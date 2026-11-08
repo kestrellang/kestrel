@@ -15,7 +15,7 @@ Seconds, best of 3 runs (Python: 1 run, from the first round), every program pin
 | fannkuch-redux 12 | 12.01 | 8.24 #6 | 13.47 #6 | 22.44 #3 | 22.44 #3 | 7.36 #5 | 33.68 #5 | 28.09 #5 | 492.3 #6 |
 | mandelbrot 16000 | 2.97 | 2.65 #6 | 2.19 #4 | 7.68 #1 | 2.93 #7 | 4.24 #7 | 8.42 #3 | 8.44 #3 | 318.6 #7 |
 | fasta 25M | 1.17 | 0.74 #3 | 0.92 #7 | 3.08 #2 | 2.61 #2 | 0.78 #9 | 13.08 #1 | 4.18 #5 | 19.43 #3 |
-| k-nucleotide 25M | 7.64 | 5.74 #1 | 3.44 #3 | 9.26 #6 | 23.30 #2 | 9.20 #6 | 34.21 #3 | 34.12 #3 | 92.81 #3 |
+| k-nucleotide 25M | 5.31 | 5.74 #1 | 3.44 #3 | 9.26 #6 | 23.30 #2 | 9.20 #6 | 34.21 #3 | 34.12 #3 | 92.81 #3 |
 | reverse-complement 25M | 0.71 | 0.21 #9 | 0.20 #1 | 0.42 #1 | 0.53 #1 | 0.46 #7 | 1.08 #7 | 1.00 #7 | 0.93 #3 |
 | binary-trees 21 | 11.69 | 2.25 #3 | 2.56 #2 | 16.68 #6 | 2.87 #9 | 11.02 #2 | — | 16.21 #7 | 52.68 #2 |
 | pidigits 10000 | 0.54 | 0.53 #2 | 0.54 #1 | 0.67 #4 | 0.56 #2 | 0.57 #5 | 0.74 #4 | 0.74 #4 | 0.76 #3 |
@@ -25,10 +25,24 @@ Geometric mean of Kestrel's time over the other language's (below 1 means Kestre
 
 Variants in `variants/`:
 
-- `binarytrees_enum.ks` uses an `indirect enum`: 16.4 s. Each node is 48 bytes there (a 24-byte `Tree` value per child, with `OwnedBox`'s liveness flag), against 16 bytes for the raw-pointer version.
+- `binarytrees_enum.ks` uses an `indirect enum`: 11.7 s with this branch's compiler and std (16.0 s before). Each node is 32 bytes (two 16-byte `Tree` values), against 16 bytes for the raw-pointer version.
 - `regexredux_pure.ks` uses the pure-Kestrel `lang/regex` package instead of PCRE2: 102 s.
 
 For reference, the plain-`malloc` C binary-trees (#1) takes 11.0 s on the same core; the fast C, Rust and Swift entries use APR pools or arenas, which Kestrel's std doesn't have.
+
+## std and compiler changes in this branch
+
+Profiling these programs with `perf` led to three changes, measured at -O2 on one core, best of 3, against the same programs built by the unchanged compiler (`2014aa37`, PR #258 merged with nightly):
+
+| Program | Before | After |
+|---|---|---|
+| k-nucleotide 25M | 8.09 s | 5.31 s |
+| binary-trees 21, `indirect enum` variant | 16.02 s | 11.74 s |
+| the other nine | | within ±2% (noise) |
+
+- **`CowBox.ensureUnique` is inlined.** Every `Array`/`Dictionary` write called it out of line, because the inlined fork made it too big. The fork is now a separate `@inline(.Never)` function.
+- **`Dictionary` is SwissTable-shaped.** One block of entry slots plus a control byte per slot (empty, deleted, or 7 bits of the hash), probed home slot first and then 8 control bytes at a time with bit tricks. Entries lost the enum tag and cached hash, so `[UInt64: Int64]` takes 17 bytes per slot instead of 32. `dict(key, default:)` and `insert` probe once instead of two or three times.
+- **Indirect enum nodes are smaller and drop without copying.** `OwnedBox` marks a given-up payload with a null pointer instead of a separate flag (48 → 32 bytes per binary-trees node), and the compiler no longer memcpys a value out of memory before destroying it in place, which recursive drop glue did at every level.
 
 ## How the Kestrel programs get their speed
 
@@ -46,7 +60,7 @@ For reference, the plain-`malloc` C binary-trees (#1) takes 11.0 s on the same c
 ## Where Kestrel loses, and why
 
 - **No SIMD types or intrinsics.** n-body, spectral-norm and mandelbrot are close to the scalar or auto-vectorized C, but the winners hand-write AVX.
-- **`Dictionary` per-operation cost.** Even with only 4 keys (everything in L1), a lookup-and-increment costs about 4.5 ns. Rust #3 runs the same algorithm on hashbrown in 3.85 s. Each lookup calls an out-of-line `CowBox.ensureUnique`, and buckets are 32 bytes (`Bucket` enum with a cached hash), so the 140k-key 18-mer table is 8 MB and misses cache. Switching the hasher (custom multiply, `FoldHasher`, folded `multiplyFull`) made no difference.
+- **`Dictionary` cache misses.** After this branch's Dictionary rework, k-nucleotide is memory-bound on the entry load of the 140k-key tables (Rust #3, the same algorithm on hashbrown: 3.44 s).
 - **No arena or pool allocator in std.** binary-trees is at C-with-`malloc` speed, 5x behind the pooled programs.
 - **reverse-complement I/O.** About half the time is kernel time: reading, and page faults from growing and zero-filling the input buffer.
 
