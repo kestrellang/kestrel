@@ -1,0 +1,4 @@
+empty.isEmpty = true
+full.isEmpty = false
+empty == "": true
+String().isEmpty = true
