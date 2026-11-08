@@ -6,22 +6,22 @@ They need the compiler and std from PR #258 (`FoldHasher`, `unsafe` unchecked su
 
 ## Results
 
-Seconds, best of 3 runs (Python: 1 run), every program pinned to one core with `taskset -c 0`. Official input sizes. `#n` is the Benchmarks Game program number that was fastest for that language on one core.
+Seconds, best of 3 runs (Python: 1 run, from the first round), every program pinned to one core with `taskset -c 0`. Official input sizes. `#n` is the Benchmarks Game program number that was fastest for that language on one core.
 
 | Benchmark | Kestrel | C | Rust | Go | Swift | C# | TypeScript | Node | Python |
 |---|---|---|---|---|---|---|---|---|---|
-| n-body 50M | 2.51 | 1.61 #9 | 1.41 #9 | 2.57 #3 | 2.28 #3 | 2.08 #9 | 3.41 #6 | 2.92 #6 | 162.2 #1 |
-| spectral-norm 5500 | 0.81 | 0.65 #2 | 0.64 #4 | 1.22 #2 | 1.39 #8 | 1.26 #2 | 1.68 #7 | 1.78 #1 | 150.2 #7 |
-| fannkuch-redux 12 | 12.90 | 9.48 #6 | 14.98 #6 | 22.58 #3 | 23.25 #3 | 8.00 #5 | 36.34 #5 | 30.76 #5 | 492.3 #6 |
-| mandelbrot 16000 | 3.13 | 3.03 #6 | 2.31 #4 | 8.39 #1 | 3.05 #7 | 4.47 #7 | 9.29 #3 | 9.38 #3 | 318.6 #7 |
-| fasta 25M | 1.25 | 0.81 #3 | 0.87 #7 | 3.40 #2 | 2.84 #2 | 0.83 #9 | 14.77 #1 | 4.92 #5 | 19.43 #3 |
-| k-nucleotide 25M | 8.28 | 5.97 #1 | 3.85 #3 | 9.92 #6 | 28.16 #2 | 9.69 #6 | 36.29 #3 | 35.01 #3 | 92.81 #3 |
-| reverse-complement 25M | 0.77 | 0.24 #9 | 0.20 #1 | 0.40 #1 | 0.52 #1 | 0.46 #7 | 1.15 #7 | 1.18 #7 | 0.93 #3 |
-| binary-trees 21 | 12.55 | 2.47 #3 | 2.37 #2 | 17.03 #6 | 2.68 #9 | 13.05 #2 | — | 17.68 #7 | 52.68 #2 |
-| pidigits 10000 | 0.64 | 0.50 #2 | 0.58 #1 | 0.77 #4 | 0.60 #2 | 0.65 #5 | 0.81 #4 | 0.81 #4 | 0.76 #3 |
-| regex-redux 5M | 1.49 | 1.36 #5 | 0.85 #6 | 18.13 #4 | 20.41 #2 | 1.72 #2 | 3.73 #4 | 3.98 #4 | 1.88 #2 |
+| n-body 50M | 2.14 | 1.39 #9 | 1.45 #9 | 2.32 #3 | 2.23 #3 | 1.84 #9 | 3.11 #6 | 2.98 #6 | 162.2 #1 |
+| spectral-norm 5500 | 0.80 | 0.64 #2 | 0.68 #4 | 1.30 #2 | 1.28 #8 | 1.34 #2 | 1.85 #7 | 1.69 #1 | 150.2 #7 |
+| fannkuch-redux 12 | 12.01 | 8.24 #6 | 13.47 #6 | 22.44 #3 | 22.44 #3 | 7.36 #5 | 33.68 #5 | 28.09 #5 | 492.3 #6 |
+| mandelbrot 16000 | 2.97 | 2.65 #6 | 2.19 #4 | 7.68 #1 | 2.93 #7 | 4.24 #7 | 8.42 #3 | 8.44 #3 | 318.6 #7 |
+| fasta 25M | 1.17 | 0.74 #3 | 0.92 #7 | 3.08 #2 | 2.61 #2 | 0.78 #9 | 13.08 #1 | 4.18 #5 | 19.43 #3 |
+| k-nucleotide 25M | 7.64 | 5.74 #1 | 3.44 #3 | 9.26 #6 | 23.30 #2 | 9.20 #6 | 34.21 #3 | 34.12 #3 | 92.81 #3 |
+| reverse-complement 25M | 0.71 | 0.21 #9 | 0.20 #1 | 0.42 #1 | 0.53 #1 | 0.46 #7 | 1.08 #7 | 1.00 #7 | 0.93 #3 |
+| binary-trees 21 | 11.69 | 2.25 #3 | 2.56 #2 | 16.68 #6 | 2.87 #9 | 11.02 #2 | — | 16.21 #7 | 52.68 #2 |
+| pidigits 10000 | 0.54 | 0.53 #2 | 0.54 #1 | 0.67 #4 | 0.56 #2 | 0.57 #5 | 0.74 #4 | 0.74 #4 | 0.76 #3 |
+| regex-redux 5M | 1.56 | 1.41 #5 | 0.87 #6 | 16.86 #4 | 18.19 #2 | 1.63 #2 | 3.61 #4 | 3.65 #4 | 1.88 #2 |
 
-Geometric mean of Kestrel's time over the other language's (below 1 means Kestrel is faster): C 1.64, Rust 1.78, C# 1.05, Swift 0.69, Go 0.58, Node 0.46, TypeScript 0.38 (9 benchmarks), Python 0.08.
+Geometric mean of Kestrel's time over the other language's (below 1 means Kestrel is faster): C 1.63, Rust 1.68, C# 1.04, Swift 0.68, Go 0.56, Node 0.47, TypeScript 0.38 (9 benchmarks), Python 0.08.
 
 Variants in `variants/`:
 
