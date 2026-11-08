@@ -4,77 +4,85 @@ module std.collections
 
 import std.core.(Bool, Equatable, Cloneable, Hashable, Hasher, Defaultable, Addable, fatalError)
 import std.text.(Formattable, Formatter, FormatOptions, String, StringBuilder)
-import std.numeric.(Int64, UInt64)
+import std.numeric.(Int64, UInt8, UInt64)
 import std.result.(Optional)
-import std.memory.(Layout, Pointer, RawPointer, SystemAllocator, CowBox)
+import std.memory.(Layout, Pointer, RawPointer, SystemAllocator, CowBox, swap)
 import std.iter.(Iterator, Iterable)
 import std.collections.(DefaultHasher, Array)
 
 // ============================================================================
-// BUCKET ENUM
+// TABLE LAYOUT
 // ============================================================================
+//
+// The table is SwissTable-shaped (the layout of Rust's `hashbrown`, with
+// its portable 8-byte groups): a heap block holds `cap` entry slots
+// followed by `cap + groupWidth` control bytes. The control byte is the
+// single source of truth for a slot's state:
+//
+// - `ctrlEmpty` (0xFF): never used; ends a probe chain.
+// - `ctrlDeleted` (0x80): tombstone left by a remove; probing skips it.
+// - `0..<0x80`: occupied; the byte is the top 7 bits of the key's hash.
+//
+// A probe loads 8 control bytes as one word and finds every slot whose
+// tag matches with a few bit operations, so it touches an entry only on
+// a tag match (1 in 128 for another key) and its branches don't depend
+// on which slot in the group holds the key. The last `groupWidth`
+// control bytes mirror the first ones, so a group load never wraps.
+// Groups probe triangularly (strides 8, 16, 24, ...), which visits every
+// group of a power-of-two table. Entry slots hold no tag or cached hash:
+// `Dictionary[UInt64, Int64]` spends 17 bytes per slot.
 
-/// One slot in the open-addressed hash table backing `Dictionary[K, V, H]`.
-///
-/// The three cases give the probe loop everything it needs to decide what
-/// to do at each step: keep probing, stop, or take the slot. Tombstones
-/// (`.Deleted`) preserve probe chains after a key is removed so later
-/// lookups for keys that originally collided still find their entries.
-/// The cached hash on `.Occupied` lets resizes rehash without re-running
-/// the user's `Hashable` implementation.
-///
-/// # Examples
-///
-/// ```
-/// // Internal — not constructed by users. The probe loop reads:
-/// match self.buckets.offset(by: i).read() {
-///     .Empty       => break,         // miss
-///     .Deleted     => continue,      // skip tombstone
-///         .Occupied(k, v, _) => ...;
-/// }
-/// ```
-///
-/// # Representation
-///
-/// Tagged enum. `.Occupied` carries the key, value, and 64-bit cached
-/// hash inline; `.Empty` and `.Deleted` are nullary tags.
-enum Bucket[K, V] {
-    /// Slot that has never held an entry; ends a probe chain on lookup.
-    case Empty
-
-    /// Tombstone left after a `remove`; probing skips past it but it
-    /// does not terminate a lookup.
-    case Deleted
-
-    /// Live entry: key, value, and the cached 64-bit hash of the key.
-    case Occupied(K, V, UInt64)
+/// A live slot's key and value. Only initialized where the slot's
+/// control byte is a tag (`< ctrlDeleted`).
+struct Entry[K, V] {
+    var key: K
+    var value: V
 }
 
-// ============================================================================
-// HELPER FUNCTIONS
-// ============================================================================
+/// Control byte of a never-used slot.
+let ctrlEmpty: UInt8 = 255
+/// Control byte of a tombstone.
+let ctrlDeleted: UInt8 = 128
+/// Control bytes loaded per probe step.
+let groupWidth: Int64 = 8
+/// `0x01` in every byte of a group word.
+let groupLowBits: UInt64 = 72340172838076673    // 0x0101010101010101
+/// `0x80` in every byte of a group word.
+let groupHighBits: UInt64 = 9259542123273814144  // 0x8080808080808080
 
-/// Is `bucket` a never-used slot (the end of a probe chain)?
-func bucketIsEmpty[K, V](bucket: Bucket[K, V]) -> Bool {
-    match bucket {
-        .Empty => true,
-        _ => false
-    }
+/// The control byte stored for an entry whose key hashes to `hash`: its
+/// top 7 bits. The low bits pick the home slot, so the two are independent.
+fileprivate func tagFor(hash: UInt64) -> UInt8 {
+    UInt8(truncating: hash >> 57)
+}
+
+/// High bit of each byte of `group` equal to `tag`. Can also flag a byte
+/// that differs from `tag` only in its lowest bit, which is another tag
+/// (never an empty or deleted slot), so the key comparison weeds it out.
+fileprivate func groupMatch(group: UInt64, tag: UInt8) -> UInt64 {
+    let cmp = group ^ (UInt64(from: tag).multiplyWrapping(groupLowBits));
+    cmp.subtractWrapping(groupLowBits) & cmp.bitwiseNot() & groupHighBits
+}
+
+/// High bit of each empty byte of `group`: `0xFF` is the only control
+/// byte with both of its top two bits set.
+fileprivate func groupMatchEmpty(group: UInt64) -> UInt64 {
+    group & (group << 1) & groupHighBits
+}
+
+/// High bit of each empty or deleted byte of `group`.
+fileprivate func groupMatchFree(group: UInt64) -> UInt64 {
+    group & groupHighBits
+}
+
+/// Byte position of the lowest flagged byte in a non-zero match word.
+fileprivate func lowestMatch(bits: UInt64) -> Int64 {
+    bits.trailingZeros >> 3
 }
 
 /// The home slot for `hash` in a table of `mask + 1` slots (a power of two).
 fileprivate func slotFor(hash: UInt64, mask: Int64) -> Int64 {
     Int64(truncating: hash & UInt64(truncating: mask))
-}
-
-/// Writes `entry` into the first `.Empty` slot on `hash`'s probe chain.
-/// Used while rebuilding a table, which has no tombstones and room to spare.
-fileprivate func placeEntry[K, V](buckets: Pointer[Bucket[K, V]], mask: Int64, consuming entry: Bucket[K, V], hash: UInt64) {
-    var slot = slotFor(hash, mask);
-    while not bucketIsEmpty(unsafe buckets.offset(by: slot).value) {
-        slot = (slot + 1) & mask
-    }
-    unsafe buckets.offset(by: slot).write(entry)
 }
 
 /// Returns the smallest power of two `>= n`, clamped up to a minimum of 8.
@@ -105,11 +113,11 @@ func nextPowerOfTwo(n: Int64) -> Int64 {
 /// Single-pass forward iterator over the `(key, value)` entries of a
 /// `Dictionary[K, V, H]`.
 ///
-/// Produced by `Dictionary.iter()`. Walks the bucket array once, skipping
-/// `.Empty` and `.Deleted` slots, and yields each occupied entry as a
-/// tuple. Iteration order matches bucket layout, which depends on the
-/// hash and probe sequence — treat it as unspecified. For key- or
-/// value-only views see `KeysIterator` and `ValuesIterator`.
+/// Produced by `Dictionary.iter()`. Walks the slots once, skipping empty
+/// and deleted ones, and yields each live entry as a tuple. Iteration
+/// order matches slot layout, which depends on the hash and probe
+/// sequence — treat it as unspecified. For key- or value-only views see
+/// `KeysIterator` and `ValuesIterator`.
 ///
 /// # Examples
 ///
@@ -123,13 +131,12 @@ func nextPowerOfTwo(n: Int64) -> Int64 {
 ///
 /// # Representation
 ///
-/// A share of the dictionary's storage, plus the bucket pointer, total
-/// slots and current scan position.
+/// A share of the dictionary's storage, plus the current scan position.
 ///
 /// # Memory Model
 ///
 /// Holds a share of the dictionary's storage, like `ArrayIterator`. The
-/// share keeps the buckets alive and marks them shared, so the iterator
+/// share keeps the table alive and marks it shared, so the iterator
 /// sees the dictionary as it was when `iter()` was called: inserting into
 /// or dropping the dictionary while iterating copies or releases the
 /// dictionary's own table, never the one being read.
@@ -137,30 +144,23 @@ public struct DictionaryIterator[K, V]: Iterator {
     /// Element type yielded by `next()` — a `(key, value)` tuple.
     type Item = (K, V)
 
-    /// Keeps `buckets` alive for the iterator's lifetime.
+    /// Keeps the table alive for the iterator's lifetime. Never written
+    /// while the share is held.
     private var storage: CowBox[DictionaryStorage[K, V]]
-    /// The shared bucket array. Never written while the share is held.
-    private var buckets: Pointer[Bucket[K, V]]
-    /// Total number of slots in the bucket array.
-    private var capacity: Int64
     /// Current scan position; advances every `next()` call.
     private var index: Int64
 
     /// @name From Storage
-    /// Iterates `storage`'s buckets, holding the share until dropped.
+    /// Iterates `storage`'s slots, holding the share until dropped.
     /// Use `Dictionary.iter()`, `keys` or `values` to get one.
     fileprivate init(storage storage: CowBox[DictionaryStorage[K, V]]) {
-        self.buckets = storage.value.buckets;
-        self.capacity = storage.value.cap;
         self.storage = storage;
         self.index = 0;
     }
 
-    /// Advances the scan to the next occupied slot and returns its
-    /// entry, or `None` when no more remain.
-    ///
-    /// Skips `.Empty` and `.Deleted` slots silently. Once `None` is
-    /// returned the iterator stays exhausted.
+    /// Advances the scan to the next live slot and returns its entry, or
+    /// `None` when no more remain. Once `None` is returned the iterator
+    /// stays exhausted.
     ///
     /// # Examples
     ///
@@ -170,12 +170,12 @@ public struct DictionaryIterator[K, V]: Iterator {
     /// it.next();  // None
     /// ```
     public mutating func next() -> (K, V)? {
-        while self.index < self.capacity {
-            let bucket = unsafe self.buckets.offset(by: self.index).read();
+        let s = &self.storage.value;
+        while self.index < s.cap {
+            let slot = self.index;
             self.index = self.index + 1;
-            match bucket {
-                .Occupied(key, value, _) => return .Some((key, value)),
-                _ => {}
+            if let .Some(e) = s.entryAt(slot) {
+                return .Some((e.key, e.value))
             }
         }
         .None
@@ -186,117 +186,189 @@ public struct DictionaryIterator[K, V]: Iterator {
 // DICTIONARY STORAGE (Internal)
 // ============================================================================
 
-/// Internal `(buckets, len, cap)` storage cell shared by
-/// `Dictionary[K, V, H]` instances.
+/// Internal storage cell shared by `Dictionary[K, V, H]` instances: one
+/// heap block of `cap` entry slots followed by `cap` control bytes (see
+/// TABLE LAYOUT above).
 ///
-/// Wrapped in an `RcBox` by `Dictionary` so copying a dictionary just
+/// Wrapped in a `CowBox` by `Dictionary` so copying a dictionary just
 /// bumps a refcount; mutations call `makeUnique()` first, which
-/// deep-copies via `clone()` here. The bucket array always has
-/// power-of-two `cap` (or zero), maintained by `nextPowerOfTwo`.
-///
-/// # Examples
-///
-/// ```
-/// // Not used directly. Created by Dictionary's initializers.
-/// let s = DictionaryStorage(buckets: ptr, len: 0, cap: 8);
-/// ```
+/// deep-copies via `clone()` here. `cap` is always a power of two, or
+/// zero with no allocation.
 ///
 /// # Representation
 ///
-/// Three fields: heap pointer to the bucket array, count of live
-/// entries (`len`), and total slots (`cap`). `cap == 0` indicates a
-/// null pointer with no allocation.
+/// Pointers to the entry slots and control bytes (both into the same
+/// block), the live count, the tombstone count, and the slot count.
 ///
 /// # Memory Model
 ///
-/// Owns the bucket buffer; `deinit` deallocates it. Used as the value
-/// inside an `RcBox`, providing the refcount that powers COW on the
-/// dictionary level.
+/// Owns the block; `deinit` drops every live entry and frees it. The
+/// key/value hashing lives in `Dictionary`, which knows the hasher.
 struct DictionaryStorage[K, V]: Cloneable {
-    /// Heap pointer to the bucket array; null when `cap == 0`.
-    var buckets: Pointer[Bucket[K, V]]
-    /// Number of `.Occupied` entries (excludes `.Empty` and `.Deleted`).
+    /// Entry slots; null when `cap == 0`. Initialized only where `ctrl`
+    /// holds a tag.
+    var entries: Pointer[Entry[K, V]]
+    /// One control byte per slot, then `groupWidth` bytes mirroring the
+    /// first ones; right after the entries in the block.
+    var ctrl: Pointer[UInt8]
+    /// Number of live entries.
     var len: Int64
-    /// Number of `.Deleted` tombstones. `len + deleted` is what fills
-    /// the table, so it's what the load-factor check counts.
+    /// Number of tombstones. `len + deleted` is what fills the table, so
+    /// it's what the load-factor check counts.
     var deleted: Int64
-    /// Total bucket count; always a power of two or zero.
+    /// Total slot count; always a power of two or zero.
     var cap: Int64
 
-    /// @name From Fields
-    /// Constructs a storage cell from raw fields.
-    ///
-    /// Internal — callers must guarantee `cap` is zero or a power of
-    /// two and that `buckets` covers `cap` initialized slots.
-    init(buckets buckets: Pointer[Bucket[K, V]], len len: Int64, cap cap: Int64, deleted deleted: Int64 = 0) {
-        self.buckets = buckets;
-        self.len = len;
-        self.deleted = deleted;
-        self.cap = cap;
+    /// @name Empty
+    /// Storage with no allocation (`cap == 0`).
+    init() {
+        self.entries = Pointer[Entry[K, V]].nullPointer();
+        self.ctrl = Pointer[UInt8].nullPointer();
+        self.len = 0;
+        self.deleted = 0;
+        self.cap = 0;
     }
 
-    /// Deep-copies the storage into a fresh allocation.
-    ///
-    /// Allocates a new bucket array of the same `cap` and copies every
-    /// slot — including `.Empty` and `.Deleted` — so the copy preserves
-    /// existing probe chains. Empty storage clones to empty storage
-    /// without allocating. Panics on allocation failure. This is the
-    /// slow half of COW, fired by `Dictionary.makeUnique()` when
-    /// storage is shared.
-    func clone() -> DictionaryStorage[K, V] {
-        if self.cap == 0 {
-            return DictionaryStorage(
-                buckets: Pointer[Bucket[K, V]].nullPointer(),
-                len: 0,
-                cap: 0
-            )
-        }
-        let layout = Layout.array[Bucket[K, V]](self.cap);
+    /// @name With Capacity
+    /// A fresh block of `cap` empty slots. `cap` must be a power of two
+    /// (zero gives the unallocated storage). Panics on allocation failure.
+    init(capacity cap: Int64) {
+        self.init();
+        if cap == 0 { return; }
+        let (layout, ctrlOffset) = DictionaryStorage[K, V].blockLayout(cap);
         var allocator = SystemAllocator();
-        let result = allocator.allocate(layout);
-        if let .Some(rawPtr) = result {
-            let newBuckets = rawPtr.cast[Bucket[K, V]]();
-            // Copy buckets
-            for i in 0..<self.cap {
-                unsafe newBuckets.offset(by: i).write(self.buckets.offset(by: i).read());
-            }
-            DictionaryStorage(
-                buckets: newBuckets,
-                len: self.len,
-                cap: self.cap,
-                deleted: self.deleted
-            )
+        if let .Some(raw) = allocator.allocate(layout) {
+            self.entries = raw.cast[Entry[K, V]]();
+            self.ctrl = raw.offset(by: ctrlOffset).cast[UInt8]();
+            self.cap = cap;
+            for i in 0..<(cap + groupWidth) { unsafe self.ctrl.offset(by: i).write(ctrlEmpty); }
         } else {
-            fatalError("DictionaryStorage clone allocation failed")
+            fatalError("Dictionary allocation failed")
         }
     }
 
-    /// Drops every bucket payload, then frees the bucket array.
-    ///
-    /// Runs when the last `RcBox` reference to this storage drops (COW
-    /// guarantees the buffer is uniquely owned at that point, so each
-    /// payload is dropped exactly once — no double-free). Skips
-    /// everything when `cap == 0` (no buffer was ever allocated).
-    ///
-    /// The `0..<cap` loop runs `Bucket`'s destructor in place on every
-    /// slot — open addressing scatters live entries across the whole
-    /// buffer, and every slot is initialized (to `.Empty` at minimum),
-    /// so all `cap` slots must be visited, not just `len`. `dropInPlace`
-    /// is a no-op for `.Empty`/`.Deleted` and drops the `K`/`V` payload
-    /// of each `.Occupied` slot. Skipping these destructors (the previous
-    /// behavior) leaked the owned heap of every non-trivial key and value,
-    /// e.g. the `String`s inside a `Dictionary[String, String]`.
-    deinit {
-        if self.cap > 0 {
-            var i: Int64 = 0;
-            while i < self.cap {
-                unsafe self.buckets.offset(by: i).dropInPlace();
-                i = i + 1
-            };
-            let layout = Layout.array[Bucket[K, V]](self.cap);
-            var allocator = SystemAllocator();
-            unsafe allocator.deallocate(self.buckets.asRaw(), layout)
+    /// The block layout for `cap` slots, and the byte offset of the
+    /// control bytes within it.
+    static func blockLayout(cap: Int64) -> (Layout, Int64) {
+        Layout.array[Entry[K, V]](cap).merge(with: Layout.array[UInt8](cap + groupWidth))
+    }
+
+    /// The `groupWidth` control bytes starting at slot `pos`, as one
+    /// little-endian word (byte `j` is slot `pos + j`, wrapping).
+    func loadGroup(pos: Int64) -> UInt64 {
+        unsafe self.ctrl.offset(by: pos).asRaw().cast[UInt64]().read()
+    }
+
+    /// Sets slot `i`'s control byte, and its mirror when `i` is one of
+    /// the first `groupWidth` slots.
+    mutating func setCtrl(i: Int64, consuming c: UInt8) {
+        unsafe self.ctrl.offset(by: i).write(c);
+        let mirror = ((i - groupWidth) & (self.cap - 1)) + groupWidth;
+        unsafe self.ctrl.offset(by: mirror).write(c)
+    }
+
+    /// The first empty or deleted slot on `hash`'s probe chain, or `-1`
+    /// when the chain covers the table without one.
+    func findFree(hash: UInt64) -> Int64 {
+        let mask = self.cap - 1;
+        var pos = slotFor(hash, mask);
+        var stride: Int64 = 0;
+        while stride < self.cap {
+            let free = groupMatchFree(self.loadGroup(pos));
+            if free != 0 { return (pos + lowestMatch(free)) & mask; }
+            stride = stride + groupWidth;
+            pos = (pos + stride) & mask
+        };
+        -1
+    }
+
+    /// `true` when slot `i` holds a live entry.
+    func isFull(i: Int64) -> Bool {
+        unsafe self.ctrl.offset(by: i).read() < ctrlDeleted
+    }
+
+    /// Lends slot `i`'s entry, or `.None` for an empty or deleted slot.
+    /// `i` must be in `0..<cap`.
+    func entryAt(i: Int64) -> Optional[&Entry[K, V]] {
+        if not self.isFull(i) { return .None; }
+        let entry = unsafe &self.entries.offset(by: i).value;
+        .Some(entry)
+    }
+
+    /// Marks slot `i` live with `tag` and moves `entry` in. The slot must
+    /// not hold a live entry; a reused tombstone is uncounted here.
+    mutating func fill(i: Int64, tag tag: UInt8, consuming entry: Entry[K, V]) {
+        if unsafe self.ctrl.offset(by: i).read() == ctrlDeleted {
+            self.deleted = self.deleted - 1
         }
+        self.setCtrl(i, tag);
+        unsafe self.entries.offset(by: i).write(entry);
+        self.len = self.len + 1
+    }
+
+    /// Moves the live entry out of slot `i`, leaving a tombstone.
+    mutating func vacate(i: Int64) -> Entry[K, V] {
+        self.setCtrl(i, ctrlDeleted);
+        self.len = self.len - 1;
+        self.deleted = self.deleted + 1;
+        unsafe self.entries.offset(by: i).take()
+    }
+
+    /// Writes `entry` into the first empty slot on `hash`'s probe chain.
+    /// Used while rebuilding a table, which has no tombstones and room
+    /// to spare.
+    mutating func place(consuming entry: Entry[K, V], hash: UInt64) {
+        let slot = self.findFree(hash);
+        self.fill(slot, tag: tagFor(hash), entry)
+    }
+
+    /// Drops every live entry and marks every slot empty, keeping the
+    /// block.
+    mutating func removeAllEntries() {
+        for i in 0..<self.cap {
+            if self.isFull(i) { unsafe self.entries.offset(by: i).dropInPlace(); }
+        }
+        for i in 0..<(self.cap + groupWidth) { unsafe self.ctrl.offset(by: i).write(ctrlEmpty); }
+        self.len = 0;
+        self.deleted = 0
+    }
+
+    /// Deep-copies the storage into a fresh block.
+    ///
+    /// Copies the control bytes and every live entry slot-for-slot, so
+    /// the copy keeps existing probe chains and tombstones. Empty storage
+    /// clones to empty storage without allocating. This is the slow half
+    /// of COW, fired by `Dictionary.makeUnique()` when storage is shared.
+    func clone() -> DictionaryStorage[K, V] {
+        var copy = DictionaryStorage(capacity: self.cap);
+        if self.cap == 0 { return copy; }
+        for i in 0..<(self.cap + groupWidth) {
+            unsafe copy.ctrl.offset(by: i).write(self.ctrl.offset(by: i).read());
+        }
+        for i in 0..<self.cap {
+            if self.isFull(i) {
+                unsafe copy.entries.offset(by: i).write(self.entries.offset(by: i).read());
+            }
+        }
+        copy.len = self.len;
+        copy.deleted = self.deleted;
+        copy
+    }
+
+    /// Drops every live entry, then frees the block.
+    ///
+    /// Runs when the last reference to this storage drops (COW
+    /// guarantees the block is uniquely owned then, so each entry is
+    /// dropped exactly once). Open addressing scatters live entries
+    /// across the whole table, so every slot's control byte is checked.
+    deinit {
+        if self.cap == 0 { return; }
+        for i in 0..<self.cap {
+            if self.isFull(i) { unsafe self.entries.offset(by: i).dropInPlace(); }
+        }
+        let (layout, _) = DictionaryStorage[K, V].blockLayout(self.cap);
+        var allocator = SystemAllocator();
+        unsafe allocator.deallocate(self.entries.asRaw(), layout)
     }
 }
 
@@ -332,8 +404,9 @@ struct DictionaryStorage[K, V]: Cloneable {
 ///
 /// # Hashing
 ///
-/// The hash for each key is cached in its bucket so resizes don't
-/// recompute it. The default hasher, `DefaultHasher`, is SipHash-1-3 with
+/// Each slot's control byte keeps 7 bits of its key's hash, so a probe
+/// compares keys only on a tag match. Resizes rehash the keys. The
+/// default hasher, `DefaultHasher`, is SipHash-1-3 with
 /// a random per-process key, so iteration order differs between runs. For
 /// trusted keys, `Dictionary[K, V, FastHasher]` is faster and has the same
 /// order on every run.
@@ -347,24 +420,24 @@ struct DictionaryStorage[K, V]: Cloneable {
 ///
 /// # Representation
 ///
-/// One field: a `CowBox[DictionaryStorage[K, V]]` holding
-/// `(buckets, len, cap)` over a heap bucket array.
+/// One field: a `CowBox[DictionaryStorage[K, V]]` over one heap block
+/// of entry slots and control bytes (see TABLE LAYOUT).
 ///
 /// # Memory Model
 ///
 /// Reference-counted storage with copy-on-write *value* semantics.
-/// Copying a `Dictionary` is O(1) and shares the bucket array; the
+/// Copying a `Dictionary` is O(1) and shares the table; the
 /// next mutation on a shared dictionary triggers `makeUnique()`,
 /// which deep-clones via `DictionaryStorage.clone()` so the mutation
 /// is invisible to other copies.
 ///
 /// # Guarantees
 ///
-/// - Every key satisfies `K: Hashable`. The cached hash is computed once
-///   per insert and reused on resize.
+/// - Every key satisfies `K: Hashable`. A lookup or insert hashes the
+///   key once; a resize hashes every live key again.
 /// - `count <= capacity * 3 / 4` after every mutation (the resize
 ///   threshold).
-/// - Removing a key leaves a `.Deleted` tombstone; lookups still
+/// - Removing a key leaves a tombstone; lookups still
 ///   work but tombstones reduce effective capacity until the next
 ///   resize.
 /// - Iteration order is **not** specified.
@@ -378,12 +451,16 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
     /// clone-on-write barrier.
     private var storage: CowBox[DictionaryStorage[K, V]]
 
-    /// Returns the bucket-array pointer from storage. Internal helper.
-    private func buckets() -> Pointer[Bucket[K, V]] { self.storage.value.buckets }
     /// Returns the live-entry count from storage. Internal helper.
     private func len() -> Int64 { self.storage.value.len }
-    /// Returns the total bucket capacity from storage. Internal helper.
+    /// Returns the total slot count from storage. Internal helper.
     private func cap() -> Int64 { self.storage.value.cap }
+
+    /// Lends slot `slot`'s entry, or `.None` for an empty or deleted slot.
+    /// `slot` must be in `0..<cap()`. The slot-wise scans below use it.
+    fileprivate func entryAt(slot: Int64) -> Optional[&Entry[K, V]] {
+        self.storage.value.entryAt(slot)
+    }
 
     /// COW write barrier — ensures the storage is uniquely owned.
     private mutating func makeUnique() {
@@ -404,7 +481,7 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
     /// Creates an empty dictionary with no allocation.
     ///
     /// Capacity starts at zero; the first insert allocates the smallest
-    /// bucket array (currently 8 slots). For pre-sized creation use
+    /// table (currently 8 slots). For pre-sized creation use
     /// `init(capacity:)`.
     ///
     /// # Examples
@@ -415,11 +492,7 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
     /// d.capacity;  // 0
     /// ```
     public init() {
-        self.storage = CowBox(DictionaryStorage(
-            buckets: Pointer[Bucket[K, V]].nullPointer(),
-            len: 0,
-            cap: 0
-        ));
+        self.storage = CowBox(DictionaryStorage());
     }
 
     /// @name With Capacity
@@ -438,32 +511,7 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
     /// d.count;      // 0
     /// ```
     public init(capacity capacity: Int64) {
-        let actualCap = nextPowerOfTwo(capacity);
-        if actualCap > 0 {
-            let layout = Layout.array[Bucket[K, V]](actualCap);
-            var allocator = SystemAllocator();
-            let result = allocator.allocate(layout);
-            if let .Some(rawPtr) = result {
-                let newBuckets = rawPtr.cast[Bucket[K, V]]();
-                // Initialize all buckets as empty
-                for i in 0..<actualCap {
-                    unsafe newBuckets.offset(by: i).write(.Empty);
-                }
-                self.storage = CowBox(DictionaryStorage(
-                    buckets: newBuckets,
-                    len: 0,
-                    cap: actualCap
-                ))
-            } else {
-                fatalError("Dictionary allocation failed")
-            }
-        } else {
-            self.storage = CowBox(DictionaryStorage(
-                buckets: Pointer[Bucket[K, V]].nullPointer(),
-                len: 0,
-                cap: 0
-            ))
-        }
+        self.storage = CowBox(DictionaryStorage(capacity: nextPowerOfTwo(capacity)));
     }
 
     /// @name From Pairs
@@ -571,8 +619,8 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
 
     /// Computes the 64-bit hash for `key` using a fresh `H` instance.
     ///
-    /// Calls `key.hash(into:)` then `hasher.finish()`. Result is cached
-    /// in `.Occupied` buckets so resizes don't recompute it.
+    /// Calls `key.hash(into:)` then `hasher.finish()`. The low bits pick
+    /// the home slot and the top 7 are the slot's control tag.
     private func hashKey(key: K) -> UInt64 {
         var hasher = H();
         key.hash(into: hasher);
@@ -583,7 +631,7 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
     // PROPERTIES
     // ========================================================================
 
-    /// Number of live (`.Occupied`) entries. Read-only; O(1).
+    /// Number of live entries. Read-only; O(1).
     ///
     /// Excludes tombstones — `count` only reflects what
     /// `iter()`/`contains(...)` would see.
@@ -596,7 +644,7 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
     /// ```
     public var count: Int64 { get { self.len() } }
 
-    /// Total slots in the bucket array — always `>= count`. Read-only.
+    /// Total slots in the table — always `>= count`. Read-only.
     ///
     /// Resizes (doubling) trigger when `count` reaches 75% of
     /// `capacity`. Tombstones count against the threshold even though
@@ -644,7 +692,7 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
     /// order.
     ///
     /// Same iteration order as `keys` — the two views walk the
-    /// buckets in lockstep, so `zip(dict.keys, dict.values)` yields
+    /// slots in lockstep, so `zip(dict.keys, dict.values)` yields
     /// pairs equivalent to `dict.iter()`. Holds a share of the
     /// storage, like `keys`.
     ///
@@ -679,13 +727,13 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
     /// ```
     public subscript(key: K)? -> V {
         ref {
-            let index = self.findEntry(key) ?? -1;
+            let index = self.probe(key, self.hashKey(key));
             if index < 0 { return null; }
             self.valueAt(index)
         }
         mutating ref {
             self.makeUnique();
-            let index = self.findEntry(key) ?? -1;
+            let index = self.probe(key, self.hashKey(key));
             if index < 0 { return null; }
             .Some(self.mutatingValueAt(index))
         }
@@ -713,9 +761,11 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
             }
         }
         mutating ref {
-            if let .None = self.findEntry(key) { self.insert(key, defaultValue); }
             self.makeUnique();
-            self.mutatingValueAt(self.findEntry(key) ?? -1)
+            let hashValue = self.hashKey(key);
+            let found = self.probe(key, hashValue);
+            if found >= 0 { return self.mutatingValueAt(found); }
+            self.mutatingValueAt(self.insertNew(key, defaultValue, hashValue, -found - 1))
         }
     }
 
@@ -741,192 +791,167 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
     /// ```
     public subscript(unwrap key: K) -> V {
         ref {
-            let index = self.findEntry(key) ?? -1;
+            let index = self.probe(key, self.hashKey(key));
             if index < 0 { fatalError("Dictionary subscript(unwrap:): key not found") }
             self.valueRefAt(index)
         }
         mutating ref {
             self.makeUnique();
-            let index = self.findEntry(key) ?? -1;
+            let index = self.probe(key, self.hashKey(key));
             if index < 0 { fatalError("Dictionary subscript(unwrap:): key not found") }
             self.mutatingValueAt(index)
         }
     }
 
-    /// Number of bucket slots, for slot-wise key scans (`Set`).
+    /// Number of slots, for slot-wise key scans (`Set`).
     internal var slotCount: Int64 { self.cap() }
 
-    /// Lends the key in bucket `slot`, or `.None` for an empty or deleted
+    /// Lends the key in slot `slot`, or `.None` for an empty or deleted
     /// slot, or one out of range.
     internal func keyAt(consuming slot: Int64) -> Optional[&K] {
-        if slot < 0 or slot >= self.cap() { return .None; }
-        let bucket = unsafe &self.buckets().offset(by: slot).value;
-        if let .Occupied(&key, _, _) = bucket { return .Some(key); }
-        .None
+        if slot < 0 or slot >= self.cap() or not self.storage.value.isFull(slot) { return .None; }
+        let entry = unsafe &self.entrySlot(slot).value;
+        .Some(entry.key)
     }
 
-    /// Lends the value of the occupied bucket at `index`.
+    /// Pointer to entry slot `index`. References returned through it
+    /// are `Pointer`-derived, so they can outlive the lookup that found
+    /// the slot.
+    private func entrySlot(index: Int64) -> Pointer[Entry[K, V]] {
+        self.storage.value.entries.offset(by: index)
+    }
+
+    /// Lends the value of the live slot at `index`.
     private func valueAt(consuming index: Int64) -> Optional[&V] {
-        let bucket = unsafe &self.buckets().offset(by: index).value;
-        match bucket {
-            .Occupied(_, &v, _) => .Some(v),
-            _ => .None,
-        }
+        if not self.storage.value.isFull(index) { return .None; }
+        let entry = unsafe &self.entrySlot(index).value;
+        .Some(entry.value)
     }
 
-    /// Lends the value of the occupied bucket at `index`.
+    /// Lends the value of the live slot at `index`.
     private func valueRefAt(consuming index: Int64) -> &V {
-        let bucket = unsafe &self.buckets().offset(by: index).value;
-        if let .Occupied(_, &v, _) = bucket { return v; }
-        fatalError("Dictionary: bucket is not occupied")
+        if not self.storage.value.isFull(index) { fatalError("Dictionary: slot is not occupied") }
+        let entry = unsafe &self.entrySlot(index).value;
+        entry.value
     }
 
-    /// Lends the value of the occupied bucket at `index` mutably. The
-    /// caller makes the storage unique first.
+    /// Lends the value of the live slot at `index` mutably. The caller
+    /// makes the storage unique first.
     private func mutatingValueAt(consuming index: Int64) -> &mutating V {
-        let bucket = unsafe &mutating self.buckets().offset(by: index).mutatingValue;
-        if let .Occupied(_, &mutating v, _) = bucket { return v; }
-        fatalError("Dictionary: bucket is not occupied")
+        let entry = unsafe &mutating self.entrySlot(index).mutatingValue;
+        entry.value
     }
 
     // ========================================================================
     // INTERNAL LOOKUP
     // ========================================================================
 
-    /// Locates the bucket index storing `key`, or `None` if absent.
-    ///
-    /// Probes linearly from the hash-anchored start slot, skipping
-    /// `.Deleted` tombstones and stopping at the first `.Empty` slot
-    /// (which terminates a chain). Returns `None` after a full
-    /// wrap-around without finding the key.
+    /// Locates the slot storing `key`, or `None` if absent.
     private func findEntry(key: K) -> Int64? {
-        let myCap = self.cap();
-        if myCap == 0 {
-            return .None
-        }
-
-        let hashValue: UInt64 = self.hashKey(key);
-        // `cap` is a power of two, so `& mask` is the modulo.
-        let mask = myCap - 1;
-        var index = slotFor(hashValue, mask);
-        let myBuckets = self.buckets();
-        var i: Int64 = 0;
-
-        while i < myCap {
-            // Borrow the bucket: a `read()` copy retains and releases the
-            // key and value at every probe step.
-            let bucket = unsafe &myBuckets.offset(by: index).value;
-            match bucket {
-                .Empty => return .None,
-                .Occupied(&k, _, &h) => {
-                    // The cached hash rules out most keys without `isEqual`.
-                    if h == hashValue and k.isEqual(to: key) {
-                        return .Some(index)
-                    }
-                },
-                .Deleted => {}
-            }
-            // Linear probing
-            index = (index + 1) & mask;
-            i = i + 1
-        }
-        .None
+        if self.cap() == 0 { return .None; }
+        let found = self.probe(key, self.hashKey(key));
+        if found >= 0 { .Some(found) } else { .None }
     }
 
-    /// Returns the index of the first non-`.Occupied` slot reachable
-    /// from `hashValue`'s anchor.
+    /// Walks `key`'s probe chain (`hashValue` is its hash). Returns the
+    /// key's slot when present. When absent, returns `-(slot + 1)` for
+    /// the slot an insert should use: the first empty or deleted slot on
+    /// the chain. Returns `-1` for an unallocated table, and
+    /// `-(cap + 1)` when the chain covers the whole table without a free
+    /// slot (only possible when it's full).
     ///
-    /// Used by `insert` after `findEntry` has confirmed the key is
-    /// new. Reuses tombstones, which keeps the bucket array compact
-    /// after many removes followed by inserts.
-    private func findEmptySlot(hashValue: UInt64) -> Int64? {
-        let myCap = self.cap();
-        if myCap == 0 {
-            return .None
+    /// Always inlined: it is the hot loop of every lookup, and inlining
+    /// lets the caller keep the result in a register.
+    @inline(.Always)
+    private func probe(key: K, hashValue: UInt64) -> Int64 {
+        let s = &self.storage.value;
+        if s.cap == 0 { return -1; }
+        let mask = s.cap - 1;
+        let tag = tagFor(hashValue);
+        var pos = slotFor(hashValue, mask);
+        var stride: Int64 = 0;
+        var insertAt: Int64 = -1;
+        // Home slot first, by itself: its entry address doesn't depend on
+        // the control load, so the CPU can fetch both at once when it
+        // predicts the hit. In a large table that saves a cache miss.
+        if unsafe s.ctrl.offset(by: pos).read() == tag {
+            if unsafe s.entries.offset(by: pos).value.key.isEqual(to: key) { return pos; }
         }
+        while stride < s.cap {
+            let group = s.loadGroup(pos);
+            var hits = groupMatch(group, tag);
+            while hits != 0 {
+                let index = (pos + lowestMatch(hits)) & mask;
+                if unsafe s.entries.offset(by: index).value.key.isEqual(to: key) { return index; }
+                hits = hits & hits.subtractWrapping(1)
+            };
+            let free = groupMatchFree(group);
+            if insertAt < 0 and free != 0 { insertAt = (pos + lowestMatch(free)) & mask }
+            // An empty slot ends the chain: the key was never placed past it.
+            if groupMatchEmpty(group) != 0 { return -insertAt - 1 }
+            stride = stride + groupWidth;
+            pos = (pos + stride) & mask
+        };
+        -(if insertAt >= 0 { insertAt } else { s.cap }) - 1
+    }
 
-        let mask = myCap - 1;
-        var index = slotFor(hashValue, mask);
-        let myBuckets = self.buckets();
-        var i: Int64 = 0;
-
-        while i < myCap {
-            let bucket = unsafe &myBuckets.offset(by: index).value;
-            match bucket {
-                .Occupied(_, _, _) => {},
-                _ => return .Some(index)
-            }
-            // Linear probing
-            index = (index + 1) & mask;
-            i = i + 1
+    /// Inserts a key known to be absent and returns its slot. `slot` is
+    /// what `probe` offered (`-probe - 1`); it is discarded when the table
+    /// needs to grow first. The storage must be unique.
+    private mutating func insertNew(key: K, value: V, hashValue: UInt64, slot: Int64) -> Int64 {
+        var target = slot;
+        if self.needsGrowth() {
+            self.grow();
+            target = -self.probe(key, hashValue) - 1
         }
-        .None
+        let s = &mutating self.storage.value;
+        s.fill(target, tag: tagFor(hashValue), Entry(key: key, value: value));
+        target
     }
 
     // ========================================================================
     // CAPACITY MANAGEMENT (Internal)
     // ========================================================================
 
-    /// Rebuilds the table when live entries plus tombstones reach 75% of
-    /// capacity (or capacity is zero).
+    /// `true` when one more insert needs the table rebuilt first: live
+    /// entries plus tombstones would reach 75% of capacity (or there is
+    /// no table yet).
     ///
-    /// Called by `insert` before placing a new entry. Tombstones count
-    /// toward the load: without that, a table under insert/remove churn
-    /// fills with them, runs out of `.Empty` slots, and every miss probes
-    /// the whole table. The rebuild doubles capacity when live entries
-    /// alone fill half the threshold, and otherwise rehashes at the same
-    /// size, which just clears the tombstones. Either way at least
-    /// `cap * 3 / 8` more inserts fit before the next rebuild, so the
-    /// cost stays amortized O(1).
-    private mutating func ensureCapacity() {
+    /// Tombstones count toward the load: without that, a table under
+    /// insert/remove churn fills with them, runs out of empty slots, and
+    /// every miss probes the whole table.
+    private func needsGrowth() -> Bool {
+        let s = &self.storage.value;
+        s.cap == 0 or s.len + s.deleted >= s.cap * 3 / 4
+    }
+
+    /// Rebuilds a table that `needsGrowth`. It doubles capacity when live
+    /// entries alone fill half the threshold, and otherwise rehashes at
+    /// the same size, which just clears the tombstones. Either way at
+    /// least `cap * 3 / 8` more inserts fit before the next rebuild, so
+    /// the cost stays amortized O(1).
+    private mutating func grow() {
         let myCap = self.cap();
         if myCap == 0 {
-            self.resize();
+            self.resizeToCapacity(8);
             return
         }
-        let myLen = self.len();
-        let threshold = myCap * 3 / 4;
-        if myLen + self.storage.value.deleted < threshold {
-            return
-        }
-        if myLen * 2 >= threshold {
-            self.resize()
+        if self.len() * 2 >= myCap * 3 / 4 {
+            self.resizeToCapacity(myCap * 2)
         } else {
             self.resizeToCapacity(myCap)
         }
     }
 
-    /// Doubles the bucket array (or jumps from 0 to 8) and rehashes
-    /// every live entry.
+    /// Rebuilds the table at the exact `newCap` capacity, rehashing every
+    /// live key and dropping the tombstones.
     ///
-    /// Tombstones are dropped during the rebuild, so resizes also
-    /// reclaim space wasted by previous removes. Triggers COW.
-    /// Panics on allocation failure.
-    private mutating func resize() {
-        let oldCap = self.cap();
-        self.resizeToCapacity(if oldCap == 0 { 8 } else { oldCap * 2 })
-    }
-
-    /// Rebuilds the bucket array at the exact `newCap` capacity.
-    ///
-    /// Used by `resize`, `reserveCapacity` and `shrinkToFit`. The caller
+    /// Used by `grow`, `reserveCapacity` and `shrinkToFit`. The caller
     /// must ensure `newCap` is large enough to hold the current `count`
     /// without exceeding the load factor; this routine itself does
-    /// not check. Triggers COW. Panics on allocation failure.
+    /// not check. Panics on allocation failure.
     private mutating func resizeToCapacity(newCap: Int64) {
-        let layout = Layout.array[Bucket[K, V]](newCap);
-        var allocator = SystemAllocator();
-        let result = allocator.allocate(layout);
-        var newBuckets = Pointer[Bucket[K, V]].nullPointer();
-        if let .Some(rawPtr) = result {
-            newBuckets = rawPtr.cast[Bucket[K, V]]()
-        } else {
-            fatalError("Dictionary resize failed")
-        }
-        for i in 0..<newCap {
-            unsafe newBuckets.offset(by: i).write(.Empty);
-        }
-        let mask = newCap - 1;
+        var fresh = DictionaryStorage[K, V](capacity: newCap);
 
         if not self.storage.isUnique {
             // Shared (another copy or an iterator holds it): copy the live
@@ -934,34 +959,31 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
             // `value` would fork the whole old table first, only to
             // rebuild it.
             let old = &self.storage.value;
-            let liveCount = old.len;
             for i in 0..<old.cap {
-                if let .Occupied(key, value, hashValue) = unsafe old.buckets.offset(by: i).read() {
-                    placeEntry(newBuckets, mask, .Occupied(key, value, hashValue), hashValue)
+                if let .Some(e) = old.entryAt(i) {
+                    fresh.place(Entry(key: e.key, value: e.value), self.hashKey(e.key))
                 }
             }
-            self.storage = CowBox(DictionaryStorage(buckets: newBuckets, len: liveCount, cap: newCap));
+            self.storage = CowBox(fresh);
             return
         }
 
-        // Unique: move every live entry into the new table. The old
-        // buckets are left moved-out, so freeing them drops nothing.
-        let s = &mutating self.storage.value;
-        for i in 0..<s.cap {
-            if let .Occupied(key, value, hashValue) = unsafe s.buckets.offset(by: i).take() {
-                placeEntry(newBuckets, mask, .Occupied(key, value, hashValue), hashValue)
+        // Unique: swap the new table in, then move every live entry
+        // across. The old table ends with no live slots, so dropping it
+        // only frees its block.
+        swap(self.storage.value, fresh);
+        for i in 0..<fresh.cap {
+            if fresh.isFull(i) {
+                let entry = fresh.vacate(i);
+                let hashValue = self.hashKey(entry.key);
+                self.storage.value.place(entry, hashValue)
             }
         }
-        if s.cap > 0 {
-            unsafe allocator.deallocate(s.buckets.asRaw(), Layout.array[Bucket[K, V]](s.cap))
-        }
-        s.buckets = newBuckets;
-        s.cap = newCap;
-        s.deleted = 0
     }
 
     // ========================================================================
     // KEY LOOKUP
+
     // ========================================================================
 
     /// `true` if `key` is present in the dictionary.
@@ -999,47 +1021,23 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
     /// dict.insert("a", 9);  // Some(1);  dict = ["a": 9, "b": 2]
     /// ```
     public mutating func insert(key: K, value: V) -> V? {
-        let hashValue = self.hashKey(key);
-        // Check if key already exists
-        let maybeIndex = self.findEntry(key);
-        if let .Some(index) = maybeIndex {
-            self.makeUnique();
-            let myBuckets = self.buckets();
-            // Move the old entry out: `write` overwrites without dropping,
-            // so a `read()` copy here leaked the replaced key and value.
-            let oldBucket = unsafe myBuckets.offset(by: index).take();
-            let oldValue: V? = match oldBucket {
-                .Occupied(_, v, _) => .Some(v),
-                _ => .None
-            };
-            unsafe myBuckets.offset(by: index).write(.Occupied(key, value, hashValue));
-            return oldValue
-        }
-
-        // Need to insert - ensure capacity first
-        self.ensureCapacity();
         self.makeUnique();
-
-        // Find empty slot
-        let maybeSlot = self.findEmptySlot(hashValue);
-        if let .Some(slotIndex) = maybeSlot {
+        let hashValue = self.hashKey(key);
+        let found = self.probe(key, hashValue);
+        if found >= 0 {
+            // Move the old entry out: `write` overwrites without dropping.
             let s = &mutating self.storage.value;
-            // The slot is `.Empty` or a reused `.Deleted` tombstone.
-            if not bucketIsEmpty(unsafe s.buckets.offset(by: slotIndex).value) {
-                s.deleted = s.deleted - 1
-            }
-            unsafe s.buckets.offset(by: slotIndex).write(.Occupied(key, value, hashValue));
-            s.len = s.len + 1
-        } else {
-            fatalError("Dictionary insert failed - no empty slot")
+            let old = unsafe s.entries.offset(by: found).take();
+            unsafe s.entries.offset(by: found).write(Entry(key: key, value: value));
+            return .Some(old.value)
         }
-
+        let _ = self.insertNew(key, value, hashValue, -found - 1);
         .None
     }
 
     /// Removes `key` and returns its value, or `None` if absent.
     ///
-    /// Replaces the bucket with a `.Deleted` tombstone so existing
+    /// Leaves a tombstone in the key's slot so existing
     /// probe chains stay intact. Tombstones are reclaimed by the next
     /// resize. Triggers COW only when an entry is actually removed.
     ///
@@ -1055,17 +1053,7 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
 
         if let .Some(index) = maybeIndex {
             self.makeUnique();
-            let s = &mutating self.storage.value;
-            // Moved out (not `read()`): the tombstone write drops nothing.
-            let bucket = unsafe s.buckets.offset(by: index).take();
-            // Mark as deleted (tombstone)
-            unsafe s.buckets.offset(by: index).write(.Deleted);
-            s.len = s.len - 1;
-            s.deleted = s.deleted + 1;
-            return match bucket {
-                .Occupied(_, v, _) => .Some(v),
-                _ => .None
-            }
+            return .Some(self.storage.value.vacate(index).value)
         }
 
         .None
@@ -1091,24 +1079,15 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
 
         if let .Some(index) = maybeIndex {
             self.makeUnique();
-            let s = &mutating self.storage.value;
-            // Moved out (not `read()`): the tombstone write drops nothing.
-            let bucket = unsafe s.buckets.offset(by: index).take();
-            // Mark as deleted (tombstone)
-            unsafe s.buckets.offset(by: index).write(.Deleted);
-            s.len = s.len - 1;
-            s.deleted = s.deleted + 1;
-            return match bucket {
-                .Occupied(k, v, _) => .Some((k, v)),
-                _ => .None
-            }
+            let entry = self.storage.value.vacate(index);
+            return .Some((entry.key, entry.value))
         }
 
         .None
     }
 
-    /// Removes every entry, leaving the bucket array allocated and
-    /// reset to all-`.Empty`.
+    /// Removes every entry, leaving the table allocated and every slot
+    /// empty.
     ///
     /// O(capacity). The buffer is kept so subsequent inserts don't
     /// reallocate; follow with `shrinkToFit()` to release it.
@@ -1121,13 +1100,7 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
     /// dict.capacity;   // unchanged
     /// ```
     public mutating func clear() {
-        let s = &mutating self.storage.value;
-        // `assign` drops the entry it replaces; `write` leaked them.
-        for i in 0..<s.cap {
-            unsafe s.buckets.offset(by: i).assign(.Empty);
-        }
-        s.len = 0;
-        s.deleted = 0
+        self.storage.value.removeAllEntries()
     }
 
     /// Merges every entry of `other` into `self`, calling `combine`
@@ -1194,8 +1167,8 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
 
     /// Keeps only entries for which `predicate(key, value)` is true.
     ///
-    /// Two-pass implementation: collects keys to remove, then deletes
-    /// them. Each removal leaves a tombstone — call `shrinkToFit()`
+    /// One pass over the slots, dropping entries in place. Each removal
+    /// leaves a tombstone — call `shrinkToFit()`
     /// afterwards if you've removed a large fraction. The mirror is
     /// `removeAll(where:)`.
     ///
@@ -1207,25 +1180,13 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
     /// ```
     public mutating func retain(where predicate: (K, V) -> Bool) {
         self.makeUnique();
-        let myCap = self.cap();
-        let myBuckets = self.buckets();
-        var keysToRemove = Array[K]();
-
-        for i in 0..<myCap {
-            let bucket = unsafe myBuckets.offset(by: i).read();
-            match bucket {
-                .Occupied(key, value, _) => {
-                    if not predicate(key, value) {
-                        keysToRemove.append(key);
-                    }
-                },
-                _ => {}
-            }
-        }
-
-        var removeIter = keysToRemove.iter();
-        while let .Some(key) = removeIter.next() {
-             self.remove( key);
+        for i in 0..<self.cap() {
+            let doomed = match self.entryAt(i) {
+                .Some(e) => not predicate(e.key, e.value),
+                .None => false,
+            };
+            // Tombstone the slot in place: no second lookup per key.
+            if doomed { let _ = self.storage.value.vacate(i); }
         }
     }
 
@@ -1245,7 +1206,7 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
         self.retain(where: { (k, v) in not predicate(k, v) })
     }
 
-    /// Grows the bucket array so at least `minimumCapacity` entries
+    /// Grows the table so at least `minimumCapacity` entries
     /// fit without resizing.
     ///
     /// No-op when current capacity already suffices. The actual new
@@ -1319,8 +1280,6 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
         DictionaryIterator(storage: self.storage.clone())
     }
 
-    /// The bucket pointer, for the extensions below that scan buckets.
-    fileprivate func getBuckets() -> Pointer[Bucket[K, V]] { self.buckets() }
 
     // ========================================================================
     // SEARCHING AND PREDICATES
@@ -1339,18 +1298,14 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
     /// ["a": 1, "b": 2].contains { (k, v) in v > 3 };  // false
     /// ```
     public func contains(where predicate: (K, V) -> Bool) -> Bool {
-        let myCap = self.cap();
-        let myBuckets = self.buckets();
 
-        for i in 0..<myCap {
-            let bucket = unsafe myBuckets.offset(by: i).read();
-            match bucket {
-                .Occupied(key, value, _) => {
-                    if predicate(key, value) {
-                        return true
-                    }
-                },
-                _ => {}
+        for i in 0..<self.capacity {
+            if let .Some(e) = self.entryAt(i) {
+                let key = e.key;
+                let value = e.value;
+                if predicate(key, value) {
+                    return true
+                }
             }
         }
         false
@@ -1370,13 +1325,14 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
     /// dict.first { (k, v) in v > 99 }; // None
     /// ```
     public func first(where predicate: (K, V) -> Bool) -> Optional[(&K, &V)] {
-        for i in 0..<self.cap() {
-            let bucket = unsafe &self.buckets().offset(by: i).value;
-            if let .Occupied(&key, &value, _) = bucket {
-                if predicate(key, value) {
-                    let entry: (&K, &V) = (key, value);
-                    return .Some(entry)
-                }
+        for i in 0..<self.capacity {
+            if not self.storage.value.isFull(i) { continue }
+            let e = unsafe &self.entrySlot(i).value;
+            if predicate(e.key, e.value) {
+                let key = &e.key;
+                let value = &e.value;
+                let entry: (&K, &V) = (key, value);
+                return .Some(entry)
             }
         }
         .None
@@ -1395,18 +1351,14 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
     /// [:].all { (k, v) in false };                    // true (vacuous)
     /// ```
     public func all(where predicate: (K, V) -> Bool) -> Bool {
-        let myCap = self.cap();
-        let myBuckets = self.buckets();
 
-        for i in 0..<myCap {
-            let bucket = unsafe myBuckets.offset(by: i).read();
-            match bucket {
-                .Occupied(key, value, _) => {
-                    if not predicate(key, value) {
-                        return false
-                    }
-                },
-                _ => {}
+        for i in 0..<self.capacity {
+            if let .Some(e) = self.entryAt(i) {
+                let key = e.key;
+                let value = e.value;
+                if not predicate(key, value) {
+                    return false
+                }
             }
         }
         true
@@ -1443,18 +1395,14 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
     /// ```
     public func countItems(where predicate: (K, V) -> Bool) -> Int64 {
         var result: Int64 = 0;
-        let myCap = self.cap();
-        let myBuckets = self.buckets();
 
-        for i in 0..<myCap {
-            let bucket = unsafe myBuckets.offset(by: i).read();
-            match bucket {
-                .Occupied(key, value, _) => {
-                    if predicate(key, value) {
-                        result = result + 1;
-                    }
-                },
-                _ => {}
+        for i in 0..<self.capacity {
+            if let .Some(e) = self.entryAt(i) {
+                let key = e.key;
+                let value = e.value;
+                if predicate(key, value) {
+                    result = result + 1;
+                }
             }
         }
         result
@@ -1480,16 +1428,12 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
     /// ```
     public func mapValues[U](transform: (V) -> U) -> Dictionary[K, U, H] {
         var result = Dictionary[K, U, H](capacity: self.capacity);
-        let myCap = self.cap();
-        let myBuckets = self.buckets();
 
-        for i in 0..<myCap {
-            let bucket = unsafe myBuckets.offset(by: i).read();
-            match bucket {
-                .Occupied(key, value, _) => {
-                     result.insert( key, transform(value));
-                },
-                _ => {}
+        for i in 0..<self.capacity {
+            if let .Some(e) = self.entryAt(i) {
+                let key = e.key;
+                let value = e.value;
+                 result.insert( key, transform(value));
             }
         }
         result
@@ -1512,18 +1456,14 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
     /// ```
     public func compactMapValues[U](transform: (V) -> U?) -> Dictionary[K, U, H] {
         var result = Dictionary[K, U, H]();
-        let myCap = self.cap();
-        let myBuckets = self.buckets();
 
-        for i in 0..<myCap {
-            let bucket = unsafe myBuckets.offset(by: i).read();
-            match bucket {
-                .Occupied(key, value, _) => {
-                    if let .Some(transformed) = transform(value) {
-                         result.insert( key, transformed);
-                    }
-                },
-                _ => {}
+        for i in 0..<self.capacity {
+            if let .Some(e) = self.entryAt(i) {
+                let key = e.key;
+                let value = e.value;
+                if let .Some(transformed) = transform(value) {
+                     result.insert( key, transformed);
+                }
             }
         }
         result
@@ -1544,18 +1484,14 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
     /// ```
     public func filter(where predicate: (K, V) -> Bool) -> Dictionary[K, V, H] {
         var result = Dictionary[K, V, H]();
-        let myCap = self.cap();
-        let myBuckets = self.buckets();
 
-        for i in 0..<myCap {
-            let bucket = unsafe myBuckets.offset(by: i).read();
-            match bucket {
-                .Occupied(key, value, _) => {
-                    if predicate(key, value) {
-                         result.insert( key, value);
-                    }
-                },
-                _ => {}
+        for i in 0..<self.capacity {
+            if let .Some(e) = self.entryAt(i) {
+                let key = e.key;
+                let value = e.value;
+                if predicate(key, value) {
+                     result.insert( key, value);
+                }
             }
         }
         result
@@ -1672,22 +1608,18 @@ extend Dictionary[K, V, H]: Equatable where K: Hashable, V: Equatable, H: Hasher
         }
 
         // Check all entries in self exist in other with same value
-        let selfCap = self.capacity;
-        let selfBuckets = self.getBuckets();
-        for i in 0..<selfCap {
-            let bucket = unsafe selfBuckets.offset(by: i).read();
-            match bucket {
-                .Occupied(key, value, _) => {
-                    let otherValue = other(key);
-                    if let .Some(v) = otherValue {
-                        if not value.isEqual(to: v) {
-                            return false
-                        }
-                    } else {
+        for i in 0..<self.capacity {
+            if let .Some(e) = self.entryAt(i) {
+                let key = e.key;
+                let value = e.value;
+                let otherValue = other(key);
+                if let .Some(v) = otherValue {
+                    if not value.isEqual(to: v) {
                         return false
                     }
-                },
-                _ => {}
+                } else {
+                    return false
+                }
             }
         }
         true
@@ -1710,18 +1642,13 @@ extend Dictionary[K, V, H] where K: Hashable, V: Equatable, H: Hasher, H: Defaul
     /// ["a": 1, "b": 2].containsValue(5);  // false
     /// ```
     public func containsValue(value: V) -> Bool {
-        let myCap = self.capacity;
-        let myBuckets = self.getBuckets();
 
-        for i in 0..<myCap {
-            let bucket = unsafe myBuckets.offset(by: i).read();
-            match bucket {
-                .Occupied(_, v, _) => {
-                    if v.isEqual(to: value) {
-                        return true
-                    }
-                },
-                _ => {}
+        for i in 0..<self.capacity {
+            if let .Some(e) = self.entryAt(i) {
+                let v = e.value;
+                if v.isEqual(to: value) {
+                    return true
+                }
             }
         }
         false
@@ -1740,18 +1667,14 @@ extend Dictionary[K, V, H] where K: Hashable, V: Equatable, H: Hasher, H: Defaul
     /// ["a": 1, "b": 2].firstKey(of: 5);  // None
     /// ```
     public func firstKey(of value: V) -> K? {
-        let myCap = self.capacity;
-        let myBuckets = self.getBuckets();
 
-        for i in 0..<myCap {
-            let bucket = unsafe myBuckets.offset(by: i).read();
-            match bucket {
-                .Occupied(k, v, _) => {
-                    if v.isEqual(to: value) {
-                        return .Some(k)
-                    }
-                },
-                _ => {}
+        for i in 0..<self.capacity {
+            if let .Some(e) = self.entryAt(i) {
+                let k = e.key;
+                let v = e.value;
+                if v.isEqual(to: value) {
+                    return .Some(k)
+                }
             }
         }
         .None
@@ -1771,18 +1694,14 @@ extend Dictionary[K, V, H] where K: Hashable, V: Equatable, H: Hasher, H: Defaul
     /// ```
     public func allKeys(of value: V) -> Array[K] {
         var result = Array[K]();
-        let myCap = self.capacity;
-        let myBuckets = self.getBuckets();
 
-        for i in 0..<myCap {
-            let bucket = unsafe myBuckets.offset(by: i).read();
-            match bucket {
-                .Occupied(k, v, _) => {
-                    if v.isEqual(to: value) {
-                        result.append(k);
-                    }
-                },
-                _ => {}
+        for i in 0..<self.capacity {
+            if let .Some(e) = self.entryAt(i) {
+                let k = e.key;
+                let v = e.value;
+                if v.isEqual(to: value) {
+                    result.append(k);
+                }
             }
         }
         result
@@ -1808,23 +1727,19 @@ extend Dictionary[K, V, H]: Formattable where K: Hashable, K: Formattable, V: Fo
     public func format(mutating into writer: some Formatter, options: FormatOptions = FormatOptions.default()) {
         writer.append(char: '{');
         var first = true;
-        let myCap = self.capacity;
-        let myBuckets = self.getBuckets();
 
-        for i in 0..<myCap {
-            let bucket = unsafe myBuckets.offset(by: i).read();
-            match bucket {
-                .Occupied(key, value, _) => {
-                    if first {
-                        first = false
-                    } else {
-                        writer.append(", ")
-                    }
-                    key.format(into: writer, options);
-                    writer.append(": ");
-                    value.format(into: writer, options)
-                },
-                _ => {}
+        for i in 0..<self.capacity {
+            if let .Some(e) = self.entryAt(i) {
+                let key = e.key;
+                let value = e.value;
+                if first {
+                    first = false
+                } else {
+                    writer.append(", ")
+                }
+                key.format(into: writer, options);
+                writer.append(": ");
+                value.format(into: writer, options)
             }
         }
         writer.append(char: '}')
@@ -1852,16 +1767,12 @@ extend Dictionary[K, V, H] where K: Hashable, H: Hasher, H: Defaultable {
     /// ```
     public func deepClone() -> Dictionary[K, V, H] {
         var result = Dictionary[K, V, H](capacity: self.capacity);
-        let myCap = self.capacity;
-        let myBuckets = self.getBuckets();
 
-        for i in 0..<myCap {
-            let bucket = unsafe myBuckets.offset(by: i).read();
-            match bucket {
-                .Occupied(key, value, _) => {
-                     result.insert( key, value);
-                },
-                _ => {}
+        for i in 0..<self.capacity {
+            if let .Some(e) = self.entryAt(i) {
+                let key = e.key;
+                let value = e.value;
+                 result.insert( key, value);
             }
         }
         result
@@ -1886,16 +1797,11 @@ extend Dictionary[K, V, H] where K: Hashable, V: Addable, V.Output = V, V: Defau
     /// ```
     public func sumValues() -> V {
         var result = V();
-        let myCap = self.capacity;
-        let myBuckets = self.getBuckets();
 
-        for i in 0..<myCap {
-            let bucket = unsafe myBuckets.offset(by: i).read();
-            match bucket {
-                .Occupied(_, value, _) => {
-                    result = result + value;
-                },
-                _ => {}
+        for i in 0..<self.capacity {
+            if let .Some(e) = self.entryAt(i) {
+                let value = e.value;
+                result = result + value;
             }
         }
         result
