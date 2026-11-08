@@ -52,10 +52,21 @@ public struct CowBox[T]: Cloneable where T: Cloneable, T: not Sized, T: not Stat
     /// The fork clones the heap value in place (`RcBox.fork`), so a
     /// shared box is deep-copied exactly once and an unsized payload works.
     /// Every write (`value`'s `mutating ref`) goes through here.
+    ///
+    /// Always inlined: every `Array`/`Dictionary` write runs it, and the
+    /// unique case is one load and compare. The fork stays out of line
+    /// (`forkStorage`) so inlining doesn't pull the deep copy into callers.
+    @inline(.Always)
     public mutating func ensureUnique() {
         if not self.inner.isUnique {
-            self.inner = self.inner.fork()
+            self.forkStorage()
         }
+    }
+
+    /// Slow path of `ensureUnique`: replaces the shared box with a private copy.
+    @inline(.Never)
+    private mutating func forkStorage() {
+        self.inner = self.inner.fork()
     }
 
     /// Pointer to the payload on the heap. Internal plumbing for the
