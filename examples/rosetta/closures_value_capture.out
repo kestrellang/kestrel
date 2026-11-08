@@ -1,0 +1,9 @@
+funcs(0)() = 0
+funcs(1)() = 1
+funcs(2)() = 4
+funcs(3)() = 9
+funcs(4)() = 16
+funcs(5)() = 25
+funcs(6)() = 36
+funcs(7)() = 49
+funcs(8)() = 64
