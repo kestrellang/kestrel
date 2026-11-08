@@ -1,11 +1,12 @@
-// CowBox[T] - copy-on-write box built on RcBox
+// CowBox[T, A] - copy-on-write box built on RcBox
 
 module std.memory
 
-import std.core.(Bool, Cloneable, Indirection, MutableIndirection, Sized, Static)
-import std.memory.(ExistentialBox, RcBox)
+import std.core.(Bool, Cloneable, Copyable, Indirection, MutableIndirection, Sized, Static)
+import std.memory.(ExistentialBox, RcBox, Allocator, GlobalAllocator)
+import std.core.(Defaultable)
 
-/// Copy-on-write wrapper around `RcBox[T]`: value semantics on the heap.
+/// Copy-on-write wrapper around `RcBox[T, A]`: value semantics on the heap.
 ///
 /// Copies share storage until one of them writes. `value` is the payload
 /// in place: reading borrows it, and writing forks a shared box first.
@@ -21,7 +22,7 @@ import std.memory.(ExistentialBox, RcBox)
 ///
 /// # Representation
 ///
-/// A single `RcBox[T]` field.
+/// A single `RcBox[T, A]` field.
 ///
 /// # Memory Model
 ///
@@ -29,21 +30,21 @@ import std.memory.(ExistentialBox, RcBox)
 /// through `value` splits off a private copy when shared.
 // `T: not Sized`: `any[CowBox] P` holds a raw existential (when `P` refines
 // `Cloneable`). Members that move a `T` say `where T: Sized`. `not Static`
-// likewise: `CowBox[T]` is `Static` exactly when `T` is.
-public struct CowBox[T]: Cloneable where T: Cloneable, T: not Sized, T: not Static {
+// likewise: `CowBox[T, A]` is `Static` exactly when `T` is.
+public struct CowBox[T, A = GlobalAllocator]: Cloneable where T: Cloneable, T: not Sized, T: not Static, A: Allocator, A: Copyable {
     // `fileprivate` (not `private`) so the same-file `extend CowBox:
     // MutableIndirection` below can run the COW barrier on `inner`.
-    fileprivate var inner: RcBox[T]
+    fileprivate var inner: RcBox[T, A]
 
-    /// @name From Value
-    /// Allocates fresh storage holding `value` with refcount 1.
-    public init(consuming value: T) where T: Sized {
-        self.inner = RcBox(value);
+    /// @name Value and Allocator
+    /// Allocates storage from `allocator` holding `value` with refcount 1.
+    public init(consuming value: T, allocator allocator: A) where T: Sized {
+        self.inner = RcBox(value, allocator: allocator);
     }
 
     /// @name Inner
     /// Adopts an existing `RcBox` without allocating.
-    public init(inner box: RcBox[T]) {
+    public init(inner box: RcBox[T, A]) {
         self.inner = box;
     }
 
@@ -90,7 +91,7 @@ public struct CowBox[T]: Cloneable where T: Cloneable, T: not Sized, T: not Stat
     public var isUnique: Bool { self.inner.isUnique }
 
     /// Shares storage with the returned clone (refcount bump).
-    public func clone() -> CowBox[T] {
+    public func clone() -> CowBox[T, A] {
         CowBox(inner: self.inner.clone())
     }
 }
@@ -103,11 +104,20 @@ public struct CowBox[T]: Cloneable where T: Cloneable, T: not Sized, T: not Stat
 // The write barrier forks by cloning the payload into fresh storage
 // (`RcBox.fork`), which works for an unsized payload too: an
 // existential's table carries its size and clone.
-extend CowBox[T]: Indirection {
+extend CowBox[T, A]: Indirection {
     type Target = T
 }
 
-// `any[CowBox] P`: the struct's `init(consuming:)` is the witness.
-extend CowBox[T]: ExistentialBox {}
+extend CowBox[T, A] where A: Defaultable {
+    /// @name From Value
+    /// Allocates fresh storage from a default-made `A` holding `value` with
+    /// refcount 1.
+    public init(consuming value: T) where T: Sized {
+        self.inner = RcBox(value);
+    }
+}
 
-extend CowBox[T]: MutableIndirection where T: Cloneable {}
+// `any[CowBox] P`: the `init(consuming:)` above is the witness.
+extend CowBox[T, A]: ExistentialBox where A: Defaultable {}
+
+extend CowBox[T, A]: MutableIndirection where T: Cloneable {}

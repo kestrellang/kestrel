@@ -1,11 +1,11 @@
-// UniqueBox[T] - single-owner heap box for one-shot (`consuming`) closures.
+// UniqueBox[T, A] - single-owner heap box for one-shot (`consuming`) closures.
 
 module std.memory
 
-import std.core.(Bool, Copyable, fatalError)
+import std.core.(Defaultable, Bool, Copyable, fatalError)
 import std.numeric.(Int64)
 import std.result.(Optional)
-import std.memory.(Layout, Pointer, RawPointer, Allocator, SystemAllocator)
+import std.memory.(Layout, Pointer, RawPointer, Allocator, GlobalAllocator)
 
 // Storage block backing a UniqueBox: a liveness word next to the value, in a
 // single allocation. The word is 1 while the payload is present and 0 once
@@ -46,8 +46,9 @@ struct UniqueBoxStorage[T]: not Copyable where T: not Copyable {
 ///
 /// # Representation
 ///
-/// One `Pointer[UniqueBoxStorage[T]]`. The pointed-to block holds an `Int64`
-/// liveness word followed by the `T` value, allocated via `SystemAllocator`.
+/// A `Pointer[UniqueBoxStorage[T]]` plus the allocator `A` (no bytes for a
+/// stateless one). The pointed-to block holds an `Int64`
+/// liveness word followed by the `T` value, allocated from the box's `A`.
 ///
 /// # Memory Model
 ///
@@ -65,22 +66,22 @@ struct UniqueBoxStorage[T]: not Copyable where T: not Copyable {
 /// - `destroy()` runs `T.deinit` exactly once when the payload is still
 ///   present, and never when it has already been taken.
 @builtin(.UniqueBox)
-public struct UniqueBox[T]: not Copyable where T: not Copyable {
+public struct UniqueBox[T, A = GlobalAllocator]: not Copyable where T: not Copyable, A: Allocator, A: Copyable {
     // `fileprivate` mirrors `RcBox.ptr`: same-file extensions may reach it.
     fileprivate var ptr: Pointer[UniqueBoxStorage[T]]
+    // Frees the block. A stateless allocator adds no bytes, so the
+    // compiler can still pass the box around as the bare pointer word.
+    fileprivate var allocator: A
 
-    /// @name From Value
-    /// Allocates fresh storage holding `value`. Panics if the underlying
-    /// `SystemAllocator` returns `.None`.
-    ///
-    /// # Errors
+    /// @name Value and Allocator
+    /// Moves `value` into a block allocated from `allocator`.
     ///
     /// Panics with `"UniqueBox allocation failed"` on allocation failure.
-    @builtin(.UniqueBoxInit)
-    public init(consuming value: T) {
+    public init(consuming value: T, allocator allocator: A) {
         let layout: Layout = Layout.of[UniqueBoxStorage[T]]();
-        var allocator: SystemAllocator = SystemAllocator();
-        let result: RawPointer? = allocator.allocate(layout);
+        var alloc = allocator;
+        let result: RawPointer? = alloc.allocate(layout);
+        self.allocator = alloc;
         if let .Some(rawPtr) = result {
             self.ptr = rawPtr.cast[UniqueBoxStorage[T]]();
             unsafe self.ptr.write(UniqueBoxStorage(live: 1, value: value));
@@ -137,7 +138,20 @@ public struct UniqueBox[T]: not Copyable where T: not Copyable {
     // Releases the block without touching the payload.
     private func free() {
         let layout: Layout = Layout.of[UniqueBoxStorage[T]]();
-        var allocator: SystemAllocator = SystemAllocator();
+        var allocator = self.allocator;
         unsafe allocator.deallocate(self.ptr.asRaw(), layout)
+    }
+}
+
+extend UniqueBox[T, A] where A: Defaultable {
+    /// @name From Value
+    /// Allocates fresh storage holding `value` from a default-made `A`.
+    ///
+    /// # Errors
+    ///
+    /// Panics with `"UniqueBox allocation failed"` on allocation failure.
+    @builtin(.UniqueBoxInit)
+    public init(consuming value: T) {
+        self.init(value, allocator: A())
     }
 }
