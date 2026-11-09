@@ -177,7 +177,7 @@ pub fn copy_behavior_in(
         // Drop"). MUST stay in lockstep with the `needs_drop` arm below —
         // Bitwise + droppable double-frees the environment, Clone without drop
         // leaks it (lockstep 1: `expand.rs ty_needs_drop`,
-        // `audit.rs mono_needs_drop`, `clone_shim.rs ty_needs_clone_shim`,
+        // `audit.rs mono_needs_drop`, `clone_shim.rs DeepCloneQuery::ty_need`,
         // `mono/mod.rs concrete_copy`).
         //
         // - view kinds: the env holds addresses into the frame and owns
