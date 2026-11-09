@@ -37,6 +37,45 @@ impl OssaBodyCtx<'_, '_> {
         self.apply_promotion(expr_id, value)
     }
 
+    /// Lower `expr_id` while `held` values, lowered earlier, stay in use
+    /// after it. An expression that branches (`if`, `match`, `try`) threads
+    /// every scope-tracked value through block params and renames it in the
+    /// scope, so a `ValueId` kept in a Rust local across it names the
+    /// pre-branch value, which the branch consumed. Each held value is
+    /// renamed to what its scope entry holds afterwards; entries keep their
+    /// positions across a branch, so the lookup is positional.
+    /// (`s.b(0) = if c { … } else { 0 }`: the index `0` is lowered before
+    /// the right-hand side and passed to the setter after it.)
+    pub(super) fn lower_expr_holding(
+        &mut self,
+        expr_id: HirExprId,
+        held: &mut [ValueId],
+    ) -> ValueId {
+        let owned_at = |stack: &[super::ScopeFrame], v: ValueId| {
+            stack.iter().enumerate().find_map(|(si, scope)| {
+                scope
+                    .entries
+                    .iter()
+                    .position(|e| matches!(e, super::ScopeEntry::Owned(x) if *x == v))
+                    .map(|ei| (si, ei))
+            })
+        };
+        let positions: Vec<_> = held
+            .iter()
+            .map(|&v| owned_at(&self.scope_stack, v))
+            .collect();
+        let value = self.lower_expr(expr_id);
+        for (v, pos) in held.iter_mut().zip(positions) {
+            let Some((si, ei)) = pos else { continue };
+            if let Some(super::ScopeEntry::Owned(current)) =
+                self.scope_stack.get(si).and_then(|s| s.entries.get(ei))
+            {
+                *v = *current;
+            }
+        }
+        value
+    }
+
     /// Lower an expression in return/tail position. A bare `var` local there is
     /// a guaranteed last use, so MOVE it (`load [take]`) rather than the
     /// clone-then-scope-drop `lower_expr` would emit for a Copyable var read.
@@ -59,7 +98,7 @@ impl OssaBodyCtx<'_, '_> {
         self.return_tail = matches!(
             self.hir.exprs[expr_id],
             HirExpr::If { .. } | HirExpr::Match { .. } | HirExpr::Block { .. }
-        ) && !self.has_value_conversion(expr_id);
+        ) && !self.has_representation_change(expr_id);
         let value = self.lower_expr(expr_id);
         self.return_tail = false;
         // A field moved out of an owned local (`self.inner` in a consuming
@@ -72,7 +111,7 @@ impl OssaBodyCtx<'_, '_> {
     /// caller knows this read is its last use. `None` when `expr_id` isn't
     /// such a local, so the caller falls back to `lower_expr`'s copy.
     pub(super) fn try_move_var_local(&mut self, expr_id: HirExprId) -> Option<ValueId> {
-        if self.has_value_conversion(expr_id) {
+        if self.has_representation_change(expr_id) {
             return None;
         }
         let HirExpr::Local(hir_local, _) = self.hir.exprs[expr_id] else {
@@ -148,10 +187,6 @@ impl OssaBodyCtx<'_, '_> {
         self.emit_call_returning(callee, vec![arg], target_ty)
     }
 
-    /// Does this expression's value change representation at its use (a
-    /// cross-kind closure coercion, or an existential conversion)? Such an
-    /// expression must go through `lower_expr`: the place-oriented fast paths
-    /// would hand back the unconverted source.
     /// Copy a decaying `Optional[&T]` value out (`optional_ref_decays`).
     fn apply_optional_ref_decay(&mut self, expr_id: HirExprId, value: ValueId) -> ValueId {
         if !self.decays_optional_ref(expr_id) {
@@ -162,7 +197,24 @@ impl OssaBodyCtx<'_, '_> {
         self.emit_optional_ref_decay(value, decayed)
     }
 
+    /// Does this expression's value change at its use — a representation
+    /// change (below) or a `FromValue` promotion (`v` passed where `T?` is
+    /// expected)? The place-oriented argument/borrow fast paths must defer to
+    /// `lower_expr` for these, or they hand the callee the unwrapped source
+    /// (a `String` local borrowed as a `String?` param read as `.None`).
     pub(crate) fn has_value_conversion(&self, expr_id: HirExprId) -> bool {
+        self.has_representation_change(expr_id)
+            || self
+                .typed
+                .as_ref()
+                .is_some_and(|typed| typed.promotions.contains_key(&expr_id))
+    }
+
+    /// The conversions besides promotion: an optional-ref decay, a cross-kind
+    /// closure coercion, or an existential conversion. Move paths that apply
+    /// the promotion themselves after moving (`try_move_var_local`, return
+    /// tails) check only these.
+    pub(crate) fn has_representation_change(&self, expr_id: HirExprId) -> bool {
         self.decays_optional_ref(expr_id)
             || self.has_kind_coercion(expr_id)
             || self
@@ -1754,8 +1806,9 @@ impl OssaBodyCtx<'_, '_> {
             .world
             .get::<kestrel_ast_builder::Static>(resolved)
             .is_some();
-        let subscript_args: Vec<ValueId> = args.iter().map(|a| self.lower_expr(a.value)).collect();
-        let rhs = self.lower_expr(value_id);
+        let mut subscript_args: Vec<ValueId> =
+            args.iter().map(|a| self.lower_expr(a.value)).collect();
+        let rhs = self.lower_expr_holding(value_id, &mut subscript_args);
 
         if is_static {
             let self_type = self.type_from_type_ref(callee_expr);
@@ -1850,9 +1903,9 @@ impl OssaBodyCtx<'_, '_> {
         // A reference-typed computed prefix (`p.mutatingValue(i) = v`): the
         // getter lends the referent, which is the subscript's receiver.
         if let Some(prop) = self.computed_subscript_prefix(target_id) {
-            let subscript_args: Vec<ValueId> =
+            let mut subscript_args: Vec<ValueId> =
                 args.iter().map(|a| self.lower_expr(a.value)).collect();
-            let rhs = self.lower_expr(value_id);
+            let rhs = self.lower_expr_holding(value_id, &mut subscript_args);
             let type_args = self.resolve_type_args(target_id);
             // A value-returning get/set property is gotten into a writeback
             // slot (its setter runs at the statement's end). Without it the
@@ -1896,9 +1949,9 @@ impl OssaBodyCtx<'_, '_> {
         // get it into a writeback slot whose `"items.set"` witness runs at
         // the statement's end.
         if let Some(prop) = self.requirement_subscript_prefix(target_id) {
-            let subscript_args: Vec<ValueId> =
+            let mut subscript_args: Vec<ValueId> =
                 args.iter().map(|a| self.lower_expr(a.value)).collect();
-            let rhs = self.lower_expr(value_id);
+            let rhs = self.lower_expr_holding(value_id, &mut subscript_args);
             let type_args = self.resolve_type_args(target_id);
             let (field_arg, field_ty) =
                 self.computed_prefix_writeback_receiver(receiver, receiver_ty, prop)?;
@@ -1942,8 +1995,9 @@ impl OssaBodyCtx<'_, '_> {
 
         // Get the receiver's field address directly via write_place_addr + field_addr,
         // then MutBorrow the field. Avoids shallow CopyAddr that breaks COW refcounting.
-        let subscript_args: Vec<ValueId> = args.iter().map(|a| self.lower_expr(a.value)).collect();
-        let rhs = self.lower_expr(value_id);
+        let mut subscript_args: Vec<ValueId> =
+            args.iter().map(|a| self.lower_expr(a.value)).collect();
+        let rhs = self.lower_expr_holding(value_id, &mut subscript_args);
         let type_args = self.resolve_type_args(target_id);
 
         // An observed field is mutated in a writeback slot; its observer
