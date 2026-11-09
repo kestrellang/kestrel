@@ -64,6 +64,9 @@ struct Ctl {
     var iter: Int64
     /// The iterator is async (`for await`): closing it awaits `return()`.
     var asyncIter: Bool
+    /// Destructure only: the register that's true once the iterator is
+    /// exhausted (or threw), when it must not be closed.
+    var done: Int64
 }
 
 @derive(Equatable)
@@ -75,6 +78,9 @@ enum CtlKind {
     case Switch
     case Finally
     case Catch
+    /// Array destructuring: leaving it early closes the iterator (unless
+    /// `done`), and leaves its try region.
+    case Destructure
 }
 
 /// Per-function compiler state.

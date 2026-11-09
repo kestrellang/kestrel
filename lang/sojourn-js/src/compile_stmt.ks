@@ -215,6 +215,13 @@ extend VM {
             self.emit(.ForInNext(dst: v, iter: it, done: 0))
         };
         self.pushCtl(.Loop, labels, if isOf { it } else { -1 });
+        // A throw out of the binding or body closes the iterator.
+        let exception = self.reg();
+        var enter: Int64 = -1;
+        if isOf {
+            self.pushCtl(.Catch, [], -1);
+            enter = self.emit(.EnterTry(handler: 0, exception: exception));
+        }
         var pushed = false;
         match left {
             .Declaration(d) => {
@@ -229,8 +236,18 @@ extend VM {
         }
         try self.compileSubstatement(body);
         self.exitBlockScope(pushed);
+        if isOf {
+            let _ = self.emit(.LeaveTry);
+            let f = self.fnIndex();
+            let _ = self.fns(f).ctl.pop();
+        }
         self.patchContinues(self.here());
         let _ = self.emit(.Jump(target: top));
+        if isOf {
+            self.patchHere(enter);
+            let _ = self.emit(.IteratorCloseQuiet(iter: it));
+            let _ = self.emit(.Throw(src: exception));
+        }
         self.patchHere(next);
         self.popCtl();
         .Ok(())
@@ -305,7 +322,7 @@ extend VM {
     mutating func pushCtl(kind: CtlKind, labels: Array[String], iter: Int64) {
         let f = self.fnIndex();
         let depth = self.scopeDepth();
-        self.fns(f).ctl.append(Ctl(kind: kind, labels: labels, breaks: [], continues: [], envDepth: depth, finalizer: .None, iter: iter, asyncIter: false));
+        self.fns(f).ctl.append(Ctl(kind: kind, labels: labels, breaks: [], continues: [], envDepth: depth, finalizer: .None, iter: iter, asyncIter: false, done: -1));
     }
 
     /// Pops the innermost construct, pointing its breaks here.
@@ -380,6 +397,12 @@ extend VM {
                     if let .Some(body) = c.finalizer { try self.compileFinallyInline(i, body); }
                 },
                 .Catch => { let _ = self.emit(.LeaveTry); },
+                .Destructure => {
+                    let _ = self.emit(.LeaveTry);
+                    let skip = self.emit(.JumpIf(cond: c.done, target: 0, when: true));
+                    let _ = self.emit(.IteratorClose(iter: c.iter));
+                    self.patchHere(skip);
+                },
                 .Loop => if c.iter >= 0 { try self.emitIteratorClose(c); },
                 _ => {}
             }

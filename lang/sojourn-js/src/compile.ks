@@ -552,24 +552,47 @@ extend VM {
     mutating func bindArrayPattern(elements: Array[Optional[Pattern]], rest: Optional[Pattern], src: Int64, mode: BindMode) -> Result[(), SyntaxError] {
         let it = self.regs(2);
         let _ = self.emit(.GetIterator(iter: it, obj: src));
+        // `done` is also true while `next()` runs: if it throws, the
+        // iterator isn't closed.
         let done = self.reg();
         self.load(done, Value.bool(false));
+        let exception = self.reg();
+        self.pushCtl(.Destructure, [], it);
+        let f = self.fnIndex();
+        let at = self.fns(f).ctl.count - 1;
+        self.fns(f).ctl(at).done = done;
+        let enter = self.emit(.EnterTry(handler: 0, exception: exception));
         for el in elements {
+            // A property target is evaluated before the iterator steps.
+            let target = match el { .Some(p) => memberTarget(p), .None => .None };
+            var ref: Optional[Reference] = .None;
+            if let .Some(e) = target { ref = .Some(try self.compileReference(e)); }
             let v = self.reg();
             self.load(v, Value.undefined);
             let skip = self.emit(.JumpIf(cond: done, target: 0, when: true));
-            let next = self.emit(.IteratorNext(dst: v, iter: it, done: 0));
-            let over = self.emit(.Jump(target: 0));
-            self.patchHere(next);
             self.load(done, Value.bool(true));
+            let next = self.emit(.IteratorNext(dst: v, iter: it, done: 0));
+            self.load(done, Value.bool(false));
+            self.patchHere(next);
             self.patchHere(skip);
-            self.patchHere(over);
-            if let .Some(p) = el { try self.bindPattern(p, v, mode); }
+            if let .Some(r) = ref {
+                if let .Some(.WithDefault(_, value)) = el {
+                    let keep = self.emit(.JumpIfNotUndefined(src: v, target: 0));
+                    try self.compileExpr(value, v);
+                    self.patchHere(keep);
+                }
+                try self.writeReference(r, v);
+            } else if let .Some(p) = el {
+                try self.bindPattern(p, v, mode);
+            }
         }
         if let .Some(r) = rest {
+            var restRef: Optional[Reference] = .None;
+            if let .Some(e) = memberTarget(r) { restRef = .Some(try self.compileReference(e)); }
             let arr = self.reg();
             let _ = self.emit(.NewArray(dst: arr));
             let skip = self.emit(.JumpIf(cond: done, target: 0, when: true));
+            self.load(done, Value.bool(true));
             let v = self.reg();
             let top = self.here();
             let next = self.emit(.IteratorNext(dst: v, iter: it, done: 0));
@@ -577,12 +600,21 @@ extend VM {
             let _ = self.emit(.Jump(target: top));
             self.patchHere(next);
             self.patchHere(skip);
-            try self.bindPattern(r, arr, mode);
-            return .Ok(());
+            if let .Some(rr) = restRef { try self.writeReference(rr, arr); } else { try self.bindPattern(r, arr, mode); }
         }
+        let _ = self.emit(.LeaveTry);
+        let _ = self.fns(f).ctl.pop();
         let skip = self.emit(.JumpIf(cond: done, target: 0, when: true));
         let _ = self.emit(.IteratorClose(iter: it));
+        let over = self.emit(.Jump(target: 0));
+        // A throw while binding closes the iterator, unless it's done.
+        self.patchHere(enter);
+        let rethrow = self.emit(.JumpIf(cond: done, target: 0, when: true));
+        let _ = self.emit(.IteratorCloseQuiet(iter: it));
+        self.patchHere(rethrow);
+        let _ = self.emit(.Throw(src: exception));
         self.patchHere(skip);
+        self.patchHere(over);
         .Ok(())
     }
 
@@ -675,6 +707,16 @@ extend VM {
 /// bindings (`%…`, private `#…`).
 func isEvalVisible(name: String) -> Bool {
     name != "this" and not name.starts(with: "%") and not name.starts(with: "#")
+}
+
+/// An assignment pattern element that targets a property (`[a.b] = …`,
+/// `[a[k] = 1] = …`): its reference is evaluated before the value.
+func memberTarget(p: Pattern) -> Optional[Expr] {
+    match p {
+        .Expression(e) => if let .Member(_, _, _) = e.kind { .Some(e) } else { .None },
+        .WithDefault(t, _) => memberTarget(t),
+        _ => .None
+    }
 }
 
 func panicFn() -> FnState {

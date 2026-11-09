@@ -483,7 +483,8 @@ extend VM {
                     .None => self.frames(fi).pc = done
                 }
             },
-            .IteratorClose(iter) => try self.iteratorClose(self.reg(fi, iter))
+            .IteratorClose(iter) => try self.iteratorClose(self.reg(fi, iter)),
+            .IteratorCloseQuiet(iter) => { let _ = self.iteratorClose(self.reg(fi, iter)); }
         }
         .Ok(.Next)
     }

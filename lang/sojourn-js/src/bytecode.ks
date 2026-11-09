@@ -218,6 +218,9 @@ enum Instr {
     case IteratorNext(dst: Int64, iter: Int64, done: Int64)
     /// Calls the iterator's `return`, if any (leaving a loop early).
     case IteratorClose(iter: Int64)
+    /// Closes the iterator on a throw's way out: calls `return()` and
+    /// ignores whatever it does, so the original exception wins.
+    case IteratorCloseQuiet(iter: Int64)
 
     // Generators
     /// After the prologue: suspends the new frame into a generator object
