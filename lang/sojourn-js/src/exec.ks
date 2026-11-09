@@ -294,6 +294,7 @@ extend VM {
             .DefineProp(obj, key, src) => {
                 let pk = try self.toKey(self.reg(fi, key));
                 let o = self.reg(fi, obj);
+                try self.checkDefinable(o.asRef, pk);
                 if self.isPrivateKey(pk) {
                     if self.hasOwn(o.asRef, pk) { return self.throwType("Cannot initialize \(self.keyText(pk)) twice on the same object"); }
                     self.defineOwn(o.asRef, pk, self.reg(fi, src), Attr.writable);
@@ -314,6 +315,7 @@ extend VM {
                 let f = self.reg(fi, fn);
                 self.nameFunctionIfAnonymous(f, pk, "");
                 let attrs = Attr.writable | Attr.configurable | (if enumerable { Attr.enumerable } else { 0 });
+                try self.checkDefinable(self.reg(fi, obj).asRef, pk);
                 self.defineOwn(self.reg(fi, obj).asRef, pk, f, attrs);
             },
             .DefineAccessor(obj, key, fn, isGetter, enumerable) => {
@@ -321,6 +323,7 @@ extend VM {
                 let f = self.reg(fi, fn);
                 self.nameFunctionIfAnonymous(f, pk, if isGetter { "get " } else { "set " });
                 let r = self.reg(fi, obj).asRef;
+                try self.checkDefinable(r, pk);
                 var getter = Value.undefined;
                 var setter = Value.undefined;
                 if let .Some(p) = self.ownProperty(r, pk) {
@@ -512,6 +515,21 @@ extend VM {
 
     /// HasBinding for a `with` object: `name` is on `obj` and its
     /// @@unscopables doesn't list it.
+    /// Whether a configurable property `pk` can be defined on `r` (methods,
+    /// accessors, fields): not over a non-configurable one, and not new
+    /// on a non-extensible object.
+    mutating func checkDefinable(r: Ref, pk: Key) -> Result[(), Value] {
+        match self.ownProperty(r, pk) {
+            .Some(p) => if p.attrs & Attr.configurable == 0 {
+                return self.throwType("Cannot redefine property: \(self.keyText(pk))");
+            },
+            .None => if not self.heap.objects(r).extensible {
+                return self.throwType("Cannot define property \(self.keyText(pk)), object is not extensible");
+            }
+        }
+        .Ok(())
+    }
+
     /// The object a WithGet/WithSet looks on: a `with` object (slot -1,
     /// stored in slot 0) or an eval-vars object.
     func dynamicScopeObject(fi: Int64, hops: Int64, slot: Int64) -> Value {
