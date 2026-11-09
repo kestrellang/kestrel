@@ -23,7 +23,8 @@ func unitsOf(s: String) -> Units {
     out
 }
 
-/// A Kestrel string from code units. Lone surrogates become U+FFFD.
+/// A Kestrel string from code units. Lone surrogates stay, WTF-8 encoded
+/// (see `appendCodePoint`).
 func stringOf(units: Units) -> String {
     var out = "";
     var i: Int64 = 0;

@@ -237,6 +237,9 @@ extend VM {
         self.intrinsics.errorProto = errorProto;
         let errorCtor = self.constructorFor("Error", .ErrorCtor, 1, errorProto);
         self.method(errorProto, "toString", .ErrorToString, 0);
+        let stackGet = self.nativeFunction(.ErrorStackGet, "get stack", 0, false);
+        let stackSet = self.nativeFunction(.ErrorStackSet, "set stack", 1, false);
+        self.defineAccessorOwn(errorProto.asRef, self.atom("stack"), stackGet, stackSet, Attr.configurable);
         let errName = self.str("Error");
         self.defineHidden(errorProto.asRef, self.names.name, errName);
         self.defineHidden(errorProto.asRef, self.names.message, emptyString);

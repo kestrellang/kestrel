@@ -72,8 +72,10 @@ func hexValue(c: Int64) -> Int64 {
 
 /// Appends code point `c` to `out` as UTF-8. Lone surrogates, which JS
 /// strings can hold but UTF-8 can't, become U+FFFD.
+/// Appends code point `c`. A lone surrogate (from a `\uD83D` escape) is
+/// kept, WTF-8 encoded, so `unitsOf` turns it back into one code unit.
 func appendCodePoint(mutating out: String, c: Int64) {
-    let valid = c >= 0 and c <= 0x10FFFF and (c < 0xD800 or c > 0xDFFF);
+    let valid = c >= 0 and c <= 0x10FFFF;
     let scalar = if valid { UInt32(truncating: c) } else { UInt32(truncating: 0xFFFD) };
     out.append(char: Char(unchecked: scalar));
 }

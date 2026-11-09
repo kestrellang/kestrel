@@ -139,14 +139,14 @@ extend VM {
             },
             .StringToLowerCase => {
                 let s = try self.thisUnits(this, "toLowerCase");
-                self.str(stringOf(s).lowercased())
+                self.newString(lowerUnits(s))
             },
             .StringTrim => self.newString(unitsTrim(try self.thisUnits(this, "trim"), true, true)),
             .StringTrimStart => self.newString(unitsTrim(try self.thisUnits(this, "trimStart"), true, false)),
             .StringTrimEnd => self.newString(unitsTrim(try self.thisUnits(this, "trimEnd"), false, true)),
             .StringSplit => {
                 if this.isNullish { return self.throwType("String.prototype.split called on null or undefined"); }
-                if not a0.isNullish {
+                if a0.isObject {
                     let m = try self.getMethod(a0, symbolKey(WellKnown.split));
                     if not m.isUndefined { return .Ok(.Some(try self.callValue(m, a0, [this, a1]))); }
                 }
@@ -274,3 +274,56 @@ extend VM {
 }
 
 func clampNonNegative(x: Float64) -> Float64 { if x < 0.0 { 0.0 } else { x } }
+
+/// toLowerCase, with the Final_Sigma rule: a capital sigma ending a word
+/// becomes ς. The text between sigmas lowercases as a whole.
+func lowerUnits(s: Units) -> Units {
+    var out: Units = [];
+    var start: Int64 = 0;
+    for i in 0..<s.count {
+        if s(i) != 0x3A3 { continue; }
+        for u in unitsOf(stringOf(unitsSlice(s, start, i)).lowercased()) { out.append(u); }
+        let final = casedBefore(s, i) and not casedAfter(s, i);
+        out.append(if final { 0x3C2 } else { 0x3C3 });
+        start = i + 1;
+    }
+    for u in unitsOf(stringOf(unitsSlice(s, start, s.count)).lowercased()) { out.append(u); }
+    out
+}
+
+/// A cased letter: one that has another case.
+func isCasedUnit(u: UInt16) -> Bool { isCasedText([u]) }
+
+/// Case-ignorable (approximately): combining marks, format characters,
+/// and the word-internal punctuation Unicode lists.
+func isCaseIgnorableUnit(u: UInt16) -> Bool {
+    let c = Int64(from: u);
+    (c >= 0x300 and c <= 0x36F) or c == 0x27 or c == 0x2E or c == 0x3A or c == 0x5E or c == 0x60
+        or c == 0xA8 or c == 0xAD or c == 0xAF or c == 0xB4 or c == 0xB7 or c == 0xB8 or c == 0x180E
+        or (c >= 0x200B and c <= 0x200F) or c == 0x2018 or c == 0x2019 or c == 0x2024 or c == 0x2027
+        or (c >= 0x2060 and c <= 0x2064) or c == 0xFEFF
+}
+
+func casedBefore(s: Units, i: Int64) -> Bool {
+    var j = i - 1;
+    while j >= 0 and isCaseIgnorableUnit(s(j)) { j = j - 1; }
+    if j < 0 { return false; }
+    // A surrogate pair is one character.
+    let low = Int64(from: s(j));
+    if low >= 0xDC00 and low <= 0xDFFF and j > 0 { return isCasedText(unitsSlice(s, j - 1, j + 1)); }
+    isCasedUnit(s(j))
+}
+
+func casedAfter(s: Units, i: Int64) -> Bool {
+    var j = i + 1;
+    while j < s.count and isCaseIgnorableUnit(s(j)) { j = j + 1; }
+    if j >= s.count { return false; }
+    let high = Int64(from: s(j));
+    if high >= 0xD800 and high <= 0xDBFF and j + 1 < s.count { return isCasedText(unitsSlice(s, j, j + 2)); }
+    isCasedUnit(s(j))
+}
+
+func isCasedText(u: Units) -> Bool {
+    let t = stringOf(u);
+    t.lowercased() != t or t.uppercased() != t
+}

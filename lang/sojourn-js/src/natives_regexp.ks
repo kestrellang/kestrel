@@ -415,7 +415,7 @@ extend VM {
                 if this.isNullish { return self.throwType("String.prototype method called on null or undefined"); }
                 let isMatch = n == NativeFn.StringMatch;
                 let sym = if isMatch { WellKnown.matchSym } else { WellKnown.search };
-                if not a0.isNullish {
+                if a0.isObject {
                     let m = try self.getMethod(a0, symbolKey(sym));
                     if not m.isUndefined { return .Ok(.Some(try self.callValue(m, a0, [this]))); }
                 }
@@ -428,7 +428,7 @@ extend VM {
             },
             .StringMatchAll => {
                 if this.isNullish { return self.throwType("String.prototype.matchAll called on null or undefined"); }
-                if not a0.isNullish {
+                if a0.isObject {
                     if try self.isRegExp(a0) {
                         let flags = try self.getV(a0, self.atom("flags"));
                         if flags.isNullish { return self.throwType("flags is null or undefined"); }

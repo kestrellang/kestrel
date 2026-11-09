@@ -143,6 +143,8 @@ enum NativeFn {
     case SymbolToString
     case SymbolValueOf
     case SymbolDescription
+    case ErrorStackGet
+    case ErrorStackSet
     // Errors
     case ErrorCtor
     case TypeErrorCtor

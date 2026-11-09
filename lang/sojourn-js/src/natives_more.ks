@@ -419,7 +419,7 @@ extend VM {
     /// String.prototype.replace and replaceAll with a string pattern.
     mutating func stringReplace(this: Value, search: Value, replace: Value, all: Bool) -> Result[Value, Value] {
         if this.isNullish { return self.throwType("String.prototype.replace called on null or undefined"); }
-        if not search.isNullish {
+        if search.isObject {
             if all {
                 let isRx = try self.isRegExp(search);
                 if isRx {

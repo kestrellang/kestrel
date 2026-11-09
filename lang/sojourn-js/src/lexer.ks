@@ -278,6 +278,7 @@ struct Lexer {
             }
             return self.finishNumber(tok);
         }
+        if c == 48 and next == 95 { throw syntaxError("numeric separator after a leading zero", at: start + 1); }
         if c == 48 and isDecimalDigit(next) {
             // Legacy octal (`017`), or a decimal with a leading zero (`019`).
             tok.legacyOctal = true;

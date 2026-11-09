@@ -101,6 +101,26 @@ extend VM {
                 self.str(self.keyText(symbolKey(s.asRef)))
             },
             .SymbolValueOf => try self.thisSymbol(this),
+            .ErrorStackGet => {
+                if not this.isObject { return self.throwType("Error.prototype.stack getter called on non-object"); }
+                // No stack traces yet: an error's stack is empty.
+                if let .ErrorObject = self.kindAt(this.asRef) { self.str("") } else { Value.undefined }
+            },
+            .ErrorStackSet => {
+                if not this.isObject { return self.throwType("Error.prototype.stack setter called on non-object"); }
+                if not a0.isString { return self.throwType("Error stack must be a string"); }
+                if this.bits == self.intrinsics.errorProto.bits { return self.throwType("Cannot assign to read only property 'stack'"); }
+                let key = self.atom("stack");
+                let own = try self.getOwnPropertyV(this, key);
+                if let .None = own {
+                    let d = Descriptor(value: .Some(a0), writable: .Some(true), getter: .None, setter: .None, enumerable: .Some(true), configurable: .Some(true));
+                    let ok = try self.defineProperty(this.asRef, key, d);
+                    if not ok { return self.throwType("Cannot define property 'stack'"); }
+                } else {
+                    try self.setV(this, key, a0, true);
+                }
+                Value.undefined
+            },
             .SymbolDescription => {
                 let s = try self.thisSymbol(this);
                 self.symbols(s.asRef)
