@@ -23,7 +23,8 @@ func main() -> lang.i64 {
             print("\(status)\n");
             let signal = match status {
                 .Terminated(signal: s) => s == 15,
-                .Exited(_) => false
+                .Exited(_) => false,
+                .TimedOut => false
             };
             print("\(signal) \(status.code.isNone) \(status.isEqual(to: .Terminated(signal: 9)))\n");
         },

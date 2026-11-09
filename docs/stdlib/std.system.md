@@ -589,7 +589,8 @@ public mutating func timeout(milliseconds: Int64) -> &mutating Command
 ```
 
 Kills the child if `run` or `output` is still waiting on it after
-`milliseconds`; the call then fails with `TimedOut`.
+`milliseconds`. The call still succeeds, with status `.TimedOut`;
+`output()` keeps what the child wrote before it was killed.
 
 _Defined in `lang/std/system/process.ks`._
 
@@ -929,6 +930,17 @@ case Terminated
 ```
 
 It was ended from outside, by a signal such as `SIGKILL`.
+
+_Defined in `lang/std/system/process.ks`._
+
+#### case `TimedOut`
+
+```kestrel
+case TimedOut
+```
+
+It outlived the `Command`'s `timeout` and std killed it. Not an
+error: `output()` still returns whatever the child wrote before.
 
 _Defined in `lang/std/system/process.ks`._
 
