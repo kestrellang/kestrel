@@ -276,11 +276,11 @@ struct SnakeGame: not Copyable {
                     // Move body: shift all segments, add old head at front
                     var i = self.body.count - 1;
                     while i > 0 {
-                        let prev = self.body(unchecked: i - 1);
-                        self.body(unchecked: i) = prev;
+                        let prev = unsafe self.body(unchecked: i - 1);
+                        unsafe self.body(unchecked: i) = prev;
                         i = i - 1;
                     }
-                    self.body(unchecked: 0) = Point(x: oldHeadX, y: oldHeadY);
+                    unsafe self.body(unchecked: 0) = Point(x: oldHeadX, y: oldHeadY);
                 }
             },
             .GameOver => {

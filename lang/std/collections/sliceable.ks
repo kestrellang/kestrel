@@ -2,13 +2,13 @@
 
 module std.collections
 
-import std.core.(Bool, Equatable, Comparable, Hashable, Hasher, Range, ClosedRange, RangeFrom, RangeUpTo, RangeThrough, fatalError)
-import std.numeric.(Int64, UInt64, RandomNumberGenerator, SystemRandom)
+import std.core.(Bool, Equatable, Comparable, Ordering, Hashable, Hasher, Range, ClosedRange, RangeFrom, RangeUpTo, RangeThrough, fatalError)
+import std.numeric.(Int64, UInt64, RandomNumberGenerator, DefaultRandom)
 import std.result.(Optional)
 import std.memory.(UnsafeSlice, UnsafeSliceIterator, Pointer)
 import std.iter.(Iterable)
 import std.text.(Formattable, Formatter, FormatOptions, StringBuilder, String)
-import std.collections.(Array, Slice, SliceIndex, SliceClampable)
+import std.collections.(Array, Set, Slice, SliceIndex, SliceClampable)
 
 // ============================================================================
 // SLICE PROTOCOL
@@ -44,7 +44,8 @@ public protocol Sliceable[T]: Iterable {
     // gives defaults that forward to `asSlice()`.
     subscript[I](index: I) -> I.SliceOutput where I: SliceIndex[T] { ref }
     subscript[I](checked index: I)? -> I.SliceOutput where I: SliceIndex[T] { ref }
-    subscript[I](unchecked index: I) -> I.SliceOutput where I: SliceIndex[T] { ref }
+    // Unsafe: `index` must be in range.
+    unsafe subscript[I](unchecked index: I) -> I.SliceOutput where I: SliceIndex[T] { ref }
     subscript(clamped index: Int64)? -> T { ref }
     subscript[R](within range: R) -> Slice[T] where R: SliceClampable[T] { ref }
     subscript(wrapped index: Int64)? -> T { ref }
@@ -106,8 +107,8 @@ extend Sliceable[T] {
         ref { I.lendChecked(index, self.asSlice()) }
     }
 
-    public subscript[I](unchecked index: I) -> I.SliceOutput where I: SliceIndex[T] {
-        ref { I.lendUnchecked(index, self.asSlice()) }
+    public unsafe subscript[I](unchecked index: I) -> I.SliceOutput where I: SliceIndex[T] {
+        ref { unsafe I.lendUnchecked(index, self.asSlice()) }
     }
 
     public subscript(clamped index: Int64)? -> T {
@@ -134,12 +135,12 @@ extend Sliceable[T] {
 extend UnsafeSlice[T] {
     /// The elements as a `Slice`, in place.
     public func asSlice() -> &Slice[T] {
-        Slice.lend(start: self.pointer, count: self.count)
+        unsafe Slice.lend(start: self.pointer, count: self.count)
     }
 
     /// Like `asSlice()`, for writing through.
     public mutating func asMutableSlice() -> &mutating Slice[T] {
-        Slice.lendMutating(start: self.pointer, count: self.count)
+        unsafe Slice.lendMutating(start: self.pointer, count: self.count)
     }
 
     public subscript[I](index: I) -> I.SliceOutput where I: SliceIndex[T] {
@@ -152,9 +153,9 @@ extend UnsafeSlice[T] {
         mutating ref { I.lendMutatingChecked(index, self.asMutableSlice()) }
     }
 
-    public subscript[I](unchecked index: I) -> I.SliceOutput where I: SliceIndex[T] {
-        ref { I.lendUnchecked(index, self.asSlice()) }
-        mutating ref { I.lendMutatingUnchecked(index, self.asMutableSlice()) }
+    public unsafe subscript[I](unchecked index: I) -> I.SliceOutput where I: SliceIndex[T] {
+        ref { unsafe I.lendUnchecked(index, self.asSlice()) }
+        mutating ref { unsafe I.lendMutatingUnchecked(index, self.asMutableSlice()) }
     }
 
     public subscript(clamped index: Int64)? -> T {
@@ -270,7 +271,7 @@ extend Sliceable[T] {
         .Some(unsafe s.pointer.offset(by: index).read())
     }
 
-    /// A uniformly random element using OS entropy, or `.None` for an
+    /// A uniformly random element from `DefaultRandom`, or `.None` for an
     /// empty collection. O(1).
     ///
     /// # Examples
@@ -279,7 +280,7 @@ extend Sliceable[T] {
     /// ["red", "green", "blue"].randomElement();  // e.g. Some("green")
     /// ```
     public func randomElement() -> T? {
-        var rng = SystemRandom();
+        var rng = DefaultRandom();
         self.randomElement(using: rng)
     }
 
@@ -341,7 +342,7 @@ extend Sliceable[T] {
         if count > s.count {
             fatalError("prefix: count exceeds length")
         }
-        Slice.lend(start: s.pointer, count: count)
+        unsafe Slice.lend(start: s.pointer, count: count)
     }
 
     /// Returns a slice over the last `count` elements. O(1).
@@ -360,7 +361,7 @@ extend Sliceable[T] {
         if count > s.count {
             fatalError("suffix: count exceeds length")
         }
-        Slice.lend(start: s.pointer.offset(by: s.count - count), count: count)
+        unsafe Slice.lend(start: s.pointer.offset(by: s.count - count), count: count)
     }
 
     /// Returns a slice with the first `count` elements skipped. O(1).
@@ -381,7 +382,7 @@ extend Sliceable[T] {
         if count > s.count {
             fatalError("drop(first:): count exceeds length")
         }
-        Slice.lend(start: s.pointer.offset(by: count), count: s.count - count)
+        unsafe Slice.lend(start: s.pointer.offset(by: count), count: s.count - count)
     }
 
     /// Returns a slice with the last `count` elements skipped. O(1).
@@ -402,7 +403,7 @@ extend Sliceable[T] {
         if count > s.count {
             fatalError("drop(last:): count exceeds length")
         }
-        Slice.lend(start: s.pointer, count: s.count - count)
+        unsafe Slice.lend(start: s.pointer, count: s.count - count)
     }
 
     // -- Searching (predicate) -----------------------------------------------
@@ -636,7 +637,7 @@ extend Sliceable[T] {
         for i in 0..<s.count {
             let inner = transform(unsafe p.offset(by: i).read());
             for j in 0..<inner.count {
-                b.append(inner(unchecked: j))
+                b.append(unsafe inner(unchecked: j))
             }
         }
         b.build()
@@ -788,7 +789,7 @@ extend Sliceable[T] where T: Comparable {
         // Track the winner's index so nothing is copied.
         var best = 0;
         for i in 1..<s.count {
-            if unsafe s.pointer.offset(by: i).value < unsafe s.pointer.offset(by: best).value { best = i; }
+            if unsafe s.pointer.offset(by: i).value.compare(unsafe s.pointer.offset(by: best).value) == Ordering.Less { best = i; }
         }
         .Some(unsafe s.pointer.offset(by: best).value)
     }
@@ -808,7 +809,7 @@ extend Sliceable[T] where T: Comparable {
         if s.count == 0 { return .None; }
         var best = 0;
         for i in 1..<s.count {
-            if unsafe s.pointer.offset(by: i).value > unsafe s.pointer.offset(by: best).value { best = i; }
+            if unsafe s.pointer.offset(by: i).value.compare(unsafe s.pointer.offset(by: best).value) == Ordering.Greater { best = i; }
         }
         .Some(unsafe s.pointer.offset(by: best).value)
     }
@@ -833,7 +834,7 @@ extend Sliceable[T] where T: Comparable {
         }
         let myPtr = s.pointer;
         for i in 1..<s.count {
-            if unsafe myPtr.offset(by: i).read() < unsafe myPtr.offset(by: i - 1).read() {
+            if unsafe myPtr.offset(by: i).value.compare(unsafe myPtr.offset(by: i - 1).value) == Ordering.Less {
                 return false
             }
         }
@@ -862,13 +863,10 @@ extend Sliceable[T] where T: Comparable {
         var hi: Int64 = s.count;
         while lo < hi {
             let mid = lo + (hi - lo) / 2;
-            let midVal = unsafe myPtr.offset(by: mid).read();
-            if midVal < element {
-                lo = mid + 1
-            } else if midVal > element {
-                hi = mid
-            } else {
-                return .Some(mid)
+            match unsafe myPtr.offset(by: mid).value.compare(element) {
+                .Less => { lo = mid + 1 },
+                .Greater => { hi = mid },
+                .Equal => { return .Some(mid) }
             }
         }
         .None
@@ -891,7 +889,7 @@ extend Sliceable[T] where T: Comparable {
         for i in 0..<s.count {
             copy.append(unsafe myPtr.offset(by: i).read())
         }
-        copy.sort(by: { (a, b) in a < b });
+        copy.sort();
         copy
     }
 }
@@ -902,7 +900,7 @@ extend Sliceable[T] where T: Comparable {
 
 extend Sliceable[T] where T: Hashable {
     /// Returns a new array with duplicates removed, preserving
-    /// first-occurrence order. O(n²).
+    /// first-occurrence order. O(n) expected: seen elements go in a `Set`.
     ///
     /// For the mutating variant on `Array`, see `removeDuplicates()`.
     ///
@@ -914,16 +912,12 @@ extend Sliceable[T] where T: Hashable {
     public func unique() -> Array[T] {
         var result = Array[T]();
         let s = self.asUnsafeSlice();
+        var seen = Set[T](capacity: s.count);
         let myPtr = s.pointer;
         for i in 0..<s.count {
             let elem = unsafe myPtr.offset(by: i).read();
-            var found = false;
-            for j in 0..<result.count {
-                if result(unchecked: j).isEqual(to: elem) {
-                    found = true
-                }
-            }
-            if found == false {
+            // `insert` is false when an equal element was already seen.
+            if seen.insert(elem) {
                 result.append(elem)
             }
         }

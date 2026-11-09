@@ -26,7 +26,7 @@ public struct UnixStream: Readable, Writable, not Copyable {
     /// Connects to the socket at `path`.
     public static func connect(path: Path) -> Result[UnixStream, IoError] {
         let fd = try openSocket(unixFamily(), streamKind());
-        let name = path.string.toCString();
+        let name = try path.string.toNativeString();
         let r = unsafe native_unix_connect(fd, name.raw.asRaw());
         let error = IoError.last();
         name.free();
@@ -127,7 +127,7 @@ public struct UnixListener: not Copyable {
     /// Listens on a new socket file at `path`, which must not exist.
     public static func bind(path: Path) -> Result[UnixListener, IoError] {
         let fd = try openSocket(unixFamily(), streamKind());
-        let name = path.string.toCString();
+        let name = try path.string.toNativeString();
         let r = unsafe native_unix_bind(fd, name.raw.asRaw());
         let error = IoError.last();
         name.free();

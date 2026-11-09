@@ -269,11 +269,18 @@ fn collect_bare_names(ty: &AstType, out: &mut Vec<(String, Span)>) {
         return;
     }
     let children: Vec<&AstType> = match ty {
-        AstType::Named { segments, .. } => segments.iter().flat_map(|s| s.type_args.iter()).collect(),
-        AstType::Tuple(elems, _) => elems.iter().collect(),
-        AstType::Function { params, return_type, .. } => {
-            params.iter().chain(std::iter::once(return_type.as_ref())).collect()
+        AstType::Named { segments, .. } => {
+            segments.iter().flat_map(|s| s.type_args.iter()).collect()
         },
+        AstType::Tuple(elems, _) => elems.iter().collect(),
+        AstType::Function {
+            params,
+            return_type,
+            ..
+        } => params
+            .iter()
+            .chain(std::iter::once(return_type.as_ref()))
+            .collect(),
         AstType::Array(elem, _) | AstType::Optional(elem, _) => vec![elem.as_ref()],
         AstType::Dictionary(key, val, _) => vec![key.as_ref(), val.as_ref()],
         AstType::Result { ok, err, .. } => vec![ok.as_ref(), err.as_ref()],

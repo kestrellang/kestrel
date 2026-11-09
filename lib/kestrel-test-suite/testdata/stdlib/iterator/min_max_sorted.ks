@@ -25,8 +25,8 @@ module Test
             // Test sorted
             let sorted = arr.iter().sorted();
             if sorted.count != 5 { return 5 }
-            if sorted(unchecked: 0) != 1 { return 6 }
-            if sorted(unchecked: 4) != 5 { return 7 }
+            if unsafe sorted(unchecked: 0) != 1 { return 6 }
+            if unsafe sorted(unchecked: 4) != 5 { return 7 }
 
             // Test sum
             let sum = arr.iter().sum();

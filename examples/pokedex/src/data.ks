@@ -241,7 +241,7 @@ public func kantoPokedex() -> Array[PokemonEntry] {
 public func kantoEntryById(id: Int64) -> PokemonEntry {
     let all = kantoPokedex();
     if id >= 1 and id <= all.count {
-        return all(unchecked: id - 1)
+        return unsafe all(unchecked: id - 1)
     }
     PokemonEntry(id: 0, apiName: "", displayName: "Unknown", primaryType: "normal")
 }

@@ -16,7 +16,7 @@ import std.core.(
     RangeFromConstructible, RangeUpToConstructible, RangeThroughConstructible,
     RangeFrom, RangeUpTo, RangeThrough
 )
-import std.text.(String, StringBuilder, Formatter, Formattable, FormatOptions, _writePadded)
+import std.text.(String, Str, StringBuilder, Formatter, Formattable, FormatOptions, _writePadded)
 import std.memory.(UnsafeSlice, Pointer)
 import std.collections.(Sliceable, Slice)
 import std.numeric.(UInt8, Int64, UInt64)
@@ -313,11 +313,11 @@ public struct {{TYPE_NAME}}:
     // HASHING
     // ========================================================================
 
-    /// Feeds the raw bytes of this value into `hasher`. Endianness-agnostic
-    /// only within a single process — do not persist hashes across builds.
+    /// Feeds this value into `hasher` as one 64-bit word
+    /// (`write(uint64:)`), which `DefaultHasher` mixes in a single round.
+    /// Don't persist hashes across builds.
     public func hash[H](mutating into hasher: H) where H: Hasher {
-        let val = self;
-        hasher.write(Slice.lend(start: Pointer(to: val).asRaw().cast[UInt8](), count: Layout.of[{{TYPE_NAME}}]().size))
+        hasher.write(uint64: {{HASH_WORD}})
     }
 
     // ========================================================================
@@ -416,6 +416,14 @@ public struct {{TYPE_NAME}}:
     /// wrapped result, as from `multiplyWrapping`.
     public func multiplyOverflowing(other: {{TYPE_NAME}}) -> ({{TYPE_NAME}}, Bool) {
         ({{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_mul(self.raw, other.raw)), Bool(boolLiteral: lang.{{LANG_TYPE}}_{{SIGNED_PREFIX}}mul_overflows(self.raw, other.raw)))
+    }
+
+    /// The full double-width product `self * other` as `(low, high)`
+    /// halves: `low` is the wrapped product (as from `multiplyWrapping`),
+    /// `high` the bits above it. Compiles to one widening multiply. For
+    /// hashes, RNGs and bignum arithmetic.
+    public func multiplyFull(other: {{TYPE_NAME}}) -> ({{TYPE_NAME}}, {{TYPE_NAME}}) {
+        ({{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_mul(self.raw, other.raw)), {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_{{SIGNED_PREFIX}}mul_high(self.raw, other.raw)))
     }
 
     /// Truncating integer division (`self / other`). For signed types,

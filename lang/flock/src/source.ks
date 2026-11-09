@@ -65,7 +65,7 @@ public struct PathSource: PackageSource {
                     throw FlockError.ManifestNotFound(manifestPath)
                 }
 
-                match readText(Path(manifestPath)) {
+                match File.readText(Path(manifestPath)) {
                     .Err(e) => {
                         var msg = String(); msg.append("cannot read "); msg.append(manifestPath);
                         throw FlockError.IoError(msg)
@@ -170,7 +170,7 @@ public func flockHome() -> String {
             // One-time move of the legacy ~/.kestrel home.
             let kestrelDir = joinPath(base: home, rel: ".kestrel");
             if Path(kestrelDir).isDirectory() {
-                match rename(Path(kestrelDir), to: Path(flockDir)) {
+                match File.rename(Path(kestrelDir), to: Path(flockDir)) {
                     .Ok(_) => flockDir,
                     .Err(_) => kestrelDir
                 }
@@ -189,7 +189,7 @@ func splitOnSlash(s: String) -> Array[String] {
     let len = s.bytes.count;
 
     while i < len {
-        let byte = s.bytes(unchecked: i);
+        let byte = unsafe s.bytes(unchecked: i);
         if byte == 47 { // '/'
             if i > start {
                 result.append(s.asSlice().subslice(from: start, to: i).toOwned())

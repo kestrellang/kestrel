@@ -43,9 +43,9 @@ func main() -> lang.i64 {
     strs.append("hi");
 
     let i: Int64 = 0;
-    let n: Int64 = ints(unchecked: i);
-    let f: Float64 = floats(unchecked: i);
-    let s: String = strs(unchecked: i);
+    let n: Int64 = unsafe ints(unchecked: i);
+    let f: Float64 = unsafe floats(unchecked: i);
+    let s: String = unsafe strs(unchecked: i);
 
     if n != 7 { return 1 }
     if f != 2.5 { return 2 }

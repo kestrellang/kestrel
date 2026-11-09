@@ -42,7 +42,7 @@ func checkTwice() -> Int64 {
     if sumEnumerated(items) != 317 { return 3 }
     if sumEnumerated(items) != 317 { return 4 }
     if items.count != 3 { return 5 }
-    if items(unchecked: 2) != "seventeen" { return 6 }
+    if unsafe items(unchecked: 2) != "seventeen" { return 6 }
     0
 }
 

@@ -60,9 +60,9 @@ func main() -> lang.i64 {
         offsets.append(idx.byteOffset)
     }
     if offsets.count != 3 { return 13 }
-    if offsets(unchecked: 0) != 0 { return 14 }
-    if offsets(unchecked: 1) != 1 { return 15 }
-    if offsets(unchecked: 2) != 3 { return 16 }
+    if unsafe offsets(unchecked: 0) != 0 { return 14 }
+    if unsafe offsets(unchecked: 1) != 1 { return 15 }
+    if unsafe offsets(unchecked: 2) != 3 { return 16 }
 
     // ---- GraphemesView.indexedIter() ----
     let gs: std.text.String = "ab cd";
@@ -71,9 +71,9 @@ func main() -> lang.i64 {
         gOffsets.append(idx.byteOffset)
     }
     if gOffsets.count != 5 { return 17 }
-    if gOffsets(unchecked: 0) != 0 { return 18 }
-    if gOffsets(unchecked: 2) != 2 { return 19 }
-    if gOffsets(unchecked: 3) != 3 { return 20 }
+    if unsafe gOffsets(unchecked: 0) != 0 { return 18 }
+    if unsafe gOffsets(unchecked: 2) != 2 { return 19 }
+    if unsafe gOffsets(unchecked: 3) != 3 { return 20 }
 
     0
 }

@@ -1,23 +1,14 @@
 module deflate
 
 // Base lengths and extra-bit counts for length symbols 257...285 (RFC 1951 §3.2.5).
-func lengthBases() -> Array[Int64] {
-    [3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 15, 17, 19, 23, 27, 31, 35, 43, 51, 59, 67, 83, 99, 115, 131, 163, 195, 227, 258]
-}
-func lengthExtraBits() -> Array[Int64] {
-    [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 4, 4, 4, 4, 5, 5, 5, 5, 0]
-}
+// Module-level, so they are built once at startup rather than per block.
+let LENGTH_BASES: Array[Int64] = [3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 15, 17, 19, 23, 27, 31, 35, 43, 51, 59, 67, 83, 99, 115, 131, 163, 195, 227, 258]
+let LENGTH_EXTRA_BITS: Array[Int64] = [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 4, 4, 4, 4, 5, 5, 5, 5, 0]
 // Base distances and extra-bit counts for distance symbols 0...29.
-func distanceBases() -> Array[Int64] {
-    [1, 2, 3, 4, 5, 7, 9, 13, 17, 25, 33, 49, 65, 97, 129, 193, 257, 385, 513, 769, 1025, 1537, 2049, 3073, 4097, 6145, 8193, 12289, 16385, 24577]
-}
-func distanceExtraBits() -> Array[Int64] {
-    [0, 0, 0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 8, 8, 9, 9, 10, 10, 11, 11, 12, 12, 13, 13]
-}
+let DISTANCE_BASES: Array[Int64] = [1, 2, 3, 4, 5, 7, 9, 13, 17, 25, 33, 49, 65, 97, 129, 193, 257, 385, 513, 769, 1025, 1537, 2049, 3073, 4097, 6145, 8193, 12289, 16385, 24577]
+let DISTANCE_EXTRA_BITS: Array[Int64] = [0, 0, 0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 8, 8, 9, 9, 10, 10, 11, 11, 12, 12, 13, 13]
 // The order code-length code lengths are stored in a dynamic block header.
-func codeLengthOrder() -> Array[Int64] {
-    [16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15]
-}
+let CODE_LENGTH_ORDER: Array[Int64] = [16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15]
 
 /// Code lengths of the fixed literal/length code (RFC 1951 §3.2.6).
 func fixedLiteralLengths() -> Array[Int64] {
@@ -134,14 +125,12 @@ public struct Inflater: Decompressor {
                     .Err(error) => { return .Err(error); }
                 }
             } else if self.state == stateStored {
-                while self.storedRemaining > 0 {
-                    let byte = reader.read(8);
-                    if reader.isOverrun {
-                        self.bitOffset = reader.bitOffset - 8;
-                        return .Ok(());
-                    }
-                    output.append(UInt8(truncating: byte));
-                    self.storedRemaining = self.storedRemaining - 1;
+                let copied = reader.copyBytes(self.storedRemaining, into: output);
+                self.storedRemaining = self.storedRemaining - copied;
+                if self.storedRemaining > 0 {
+                    // Input ran out mid-block; resume here on the next write.
+                    self.bitOffset = reader.bitOffset;
+                    return .Ok(());
                 }
                 self.endBlock();
             } else {
@@ -213,10 +202,6 @@ public struct Inflater: Decompressor {
     mutating func decodeSymbols(mutating reader: BitReader, mutating output: Array[UInt8]) -> Result[Bool, DeflateError] {
         guard let .Some(literals) = self.literals else { return .Err(.InvalidHuffmanCode); }
         guard let .Some(distances) = self.distances else { return .Err(.InvalidHuffmanCode); }
-        let lengthBase = lengthBases();
-        let lengthExtra = lengthExtraBits();
-        let distanceBase = distanceBases();
-        let distanceExtra = distanceExtraBits();
 
         loop {
             let checkpoint = reader.bitOffset;
@@ -234,14 +219,14 @@ public struct Inflater: Decompressor {
 
             let lengthIndex = symbol - 257;
             if lengthIndex >= 29 { return .Err(.InvalidHuffmanCode); }
-            let length = lengthBase(lengthIndex) + reader.read(lengthExtra(lengthIndex));
+            let length = LENGTH_BASES(lengthIndex) + reader.read(LENGTH_EXTRA_BITS(lengthIndex));
             let distanceSymbol = distances.decode(reader);
             if reader.isOverrun {
                 self.bitOffset = checkpoint;
                 return .Ok(false);
             }
             if distanceSymbol < 0 or distanceSymbol >= 30 { return .Err(.InvalidHuffmanCode); }
-            let distance = distanceBase(distanceSymbol) + reader.read(distanceExtra(distanceSymbol));
+            let distance = DISTANCE_BASES(distanceSymbol) + reader.read(DISTANCE_EXTRA_BITS(distanceSymbol));
             if reader.isOverrun {
                 self.bitOffset = checkpoint;
                 return .Ok(false);
@@ -249,10 +234,12 @@ public struct Inflater: Decompressor {
             if distance > output.count { return .Err(.InvalidDistance); }
 
             // Byte by byte, since the source can overlap what's being written.
-            var from = output.count - distance;
-            for _ in 0..<length {
-                output.append(output(from));
-                from = from + 1;
+            // One reserve up front; `from + k` is always below `output.count`,
+            // so the reads skip the bounds check.
+            let from = output.count - distance;
+            output.reserveCapacity(output.count + length);
+            for k in 0..<length {
+                output.append(unsafe output(unchecked: from + k));
             }
         }
     }
@@ -267,10 +254,9 @@ func readDynamicTables(mutating reader: BitReader) -> Result[(HuffmanDecoder, Hu
     if reader.isOverrun { return .Ok(.None); }
     if literalCount > 286 or distanceCount > 30 { return .Err(.InvalidHuffmanCode); }
 
-    let order = codeLengthOrder();
     var codeLengthLengths = Array[Int64](repeating: 0, count: 19);
     for i in 0..<codeLengthCount {
-        codeLengthLengths(order(i)) = reader.read(3);
+        codeLengthLengths(CODE_LENGTH_ORDER(i)) = reader.read(3);
     }
     if reader.isOverrun { return .Ok(.None); }
     let codeLengthDecoder = try HuffmanDecoder.build(codeLengthLengths);

@@ -41,7 +41,7 @@ module Test
 
             // ---- bytes(unchecked:) ----
             // 'o' = 111
-            let bu = s.bytes(unchecked: 4);
+            let bu = unsafe s.bytes(unchecked: 4);
             let byteO: std.numeric.UInt8 = 111;
             if bu != byteO { return 11 }
 

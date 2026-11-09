@@ -21,11 +21,11 @@ func main() -> lang.i64 {
     if a.count != 2 { return 1 }
     if b.count != 2 { return 2 }
 
-    let first = a(unchecked: 0);
+    let first = unsafe a(unchecked: 0);
     if first.0 != 1 { return 3 }
     if first.1.isEqual(to: "one") == false { return 4 }
 
-    let second = b(unchecked: 1);
+    let second = unsafe b(unchecked: 1);
     if second.0 != 2 { return 5 }
     if second.1.isEqual(to: "two") == false { return 6 }
     0

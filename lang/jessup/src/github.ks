@@ -363,7 +363,7 @@ func stringContains(haystack haystack: String, needle needle: String) -> Bool {
         var matched = true;
         var j: Int64 = 0;
         while j < nLen {
-            if haystack.bytes(unchecked: i + j) != needle.bytes(unchecked: j) {
+            if unsafe haystack.bytes(unchecked: i + j) != unsafe needle.bytes(unchecked: j) {
                 matched = false;
                 j = nLen
             } else {

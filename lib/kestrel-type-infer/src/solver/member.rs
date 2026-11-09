@@ -661,13 +661,11 @@ pub(super) fn solve_member(
         Ok(res) => res,
         Err(crate::resolve::MemberError::NotFound) => {
             // Fall back to static member search
-            match ctx.resolver.resolve_static_member(
-                &recv_kind,
-                name,
-                &args,
-                is_call,
-                &|ext| extension_applies(ctx, ext, &recv_kind),
-            ) {
+            match ctx
+                .resolver
+                .resolve_static_member(&recv_kind, name, &args, is_call, &|ext| {
+                    extension_applies(ctx, ext, &recv_kind)
+                }) {
                 Ok(res) => res,
                 Err(_) => {
                     // Lazy `Indirection` peel: the member is on neither the
@@ -805,13 +803,11 @@ pub(super) fn solve_member(
             // The member exists but is static — fall back to static resolution.
             // Only error if static resolution also fails (the instance-on-static
             // diagnostic is for cases where no static call is possible).
-            match ctx.resolver.resolve_static_member(
-                &recv_kind,
-                name,
-                &args,
-                is_call,
-                &|ext| extension_applies(ctx, ext, &recv_kind),
-            ) {
+            match ctx
+                .resolver
+                .resolve_static_member(&recv_kind, name, &args, is_call, &|ext| {
+                    extension_applies(ctx, ext, &recv_kind)
+                }) {
                 Ok(res) => res,
                 Err(_) => {
                     ctx.poison(result);
@@ -1037,7 +1033,10 @@ pub(super) fn solve_member(
                 .map(|tp| tp.0.iter().map(|&p| ctx.param(p)).collect::<Vec<TyVar>>())
                 .unwrap_or_default()
         } else {
-            recv_view.as_ref().map(|(_, args)| args.clone()).unwrap_or_default()
+            recv_view
+                .as_ref()
+                .map(|(_, args)| args.clone())
+                .unwrap_or_default()
         };
     let recv_entity = recv_view.map(|(e, _)| e);
     if let Some(entity) = recv_entity {
@@ -1530,7 +1529,12 @@ pub(super) fn solve_member(
 /// Does `ext`'s target admit `recv`? Unknown (an open var in the receiver)
 /// admits — the same rule the instance path's ambiguity filter uses.
 pub(crate) fn extension_applies(ctx: &InferCtx<'_>, ext: Entity, recv: &TyKind) -> bool {
-    !applicability(ctx, crate::constraint::ApplicableSource::Extension(ext), recv).fails()
+    !applicability(
+        ctx,
+        crate::constraint::ApplicableSource::Extension(ext),
+        recv,
+    )
+    .fails()
 }
 
 fn has_enum_case(ctx: &InferCtx<'_>, kind: &TyKind, name: &str) -> bool {
@@ -1589,13 +1593,11 @@ pub(super) fn solve_implicit(
             // it is a call, without them a read (only a var/func name clash
             // can tell the two apart).
             let is_call = !args.is_empty();
-            match ctx.resolver.resolve_static_member(
-                &kind,
-                name,
-                &args,
-                is_call,
-                &|ext| extension_applies(ctx, ext, &kind),
-            ) {
+            match ctx
+                .resolver
+                .resolve_static_member(&kind, name, &args, is_call, &|ext| {
+                    extension_applies(ctx, ext, &kind)
+                }) {
                 Ok(res) => res,
                 // The case exists but its labels/arity don't fit the args
                 // (`Shape.Rectangle(width: 5.0)`): an overload mismatch, not
@@ -1765,7 +1767,10 @@ pub(crate) fn requirement_call(
         return;
     };
     // The receiver kind is unused when the member is already known.
-    let Ok(resolution) = ctx.resolver.resolve_single_member(&TyKind::Error, requirement) else {
+    let Ok(resolution) = ctx
+        .resolver
+        .resolve_single_member(&TyKind::Error, requirement)
+    else {
         ctx.poison(result);
         return;
     };
@@ -1780,7 +1785,13 @@ pub(crate) fn requirement_call(
         .iter()
         .copied()
         .zip(proto_args.iter().copied())
-        .chain(resolution.type_params.iter().copied().zip(own_args.iter().copied()))
+        .chain(
+            resolution
+                .type_params
+                .iter()
+                .copied()
+                .zip(own_args.iter().copied()),
+        )
         .collect();
 
     ctx.resolutions.insert(expr, requirement);

@@ -14,7 +14,7 @@ public func folderSidebar(folders: Array[Value], activeFolderId: Int64) -> Docum
     var items = Document();
     var i: Int64 = 0;
     while i < folders.count {
-        let folder = folders(unchecked: i);
+        let folder = unsafe folders(unchecked: i);
         let fid = getInt(folder, "id");
         let name = getStr(folder, "name");
         let itemCls = if fid == activeFolderId { "folder-item active" } else { "folder-item" };

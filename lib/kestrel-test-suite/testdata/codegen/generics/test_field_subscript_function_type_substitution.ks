@@ -31,10 +31,10 @@ struct Router[T]: Cloneable {
     func touch() -> Int64 {
         var i: Int64 = 0;
         while i < self.routes.count {
-            let route = self.routes(unchecked: i);
+            let route = unsafe self.routes(unchecked: i);
             var j: Int64 = 0;
             while j < route.middleware.count {
-                 route.middleware(unchecked: j);
+                 unsafe route.middleware(unchecked: j);
                 j = j + 1
             }
             i = i + 1

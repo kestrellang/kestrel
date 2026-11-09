@@ -13,11 +13,11 @@ import std.streams.(IoErrorKind)
 func main() -> lang.i64 {
     let dir = match Directory.createTemporary(prefix: "kestrel-dirs") { .Ok(d) => d, .Err(_) => return 1 };
     let a = dir / Path("a.txt");
-    if writeText(a, "data").isErr { return 2 }
+    if File.writeText(a, "data").isErr { return 2 }
 
-    if rename(a, to: dir / Path("b.txt")).isErr { return 3 }
+    if File.rename(a, to: dir / Path("b.txt")).isErr { return 3 }
     if a.exists() { return 4 }
-    match copy(dir / Path("b.txt"), to: dir / Path("c.txt")) {
+    match File.copy(dir / Path("b.txt"), to: dir / Path("c.txt")) {
         .Ok(n) => if n != 4 { return 5 },
         .Err(_) => return 6
     }
@@ -47,12 +47,12 @@ func main() -> lang.i64 {
     }
 
     let link = dir / Path("link");
-    if createSymbolicLink(at: link, to: Path("b.txt")).isErr { return 14 }
-    match readSymbolicLink(link) { .Ok(t) => if t.string != "b.txt" { return 15 }, .Err(_) => return 16 }
-    match symbolicLinkMetadata(link) { .Ok(m) => if m.kind != FileKind.SymbolicLink { return 17 }, .Err(_) => return 18 }
+    if SymbolicLink.create(at: link, to: Path("b.txt")).isErr { return 14 }
+    match SymbolicLink.read(link) { .Ok(t) => if t.string != "b.txt" { return 15 }, .Err(_) => return 16 }
+    match Metadata.ofSymbolicLink(link) { .Ok(m) => if m.kind != FileKind.SymbolicLink { return 17 }, .Err(_) => return 18 }
 
-    if setPermissions(dir / Path("c.txt"), Permissions(256)).isErr { return 19 }
-    match metadata(dir / Path("c.txt")) {
+    if File.setPermissions(dir / Path("c.txt"), Permissions(256)).isErr { return 19 }
+    match Metadata.of(dir / Path("c.txt")) {
         .Ok(m) => if m.permissions.mode != 256 or not m.permissions.isReadOnly { return 20 },
         .Err(_) => return 21
     }

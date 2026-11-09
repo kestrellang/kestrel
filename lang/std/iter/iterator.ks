@@ -1009,7 +1009,18 @@ extend Iterator {
     /// words.iter().isSorted { it.count };   // true
     /// ```
     public consuming func isSorted[K](consuming byKey key: (Item) -> K) -> Bool where K: Comparable {
-        self.isSorted(by: { (a, b) in key(a).compare(key(b)) != Ordering.Greater })
+        // Carry the previous key so each element's key is computed once.
+        if let .Some(first) = self.next() {
+            var prevKey = key(first);
+            while let .Some(item) = self.next() {
+                let k = key(item);
+                if k.compare(prevKey) == Ordering.Less {
+                    return false
+                }
+                prevKey = k;
+            }
+        }
+        true
     }
 }
 

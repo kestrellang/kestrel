@@ -13,11 +13,11 @@ func main() -> lang.i64 {
     let dir = match Directory.createTemporary(prefix: "kestrel-files") { .Ok(d) => d, .Err(_) => return 1 };
     let f = dir / Path("x.txt");
 
-    if writeText(f, "hello\nworld").isErr { return 2 }
+    if File.writeText(f, "hello\nworld").isErr { return 2 }
     if not f.exists() or not f.isFile() or f.isDirectory() { return 3 }
-    match readText(f) { .Ok(t) => if t != "hello\nworld" { return 4 }, .Err(_) => return 5 }
-    if appendText(f, "!").isErr { return 6 }
-    match metadata(f) {
+    match File.readText(f) { .Ok(t) => if t != "hello\nworld" { return 4 }, .Err(_) => return 5 }
+    if File.appendText(f, "!").isErr { return 6 }
+    match Metadata.of(f) {
         .Ok(m) => if m.size != 12 or m.kind != FileKind.File { return 7 },
         .Err(_) => return 8
     }
@@ -27,7 +27,7 @@ func main() -> lang.i64 {
     match file.readText() { .Ok(t) => if t != "world!" { return 12 }, .Err(_) => return 13 }
     if file.setLength(5).isErr { return 14 }
     if file.close().isErr { return 15 }
-    match readBytes(f) { .Ok(b) => if b.count != 5 { return 16 }, .Err(_) => return 17 }
+    match File.readBytes(f) { .Ok(b) => if b.count != 5 { return 16 }, .Err(_) => return 17 }
 
     // createNew refuses an existing file.
     var options = OpenOptions.writing;
@@ -41,7 +41,7 @@ func main() -> lang.i64 {
         .Ok(_) => return 20,
         .Err(e) => if e.kind != IoErrorKind.NotFound { return 21 }
     }
-    match readText(Path("/definitely/not/a/real/file-kestrel-test")) {
+    match File.readText(Path("/definitely/not/a/real/file-kestrel-test")) {
         .Ok(_) => return 22,
         .Err(e) => if e.kind != IoErrorKind.NotFound { return 23 }
     }

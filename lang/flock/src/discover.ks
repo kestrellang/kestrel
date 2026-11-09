@@ -53,7 +53,7 @@ public func discoverBins(rootDir rootDir: String, sourceDir sourceDir: String, p
         let entries = entryNames(binDir);
         var i: Int64 = 0;
         while i < entries.count {
-            let entry = entries(unchecked: i);
+            let entry = unsafe entries(unchecked: i);
             i = i + 1;
             if entry.starts(with: ".") or not entry.ends(with: ".ks") {
                 // skip hidden entries and non-.ks files
@@ -73,7 +73,7 @@ public func discoverBins(rootDir rootDir: String, sourceDir sourceDir: String, p
         var merged = [];
         var i: Int64 = 0;
         while i < result.count {
-            let target = result(unchecked: i);
+            let target = unsafe result(unchecked: i);
             i = i + 1;
             if not declsContainName(bins: bins, name: target.name) {
                 merged.append(target)
@@ -81,7 +81,7 @@ public func discoverBins(rootDir rootDir: String, sourceDir sourceDir: String, p
         }
         i = 0;
         while i < bins.count {
-            let decl = bins(unchecked: i);
+            let decl = unsafe bins(unchecked: i);
             i = i + 1;
             merged.append(BinTarget(name: decl.name, entry: joinPath(base: rootDir, rel: decl.path)))
         }
@@ -94,8 +94,8 @@ public func discoverBins(rootDir rootDir: String, sourceDir sourceDir: String, p
     while i < result.count {
         var j = i + 1;
         while j < result.count {
-            if result(unchecked: i).name == result(unchecked: j).name {
-                throw FlockError.DuplicateBinary(result(unchecked: i).name)
+            if unsafe result(unchecked: i).name == unsafe result(unchecked: j).name {
+                throw FlockError.DuplicateBinary(unsafe result(unchecked: i).name)
             }
             j = j + 1
         }
@@ -126,7 +126,7 @@ public func discoverSources(rootDir rootDir: String) -> Array[String] {
     let entries = entryNames(rootDir);
     var i: Int64 = 0;
     while i < entries.count {
-        let entry = entries(unchecked: i);
+        let entry = unsafe entries(unchecked: i);
         i = i + 1;
 
         // Skip hidden entries and target directory

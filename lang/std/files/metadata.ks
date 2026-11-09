@@ -2,7 +2,7 @@
 
 module std.files
 
-import std.numeric.(Int32, Int64, UInt32)
+import std.numeric.(Int32, Int64, UInt32, UInt64)
 import std.core.(Bool, Equatable)
 import std.result.(Result)
 import std.text.(String, Formatter, Formattable, FormatOptions, _writePadded)
@@ -83,6 +83,11 @@ public struct Metadata {
     public var modified: Int64
     /// When it was last read, in nanoseconds since the Unix epoch.
     public var accessed: Int64
+    /// The device the file system lives on (`st_dev`).
+    public var device: UInt64
+    /// The file's number on its device (`st_ino`). Two paths name the same
+    /// file exactly when `device` and `inode` both match.
+    public var inode: UInt64
 
     /// `true` for a regular file.
     public var isFile: Bool { self.kind == .File }
@@ -90,22 +95,17 @@ public struct Metadata {
     public var isDirectory: Bool { self.kind == .Directory }
     /// `true` for a symbolic link.
     public var isSymbolicLink: Bool { self.kind == .SymbolicLink }
-}
 
-/// The metadata of what's at `path`, following symbolic links (`stat`).
-public func metadata(path: Path) -> Result[Metadata, IoError] {
-    readMetadata(path, true)
-}
-
-/// The metadata of `path` itself, without following a symbolic link
-/// (`lstat`).
-public func symbolicLinkMetadata(path: Path) -> Result[Metadata, IoError] {
-    readMetadata(path, false)
+    /// `true` when both describe the same file: the same inode on the
+    /// same device, whatever paths or links led to them.
+    public func isSameFile(as other: Metadata) -> Bool {
+        self.device == other.device and self.inode == other.inode
+    }
 }
 
 internal func readMetadata(path: Path, follow: Bool) -> Result[Metadata, IoError] {
-    let out = unsafe malloc(40);
-    let cpath = path.text.toCString();
+    let out = unsafe malloc(metadataCellCount * 8);
+    let cpath = try path.toNativePath();
     let r = unsafe native_path_metadata(cpath.raw.asRaw(), if follow { 1 } else { 0 }, out);
     let error = IoError.last();
     cpath.free();
@@ -114,7 +114,11 @@ internal func readMetadata(path: Path, follow: Bool) -> Result[Metadata, IoError
     result
 }
 
-/// Builds `Metadata` from the shims' five int64s.
+/// How many int64s the metadata shims write (`fill_metadata` in
+/// files_shims.c).
+internal let metadataCellCount: Int64 = 7
+
+/// Builds `Metadata` from the shims' int64s.
 internal func metadataFrom(out: RawPointer) -> Metadata {
     let cells = out.cast[Int64]();
     Metadata(
@@ -122,6 +126,21 @@ internal func metadataFrom(out: RawPointer) -> Metadata {
         size: unsafe cells.offset(by: 1).read(),
         permissions: Permissions(UInt32(from: unsafe cells.offset(by: 2).read())),
         modified: unsafe cells.offset(by: 3).read(),
-        accessed: unsafe cells.offset(by: 4).read()
+        accessed: unsafe cells.offset(by: 4).read(),
+        device: UInt64(truncating: unsafe cells.offset(by: 5).read()),
+        inode: UInt64(truncating: unsafe cells.offset(by: 6).read())
     )
+}
+
+extend Metadata {
+    /// The metadata of what's at `path`, following symbolic links (`stat`).
+    public static func of(path: Path) -> Result[Metadata, IoError] {
+        readMetadata(path, true)
+    }
+
+    /// The metadata of `path` itself, without following a symbolic link
+    /// (`lstat`).
+    public static func ofSymbolicLink(path: Path) -> Result[Metadata, IoError] {
+        readMetadata(path, false)
+    }
 }

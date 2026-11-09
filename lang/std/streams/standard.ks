@@ -30,9 +30,13 @@ public struct StandardInput: Readable {
     /// input. Invalid UTF-8 becomes U+FFFD.
     public mutating func readLine() -> Result[Optional[String], IoError] {
         var bytes = Array[UInt8]();
+        // One scratch byte for the whole line: `readByte` would allocate
+        // per byte. The C side buffers fd 0, so each read is a memcpy.
+        var one = Array[UInt8](repeating: 0, count: 1);
         var sawAny = false;
-        while let .Some(b) = try self.readByte() {
+        while try self.read(into: one.asMutableSlice()) > 0 {
             sawAny = true;
+            let b = unsafe one(unchecked: 0);
             if b == 10 {
                 break
             }
@@ -41,7 +45,7 @@ public struct StandardInput: Readable {
         if not sawAny {
             return .Ok(.None)
         }
-        if bytes.count > 0 and bytes(unchecked: bytes.count - 1) == 13 {
+        if bytes.count > 0 and unsafe bytes(unchecked: bytes.count - 1) == 13 {
             bytes.pop();
         }
         .Ok(.Some(String(fromUtf8Lossy: bytes.asSlice())))
@@ -75,12 +79,19 @@ public struct StandardOutput: Writable {
 }
 
 /// The process's standard error. Unbuffered, so diagnostics appear at once.
+///
+/// Each write flushes standard output's buffer first. That keeps the two
+/// streams in order when they share a pipe or file, and it means the
+/// output a program printed before a `fatalError` (which writes here and
+/// then traps, skipping `atexit`) isn't lost.
 public struct StandardError: Writable {
     /// @name Default
     public init() {}
 
-    /// Writes `buf` to fd 2.
+    /// Flushes standard output, then writes `buf` to fd 2.
     public mutating func write(from buf: Slice[UInt8]) -> Result[Int64, IoError] {
+        // Best effort: a failed stdout flush mustn't hide the diagnostic.
+        let _ = flushStandardOutput();
         let n = unsafe native_stream_write(2, buf.pointer.asRaw(), buf.count);
         if n < 0 {
             return .Err(IoError.last())

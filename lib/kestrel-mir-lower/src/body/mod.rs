@@ -15,7 +15,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use kestrel_hecs::Entity;
-use kestrel_hir::body::{HirBlock, HirBody, HirExpr, HirExprId};
+use kestrel_hir::body::{HirBlock, HirBody, HirExpr, HirExprId, HirStmt};
 use kestrel_hir::res::LocalId as HirLocalId;
 use kestrel_mir::block::BlockParam;
 use kestrel_mir::body::OssaBody;
@@ -432,6 +432,21 @@ pub(crate) struct OssaBodyCtx<'a, 'w> {
     /// `set_terminator` carve-out. Saved/restored across closure bodies
     /// (closures can never ret_borrow — E491 rejects the function type).
     pub(crate) ret_borrow: bool,
+    /// Set by `lower_expr_for_return` just before lowering an `if`/`match`/
+    /// block whose value leaves the function, and taken (reset) by the
+    /// first `lower_if`/`lower_match`/`lower_hir_block` entered. Their arm
+    /// tails are then return positions too, so a bare `var` there is moved
+    /// out, not copied. One-shot: anything nested reads it as false.
+    pub(crate) return_tail: bool,
+    /// The current `lower_match`'s arms are return positions (taken from
+    /// `return_tail`). Saved/restored per match, read by its arm leaves.
+    pub(crate) match_arms_return: bool,
+    /// Locals named as a bare value in a return position reached through
+    /// `if`/`match`/block arms (`if c { o } else { … }` as the function's
+    /// tail or a `return` value). Such a local may be moved out on one path
+    /// only, so it gets a drop flag at its declaration
+    /// (see [`collect_return_tail_locals`]).
+    pub(crate) return_tail_locals: HashSet<HirLocalId>,
     /// @guaranteed results of ret_borrow calls in this body. A ref is
     /// intra-block in stage 1: force-ending one at a non-Return terminator
     /// is the E497 "ref across a control-flow merge" error, not a silent
@@ -571,6 +586,9 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
             field_inits: Vec::new(),
             value_forwarding: HashMap::new(),
             ret_borrow: false,
+            return_tail: false,
+            match_arms_return: false,
+            return_tail_locals: collect_return_tail_locals(hir),
             ref_results: std::collections::HashSet::new(),
             ref_arg_borrows: HashMap::new(),
             ref_binding_vals: HashMap::new(),
@@ -1362,6 +1380,23 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
             .find(|e| matches!(e, ScopeEntry::Var { local: Some(l), .. } if *l == local))
     }
 
+    /// May `local` be moved out at this point without leaking it on other
+    /// paths? Yes when it has a drop flag, or when it lives in the innermost
+    /// scope frame (no arm boundary between its declaration and here, so the
+    /// move happens on every path through that frame).
+    pub(crate) fn var_movable_here(&self, local: HirLocalId) -> bool {
+        let in_top = self.scope_stack.last().is_some_and(|f| {
+            f.entries
+                .iter()
+                .any(|e| matches!(e, ScopeEntry::Var { local: Some(l), .. } if *l == local))
+        });
+        in_top
+            || matches!(
+                self.var_entry(local),
+                Some(ScopeEntry::Var { flag: Some(_), .. })
+            )
+    }
+
     pub(crate) fn var_entry(&self, local: HirLocalId) -> Option<&ScopeEntry> {
         self.scope_stack
             .iter()
@@ -1456,6 +1491,16 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
     /// Copyable container — the consuming read path takes those out of the
     /// slot too, and the scope-exit guarded destroy needs the flag). `None`
     /// for definitely-Copyable vars (never moved, never need a flag).
+    /// [`Self::maybe_alloc_var_flag`] for a declared local: a local that a
+    /// return-position arm may move out (`return_tail_locals`) gets a flag
+    /// even when Copyable, since it's moved on some paths only.
+    pub fn maybe_alloc_local_flag(&mut self, local: HirLocalId, ty: TyId) -> Option<ValueId> {
+        if self.return_tail_locals.contains(&local) {
+            return Some(self.alloc_var_flag());
+        }
+        self.maybe_alloc_var_flag(ty)
+    }
+
     pub fn maybe_alloc_var_flag(&mut self, ty: TyId) -> Option<ValueId> {
         if self.is_non_copyable(ty) || self.copy_behavior_is_mono_dependent(ty) {
             Some(self.alloc_var_flag())
@@ -5670,17 +5715,48 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
 
     /// Lower a block of HIR statements + optional tail expression.
     pub fn lower_hir_block(&mut self, block: &HirBlock) -> ValueId {
+        let returns = std::mem::take(&mut self.return_tail);
         for &stmt_id in &block.stmts {
             self.lower_stmt(stmt_id);
             if self.is_terminated() {
                 return self.emit_literal(Immediate::unit());
             }
         }
-        if let Some(tail) = block.tail_expr {
-            self.lower_expr(tail)
-        } else {
-            self.emit_literal(Immediate::unit())
+        let Some(tail) = block.tail_expr else {
+            return self.emit_literal(Immediate::unit());
+        };
+        if returns {
+            return self.lower_expr_for_return(tail);
         }
+        // A tail naming a local this block declared is that local's last use:
+        // the slot dies at the block's end. Move it out instead of copying —
+        // a copy is a wasted clone, and inside a type's own `clone()` (where
+        // CopyValue isn't expanded to a clone call) a bitwise alias that the
+        // scope exit then also drops (double free).
+        if self.declares_local_movably(block, tail)
+            && let Some(v) = self.try_move_var_local(tail)
+        {
+            return v;
+        }
+        self.lower_expr(tail)
+    }
+
+    /// Is `tail` a bare local declared by a `let`/`var` in `block` itself,
+    /// with no `deinit` action registered on it (which needs the value at
+    /// scope exit)?
+    fn declares_local_movably(&self, block: &HirBlock, tail: HirExprId) -> bool {
+        let HirExpr::Local(local, _) = self.hir.exprs[tail] else {
+            return false;
+        };
+        let mut declared = false;
+        for &stmt_id in &block.stmts {
+            match &self.hir.stmts[stmt_id] {
+                HirStmt::Let { local: l, .. } if *l == local => declared = true,
+                HirStmt::Deinit { local: Some(l), .. } if *l == local => return false,
+                _ => {},
+            }
+        }
+        declared
     }
 }
 
@@ -6058,4 +6134,46 @@ pub(crate) fn lower_function_body(ctx: &mut LowerCtx, hir_entity: Entity, func_e
         }
     }
     func.body = Some(ossa_body);
+}
+
+/// Every local named as a bare value in a return position: the body's tail
+/// or a `return` value, and recursively the arm tails of an `if`/`match`/
+/// block in such a position. Lowering moves these out instead of copying
+/// them (`lower_expr_for_return`), so each needs a drop flag for the paths
+/// that don't move it.
+fn collect_return_tail_locals(hir: &HirBody) -> HashSet<HirLocalId> {
+    fn visit(hir: &HirBody, expr: HirExprId, out: &mut HashSet<HirLocalId>) {
+        let block_tail = |b: &HirBlock, out: &mut HashSet<HirLocalId>| {
+            if let Some(t) = b.tail_expr {
+                visit(hir, t, out);
+            }
+        };
+        match &hir.exprs[expr] {
+            HirExpr::Local(l, _) => {
+                out.insert(*l);
+            },
+            HirExpr::If {
+                then_body,
+                else_body,
+                ..
+            } => {
+                block_tail(then_body, out);
+                if let Some(e) = else_body {
+                    block_tail(e, out);
+                }
+            },
+            HirExpr::Match { arms, .. } => arms.iter().for_each(|a| visit(hir, a.body, out)),
+            HirExpr::Block { body, .. } => block_tail(body, out),
+            _ => {},
+        }
+    }
+    let mut out = HashSet::new();
+    let returns = hir.exprs.iter().filter_map(|(_, e)| match e {
+        HirExpr::Return { value: Some(v), .. } => Some(*v),
+        _ => None,
+    });
+    for root in hir.tail_expr.into_iter().chain(returns) {
+        visit(hir, root, &mut out);
+    }
+    out
 }

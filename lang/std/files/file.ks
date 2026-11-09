@@ -45,7 +45,7 @@ public struct File: Readable, Writable, Seekable, not Copyable {
     /// `NotFound` if the file doesn't exist and `options` don't create it,
     /// `AlreadyExists` if `createNew` is set and it does.
     public static func open(path: Path, options: OpenOptions) -> Result[File, IoError] {
-        let cpath = path.text.toCString();
+        let cpath = try path.toNativePath();
         let fd = unsafe native_open(cpath.raw.asRaw(), options.nativeFlags(), Int32(from: options.permissions.mode));
         let error = IoError.last();
         cpath.free();
@@ -120,7 +120,7 @@ public struct File: Readable, Writable, Seekable, not Copyable {
 
     /// The open file's metadata (`fstat`).
     public func metadata() -> Result[Metadata, IoError] {
-        let out = unsafe malloc(40);
+        let out = unsafe malloc(metadataCellCount * 8);
         let r = unsafe native_file_metadata(self.fd, out);
         let error = IoError.last();
         let result = if r < 0 { .Err(error) } else { .Ok(metadataFrom(out)) };

@@ -137,7 +137,8 @@ impl OssaBodyCtx<'_, '_> {
     /// different requirements: a unique box is taken from (once) or destroyed
     /// (once), never shared.
     pub(crate) fn resolve_unique_box_binding(&mut self, payload_ty: TyId) -> Option<BoxBinding> {
-        let mut b = self.resolve_box_common(Builtin::UniqueBox, Builtin::UniqueBoxInit, payload_ty)?;
+        let mut b =
+            self.resolve_box_common(Builtin::UniqueBox, Builtin::UniqueBoxInit, payload_ty)?;
         let entity = match self.ctx.module.ty_arena.get(b.handle_ty) {
             MirTy::Named { entity, .. } => *entity,
             _ => return None,

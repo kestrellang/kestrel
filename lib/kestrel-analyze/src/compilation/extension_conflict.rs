@@ -156,8 +156,9 @@ impl CompilationCheck for ExtensionConflictAnalyzer {
                     // protocol by argument type, not an ambiguous direct call,
                     // so this is legal — and mirrors multi-conformance declared
                     // on the type body, which this analyzer never flags.
-                    if witnesses_distinct_instantiation(cx, *target, *ext_i, *ext_j, name_i, *method_i)
-                    {
+                    if witnesses_distinct_instantiation(
+                        cx, *target, *ext_i, *ext_j, name_i, *method_i,
+                    ) {
                         continue;
                     }
 
@@ -413,4 +414,3 @@ fn witnesses_distinct_instantiation(
         &labels,
     )
 }
-

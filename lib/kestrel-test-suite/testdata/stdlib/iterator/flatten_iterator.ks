@@ -21,8 +21,8 @@ module Test
 
             let flat = nested.iter().map(as: { (arr) in arr.iter() }).flatten().collect();
             if flat.count != 5 { return 1 }
-            if flat(unchecked: 0) != 1 { return 2 }
-            if flat(unchecked: 4) != 5 { return 3 }
+            if unsafe flat(unchecked: 0) != 1 { return 2 }
+            if unsafe flat(unchecked: 4) != 5 { return 3 }
 
             0
         }

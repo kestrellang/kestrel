@@ -16,7 +16,7 @@ import std.core.(
     RangeFromConstructible, RangeUpToConstructible, RangeThroughConstructible,
     RangeFrom, RangeUpTo, RangeThrough
 )
-import std.text.(String, StringBuilder, Formatter, Formattable, FormatOptions, _writePadded)
+import std.text.(String, Str, StringBuilder, Formatter, Formattable, FormatOptions, _writePadded)
 import std.memory.(UnsafeSlice, Pointer)
 import std.collections.(Sliceable, Slice)
 import std.numeric.(UInt8, Int64, UInt64)
@@ -528,11 +528,11 @@ public struct UInt16:
     // HASHING
     // ========================================================================
 
-    /// Feeds the raw bytes of this value into `hasher`. Endianness-agnostic
-    /// only within a single process — do not persist hashes across builds.
+    /// Feeds this value into `hasher` as one 64-bit word
+    /// (`write(uint64:)`), which `DefaultHasher` mixes in a single round.
+    /// Don't persist hashes across builds.
     public func hash[H](mutating into hasher: H) where H: Hasher {
-        let val = self;
-        hasher.write(Slice.lend(start: Pointer(to: val).asRaw().cast[UInt8](), count: Layout.of[UInt16]().size))
+        hasher.write(uint64: UInt64(from: self))
     }
 
     // ========================================================================
@@ -631,6 +631,14 @@ public struct UInt16:
     /// wrapped result, as from `multiplyWrapping`.
     public func multiplyOverflowing(other: UInt16) -> (UInt16, Bool) {
         (UInt16(raw: lang.i16_mul(self.raw, other.raw)), Bool(boolLiteral: lang.i16_unsigned_mul_overflows(self.raw, other.raw)))
+    }
+
+    /// The full double-width product `self * other` as `(low, high)`
+    /// halves: `low` is the wrapped product (as from `multiplyWrapping`),
+    /// `high` the bits above it. Compiles to one widening multiply. For
+    /// hashes, RNGs and bignum arithmetic.
+    public func multiplyFull(other: UInt16) -> (UInt16, UInt16) {
+        (UInt16(raw: lang.i16_mul(self.raw, other.raw)), UInt16(raw: lang.i16_unsigned_mul_high(self.raw, other.raw)))
     }
 
     /// Truncating integer division (`self / other`). For signed types,
@@ -1050,7 +1058,7 @@ public struct UInt16:
         var result: UInt64 = 0;
         var i: Int64 = 0;
         while i < 2 {
-            let byteVal = UInt64(from: bytes(unchecked: i));
+            let byteVal = UInt64(from: unsafe bytes(unchecked: i));
             result = (result << 8) | byteVal;
             i = i + 1
         }
@@ -1069,7 +1077,7 @@ public struct UInt16:
         var i: Int64 = 0;
         while i < 2 {
             let shift = i * 8;
-            let byteVal = UInt64(from: bytes(unchecked: i));
+            let byteVal = UInt64(from: unsafe bytes(unchecked: i));
             result = result | (byteVal << shift);
             i = i + 1
         }
@@ -1092,15 +1100,17 @@ public struct UInt16:
     /// let n = UInt16(parsing: "42");   // Some(42)
     /// let bad = UInt16(parsing: "-1"); // null (no sign for unsigned)
     /// ```
-    public init(parsing string: String)? {
-        let len = string.bytes.count;
+    public init[S](parsing text: S)? where S: Str, S: not Static {
+        // One view for the whole parse; works on String and StringSlice alike.
+        let bytes = text.bytes;
+        let len = bytes.count;
         if len == 0 {
             return null
         }
 
         var index: Int64 = 0;
 
-        let firstByte: UInt8 = string.bytes(unchecked: 0);
+        let firstByte: UInt8 = unsafe bytes(unchecked: 0);
         let firstByteVal = Int64(from: firstByte);
         if firstByteVal == 43 {
             index = 1
@@ -1117,7 +1127,7 @@ public struct UInt16:
         let maxVal: UInt64 = UInt64(from: UInt16.maxValue);
 
         while index < len {
-            let byte: UInt8 = string.bytes(unchecked: index);
+            let byte: UInt8 = unsafe bytes(unchecked: index);
             let byteVal = UInt64(from: byte);
 
             if byteVal < 48 or byteVal > 57 {
@@ -1158,19 +1168,21 @@ public struct UInt16:
     /// let n = UInt16(parsing: "ff", radix: 16);      // Some(255 if it fits, else None)
     /// let m = UInt16(parsing: "101010", radix: 2);   // Some(42)
     /// ```
-    public init(parsing string: String, radix radix: Int64)? {
+    public init[S](parsing text: S, radix radix: Int64)? where S: Str, S: not Static {
+        // One view for the whole parse; works on String and StringSlice alike.
+        let bytes = text.bytes;
         if radix < 2 or radix > 36 {
             return null
         }
 
-        let len = string.bytes.count;
+        let len = bytes.count;
         if len == 0 {
             return null
         }
 
         var index: Int64 = 0;
 
-        let firstByte: UInt8 = string.bytes(unchecked: 0);
+        let firstByte: UInt8 = unsafe bytes(unchecked: 0);
         let firstByteVal = Int64(from: firstByte);
         if firstByteVal == 43 {
             index = 1
@@ -1188,7 +1200,7 @@ public struct UInt16:
         var result: UInt64 = 0;
 
         while index < len {
-            let byte: UInt8 = string.bytes(unchecked: index);
+            let byte: UInt8 = unsafe bytes(unchecked: index);
             let byteVal = Int64(from: byte);
 
             let digit: Int64 = if byteVal >= 48 and byteVal <= 57 {
@@ -1287,7 +1299,7 @@ public struct UInt16:
 
         var i = digits.bytes.count - 1;
         while i >= 0 {
-            result.appendByte(digits.bytes(unchecked: i));
+            result.appendByte(unsafe digits.bytes(unchecked: i));
             i = i - 1
         }
 

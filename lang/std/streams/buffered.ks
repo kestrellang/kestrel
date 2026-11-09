@@ -78,7 +78,7 @@ public struct BufferedReader[R]: Readable where R: Readable, R: not Copyable, R:
                 break
             }
             var i = self.start;
-            while i < self.end and self.buffer(unchecked: i) != byte {
+            while i < self.end and unsafe self.buffer(unchecked: i) != byte {
                 i = i + 1
             }
             let found = i < self.end;
@@ -100,9 +100,9 @@ public struct BufferedReader[R]: Readable where R: Readable, R: not Copyable, R:
         if try self.readUntil(byte: 10, into: bytes) == 0 {
             return .Ok(.None)
         }
-        if bytes.count > 0 and bytes(unchecked: bytes.count - 1) == 10 {
+        if bytes.count > 0 and unsafe bytes(unchecked: bytes.count - 1) == 10 {
             bytes.pop();
-            if bytes.count > 0 and bytes(unchecked: bytes.count - 1) == 13 {
+            if bytes.count > 0 and unsafe bytes(unchecked: bytes.count - 1) == 13 {
                 bytes.pop();
             }
         }

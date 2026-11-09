@@ -38,7 +38,7 @@ struct Grid: Cloneable {
         // (callers are at most one step out, so a single add/subtract suffices),
         // so `yy * w + xx` is always in `[0, w*h)` — the bounds check would be
         // redundant. `unchecked:` skips it; this is the hot per-cell read.
-        self.cells(unchecked: yy * w + xx)
+        unsafe self.cells(unchecked: yy * w + xx)
     }
 
     mutating func setCell(x x: Int64, y y: Int64, alive alive: Bool) {
@@ -69,7 +69,7 @@ struct Grid: Cloneable {
                 // x,y are in-bounds here (loop bounds `0..<width`/`0..<height`),
                 // so the index is direct — no wrap — and provably in `[0, w*h)`,
                 // making the bounds check redundant. `unchecked:` skips it.
-                self.next(unchecked: y * self.width + x) = nextAlive;
+                unsafe self.next(unchecked: y * self.width + x) = nextAlive;
             }
         }
         let tmp = self.cells;

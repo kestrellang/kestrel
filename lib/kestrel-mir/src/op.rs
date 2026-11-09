@@ -101,6 +101,9 @@ pub enum Op {
     AddOverflows(IntBits, Signedness),
     SubOverflows(IntBits, Signedness),
     MulOverflows(IntBits, Signedness),
+    /// The high half of the double-width product `a * b` (operands extended
+    /// by the signedness). With the wrapping `Mul` it gives the full product.
+    MulHigh(IntBits, Signedness),
     /// `true` when this build checks integer overflow (`+ - *` trap instead
     /// of wrapping). Takes a unit arg. Codegen resolves it to a constant from
     /// `CodegenOptions::overflow_checks()`, so MIR (and its cache) stays the

@@ -134,5 +134,3 @@ fn moves(cx: &BodyContext<'_>, expr: HirExprId) -> bool {
     }
     ty_copy_semantics(cx, ty) == CopySemantics::NotCopyable
 }
-
-

@@ -1,7 +1,7 @@
 module Aerie
 
 import deflate.(Zlib)
-import std.files.(Path, readBytes, writeBytes)
+import std.files.(Path, File)
 
 /// The world's save file: a `SaveState`, zlib-compressed.
 struct SaveFile {
@@ -11,7 +11,7 @@ struct SaveFile {
     /// world; a damaged one is reported and ignored rather than
     /// overwritten silently on the next save.
     func load() -> SaveState? {
-        guard let .Ok(packed) = readBytes(Path(self.path)) else {
+        guard let .Ok(packed) = File.readBytes(Path(self.path)) else {
             return .None;
         }
         guard let .Ok(bytes) = Zlib.decompress(packed) else {
@@ -29,7 +29,7 @@ struct SaveFile {
     /// written.
     func write(state: SaveState) -> Bool {
         let packed = Zlib.compress(state.encode());
-        guard let .Ok(_) = writeBytes(Path(self.path), packed.asSlice()) else {
+        guard let .Ok(_) = File.writeBytes(Path(self.path), packed.asSlice()) else {
             println("couldn't write \(self.path)");
             return false;
         }

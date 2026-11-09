@@ -26,8 +26,8 @@ func main() -> lang.i64 {
     if parts.count != 2 { return 8 }
     let alphaOwned: String = "alpha";
     let betaOwned: String = "beta";
-    if parts(unchecked: 0) != alphaOwned { return 9 }
-    if parts(unchecked: 1) != betaOwned { return 10 }
+    if unsafe parts(unchecked: 0) != alphaOwned { return 9 }
+    if unsafe parts(unchecked: 1) != betaOwned { return 10 }
 
     let replaced: String = owned.asSlice().replaced(alpha, with: beta);
     if replaced.isEqual(to: "beta,beta") == false { return 11 }

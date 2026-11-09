@@ -29,7 +29,7 @@ public func lookup(host: String, port: UInt16) -> Result[Array[SocketAddress], I
     let capacity: Int64 = 64;
     let cells = unsafe malloc(capacity * nativeAddressSize());
     let kindCell = unsafe malloc(4);
-    let name = host.toCString();
+    let name = try host.toNativeString();
     let n = unsafe native_lookup(name.raw.asRaw(), Int64(from: port), cells, capacity, kindCell);
     let error = IoError.last();
     let kind = unsafe kindCell.cast[Int32]().read();

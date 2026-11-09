@@ -41,7 +41,7 @@ public func resolveRegistryUrl(projectUrl projectUrl: String?) -> String {
     // 2. Global config (~/.flock/config.toml)
     let configPath = joinPath(base: flockHome(), rel: "config.toml");
     if Path(configPath).exists() {
-        match readText(Path(configPath)) {
+        match File.readText(Path(configPath)) {
             .Ok(source) => {
                 match parseToml(source) {
                     .Ok(root) => {
@@ -79,7 +79,7 @@ public func resolveRegistryUrl(projectUrl projectUrl: String?) -> String {
 public func splitPackageName(name name: String) -> (String, String)? {
     var i: Int64 = 0;
     while i < name.bytes.count {
-        if name.bytes(unchecked: i) == 47 {
+        if unsafe name.bytes(unchecked: i) == 47 {
             let org = name.asSlice().subslice(from: 0, to: i).toOwned();
             let pkg = name.asSlice().subslice(from: i + 1, to: name.bytes.count).toOwned();
             return .Some((org, pkg))

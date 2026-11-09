@@ -248,9 +248,21 @@ public protocol Hashable: Equatable {
 public protocol Hasher {
     /// Mixes `bytes` into the running hash state.
     mutating func write(bytes: Slice[UInt8])
+    /// Mixes one 64-bit word into the state. Integers, `Bool` and `Char`
+    /// hash through this. The default writes the word's 8 bytes; a hasher
+    /// can mix it in one round instead.
+    mutating func write(uint64 value: UInt64)
     /// Returns the finalised hash. After calling `finish` the hasher's
     /// state is unspecified — don't reuse it.
     mutating func finish() -> UInt64
+}
+
+extend Hasher {
+    /// Writes the word's 8 bytes (in memory order) through `write(bytes:)`.
+    public mutating func write(uint64 value: UInt64) {
+        let word = value;
+        self.write(unsafe Slice.lend(start: Pointer(to: word).asRaw().cast[UInt8](), count: 8))
+    }
 }
 
 /// Protocol for types with a meaningful zero/default value.

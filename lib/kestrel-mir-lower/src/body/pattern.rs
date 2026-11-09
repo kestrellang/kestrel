@@ -186,6 +186,20 @@ impl OssaBodyCtx<'_, '_> {
         arms: &[HirMatchArm],
         source: MatchSource,
     ) -> ValueId {
+        let returns = std::mem::take(&mut self.return_tail);
+        let saved_arms_return = std::mem::replace(&mut self.match_arms_return, returns);
+        let value = self.lower_match_inner(expr_id, scrutinee_expr, arms, source);
+        self.match_arms_return = saved_arms_return;
+        value
+    }
+
+    fn lower_match_inner(
+        &mut self,
+        expr_id: HirExprId,
+        scrutinee_expr: HirExprId,
+        arms: &[HirMatchArm],
+        source: MatchSource,
+    ) -> ValueId {
         // Irrefutable single-arm destructures (let/param) don't need branching.
         // Emit bindings directly so local_map entries survive past the match.
         if matches!(
@@ -989,7 +1003,15 @@ impl OssaBodyCtx<'_, '_> {
             self.emit_bindings(bindings, scrutinee, scrutinee_ty);
         }
         if let Some(arm) = arms.get(arm_index) {
-            let body_val = self.lower_expr(arm.body);
+            // In a return-position match each arm body is a return position.
+            // Saved across the body: a nested match inside it resets the flag.
+            let returns = self.match_arms_return;
+            let body_val = if returns {
+                self.lower_expr_for_return(arm.body)
+            } else {
+                self.lower_expr(arm.body)
+            };
+            self.match_arms_return = returns;
             // Arm-value decay copies in `capture_arm_exit` diagnose at the
             // arm's value expression, not the enclosing statement.
             let arm_span = super::value_expr_span(&self.hir, arm.body);

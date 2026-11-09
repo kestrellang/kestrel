@@ -2,8 +2,8 @@
 
 module std.collections
 
-import std.core.(Bool, Comparable, fatalError)
-import std.numeric.(Int64, UInt64, RandomNumberGenerator, SystemRandom)
+import std.core.(Bool, Comparable, Ordering, fatalError)
+import std.numeric.(Int64, UInt64, RandomNumberGenerator, DefaultRandom)
 import std.result.(Optional)
 import std.memory.(UnsafeSlice, Pointer)
 import std.iter.(Iterator)
@@ -72,7 +72,7 @@ extend Slice[T] where T: Copyable {
 
     /// Shuffles the slice in place with a fresh system RNG.
     public mutating func shuffle() {
-        var rng = SystemRandom();
+        var rng = DefaultRandom();
         self.shuffle(using: rng)
     }
 
@@ -122,7 +122,7 @@ extend Slice[T] where T: Copyable {
 
     /// Sorts the slice in place by an extracted `Comparable` key.
     public mutating func sort[K](consuming byKey key: (T) -> K) where K: Comparable {
-        self.sort(by: { (a, b) in key(a) < key(b) })
+        self.sort(by: { (a, b) in key(a).compare(key(b)) == Ordering.Less })
     }
 }
 
@@ -131,7 +131,7 @@ extend Slice[T] where T: Copyable {
     public mutating func fill(with value: T) {
         var raw = self.asUnsafeSlice();
         for i in 0..<raw.count {
-            raw(unchecked: i) = value;
+            unsafe raw(unchecked: i) = value;
         }
     }
 }
@@ -139,7 +139,7 @@ extend Slice[T] where T: Copyable {
 extend Slice[T] where T: Comparable {
     /// Sorts the slice in place, ascending (introsort; see `sort(by:)`).
     public mutating func sort() {
-        self.sort(by: { (a, b) in a < b })
+        self.sort(by: { (a, b) in a.compare(b) == Ordering.Less })
     }
 }
 
@@ -190,15 +190,15 @@ fileprivate func partitionRange[T](s: UnsafeSlice[T], lo: Int64, hi: Int64, cmp:
     let mid = lo + (hi - lo) / 2;
     let last = hi - 1;
     // Order lo, mid, last so the median lands at mid.
-    if cmp(v(unchecked: mid), v(unchecked: lo)) { swapRaw(v, lo, mid) }
-    if cmp(v(unchecked: last), v(unchecked: lo)) { swapRaw(v, lo, last) }
-    if cmp(v(unchecked: last), v(unchecked: mid)) { swapRaw(v, mid, last) }
+    if cmp(unsafe v(unchecked: mid), unsafe v(unchecked: lo)) { swapRaw(v, lo, mid) }
+    if cmp(unsafe v(unchecked: last), unsafe v(unchecked: lo)) { swapRaw(v, lo, last) }
+    if cmp(unsafe v(unchecked: last), unsafe v(unchecked: mid)) { swapRaw(v, mid, last) }
     // Move the median to the pivot slot (last).
     swapRaw(v, mid, last);
-    let pivot = v(unchecked: last);
+    let pivot = unsafe v(unchecked: last);
     var i = lo;
     for j in lo..<last {
-        if cmp(v(unchecked: j), pivot) {
+        if cmp(unsafe v(unchecked: j), pivot) {
             swapRaw(v, i, j);
             i = i + 1
         }
@@ -210,13 +210,13 @@ fileprivate func partitionRange[T](s: UnsafeSlice[T], lo: Int64, hi: Int64, cmp:
 fileprivate func insertionSortRange[T](s: UnsafeSlice[T], lo: Int64, hi: Int64, cmp: (T, T) -> Bool) {
     var v = s;
     for i in (lo + 1)..<hi {
-        let key = v(unchecked: i);
+        let key = unsafe v(unchecked: i);
         var j = i - 1;
-        while j >= lo and cmp(key, v(unchecked: j)) {
-            v(unchecked: j + 1) = v(unchecked: j);
+        while j >= lo and cmp(key, unsafe v(unchecked: j)) {
+            unsafe v(unchecked: j + 1) = unsafe v(unchecked: j);
             j = j - 1
         }
-        v(unchecked: j + 1) = key
+        unsafe v(unchecked: j + 1) = key
     }
 }
 
@@ -242,10 +242,10 @@ fileprivate func siftDown[T](s: UnsafeSlice[T], lo: Int64, start: Int64, n: Int6
         var largest = idx;
         let left = 2 * idx + 1;
         let right = 2 * idx + 2;
-        if left < n and cmp(s(unchecked: lo + largest), s(unchecked: lo + left)) {
+        if left < n and cmp(unsafe s(unchecked: lo + largest), unsafe s(unchecked: lo + left)) {
             largest = left
         }
-        if right < n and cmp(s(unchecked: lo + largest), s(unchecked: lo + right)) {
+        if right < n and cmp(unsafe s(unchecked: lo + largest), unsafe s(unchecked: lo + right)) {
             largest = right
         }
         if largest == idx { return }

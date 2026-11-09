@@ -11,8 +11,8 @@ module Test
             if sub.count != 2 { return 1 }
             // Sub-view re-iterates as the same lines
             var it = sub.iter();
-            if it.next().unwrap().isEqual(to: "alpha") == false { return 2 }
-            if it.next().unwrap().isEqual(to: "beta") == false { return 3 }
+            if it.next().unwrap() != "alpha" { return 2 }
+            if it.next().unwrap() != "beta" { return 3 }
             if it.next().isSome { return 4 }
             // Underlying byte range includes the terminator after "beta"
             if sub.toString().isEqual(to: "alpha\nbeta\n") == false { return 5 }

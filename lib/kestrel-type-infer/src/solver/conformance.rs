@@ -580,14 +580,17 @@ pub(super) fn unify_bound_protocol_args(
     // zero → every declared instantiation contradicts the bound: reject.
     if applicable.len() > 1 {
         applicable.retain(|c| {
-            !want_args.iter().zip(c.decl_args.iter()).any(|(&w, d)| match d {
-                // A default's `Self` is the receiver itself.
-                kestrel_hir::ty::HirTy::SelfType(..) => matches!(
-                    ctx.slot(ctx.resolve(w)),
-                    TySlot::Resolved(k) if k.entity().is_some_and(|e| e != entity)
-                ),
-                _ => tv_definitely_incompatible(ctx, w, d),
-            })
+            !want_args
+                .iter()
+                .zip(c.decl_args.iter())
+                .any(|(&w, d)| match d {
+                    // A default's `Self` is the receiver itself.
+                    kestrel_hir::ty::HirTy::SelfType(..) => matches!(
+                        ctx.slot(ctx.resolve(w)),
+                        TySlot::Resolved(k) if k.entity().is_some_and(|e| e != entity)
+                    ),
+                    _ => tv_definitely_incompatible(ctx, w, d),
+                })
         });
         if applicable.is_empty() {
             return Err(());

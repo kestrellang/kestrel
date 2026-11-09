@@ -72,7 +72,7 @@ extend Writable {
     /// Writes the UTF-8 bytes of `text`.
     public mutating func write(text text: String) -> Result[(), IoError] {
         let raw = text.asByteSlice();
-        self.writeAll(from: Slice.lend(start: raw.pointer, count: raw.count))
+        self.writeAll(from: unsafe Slice.lend(start: raw.pointer, count: raw.count))
     }
 
     /// Writes `text` and a `"\n"`.

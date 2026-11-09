@@ -122,10 +122,12 @@ impl OssaBodyCtx<'_, '_> {
         boxed: ValueId,
     ) -> Vec<ValueId> {
         let owned_box = self.owned_box_entity(case.box_ty);
-        let take_value =
-            self.find_box_member_by_shape(owned_box, NodeKind::Function, "takeValue()", |c, name| {
-                name == "takeValue" && c.params.is_empty()
-            });
+        let take_value = self.find_box_member_by_shape(
+            owned_box,
+            NodeKind::Function,
+            "takeValue()",
+            |c, name| name == "takeValue" && c.params.is_empty(),
+        );
         self.ctx.register_name(take_value);
         let payload = self.emit_call_returning(
             Callee::direct_with_args(take_value, vec![case.payload_ty], Some(case.box_ty)),

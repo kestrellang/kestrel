@@ -5,7 +5,7 @@ module std.streams
 import std.numeric.(Int32, Int64)
 import std.text.(String, Formatter, Formattable, FormatOptions, _writePadded)
 import std.core.(Bool, Equatable)
-import std.result.(Optional)
+import std.result.(Optional, Result)
 import std.memory.(RawPointer)
 import std.ffi.(CString)
 
@@ -20,7 +20,7 @@ import std.ffi.(CString)
 /// # Examples
 ///
 /// ```
-/// match readText("config.toml") {
+/// match File.readText("config.toml") {
 ///     .Ok(text) => parse(text),
 ///     .Err(e) if e.kind == .NotFound => defaults(),
 ///     .Err(e) => fail(e)
@@ -245,3 +245,33 @@ internal func native_errno_kind(code: Int32) -> Int32
 
 @extern(.C, mangleName: "kestrel_strerror")
 internal func native_strerror(code: Int32) -> RawPointer
+
+// ============================================================================
+// C STRINGS FOR SYSTEM CALLS
+// ============================================================================
+
+extend String {
+    /// This text as a NUL-terminated C string for a system call, or
+    /// `InvalidInput` when it contains a NUL byte. C would stop at that
+    /// byte, so `"data.txt\0.png"` would quietly name `data.txt`. Every
+    /// path, name and argument std passes to the system goes through here.
+    /// The caller frees the result.
+    internal func toNativeString() -> Result[CString, IoError] {
+        if self.containsNulByte {
+            return .Err(IoError(kind: .InvalidInput))
+        }
+        .Ok(self.toCString())
+    }
+
+    /// `true` when some byte is 0, which no C string can hold.
+    internal var containsNulByte: Bool {
+        let count = self.bytes.count;
+        let start = RawPointer(raw: self.bytes.asRaw()).cast[UInt8]();
+        for i in 0..<count {
+            if unsafe start.offset(by: i).read() == 0 {
+                return true
+            }
+        }
+        false
+    }
+}

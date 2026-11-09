@@ -225,8 +225,7 @@ impl LowerCtx<'_> {
         if let Some(op_req) = lookup_compound_assign_op(op)
             && let Some(protocol) = self.resolve_builtin(op_req.protocol)
         {
-            let pcall =
-                self.operator_call(op_req, protocol, lowered_lhs, vec![lowered_rhs], span);
+            let pcall = self.operator_call(op_req, protocol, lowered_lhs, vec![lowered_rhs], span);
             return self.alloc_expr(HirExpr::Sugar {
                 kind: SugarKind::CompoundAssign,
                 inner: pcall,

@@ -15,7 +15,7 @@ import std.core.(
     Addable, Subtractable, Multipliable, Divisible, Negatable,
     ExpressibleByFloatLiteral, ExpressibleByIntLiteral, Convertible, Defaultable
 )
-import std.text.(String, StringBuilder, Formatter, Formattable, FormatOptions, _writePadded)
+import std.text.(String, Str, StringBuilder, Formatter, Formattable, FormatOptions, _writePadded)
 import std.numeric.(Int64, {{UINT_TYPE}}, {{OTHER_FLOAT}})
 import std.collections.Array
 
@@ -349,6 +349,48 @@ public struct {{TYPE_NAME}}:
         self == 0.0
     }}
 
+    /// True if the sign bit is set: negatives, `-0.0`, and NaNs with the
+    /// sign bit on. Unlike `isNegative`, this tells `-0.0` from `+0.0`.
+    public var isSignMinus: Bool { get {
+        self.bitPattern.shiftRight(by: {{BITS}} - 1) == 1
+    }}
+
+    /// The smaller of `self` and `other`, as IEEE 754-2019 `minimum`
+    /// defines it: NaN if either is NaN, and `-0.0` below `+0.0`.
+    /// For a min that skips NaN instead, compare with `compare`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// (1.0).minimum(2.0);               // 1.0
+    /// (1.0).minimum({{TYPE_NAME}}.nan);  // nan
+    /// (0.0).minimum(-0.0);              // -0.0
+    /// ```
+    public func minimum(other: {{TYPE_NAME}}) -> {{TYPE_NAME}} {
+        if self.isNaN or other.isNaN { return {{TYPE_NAME}}.nan }
+        if self < other { return self }
+        if other < self { return other }
+        // Equal: only the zeros' signs can differ.
+        if self.isSignMinus { self } else { other }
+    }
+
+    /// The larger of `self` and `other`, as IEEE 754-2019 `maximum`
+    /// defines it: NaN if either is NaN, and `+0.0` above `-0.0`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// (1.0).maximum(2.0);               // 2.0
+    /// (1.0).maximum({{TYPE_NAME}}.nan);  // nan
+    /// (-0.0).maximum(0.0);              // 0.0
+    /// ```
+    public func maximum(other: {{TYPE_NAME}}) -> {{TYPE_NAME}} {
+        if self.isNaN or other.isNaN { return {{TYPE_NAME}}.nan }
+        if self > other { return self }
+        if other > self { return other }
+        if self.isSignMinus { other } else { self }
+    }
+
     /// The raw IEEE-754 bit pattern reinterpreted as an unsigned integer
     /// ({{UINT_TYPE}} for {{TYPE_NAME}}). No value conversion — the bits are
     /// preserved exactly, so `sign`/`exponent`/`significand` can be extracted by
@@ -392,10 +434,12 @@ public struct {{TYPE_NAME}}:
         Bool(boolLiteral: lang.{{LANG_TYPE}}_eq(self.raw, other.raw))
     }
 
-    /// Three-way comparison returning an `Ordering`. NaN is *not* an ordered
-    /// value — comparisons against NaN currently fall through to `.Equal`,
-    /// which is wrong; gate inputs with `isNaN` if you need a well-defined
-    /// answer.
+    /// Three-way comparison returning an `Ordering`. This is a total order,
+    /// so `sort`, `min`/`max` and `binarySearch` stay consistent with NaN in
+    /// the data: every NaN is equal to every other NaN and greater than any
+    /// number, so NaNs sort last. Numbers compare as IEEE 754 does, so
+    /// `-0.0` and `0.0` are `.Equal`. The `<`, `>`, `<=` and `>=` operators
+    /// stay IEEE comparisons, which are all `false` against NaN.
     ///
     /// # Examples
     ///
@@ -403,12 +447,16 @@ public struct {{TYPE_NAME}}:
     /// (1.0).compare(2.0);              // .Less
     /// (2.0).compare(2.0);              // .Equal
     /// (3.0).compare(2.0);              // .Greater
-    /// (1.0).compare(Float64.infinity); // .Less
+    /// (1.0).compare({{TYPE_NAME}}.infinity); // .Less
+    /// {{TYPE_NAME}}.nan.compare({{TYPE_NAME}}.infinity); // .Greater
     /// ```
     public func compare(other: {{TYPE_NAME}}) -> Ordering {
-        if Bool(boolLiteral: lang.{{LANG_TYPE}}_lt(self.raw, other.raw)) { .Less }
-        else if Bool(boolLiteral: lang.{{LANG_TYPE}}_gt(self.raw, other.raw)) { .Greater }
-        else { .Equal }
+        if Bool(boolLiteral: lang.{{LANG_TYPE}}_lt(self.raw, other.raw)) { return .Less }
+        if Bool(boolLiteral: lang.{{LANG_TYPE}}_gt(self.raw, other.raw)) { return .Greater }
+        // Neither is less: they're equal numbers, or at least one is NaN.
+        let selfNaN = self.isNaN;
+        if selfNaN == other.isNaN { return .Equal }
+        if selfNaN { .Greater } else { .Less }
     }
 
     // ========================================================================
@@ -567,7 +615,7 @@ public struct {{TYPE_NAME}}:
 
     /// Real cube root. Defined for negatives — `(-8.0).cbrt() == -2.0`.
     public func cbrt() -> {{TYPE_NAME}} {
-        {{TYPE_NAME}}(raw: libm_cbrt{{LIBM_SUFFIX}}(self.raw))
+        {{TYPE_NAME}}(raw: unsafe libm_cbrt{{LIBM_SUFFIX}}(self.raw))
     }
 
     /// Hypotenuse — `sqrt(self² + other²)`, computed via libm in a way that
@@ -579,7 +627,7 @@ public struct {{TYPE_NAME}}:
     /// (3.0).hypot(4.0);  // 5.0
     /// ```
     public func hypot(other: {{TYPE_NAME}}) -> {{TYPE_NAME}} {
-        {{TYPE_NAME}}(raw: libm_hypot{{LIBM_SUFFIX}}(self.raw, other.raw))
+        {{TYPE_NAME}}(raw: unsafe libm_hypot{{LIBM_SUFFIX}}(self.raw, other.raw))
     }
 
     // ========================================================================
@@ -587,14 +635,14 @@ public struct {{TYPE_NAME}}:
     // ========================================================================
 
     /// `e^self` via libm. `(-inf).exp()` is `0.0`; `(inf).exp()` is `inf`.
-    public func exp() -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: libm_exp{{LIBM_SUFFIX}}(self.raw)) }
+    public func exp() -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: unsafe libm_exp{{LIBM_SUFFIX}}(self.raw)) }
 
     /// `2^self`. Useful for binary scaling.
-    public func exp2() -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: libm_exp2{{LIBM_SUFFIX}}(self.raw)) }
+    public func exp2() -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: unsafe libm_exp2{{LIBM_SUFFIX}}(self.raw)) }
 
     /// `e^self - 1`, computed without the cancellation that hurts
     /// `self.exp() - 1.0` for small `self`.
-    public func expm1() -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: libm_expm1{{LIBM_SUFFIX}}(self.raw)) }
+    public func expm1() -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: unsafe libm_expm1{{LIBM_SUFFIX}}(self.raw)) }
 
     /// Natural logarithm. Negatives return NaN; zero returns `-inf`.
     ///
@@ -606,17 +654,17 @@ public struct {{TYPE_NAME}}:
     /// (0.0).ln();           // -inf
     /// (-1.0).ln();          //  nan
     /// ```
-    public func ln() -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: libm_log{{LIBM_SUFFIX}}(self.raw)) }
+    public func ln() -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: unsafe libm_log{{LIBM_SUFFIX}}(self.raw)) }
 
     /// `ln(1 + self)`, accurate for small `self` where `(1.0 + self).ln()`
     /// would lose digits.
-    public func ln1p() -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: libm_log1p{{LIBM_SUFFIX}}(self.raw)) }
+    public func ln1p() -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: unsafe libm_log1p{{LIBM_SUFFIX}}(self.raw)) }
 
     /// Base-2 logarithm.
-    public func log2() -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: libm_log2{{LIBM_SUFFIX}}(self.raw)) }
+    public func log2() -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: unsafe libm_log2{{LIBM_SUFFIX}}(self.raw)) }
 
     /// Base-10 logarithm.
-    public func log10() -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: libm_log10{{LIBM_SUFFIX}}(self.raw)) }
+    public func log10() -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: unsafe libm_log10{{LIBM_SUFFIX}}(self.raw)) }
 
     /// Logarithm with arbitrary base, computed as `self.ln() / base.ln()`.
     /// Pick `log2` or `log10` directly when you can — they avoid the second
@@ -636,7 +684,7 @@ public struct {{TYPE_NAME}}:
     /// (-2.0).pow(0.5);   // nan
     /// ```
     public func pow(exponent: {{TYPE_NAME}}) -> {{TYPE_NAME}} {
-        {{TYPE_NAME}}(raw: libm_pow{{LIBM_SUFFIX}}(self.raw, exponent.raw))
+        {{TYPE_NAME}}(raw: unsafe libm_pow{{LIBM_SUFFIX}}(self.raw, exponent.raw))
     }
 
     /// Integer-exponent power via repeated squaring. Faster and more accurate
@@ -670,25 +718,25 @@ public struct {{TYPE_NAME}}:
     // ========================================================================
 
     /// Sine of `self` in radians.
-    public func sin() -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: libm_sin{{LIBM_SUFFIX}}(self.raw)) }
+    public func sin() -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: unsafe libm_sin{{LIBM_SUFFIX}}(self.raw)) }
 
     /// Cosine of `self` in radians.
-    public func cos() -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: libm_cos{{LIBM_SUFFIX}}(self.raw)) }
+    public func cos() -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: unsafe libm_cos{{LIBM_SUFFIX}}(self.raw)) }
 
     /// Tangent of `self` in radians. Diverges to ±large near `π/2 + kπ`.
-    public func tan() -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: libm_tan{{LIBM_SUFFIX}}(self.raw)) }
+    public func tan() -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: unsafe libm_tan{{LIBM_SUFFIX}}(self.raw)) }
 
     /// Arc sine, result in radians on `[-π/2, π/2]`. Returns NaN outside
     /// `[-1.0, 1.0]`.
-    public func asin() -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: libm_asin{{LIBM_SUFFIX}}(self.raw)) }
+    public func asin() -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: unsafe libm_asin{{LIBM_SUFFIX}}(self.raw)) }
 
     /// Arc cosine, result in radians on `[0, π]`. Returns NaN outside
     /// `[-1.0, 1.0]`.
-    public func acos() -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: libm_acos{{LIBM_SUFFIX}}(self.raw)) }
+    public func acos() -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: unsafe libm_acos{{LIBM_SUFFIX}}(self.raw)) }
 
     /// Arc tangent, result in radians on `[-π/2, π/2]`. For full-quadrant
     /// recovery use `atan2`.
-    public func atan() -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: libm_atan{{LIBM_SUFFIX}}(self.raw)) }
+    public func atan() -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: unsafe libm_atan{{LIBM_SUFFIX}}(self.raw)) }
 
     /// Two-argument arctangent — angle of the point `(x, self)` measured
     /// from the positive x-axis, on `[-π, π]`. Disambiguates quadrant where
@@ -702,7 +750,7 @@ public struct {{TYPE_NAME}}:
     /// (-1.0).atan2(-1.0);  // -3π/4  (Q3)
     /// (-1.0).atan2(1.0);   // -π/4   (Q4)
     /// ```
-    public func atan2(x: {{TYPE_NAME}}) -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: libm_atan2{{LIBM_SUFFIX}}(self.raw, x.raw)) }
+    public func atan2(x: {{TYPE_NAME}}) -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: unsafe libm_atan2{{LIBM_SUFFIX}}(self.raw, x.raw)) }
 
     /// Sine and cosine in one call. Implemented via two libm calls today;
     /// kept for ergonomics and as a future optimisation point.
@@ -721,22 +769,22 @@ public struct {{TYPE_NAME}}:
     // ========================================================================
 
     /// Hyperbolic sine.
-    public func sinh() -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: libm_sinh{{LIBM_SUFFIX}}(self.raw)) }
+    public func sinh() -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: unsafe libm_sinh{{LIBM_SUFFIX}}(self.raw)) }
 
     /// Hyperbolic cosine.
-    public func cosh() -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: libm_cosh{{LIBM_SUFFIX}}(self.raw)) }
+    public func cosh() -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: unsafe libm_cosh{{LIBM_SUFFIX}}(self.raw)) }
 
     /// Hyperbolic tangent. Saturates at ±1 for large magnitudes.
-    public func tanh() -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: libm_tanh{{LIBM_SUFFIX}}(self.raw)) }
+    public func tanh() -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: unsafe libm_tanh{{LIBM_SUFFIX}}(self.raw)) }
 
     /// Inverse hyperbolic sine. Defined on all real inputs.
-    public func asinh() -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: libm_asinh{{LIBM_SUFFIX}}(self.raw)) }
+    public func asinh() -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: unsafe libm_asinh{{LIBM_SUFFIX}}(self.raw)) }
 
     /// Inverse hyperbolic cosine. Returns NaN for inputs less than `1.0`.
-    public func acosh() -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: libm_acosh{{LIBM_SUFFIX}}(self.raw)) }
+    public func acosh() -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: unsafe libm_acosh{{LIBM_SUFFIX}}(self.raw)) }
 
     /// Inverse hyperbolic tangent. NaN outside `(-1.0, 1.0)`; `±inf` at ±1.
-    public func atanh() -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: libm_atanh{{LIBM_SUFFIX}}(self.raw)) }
+    public func atanh() -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: unsafe libm_atanh{{LIBM_SUFFIX}}(self.raw)) }
 
     // ========================================================================
     // IEEE 754 OPERATIONS
@@ -763,19 +811,19 @@ public struct {{TYPE_NAME}}:
     /// Next representable value greater than `self`. `+inf` and `nan` are
     /// fixed points; the largest finite value steps up to `+inf`.
     public func nextUp() -> {{TYPE_NAME}} {
-        {{TYPE_NAME}}(raw: libm_nextafter{{LIBM_SUFFIX}}(self.raw, lang.{{LANG_TYPE}}_infinity()))
+        {{TYPE_NAME}}(raw: unsafe libm_nextafter{{LIBM_SUFFIX}}(self.raw, lang.{{LANG_TYPE}}_infinity()))
     }
 
     /// Next representable value less than `self`. Mirror of `nextUp`.
     public func nextDown() -> {{TYPE_NAME}} {
-        {{TYPE_NAME}}(raw: libm_nextafter{{LIBM_SUFFIX}}(self.raw, lang.{{LANG_TYPE}}_neg(lang.{{LANG_TYPE}}_infinity())))
+        {{TYPE_NAME}}(raw: unsafe libm_nextafter{{LIBM_SUFFIX}}(self.raw, lang.{{LANG_TYPE}}_neg(lang.{{LANG_TYPE}}_infinity())))
     }
 
     /// IEEE 754 remainder — uses round-to-nearest division, not truncation.
     /// Differs from `%`: `(5.0).remainder(dividingBy: 3.0)` is `-1.0`, not
     /// `2.0`.
     public func remainder(dividingBy other: {{TYPE_NAME}}) -> {{TYPE_NAME}} {
-        {{TYPE_NAME}}(raw: libm_remainder{{LIBM_SUFFIX}}(self.raw, other.raw))
+        {{TYPE_NAME}}(raw: unsafe libm_remainder{{LIBM_SUFFIX}}(self.raw, other.raw))
     }
 
     // ========================================================================

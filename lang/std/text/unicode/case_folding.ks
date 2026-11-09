@@ -164,8 +164,8 @@ public func caseFold(c: Char) -> Char {
         return Char(unchecked: cp + 32)
     }
     if cp > 0x10FFFF { return c }
-    let blockIdx = FOLD_STAGE1(unchecked: Int64(from: cp.shiftRight(by: 8)));
-    let delta = FOLD_STAGE2(unchecked: Int64(from: blockIdx) * 256 + Int64(from: cp.bitwiseAnd(UInt32(intLiteral: 0xFF))));
+    let blockIdx = unsafe FOLD_STAGE1(unchecked: Int64(from: cp.shiftRight(by: 8)));
+    let delta = unsafe FOLD_STAGE2(unchecked: Int64(from: blockIdx) * 256 + Int64(from: cp.bitwiseAnd(UInt32(intLiteral: 0xFF))));
     if delta == 0 { return c }
     Char(unchecked: UInt32(truncating: Int64(from: cp).add(Int64(from: delta))))
 }
@@ -177,7 +177,7 @@ public func hasCaseFoldExpansion(c: Char) -> Bool {
     let cp = c.value();
     var i: Int64 = 0;
     while i < FOLD_EXPANSIONS_COUNT {
-        let entry = FOLD_EXPANSIONS(unchecked: i);
+        let entry = unsafe FOLD_EXPANSIONS(unchecked: i);
         if UInt32(truncating: entry.0) == cp { return true }
         i = i + 1
     }
@@ -199,7 +199,7 @@ public func caseFoldExpansion(c: Char) -> String {
     let cp = c.value();
     var i: Int64 = 0;
     while i < FOLD_EXPANSIONS_COUNT {
-        let entry = FOLD_EXPANSIONS(unchecked: i);
+        let entry = unsafe FOLD_EXPANSIONS(unchecked: i);
         if UInt32(truncating: entry.0) == cp {
             var result = String();
             result.append(char: Char(unchecked: UInt32(truncating: entry.2)));
