@@ -119,9 +119,11 @@ pub struct InferCtx<'a> {
     /// never see a ref. Patterns stay wired directly to the scrutinee var.
     pub(crate) scrutinee_exprs: HashSet<HirExprId>,
 
-    /// The scrutinees whose arms write through a `&mutating` binder: a
-    /// failable member read there goes through its `mutating ref`.
-    pub(crate) mutating_scrutinee_exprs: HashSet<HirExprId>,
+    /// Reads in a context that needs a mutable place: a scrutinee whose arms
+    /// write through a `&mutating` binder, or a value returned as
+    /// `&mutating T`. A place member read there goes through its `mutating
+    /// ref` and is typed `&mutating T` (`Optional[&mutating T]` failable).
+    pub(crate) mutating_place_reads: HashSet<HirExprId>,
 
     /// HirExprIds that are a `Call`'s direct callee. A direct callee Def
     /// legitimately carries `TyKind::Function { ret: Ref }` — exempted from
@@ -212,6 +214,10 @@ pub struct InferCtx<'a> {
     /// emits while deciding another one — an overload candidate's parameter
     /// equalities, say — stay queued, since that decision may still back out.
     pub(crate) solving_depth: u32,
+    /// Span of the member or call constraint being solved. Types formed by
+    /// instantiating the callee's signature report their well-formedness
+    /// here (the user's `.collect()`), not at the signature in std.
+    pub(crate) formation_site: Option<Span>,
     /// Off while the body's assumptions Γ (params, where clauses) are being
     /// set up: those constraints are interdependent and settle as one batch.
     /// On once the walker starts (bidi P5).
@@ -235,6 +241,10 @@ pub struct InferCtx<'a> {
     /// The `for_loop_iter_calls` whose iterable is itself an `Iterator`.
     /// Surfaced on `TypedBody.direct_iterators`.
     pub(crate) direct_iterators: HashSet<HirExprId>,
+
+    /// Place reads typed `&mutating T` (see `mutating_place_reads`).
+    /// Surfaced on `TypedBody.mutating_lends`.
+    pub(crate) mutating_lends: HashSet<HirExprId>,
 
     /// Expressions whose `Optional[&T]` value decays to `Optional[T]`: bound
     /// initializers and operator receivers. Surfaced on `TypedBody.optional_ref_decays`.
@@ -509,7 +519,7 @@ impl<'a> InferCtx<'a> {
             error_is_cascade: Vec::new(),
             errored_coerce_exprs: HashSet::default(),
             scrutinee_exprs: HashSet::default(),
-            mutating_scrutinee_exprs: HashSet::default(),
+            mutating_place_reads: HashSet::default(),
             assign_target_exprs: HashSet::default(),
             place_assign_values: HashSet::default(),
             always_decay_exprs: HashSet::default(),
@@ -525,10 +535,12 @@ impl<'a> InferCtx<'a> {
             synth_gate: true,
             interpolation_depth: 0,
             solving_depth: 0,
+            formation_site: None,
             eager: false,
             poison_protocol_call_recv_on_failure: HashSet::default(),
             for_loop_iter_calls: HashSet::default(),
             direct_iterators: HashSet::default(),
+            mutating_lends: HashSet::default(),
             optional_ref_decays: HashSet::default(),
             call_return_tvs: HashMap::default(),
             protocol_dispatch_members: HashSet::default(),
@@ -1145,6 +1157,23 @@ impl<'a> InferCtx<'a> {
     pub fn poison(&mut self, tv: TyVar) {
         let root = self.resolve(tv);
         self.types[root.0 as usize] = TySlot::Resolved(TyKind::Error);
+    }
+
+    /// Poison `tv` for a failure that is still to be reported about it, and
+    /// return a copy of its type as it was, for the diagnostic to name.
+    /// Poisoning first left the message naming the Error type (`_ !:
+    /// AddAssign`).
+    /// An unresolved `tv` has nothing to show: it is returned poisoned, so the
+    /// report is suppressed as a cascade like any other on an Error type.
+    pub fn poison_keeping_shown(&mut self, tv: TyVar) -> TyVar {
+        let slot = self.slot(self.resolve(tv)).clone();
+        self.poison(tv);
+        if !matches!(slot, TySlot::Resolved(ref k) if !matches!(k, TyKind::Error)) {
+            return tv;
+        }
+        let shown = self.fresh();
+        self.types[shown.0 as usize] = slot;
+        shown
     }
 
     /// Mark `tv` as a wildcard (created from explicit `_` in a type-arg position).

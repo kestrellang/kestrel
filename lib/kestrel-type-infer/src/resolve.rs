@@ -493,7 +493,8 @@ impl TypeResolver for WorldResolver<'_> {
     }
 
     fn entity_and_args(&self, ty: &TyKind) -> Option<(Entity, Vec<TyVar>)> {
-        self.structural_view(ty).or_else(|| ty.entity().map(|e| (e, ty.args().to_vec())))
+        self.structural_view(ty)
+            .or_else(|| ty.entity().map(|e| (e, ty.args().to_vec())))
     }
 
     fn conforms_to(&self, ty: &TyKind, protocol: Entity) -> bool {
@@ -1098,7 +1099,10 @@ pub(crate) fn structural_ty_kind(
 ) -> Option<TyKind> {
     use kestrel_name_res::extensions::{lang_ref_mutability, lang_tuple_arity};
     if let Some(mutating) = lang_ref_mutability(ctx, entity) {
-        return Some(TyKind::Ref { pointee: *args.first()?, mutating });
+        return Some(TyKind::Ref {
+            pointee: *args.first()?,
+            mutating,
+        });
     }
     if let Some(arity) = lang_tuple_arity(ctx, entity) {
         return (args.len() == arity).then(|| TyKind::Tuple(args.to_vec()));
@@ -1122,8 +1126,14 @@ impl WorldResolver<'_> {
     /// every other type. The reverse is [`structural_ty_kind`].
     pub(crate) fn structural_view(&self, ty: &TyKind) -> Option<(Entity, Vec<TyVar>)> {
         let (name, args) = match ty {
-            TyKind::Ref { mutating: true, pointee } => ("&mutating".to_string(), vec![*pointee]),
-            TyKind::Ref { mutating: false, pointee } => ("&".to_string(), vec![*pointee]),
+            TyKind::Ref {
+                mutating: true,
+                pointee,
+            } => ("&mutating".to_string(), vec![*pointee]),
+            TyKind::Ref {
+                mutating: false,
+                pointee,
+            } => ("&".to_string(), vec![*pointee]),
             TyKind::Tuple(elems) if elems.is_empty() => ("()".to_string(), Vec::new()),
             TyKind::Tuple(elems) => (
                 kestrel_ast_builder::lang_module::lang_tuple_name(elems.len()),
@@ -1271,7 +1281,9 @@ impl WorldResolver<'_> {
         // Structural types (`()`, `!`, `(A, B)`, `&T`) resolve members via
         // their synthetic `lang` entities, so `(a, b).m()` finds what
         // `extend (X, Y)` declares; the solver binds X/Y from the same view.
-        let (entity, _) = self.entity_and_args(receiver_ty).ok_or(MemberError::NotFound)?;
+        let (entity, _) = self
+            .entity_and_args(receiver_ty)
+            .ok_or(MemberError::NotFound)?;
         let entity = &entity;
 
         // Discover every type-side candidate by name in one pass: direct
@@ -1779,6 +1791,32 @@ impl WorldResolver<'_> {
         }
     }
 
+    /// True when `candidate` takes one of its own type params at a position
+    /// where `protocol`'s requirement takes one of the protocol's params.
+    fn generic_where_protocol_param(
+        &self,
+        protocol: Entity,
+        candidate: Entity,
+        proto_tys: &[HirTy],
+        candidate_tys: &[HirTy],
+    ) -> bool {
+        let params_of = |e: Entity| {
+            self.ctx
+                .get::<TypeParams>(e)
+                .map(|tp| tp.0.clone())
+                .unwrap_or_default()
+        };
+        let own = params_of(candidate);
+        if own.is_empty() {
+            return false;
+        }
+        let protocol_params = params_of(protocol);
+        proto_tys.iter().zip(candidate_tys).any(|(p, c)| {
+            matches!((p, c), (HirTy::Param(pp, _), HirTy::Param(cp, _))
+                if protocol_params.contains(pp) && own.contains(cp))
+        })
+    }
+
     /// Try to resolve an ambiguous member through protocol conformances.
     ///
     /// When multiple candidates match the same name+labels, check if a single
@@ -1857,6 +1895,15 @@ impl WorldResolver<'_> {
             }
             let concrete_param_tys = self.param_type_shapes(c);
             if !param_shapes_compatible(&proto_param_tys, &concrete_param_tys) {
+                return None;
+            }
+            // A candidate generic in a parameter of its own (`init[I](from: I)`)
+            // can't witness a requirement whose parameter there is the
+            // protocol's (`Convertible[From].init(from: From)`): every
+            // conformance fixes `From`. Collapsing would pin `I` to a
+            // conformance's `From` and reject the call's real argument.
+            if self.generic_where_protocol_param(protocol, c, &proto_param_tys, &concrete_param_tys)
+            {
                 return None;
             }
         }

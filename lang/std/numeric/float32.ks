@@ -13,6 +13,7 @@ import std.core.(
     Equatable, Comparable, Ordering, Bool,
     Less, LessOrEqual, Greater, GreaterOrEqual,
     Addable, Subtractable, Multipliable, Divisible, Negatable,
+    AddAssign, SubtractAssign, MultiplyAssign, DivideAssign,
     ExpressibleByFloatLiteral, ExpressibleByIntLiteral, Convertible, Defaultable
 )
 import std.text.(String, Str, StringBuilder, Formatter, Formattable, FormatOptions, _writePadded)
@@ -66,6 +67,10 @@ public struct Float32:
     Multipliable,
     Divisible,
     Negatable,
+    AddAssign,
+    SubtractAssign,
+    MultiplyAssign,
+    DivideAssign,
     ExpressibleByFloatLiteral,
     ExpressibleByIntLiteral,
     Defaultable,
@@ -541,6 +546,19 @@ public struct Float32:
     /// IEEE 754 negation — flips the sign bit. `-nan` is still NaN; `-(-0.0)`
     /// is `+0.0`.
     public consuming func negate() -> Float32 { Float32(raw: lang.f32_neg(self.raw)) }
+
+    // ========================================================================
+    // COMPOUND ASSIGNMENT
+    // ========================================================================
+
+    /// `self += other`
+    public mutating func addAssign(other: Float32) { self = self.add(other) }
+    /// `self -= other`
+    public mutating func subtractAssign(other: Float32) { self = self.subtract(other) }
+    /// `self *= other`
+    public mutating func multiplyAssign(other: Float32) { self = self.multiply(other) }
+    /// `self /= other`
+    public mutating func divideAssign(other: Float32) { self = self.divide(other) }
 
     // ========================================================================
     // BASIC MATHEMATICAL FUNCTIONS

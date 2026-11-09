@@ -2,30 +2,6 @@ module Main
 
 import std.streams.(StandardInput, StandardOutput)
 
-// Reads all of standard input straight into one growing buffer.
-// Returns the buffer and how many bytes of it are filled.
-func readAllStdin() -> (Array[UInt8], Int64) {
-    var data = Array[UInt8](repeating: 0, count: 1 << 24);
-    var len: Int64 = 0;
-    var input = StandardInput();
-    loop {
-        if len == data.count {
-            // Double the buffer.
-            var bigger = Array[UInt8](repeating: 0, count: data.count * 2);
-            bigger(0..<len).assign(from: data(0..<len));
-            data = bigger;
-        }
-        let cap = data.count;
-        let n = match input.read(into: data(len..<cap)) {
-            .Ok(n) => n,
-            .Err(_) => 0,
-        };
-        if n == 0 { break }
-        len = len + n;
-    }
-    (data, len)
-}
-
 @main
 func main() {
     // Complement table: IUPAC codes map to their complements, in upper case.
@@ -38,7 +14,10 @@ func main() {
     for i in 0..<fromArr.count { comp(Int64(from: fromArr(i))) = toArr(i); }
     let ct = comp.asSlice();
 
-    var (data, len) = readAllStdin();
+    // All of standard input, read straight into one growing buffer.
+    var data = Array[UInt8](capacity: 1 << 24);
+    let _ = StandardInput().readAll(into: data);
+    let len = data.count;
     let buf = data.asMutableSlice();
     var stdout = StandardOutput();
     // Output goes out in 1 MB pieces through the (already buffered) stdout.

@@ -8,7 +8,7 @@ import std.numeric.(Int64)
 import std.result.(Optional)
 import std.iter.(Iterator, Iterable)
 import std.collections.(Dictionary, DictionaryIterator, DefaultHasher)
-import std.memory.(LiteralSlice)
+import std.memory.(LiteralSlice, Allocator, GlobalAllocator)
 import std.text.(String)
 import std.core.(ExpressibleByArrayLiteral)
 
@@ -47,10 +47,10 @@ struct Unit: Equatable, Cloneable {
 // SET ITERATOR
 // ============================================================================
 
-/// Single-pass forward iterator over the elements of a `Set[T, H]`.
+/// Single-pass forward iterator over the elements of a `Set[T, H, A]`.
 ///
 /// Returned by `Set.iter()`. Wraps the underlying
-/// `DictionaryIterator[T, Unit]` and discards the (unused) value
+/// `DictionaryIterator[T, Unit, A]` and discards the (unused) value
 /// half of each entry, yielding only the key. Iteration order
 /// matches the underlying bucket layout and is unspecified.
 ///
@@ -63,25 +63,25 @@ struct Unit: Equatable, Cloneable {
 ///
 /// # Representation
 ///
-/// Wraps a `DictionaryIterator[T, Unit]`.
+/// Wraps a `DictionaryIterator[T, Unit, A]`.
 ///
 /// # Memory Model
 ///
 /// Value type. Aliases the source set's bucket array; do not retain
 /// across mutations of the set.
-public struct SetIterator[T, H = DefaultHasher]: Iterator where T: Hashable, H: Hasher, H: Defaultable {
+public struct SetIterator[T, H = DefaultHasher, A = GlobalAllocator]: Iterator where T: Hashable, H: Hasher, H: Defaultable, A: Allocator {
     /// Element type yielded by `next()` — `T`.
     type Item = T
 
     /// The underlying entry iterator over the backing dictionary;
     /// only `pair.0` is read.
-    private var dictIter: DictionaryIterator[T, Unit]
+    private var dictIter: DictionaryIterator[T, Unit, A]
 
     /// @name From Dict
     /// Wraps a `DictionaryIterator` to yield only its keys.
     ///
     /// Low-level — prefer `Set.iter()` over calling this directly.
-    public init(dictIter dictIter: DictionaryIterator[T, Unit]) {
+    public init(dictIter dictIter: DictionaryIterator[T, Unit, A]) {
         self.dictIter = dictIter;
     }
 
@@ -115,7 +115,7 @@ public struct SetIterator[T, H = DefaultHasher]: Iterator where T: Hashable, H: 
 /// An unordered hash set of unique elements, parameterized over the
 /// hasher type `H` (defaults to `DefaultHasher`).
 ///
-/// Backed by a `Dictionary[T, Unit, H]` — the dictionary's keys are
+/// Backed by a `Dictionary[T, Unit, H, A]` — the dictionary's keys are
 /// the set's elements, and `Unit` fills the value slot. Inherits
 /// O(1) average-case lookup, insertion, and removal, plus
 /// copy-on-write storage from the underlying dictionary: copying a
@@ -158,7 +158,7 @@ public struct SetIterator[T, H = DefaultHasher]: Iterator where T: Hashable, H: 
 ///
 /// # Representation
 ///
-/// One field, `dict: Dictionary[T, Unit, H]`. All set operations
+/// One field, `dict: Dictionary[T, Unit, H, A]`. All set operations
 /// delegate to the dictionary.
 ///
 /// # Memory Model
@@ -174,103 +174,44 @@ public struct SetIterator[T, H = DefaultHasher]: Iterator where T: Hashable, H: 
 /// - Iteration order is **not** specified.
 /// - Operations marked O(1) are amortized; the underlying dictionary
 ///   resizes geometrically.
-public struct Set[T, H = DefaultHasher]: Iterable, Cloneable where T: Hashable, H: Hasher, H: Defaultable {
+public struct Set[T, H = DefaultHasher, A = GlobalAllocator]: Iterable, Cloneable where T: Hashable, H: Hasher, H: Defaultable, A: Allocator {
     /// `Iterable` element type — `T`.
     type Item = T
     /// Concrete iterator type returned by `iter()`.
-    type TargetIterator = SetIterator[T, H]
+    type TargetIterator = SetIterator[T, H, A]
 
     /// Backing dictionary. Keys are the set's elements; values are
     /// always `Unit()`.
-    var dict: Dictionary[T, Unit, H]
+    var dict: Dictionary[T, Unit, H, A]
 
     // ========================================================================
     // INITIALIZERS
     // ========================================================================
 
-    /// @name Empty
-    /// Creates an empty set with no allocation.
-    ///
-    /// The first insert allocates the smallest dictionary bucket
-    /// array (currently 8 slots). For pre-sized creation, use
-    /// `init(capacity:)`.
+    /// @name With Allocator
+    /// An empty set whose table will come from `allocator`. Nothing is
+    /// allocated until the first insert.
     ///
     /// # Examples
     ///
     /// ```
-    /// let set = Set[String]();
-    /// set.isEmpty;   // true
-    /// set.capacity;  // 0
+    /// var arena = ArenaAllocator();
+    /// var s = Set[Int64, DefaultHasher, ArenaAllocator](allocator: arena);
+    /// s.insert(1);  // allocated from the arena
     /// ```
-    public init() {
-        self.dict = Dictionary();
+    public init(allocator allocator: A) {
+        self.dict = Dictionary[T, Unit, H, A](allocator: allocator);
     }
 
-    /// @name With Capacity
-    /// Creates an empty set sized to hold at least `capacity` elements
-    /// without resizing.
-    ///
-    /// The actual allocated capacity rounds up to the next power of
-    /// two (minimum 8) per the underlying dictionary policy. A
-    /// non-positive `capacity` behaves like `init()`. Panics on
-    /// allocation failure.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// var set = Set[String](capacity: 1000);
-    /// set.capacity;  // 1024
-    /// set.count;     // 0
-    /// ```
-    public init(capacity capacity: Int64) {
-        self.dict = Dictionary(capacity: capacity);
+    /// @name With Capacity And Allocator
+    /// An empty set with room for at least `capacity` elements before
+    /// growing, allocated from `allocator`.
+    public init(capacity capacity: Int64, allocator allocator: A) {
+        self.dict = Dictionary[T, Unit, H, A](capacity: capacity, allocator: allocator);
     }
 
-    /// @name From Iterable
-    /// Creates a set by inserting every element produced by an
-    /// iterable.
-    ///
-    /// Duplicates collapse silently (insert returns `false` for the
-    /// already-present case). Capacity grows geometrically as
-    /// inserts arrive — for sized sources, follow up with
-    /// `shrinkToFit()` if memory matters.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// let arr = [1, 2, 2, 3, 3, 3];
-    /// let set = Set(from: arr);    // {1, 2, 3}
-    /// let r   = Set(from: 1..<4);  // {1, 2, 3}
-    /// ```
-    public init[I](from elements: I) where I: Iterable, I: not Static, I.Item = T {
-        self.dict = Dictionary();
-        var iter = elements.iter();
-        while let .Some(elem) = iter.next() {
-             self.insert(elem);
-        }
-    }
-
-    /// @name Array Literal
-    /// Creates a set from an array literal slice — emitted by the
-    /// compiler when you write `let s: Set = [1, 2, 3]`.
-    ///
-    /// Pre-allocates capacity to the literal's element count (so the
-    /// build avoids resizing) and inserts each element. Duplicates
-    /// collapse.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// // Triggered by the array-literal-with-Set-annotation syntax:
-    /// let nums: Set = [1, 2, 3];
-    /// ```
-    public init(arrayLiteral elements: LiteralSlice[T]) {
-        self.dict = Dictionary(capacity: elements.count);
-        var iter = elements.iter();
-        while let .Some(elem) = iter.next() {
-             self.insert(elem);
-        }
-    }
+    /// The allocator this set's table comes from.
+    public var allocator: A { self.dict.allocator }
 
     // ========================================================================
     // PROPERTIES
@@ -340,7 +281,7 @@ public struct Set[T, H = DefaultHasher]: Iterable, Cloneable where T: Hashable, 
         self.dict.contains(element)
     }
 
-    /// Returns a single-pass `SetIterator[T, H]` over the elements.
+    /// Returns a single-pass `SetIterator[T, H, A]` over the elements.
     ///
     /// Order is unspecified and may change between mutations. The
     /// iterator borrows the underlying buffer; do not mutate the
@@ -352,7 +293,7 @@ public struct Set[T, H = DefaultHasher]: Iterable, Cloneable where T: Hashable, 
     /// for item in set.iter() { print(item); }
     /// let arr = Array(from: set);
     /// ```
-    public func iter() -> SetIterator[T, H] {
+    public func iter() -> SetIterator[T, H, A] {
         SetIterator(dictIter: self.dict.iter())
     }
 
@@ -425,7 +366,7 @@ public struct Set[T, H = DefaultHasher]: Iterable, Cloneable where T: Hashable, 
     /// let b: Set = [2, 3];
     /// a.formUnion(b);  // a == {1, 2, 3}
     /// ```
-    public mutating func formUnion(other: Set[T, H]) {
+    public mutating func formUnion(other: Set[T, H, A]) {
         var otherIter = other.iter();
         while let .Some(elem) = otherIter.next() {
              self.insert(elem);
@@ -538,7 +479,7 @@ public struct Set[T, H = DefaultHasher]: Iterable, Cloneable where T: Hashable, 
     /// let b: Set = [2, 3, 4];
     /// a.formIntersection(b);  // a == {2, 3}
     /// ```
-    public mutating func formIntersection(other: Set[T, H]) {
+    public mutating func formIntersection(other: Set[T, H, A]) {
         var toRemove: Array[T] = [];
         var selfIter = self.iter();
         while let .Some(elem) = selfIter.next() {
@@ -564,7 +505,7 @@ public struct Set[T, H = DefaultHasher]: Iterable, Cloneable where T: Hashable, 
     /// let b: Set = [2, 3, 4];
     /// a.formDifference(b);  // a == {1}
     /// ```
-    public mutating func formDifference(other: Set[T, H]) {
+    public mutating func formDifference(other: Set[T, H, A]) {
         var toRemove: Array[T] = [];
         var selfIter = self.iter();
         while let .Some(elem) = selfIter.next() {
@@ -591,7 +532,7 @@ public struct Set[T, H = DefaultHasher]: Iterable, Cloneable where T: Hashable, 
     /// let b: Set = [2, 3, 4];
     /// a.formSymmetricDifference(b);  // a == {1, 4}
     /// ```
-    public mutating func formSymmetricDifference(other: Set[T, H]) {
+    public mutating func formSymmetricDifference(other: Set[T, H, A]) {
         var toRemove: Array[T] = [];
         var toAdd: Array[T] = [];
         
@@ -634,7 +575,7 @@ public struct Set[T, H = DefaultHasher]: Iterable, Cloneable where T: Hashable, 
     /// let b: Set = [3, 4, 5];
     /// a.union(b);  // {1, 2, 3, 4, 5}
     /// ```
-    public func union(other: Set[T, H]) -> Set[T, H] {
+    public func union(other: Set[T, H, A]) -> Set[T, H, A] {
         var result = self.clone();
         result.formUnion( other);
         result
@@ -654,9 +595,9 @@ public struct Set[T, H = DefaultHasher]: Iterable, Cloneable where T: Hashable, 
     /// let b: Set = [2, 3, 4];
     /// a.intersection(b);  // {2, 3}
     /// ```
-    public func intersection(other: Set[T, H]) -> Set[T, H] {
+    public func intersection(other: Set[T, H, A]) -> Set[T, H, A] {
         let selfCount = self.count;
-        var result = Set[T, H](capacity: selfCount);
+        var result = Set[T, H, A](capacity: selfCount, allocator: self.allocator);
         var selfIter = self.iter();
         while let .Some(elem) = selfIter.next() {
             if other.contains( elem) {
@@ -681,9 +622,9 @@ public struct Set[T, H = DefaultHasher]: Iterable, Cloneable where T: Hashable, 
     /// a.difference(b);  // {1}
     /// b.difference(a);  // {4}
     /// ```
-    public func difference(other: Set[T, H]) -> Set[T, H] {
+    public func difference(other: Set[T, H, A]) -> Set[T, H, A] {
         let selfCount = self.count;
-        var result = Set[T, H](capacity: selfCount);
+        var result = Set[T, H, A](capacity: selfCount, allocator: self.allocator);
         var selfIter = self.iter();
         while let .Some(elem) = selfIter.next() {
             if not other.contains( elem) {
@@ -708,10 +649,10 @@ public struct Set[T, H = DefaultHasher]: Iterable, Cloneable where T: Hashable, 
     /// let b: Set = [2, 3, 4];
     /// a.symmetricDifference(b);  // {1, 4}
     /// ```
-    public func symmetricDifference(other: Set[T, H]) -> Set[T, H] {
+    public func symmetricDifference(other: Set[T, H, A]) -> Set[T, H, A] {
         let selfCount = self.count;
         let otherCount = other.count;
-        var result = Set[T, H](capacity: selfCount + otherCount);
+        var result = Set[T, H, A](capacity: selfCount + otherCount, allocator: self.allocator);
         
         // Add elements in self but not other
         var selfIter = self.iter();
@@ -752,7 +693,7 @@ public struct Set[T, H = DefaultHasher]: Iterable, Cloneable where T: Hashable, 
     /// b.isSubset(of: a);  // false
     /// a.isSubset(of: a);  // true
     /// ```
-    public func isSubset(of other: Set[T, H]) -> Bool {
+    public func isSubset(of other: Set[T, H, A]) -> Bool {
         if self.count > other.count {
             return false
         }
@@ -779,7 +720,7 @@ public struct Set[T, H = DefaultHasher]: Iterable, Cloneable where T: Hashable, 
     /// a.isStrictSubset(of: b);  // true
     /// a.isStrictSubset(of: a);  // false (equal, not strict)
     /// ```
-    public func isStrictSubset(of other: Set[T, H]) -> Bool {
+    public func isStrictSubset(of other: Set[T, H, A]) -> Bool {
         self.isSubset(of: other) and self.count < other.count
     }
 
@@ -796,7 +737,7 @@ public struct Set[T, H = DefaultHasher]: Iterable, Cloneable where T: Hashable, 
     /// a.isSuperset(of: b);  // true
     /// b.isSuperset(of: a);  // false
     /// ```
-    public func isSuperset(of other: Set[T, H]) -> Bool {
+    public func isSuperset(of other: Set[T, H, A]) -> Bool {
         other.isSubset(of: self)
     }
 
@@ -813,7 +754,7 @@ public struct Set[T, H = DefaultHasher]: Iterable, Cloneable where T: Hashable, 
     /// a.isStrictSuperset(of: b);  // true
     /// a.isStrictSuperset(of: a);  // false (equal, not strict)
     /// ```
-    public func isStrictSuperset(of other: Set[T, H]) -> Bool {
+    public func isStrictSuperset(of other: Set[T, H, A]) -> Bool {
         self.isSuperset(of: other) and self.count > other.count
     }
 
@@ -832,7 +773,7 @@ public struct Set[T, H = DefaultHasher]: Iterable, Cloneable where T: Hashable, 
     /// a.isDisjoint(with: b);  // true
     /// a.isDisjoint(with: c);  // false (share 2)
     /// ```
-    public func isDisjoint(with other: Set[T, H]) -> Bool {
+    public func isDisjoint(with other: Set[T, H, A]) -> Bool {
         // Iterate over the smaller set for efficiency
         if self.count > other.count {
             return other.isDisjoint(with: self)
@@ -973,8 +914,8 @@ public struct Set[T, H = DefaultHasher]: Iterable, Cloneable where T: Hashable, 
     /// let set: Set = [1, 2, 3, 4, 5];
     /// let evens = set.filter { (x) in x % 2 == 0 };  // {2, 4}
     /// ```
-    public func filter(where predicate: (T) -> Bool) -> Set[T, H] {
-        var result = Set[T, H]();
+    public func filter(where predicate: (T) -> Bool) -> Set[T, H, A] {
+        var result = Set[T, H, A](allocator: self.allocator);
         var iter = self.iter();
         while let .Some(elem) = iter.next() {
             if predicate(elem) {
@@ -1083,7 +1024,7 @@ public struct Set[T, H = DefaultHasher]: Iterable, Cloneable where T: Hashable, 
     public mutating func reserveCapacity(minimumCapacity: Int64) {
         if self.capacity < minimumCapacity {
             // Create new dictionary with required capacity
-            var newDict = Dictionary[T, Unit, H](capacity: minimumCapacity);
+            var newDict = Dictionary[T, Unit, H, A](capacity: minimumCapacity, allocator: self.allocator);
             var iter = self.iter();
             while let .Some(elem) = iter.next() {
                  newDict.insert(elem, Unit());
@@ -1107,7 +1048,7 @@ public struct Set[T, H = DefaultHasher]: Iterable, Cloneable where T: Hashable, 
     /// ```
     public mutating func shrinkToFit() {
         if self.capacity > self.count {
-            var newDict = Dictionary[T, Unit, H](capacity: self.count);
+            var newDict = Dictionary[T, Unit, H, A](capacity: self.count, allocator: self.allocator);
             var iter = self.iter();
             while let .Some(elem) = iter.next() {
                  newDict.insert(elem, Unit());
@@ -1150,13 +1091,13 @@ public struct Set[T, H = DefaultHasher]: Iterable, Cloneable where T: Hashable, 
     /// @name From Dict
     /// Wraps an existing backing `Dictionary` in a new `Set`. Used by
     /// `clone()` and other helpers.
-    private init(dict dict: Dictionary[T, Unit, H]) {
+    private init(dict dict: Dictionary[T, Unit, H, A]) {
         self.dict = dict;
     }
 
-    /// Returns the backing `Dictionary[T, Unit, H]`. Internal helper
+    /// Returns the backing `Dictionary[T, Unit, H, A]`. Internal helper
     /// for extensions that need direct dictionary access.
-    func getDict() -> Dictionary[T, Unit, H] { self.dict }
+    func getDict() -> Dictionary[T, Unit, H, A] { self.dict }
 
     /// Returns a `Set` sharing the same storage; the deep copy is
     /// deferred until either side mutates.
@@ -1173,8 +1114,95 @@ public struct Set[T, H = DefaultHasher]: Iterable, Cloneable where T: Hashable, 
     /// var b = a.clone();   // O(1), shares storage
     /// b.insert(4);         // b deep-copies here; a is unchanged
     /// ```
-    public func clone() -> Set[T, H] {
+    public func clone() -> Set[T, H, A] {
         Set(dict: self.dict.clone())
+    }
+}
+
+// Constructors that make their own allocator.
+extend Set[T, H, A] where A: Defaultable {
+    /// @name Empty
+    /// Creates an empty set with no allocation.
+    ///
+    /// The first insert allocates the smallest dictionary bucket
+    /// array (currently 8 slots). For pre-sized creation, use
+    /// `init(capacity:)`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let set = Set[String]();
+    /// set.isEmpty;   // true
+    /// set.capacity;  // 0
+    /// ```
+    public init() {
+        self.init(allocator: A());
+    }
+
+    /// @name With Capacity
+    /// Creates an empty set sized to hold at least `capacity` elements
+    /// without resizing.
+    ///
+    /// The actual allocated capacity rounds up to the next power of
+    /// two (minimum 8) per the underlying dictionary policy. A
+    /// non-positive `capacity` behaves like `init()`. Panics on
+    /// allocation failure.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// var set = Set[String](capacity: 1000);
+    /// set.capacity;  // 1024
+    /// set.count;     // 0
+    /// ```
+    public init(capacity capacity: Int64) {
+        self.init(capacity: capacity, allocator: A());
+    }
+
+    /// @name From Iterable
+    /// Creates a set by inserting every element produced by an
+    /// iterable.
+    ///
+    /// Duplicates collapse silently (insert returns `false` for the
+    /// already-present case). Capacity grows geometrically as
+    /// inserts arrive — for sized sources, follow up with
+    /// `shrinkToFit()` if memory matters.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let arr = [1, 2, 2, 3, 3, 3];
+    /// let set = Set(from: arr);    // {1, 2, 3}
+    /// let r   = Set(from: 1..<4);  // {1, 2, 3}
+    /// ```
+    public init[I](from elements: I) where I: Iterable, I: not Static, I.Item = T {
+        self.init(allocator: A());
+        var iter = elements.iter();
+        while let .Some(elem) = iter.next() {
+             self.insert(elem);
+        }
+    }
+
+    /// @name Array Literal
+    /// Creates a set from an array literal slice — emitted by the
+    /// compiler when you write `let s: Set = [1, 2, 3]`.
+    ///
+    /// Pre-allocates capacity to the literal's element count (so the
+    /// build avoids resizing) and inserts each element. Duplicates
+    /// collapse.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// // Triggered by the array-literal-with-Set-annotation syntax:
+    /// let nums: Set = [1, 2, 3];
+    /// ```
+    public init(arrayLiteral elements: LiteralSlice[T]) {
+        self.init(capacity: elements.count, allocator: A());
+        var iter = elements.iter();
+        while let .Some(elem) = iter.next() {
+             self.insert(elem);
+        }
     }
 }
 
@@ -1182,9 +1210,9 @@ public struct Set[T, H = DefaultHasher]: Iterable, Cloneable where T: Hashable, 
 // CONDITIONAL EXTENSIONS - EQUATABLE
 // ============================================================================
 
-/// `Equatable` conformance — every `Set[T, H]` is equatable because
+/// `Equatable` conformance — every `Set[T, H, A]` is equatable because
 /// `T: Hashable` already implies `T: Equatable`.
-extend Set[T, H]: Equatable where T: Hashable, H: Hasher, H: Defaultable {
+extend Set[T, H, A]: Equatable where T: Hashable, H: Hasher, H: Defaultable {
 
     /// `true` when `self` and `other` contain exactly the same
     /// elements.
@@ -1199,7 +1227,7 @@ extend Set[T, H]: Equatable where T: Hashable, H: Hasher, H: Defaultable {
     /// Set([1, 2, 3]).isEqual(to: Set([3, 2, 1]));  // true
     /// Set([1, 2]).isEqual(to: Set([1, 2, 3]));     // false
     /// ```
-    public func isEqual(to other: Set[T, H]) -> Bool {
+    public func isEqual(to other: Set[T, H, A]) -> Bool {
         if self.count != other.count {
             return false
         }
@@ -1213,7 +1241,7 @@ extend Set[T, H]: Equatable where T: Hashable, H: Hasher, H: Defaultable {
 
 /// `Hashable` conformance — order-independent, so two sets with the
 /// same elements hash equal regardless of insertion order.
-extend Set[T, H]: Hashable where T: Hashable, H: Hasher, H: Defaultable {
+extend Set[T, H, A]: Hashable where T: Hashable, H: Hasher, H: Defaultable {
 
     /// Order-independent hash: hashes each element with a fresh hasher
     /// and combines the per-element digests with a commutative
@@ -1253,7 +1281,7 @@ extend Set[T, H]: Hashable where T: Hashable, H: Hasher, H: Defaultable {
 ///
 /// Drives string interpolation. Empty sets render as `"{}"`. Element
 /// order in the output matches iteration order and is unspecified.
-extend Set[T, H]: Formattable where T: Formattable, T: Hashable, H: Hasher, H: Defaultable {
+extend Set[T, H, A]: Formattable where T: Formattable, T: Hashable, H: Hasher, H: Defaultable {
     /// Renders the set as `"{" + elements.joined(", ") + "}"`,
     /// passing `options` to each element's `format`.
     ///
@@ -1262,7 +1290,7 @@ extend Set[T, H]: Formattable where T: Formattable, T: Hashable, H: Hasher, H: D
     /// ```
     /// Set([1, 2, 3]).format();  // "{1, 2, 3}" — order unspecified
     /// Set[Int64]().format();    // "{}"
-    /// "\{Set([1, 2, 3])}";      // "{1, 2, 3}" via interpolation
+    /// "\(Set([1, 2, 3]))";      // "{1, 2, 3}" via interpolation
     /// ```
     public func format(mutating into writer: some Formatter, options: FormatOptions = FormatOptions.default()) {
         writer.append(char: '{');
@@ -1286,7 +1314,7 @@ extend Set[T, H]: Formattable where T: Formattable, T: Hashable, H: Hasher, H: D
 /// Eager-copy variant of `clone()` for callers that don't want to
 /// inherit the COW share with the source. Available when `T` itself
 /// is `Cloneable`.
-extend Set[T, H] where T: Hashable, T: Cloneable, H: Hasher, H: Defaultable {
+extend Set[T, H, A] where T: Hashable, T: Cloneable, H: Hasher, H: Defaultable {
 
     /// Returns a fully-detached copy of the set with no shared
     /// storage; every element is also `clone()`-d.
@@ -1302,8 +1330,8 @@ extend Set[T, H] where T: Hashable, T: Cloneable, H: Hasher, H: Defaultable {
     /// let a: Set = [[1, 2], [3, 4]];  // Set of arrays
     /// let b = a.deepClone();          // fully independent copy
     /// ```
-    public func deepClone() -> Set[T, H] {
-        var result = Set[T, H](capacity: self.count);
+    public func deepClone() -> Set[T, H, A] {
+        var result = Set[T, H, A](capacity: self.count, allocator: self.allocator);
         var iter = self.iter();
         while let .Some(elem) = iter.next() {
              result.insert( elem.clone());
@@ -1317,7 +1345,7 @@ extend Set[T, H] where T: Hashable, T: Cloneable, H: Hasher, H: Defaultable {
 // ============================================================================
 
 /// Ordering-aware operations available when `T: Comparable`.
-extend Set[T, H] where T: Hashable, T: Comparable, H: Hasher, H: Defaultable {
+extend Set[T, H, A] where T: Hashable, T: Comparable, H: Hasher, H: Defaultable {
 
     /// Lends the smallest element, or `None` for an empty set.
     ///
@@ -1388,7 +1416,7 @@ extend Set[T, H] where T: Hashable, T: Comparable, H: Hasher, H: Defaultable {
 
 /// Aggregation available when `T` forms an `Addable` monoid (`T + T = T`
 /// with a `Defaultable` zero).
-extend Set[T, H] where T: Hashable, T: Addable, T.Output = T, T: Defaultable, H: Hasher, H: Defaultable {
+extend Set[T, H, A] where T: Hashable, T: Addable, T.Output = T, T: Defaultable, H: Hasher, H: Defaultable {
 
     /// Returns the sum of every element, starting from `T()` (the
     /// default-constructed zero).
@@ -1418,9 +1446,9 @@ extend Set[T, H] where T: Hashable, T: Addable, T.Output = T, T: Defaultable, H:
 
 // TODO: DirectIterable protocol not yet implemented
 // /// DirectIterable conformance allows using iterator methods directly on sets.
-// extend Set[T, H]: DirectIterable[T] where T: Hashable, H: Hasher, H: Defaultable {
-//     public static func collect[I](from iter: I) -> Set[T, H] where I: Iterator, I.Item = T {
-//         var result = Set[T, H]();
+// extend Set[T, H, A]: DirectIterable[T] where T: Hashable, H: Hasher, H: Defaultable {
+//     public static func collect[I](from iter: I) -> Set[T, H, A] where I: Iterator, I.Item = T {
+//         var result = Set[T, H, A]();
 //         var iterator = iter;
 //         while let .Some(elem) = iterator.next() {
 //              result.insert( elem);
@@ -1445,7 +1473,7 @@ extend Set[T, H] where T: Hashable, T: Addable, T.Output = T, T: Defaultable, H:
 /// let strings: Set[String] = ["a", "b", "c"];
 /// let empty: Set[Int64] = [];
 /// ```
-extend Set[T, H]: ExpressibleByArrayLiteral where T: Hashable, H: Hasher, H: Defaultable {
+extend Set[T, H, A]: ExpressibleByArrayLiteral where T: Hashable, H: Hasher, H: Defaultable, A: Defaultable {
     /// `ExpressibleByArrayLiteral` element type — equals `T`.
     type Element = T
 

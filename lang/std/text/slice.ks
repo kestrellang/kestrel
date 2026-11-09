@@ -8,7 +8,7 @@ import std.result.(Optional)
 import std.memory.(Layout, Pointer, RawPointer)
 import std.collections.(Slice)
 import std.iter.(Iterable)
-import std.text.(Formattable, Formatter, FormatOptions, Char, Grapheme, decodeUtf8, encodeUtf8, String, StringBuilder, StringStorage, CharsIterator, ByteIndex, CharIndex, GraphemeIndex, Str, _bytesEqual, _bytesCompare)
+import std.text.(Formattable, Formatter, FormatOptions, Char, Grapheme, decodeUtf8, encodeUtf8, String, StringBuilder, StringBytes, CharsIterator, ByteIndex, CharIndex, GraphemeIndex, Str, _bytesEqual, _bytesCompare)
 
 // ============================================================================
 // STRING INDEX PROTOCOL
@@ -123,7 +123,8 @@ extend CharIndex {
 ///
 /// # Representation
 ///
-/// `(base: &String, start: Int64, end: Int64)`. `start` and `end` are
+/// `(base: &StringBytes, start: Int64, end: Int64)`: a borrow of the
+/// string's bytes (whatever its allocator). `start` and `end` are
 /// byte offsets into the whole string, not into this slice.
 public struct StringSlice: Str, Equatable, Equal[StringSlice], Equal[String], NotEqual[StringSlice], NotEqual[String], Comparable, Hashable, Cloneable, Formattable, Iterable {
     type Item = Char
@@ -134,7 +135,7 @@ public struct StringSlice: Str, Equatable, Equal[StringSlice], Equal[String], No
     type NotEqual[String].Output = Bool
 
     // Module-internal so `String.asSlice()` can build one (memberwise).
-    let base: &String
+    let base: &StringBytes
     public let start: Int64
     public let end: Int64
 
@@ -168,10 +169,10 @@ public struct StringSlice: Str, Equatable, Equal[StringSlice], Equal[String], No
     /// The string's current byte buffer. Panics when the string got
     /// shorter than this slice since it was made.
     func _rawPtr() -> Pointer[UInt8] {
-        if self.end > self.base._byteCount() {
+        if self.end > self.base.len {
             fatalError("StringSlice: the string is shorter than the slice");
         }
-        self.base._bytePtr()
+        self.base.ptr
     }
 
     /// The current address of this slice's first byte, as the raw pointer

@@ -1029,11 +1029,7 @@ fn analyze_expr(
                 Some(*receiver),
             );
         },
-        HirExpr::ProtocolCall {
-            receiver,
-            args,
-            ..
-        } => {
+        HirExpr::ProtocolCall { receiver, args, .. } => {
             state = analyze_expr(mcx, *receiver, state, false, diags);
             // A `for` loop over an Iterator consumes the iterable itself as
             // its iterator — no `iter()` call (mirrors MIR lowering).

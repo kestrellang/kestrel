@@ -402,8 +402,9 @@ pub fn same_label_witnesses_allowed(
             owners.contains(source) && declares_requirement(ctx, *protocol, name, labels)
         })
         .map(|(protocol, source, ast_args)| {
-            let args =
-                kestrel_hir_lower::conformance_protocol_args(ctx, root, *protocol, *source, ast_args);
+            let args = kestrel_hir_lower::conformance_protocol_args(
+                ctx, root, *protocol, *source, ast_args,
+            );
             (*protocol, *source, args)
         })
         .collect();
@@ -431,20 +432,25 @@ fn declares_requirement(
     labels: &[Option<String>],
 ) -> bool {
     let is_init = name == "init";
-    let kind = if is_init { NodeKind::Initializer } else { NodeKind::Function };
+    let kind = if is_init {
+        NodeKind::Initializer
+    } else {
+        NodeKind::Function
+    };
     children_of_kind(ctx, protocol, kind)
         .into_iter()
         // entity_name (not the Name component) — keys for anonymous
         // functions carry the "<anonymous>" fallback and must still match.
         .filter(|&c| is_init || entity_name(ctx, c) == name)
         .any(|c| {
-            ctx.get::<kestrel_ast_builder::Callable>(c).is_some_and(|callable| {
-                callable
-                    .params
-                    .iter()
-                    .map(|p| p.label.clone())
-                    .eq(labels.iter().cloned())
-            })
+            ctx.get::<kestrel_ast_builder::Callable>(c)
+                .is_some_and(|callable| {
+                    callable
+                        .params
+                        .iter()
+                        .map(|p| p.label.clone())
+                        .eq(labels.iter().cloned())
+                })
         })
 }
 
@@ -473,11 +479,22 @@ pub fn protocol_call_method(cx: &BodyContext<'_>, expr: HirExprId) -> Option<Ent
         return Some(*requirement);
     }
     let labels: Vec<Option<String>> = args.iter().map(|a| a.label.clone()).collect();
-    children_named_of_kind(cx.query, *protocol, method.as_str_or_empty(), NodeKind::Function)
-        .into_iter()
-        .find(|&c| {
-            cx.query
-                .get::<kestrel_ast_builder::Callable>(c)
-                .is_some_and(|callable| callable.params.iter().map(|p| p.label.clone()).eq(labels.iter().cloned()))
-        })
+    children_named_of_kind(
+        cx.query,
+        *protocol,
+        method.as_str_or_empty(),
+        NodeKind::Function,
+    )
+    .into_iter()
+    .find(|&c| {
+        cx.query
+            .get::<kestrel_ast_builder::Callable>(c)
+            .is_some_and(|callable| {
+                callable
+                    .params
+                    .iter()
+                    .map(|p| p.label.clone())
+                    .eq(labels.iter().cloned())
+            })
+    })
 }

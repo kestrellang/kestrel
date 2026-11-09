@@ -7,7 +7,7 @@
 //! to destructure values.
 
 use kestrel_hecs::Entity;
-use kestrel_hir::body::{HirExpr, HirExprId, HirMatchArm, MatchSource};
+use kestrel_hir::body::{HirExpr, HirExprId, HirMatchArm, LET_DESTRUCTURE_TEMP, MatchSource};
 use kestrel_hir::res::LocalId;
 use kestrel_mir::callee::Callee;
 use kestrel_mir::terminator::{SwitchArm, SwitchCase};
@@ -405,7 +405,7 @@ impl OssaBodyCtx<'_, '_> {
             let mutating = ref_mode.unwrap_or(false);
             return self.lower_destructure_in_place(scrutinee_expr, arm, part_moves, mutating);
         }
-        let scrutinee_val = self.lower_expr(scrutinee_expr);
+        let scrutinee_val = self.lower_destructure_scrutinee(scrutinee_expr);
         let scrutinee_ty = self.resolve_expr_type(scrutinee_expr);
         let scrutinee_resolved_ty = self.resolve_expr_resolved_ty(scrutinee_expr);
 
@@ -423,6 +423,25 @@ impl OssaBodyCtx<'_, '_> {
 
         // Lower the arm body (typically `()` for let destructures).
         self.lower_expr(arm.body)
+    }
+
+    /// The scrutinee of an irrefutable destructure. The desugared
+    /// `$let_tmp` of `let (a, b) = f()` is read only here, so it is MOVED:
+    /// a copy would leave the temp holding a second reference until scope
+    /// exit, and a copy-on-write binding (`a: Array`) would then fork its
+    /// whole buffer on the first write.
+    fn lower_destructure_scrutinee(&mut self, scrutinee_expr: HirExprId) -> ValueId {
+        let is_temp = matches!(
+            self.hir.exprs[scrutinee_expr],
+            HirExpr::Local(local, _) if self.hir.locals[local].name == LET_DESTRUCTURE_TEMP
+        );
+        if !is_temp {
+            return self.lower_expr(scrutinee_expr);
+        }
+        if let Some(v) = self.try_move_var_local(scrutinee_expr) {
+            return v;
+        }
+        self.lower_expr_for_consuming(scrutinee_expr)
     }
 
     /// `lower_irrefutable_destructure` for a partial move or `&` binders:

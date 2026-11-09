@@ -272,6 +272,24 @@ fn opt_static(p: &mut Parser<'_>) {
     }
 }
 
+/// `static` and `unsafe`, each at most once, in either order
+/// (`unsafe static func` and `static unsafe func` are the same declaration;
+/// the AST finds each modifier node by kind, not position).
+fn opt_static_unsafe(p: &mut Parser<'_>) {
+    let (mut seen_static, mut seen_unsafe) = (false, false);
+    loop {
+        if !seen_static && p.at(K::Static) {
+            opt_static(p);
+            seen_static = true;
+        } else if !seen_unsafe && p.at(K::Unsafe) {
+            opt_unsafe(p);
+            seen_unsafe = true;
+        } else {
+            return;
+        }
+    }
+}
+
 /// `UnsafeModifier` node, if `unsafe` is next.
 fn opt_unsafe(p: &mut Parser<'_>) {
     if p.at(K::Unsafe) {
@@ -503,13 +521,12 @@ fn deinit_decl(p: &mut Parser<'_>) {
     m.complete(p, K::DeinitDeclaration);
 }
 
-/// `static? unsafe? (mutating|consuming)? func name[T](params) (-> R)? (where …)? body?`
+/// `(static|unsafe)* (mutating|consuming)? func name[T](params) (-> R)? (where …)? body?`
 fn function_decl(p: &mut Parser<'_>) {
     let m = p.start();
     attribute_list(p);
     visibility(p);
-    opt_static(p);
-    opt_unsafe(p);
+    opt_static_unsafe(p);
     if p.at_any(&[K::Mutating, K::Consuming]) {
         p.bump_any();
     }
@@ -536,8 +553,7 @@ fn subscript_decl(p: &mut Parser<'_>) {
     let m = p.start();
     attribute_list(p);
     visibility(p);
-    opt_static(p);
-    opt_unsafe(p);
+    opt_static_unsafe(p);
     stray_modifiers(p);
     p.expect(K::Subscript);
     opt_type_parameter_list(p);
@@ -561,8 +577,7 @@ fn field_decl(p: &mut Parser<'_>) {
     attribute_list(p);
     visibility(p);
     let lazy_first = opt_lazy(p);
-    opt_static(p);
-    opt_unsafe(p);
+    opt_static_unsafe(p);
     stray_modifiers(p);
     if !lazy_first {
         opt_lazy(p);

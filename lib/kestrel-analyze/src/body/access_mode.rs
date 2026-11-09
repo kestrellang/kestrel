@@ -730,5 +730,3 @@ fn mutating_ref_class(cx: &BodyContext<'_>, expr_id: HirExprId) -> MutClass {
         class => class,
     }
 }
-
-
