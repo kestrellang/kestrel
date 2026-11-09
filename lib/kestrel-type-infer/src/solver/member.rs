@@ -692,6 +692,14 @@ pub(super) fn solve_member(
                             span,
                         });
                     }
+                    // An operator's hidden method (`subtract` for `-`) is never
+                    // the user's word: its `Conforms` constraint already reports
+                    // `S !: Subtractable`, so a second "no member 'subtract'"
+                    // only leaks the hook name. Poison the result instead.
+                    if ctx.operator_members.contains_key(&expr) {
+                        ctx.poison(result);
+                        return SolveResult::Solved;
+                    }
                     return SolveResult::Error(member_not_found_error(
                         ctx, receiver, &recv_kind, name, is_call, span,
                     ));
@@ -868,6 +876,13 @@ pub(super) fn solve_member(
     for source in sources {
         match applicability(ctx, source, &recv_kind) {
             kestrel_entail::Tri::Holds => {},
+            // An operator hook (`subtract` for `-`) found on a protocol the
+            // receiver doesn't conform to: the operator's `Conforms` already
+            // reports `S !: Subtractable`, so poison instead of a second error.
+            kestrel_entail::Tri::Fails if ctx.operator_members.contains_key(&expr) => {
+                ctx.poison(result);
+                return SolveResult::Solved;
+            },
             kestrel_entail::Tri::Fails if !crate::solver_entail::has_open_var(ctx, receiver) => {
                 return SolveResult::Error(InferError::NoMember {
                     receiver,
@@ -1467,9 +1482,14 @@ pub(super) fn solve_member(
     );
     // A failable read that a `&mutating` binder writes through lends
     // `Optional[&mutating T]` from the `mutating ref` instead.
-    let mutating_read = ctx.mutating_scrutinee_exprs.contains(&expr);
+    let mutating_read = ctx.mutating_place_reads.contains(&expr);
+    // A read in a mutable-place context (returned as `&mutating T`) takes
+    // the `mutating ref` when there is one, and is typed `&mutating T`.
+    let lends_mutating =
+        mutating_read && place_accessors.is_some_and(|info| info.mutating_ref_accessor.is_some());
     let read_accessor = place_accessors.and_then(|info| match failable {
         true => info.failable_read_accessor(mutating_read),
+        false if lends_mutating => info.mutating_ref_accessor,
         false => info.ref_accessor,
     });
     let ret_tv = match read_accessor {
@@ -1489,7 +1509,14 @@ pub(super) fn solve_member(
                 &subs,
             )
         },
-        Some(_) if wraps_ref => ctx.ref_ty(ret_tv, false),
+        // A computed property resolves as `Field` and reads as plain `T`,
+        // except in a mutable-place context, where it lends `&mutating T`.
+        Some(_) if wraps_ref || lends_mutating => {
+            if lends_mutating {
+                ctx.mutating_lends.insert(expr);
+            }
+            ctx.ref_ty(ret_tv, lends_mutating)
+        },
         _ => ret_tv,
     };
     let args_decay = !matches!(resolution.kind, crate::resolve::MemberKind::Field { .. });

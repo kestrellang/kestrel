@@ -372,7 +372,21 @@ pub(crate) fn self_conformance_error(
     let needs = kestrel_semantics::self_conformance(ctx.query_ctx, protocol, &pinned, ctx.root);
     let shown = describe_tyvar(ctx, tv);
     let proto = entity_name(ctx, protocol);
+    let cloneable = ctx.resolver.builtin(Builtin::Cloneable);
     let why = match needs.blocker {
+        // `clone() -> Self` blocks every `P: Cloneable`, the protocols
+        // `any[CowBox] P` needs: say so plainly, as a known gap.
+        Some(requirement)
+            if cloneable.is_some()
+                && ctx.query_ctx.parent_of(requirement) == cloneable
+                && Some(protocol) != cloneable =>
+        {
+            format!(
+                "'{proto}' refines 'Cloneable', whose 'clone() -> Self' cannot be called \
+                 through an existential yet, so extension methods and generic code over \
+                 '{proto}' are not available on '{shown}'"
+            )
+        },
         Some(requirement) => format!(
             "requirement '{}' cannot be called through an existential",
             entity_name(ctx, requirement)
