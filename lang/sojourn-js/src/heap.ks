@@ -100,6 +100,8 @@ enum ObjectKind {
     /// A Promise (`PromiseState`) and its pending reactions, four values
     /// each: the derived promise, its resolve and reject, and the handler.
     case PromiseObject(state: Int64, result: Value, fulfill: [Value], reject: [Value], handled: Bool)
+    /// A Proxy: its handler is null once revoked.
+    case ProxyObject(target: Value, handler: Value)
 }
 
 /// Generator states.
@@ -170,6 +172,8 @@ struct JSObject {
     /// Arrays only: whether any index lives in the shape, which turns
     /// off the natives' dense fast paths.
     var hasShapeIndices: Bool
+    /// Arrays only: false once `length` is made read-only.
+    var lengthWritable: Bool
     var kind: ObjectKind
     var extensible: Bool
     /// Functions only: whether `new` works on it.
@@ -423,6 +427,10 @@ func traceKind(kind: ObjectKind, mutating m: Marker) {
             m.values.append(home);
             m.values.append(fields);
         },
+        .ProxyObject(target, handler) => {
+            m.values.append(target);
+            m.values.append(handler);
+        },
         .BoundFunction(target, boundThis, args) => {
             m.values.append(target);
             m.values.append(boundThis);
@@ -478,7 +486,7 @@ func traceKind(kind: ObjectKind, mutating m: Marker) {
 
 /// A freed object slot: shape -1.
 func freeObject() -> JSObject {
-    JSObject(shape: -1, slots: [], proto: Value.nullValue, elements: [], length: 0, hasShapeIndices: false, kind: .Ordinary, extensible: false, isConstructor: false)
+    JSObject(shape: -1, slots: [], proto: Value.nullValue, elements: [], length: 0, hasShapeIndices: false, lengthWritable: true, kind: .Ordinary, extensible: false, isConstructor: false)
 }
 
 func isFreeObject(o: JSObject) -> Bool { o.shape == -1 }

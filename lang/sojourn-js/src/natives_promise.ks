@@ -619,7 +619,8 @@ extend VM {
                     self.defineHidden(e.asRef, self.names.message, m);
                 }
                 let a2 = arg(args, 2);
-                if a2.isObject and self.hasProperty(a2, self.names.cause) {
+                let hp11 = try self.hasProperty(a2, self.names.cause);
+                if a2.isObject and hp11 {
                     let cause = try self.getFrom(a2, self.names.cause, a2);
                     self.defineHidden(e.asRef, self.names.cause, cause);
                 }

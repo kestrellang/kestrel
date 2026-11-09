@@ -130,6 +130,7 @@ extend VM {
         let arrayProto = self.newObjectKind(objectProto, .ArrayObject);
         self.intrinsics.arrayProto = arrayProto;
         let arrayCtor = self.constructorFor("Array", .ArrayCtor, 1, arrayProto);
+        self.speciesGetter(arrayCtor);
         self.method(arrayCtor, "isArray", .ArrayIsArray, 1);
         self.method(arrayCtor, "of", .ArrayOf, 0);
         self.method(arrayCtor, "from", .ArrayFrom, 1);
@@ -137,6 +138,7 @@ extend VM {
             ("push", NativeFn.ArrayPush, 1), ("pop", NativeFn.ArrayPop, 0), ("shift", NativeFn.ArrayShift, 0),
             ("unshift", NativeFn.ArrayUnshift, 1), ("slice", NativeFn.ArraySlice, 2), ("splice", NativeFn.ArraySplice, 2),
             ("concat", NativeFn.ArrayConcat, 1), ("join", NativeFn.ArrayJoin, 1), ("toString", NativeFn.ArrayToString, 0),
+            ("toLocaleString", NativeFn.ArrayToLocaleString, 0),
             ("indexOf", NativeFn.ArrayIndexOf, 1), ("lastIndexOf", NativeFn.ArrayLastIndexOf, 1),
             ("includes", NativeFn.ArrayIncludes, 1), ("forEach", NativeFn.ArrayForEach, 1), ("map", NativeFn.ArrayMap, 1),
             ("filter", NativeFn.ArrayFilter, 1), ("reduce", NativeFn.ArrayReduce, 1), ("reduceRight", NativeFn.ArrayReduceRight, 1),
@@ -148,6 +150,13 @@ extend VM {
         ] {
             self.method(arrayProto, name, n, len);
         }
+        // Array.prototype[@@unscopables]: the names `with` mustn't see.
+        let unscopables = self.newObjectKind(Value.nullValue, .Ordinary);
+        for name in ["at", "copyWithin", "entries", "fill", "find", "findIndex", "findLast", "findLastIndex",
+                     "flat", "flatMap", "includes", "keys", "toReversed", "toSorted", "toSpliced", "values"] {
+            self.defineOwn(unscopables.asRef, self.atom(name), Value.bool(true), Attr.all);
+        }
+        self.defineOwn(arrayProto.asRef, symbolKey(WellKnown.unscopables), unscopables, Attr.configurable);
         let values = self.nativeFunction(.ArrayValues, "values", 0, false);
         self.defineHidden(arrayProto.asRef, self.atom("values"), values);
         self.defineHidden(arrayProto.asRef, symbolKey(WellKnown.iterator), values);
@@ -278,10 +287,12 @@ extend VM {
             ("get", NativeFn.ReflectGet, 2), ("set", NativeFn.ReflectSet, 3),
             ("defineProperty", NativeFn.ReflectDefineProperty, 3), ("deleteProperty", NativeFn.ReflectDeleteProperty, 2),
             ("getOwnPropertyDescriptor", NativeFn.ReflectGetOwnPropertyDescriptor, 2),
-            ("isExtensible", NativeFn.ObjectIsExtensible, 1), ("preventExtensions", NativeFn.ReflectPreventExtensions, 1)
+            ("isExtensible", NativeFn.ReflectIsExtensible, 1), ("preventExtensions", NativeFn.ReflectPreventExtensions, 1)
         ] {
             self.method(reflect, name, n, len);
         }
+        let reflectTag = self.str("Reflect");
+        self.defineOwn(reflect.asRef, symbolKey(WellKnown.toStringTag), reflectTag, Attr.configurable);
 
         // Global functions
         for (name, n, len) in [

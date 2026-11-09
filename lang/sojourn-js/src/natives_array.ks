@@ -7,6 +7,7 @@ extend VM {
     mutating func arrayNative(n: NativeFn, this: Value, args: Array[Value], newTarget: Value) -> Result[Optional[Value], Value] {
         let a0 = arg(args, 0);
         let a1 = arg(args, 1);
+        if let .Some(r) = try self.arraySpeciesNative(n, this, args) { return .Ok(.Some(r)); }
         let r: Value = match n {
             .ArrayCtor => {
                 let proto = try self.prototypeFor(newTarget, self.intrinsics.arrayProto);
@@ -20,38 +21,7 @@ extend VM {
                 }
                 a
             },
-            .ArrayIsArray => Value.bool(self.isArray(a0)),
-            .ArrayOf => self.newArray(args),
-            .ArrayFrom => {
-                let mapFn = a1;
-                if not mapFn.isUndefined { let _ = try self.requireCallable(mapFn); }
-                let usesIterator = not (try self.getV(a0, symbolKey(WellKnown.iterator))).isNullish;
-                var items: [Value] = [];
-                if usesIterator {
-                    items = try self.iterateToArray(a0);
-                } else {
-                    let o = try self.toObject(a0);
-                    let len = try self.lengthOf(o);
-                    for i in 0..<len { items.append(try self.getIndex(o, i)); }
-                }
-                let out = self.newArray([]);
-                self.pushRoot(out);
-                for i in 0..<items.count {
-                    var v = items(i);
-                    if not mapFn.isUndefined {
-                        match self.callValue(mapFn, arg(args, 2), [v, Value.int(i)]) {
-                            .Ok(x) => v = x,
-                            .Err(e) => {
-                                self.popRoots(1);
-                                return .Err(e);
-                            }
-                        }
-                    }
-                    self.appendElement(out.asRef, v);
-                }
-                self.popRoots(1);
-                out
-            },
+            .ArrayIsArray => Value.bool(try self.isArrayV(a0)),
             .ArrayPush => {
                 let o = try self.toObject(this);
                 if self.isSimpleArray(o) {
@@ -59,6 +29,7 @@ extend VM {
                     return .Ok(.Some(Value.int(self.heap.objects(o.asRef).length)));
                 }
                 var len = try self.lengthOf(o);
+                if len + args.count > maxSafeLength() { return self.throwType("Pushing \(args.count) elements on an array-like of length \(len) is disallowed"); }
                 for a in args {
                     try self.setIndex(o, len, a);
                     len = len + 1;
@@ -75,7 +46,8 @@ extend VM {
                 }
                 let v = try self.getIndex(o, len - 1);
                 let k = self.internIndex(len - 1);
-                let _ = self.deleteOwn(o.asRef, k);
+                let hp17 = try self.deleteOwn(o.asRef, k);
+                let _ = hp17;
                 try self.setLength(o, len - 1);
                 v
             },
@@ -93,13 +65,16 @@ extend VM {
                     return .Ok(.Some(if first.isEmpty { Value.undefined } else { first }));
                 }
                 for i in 1..<len {
-                    if self.hasIndex(o, i) {
+                    let hp18 = try self.hasIndex(o, i);
+                    if hp18 {
                         try self.setIndex(o, i - 1, try self.getIndex(o, i));
                     } else {
-                        let _ = self.deleteOwn(o.asRef, self.internIndex(i - 1));
+                        let hp19 = try self.deleteOwn(o.asRef, self.internIndex(i - 1));
+                        let _ = hp19;
                     }
                 }
-                let _ = self.deleteOwn(o.asRef, self.internIndex(len - 1));
+                let hp20 = try self.deleteOwn(o.asRef, self.internIndex(len - 1));
+                let _ = hp20;
                 try self.setLength(o, len - 1);
                 first
             },
@@ -112,85 +87,38 @@ extend VM {
                     return .Ok(.Some(Value.int(els.count)));
                 }
                 let len = try self.lengthOf(o);
-                var i = len;
+                if args.count > 0 and len + args.count > maxSafeLength() { return self.throwType("Invalid array length"); }
+                var i = if args.count > 0 { len } else { 0 };
                 while i > 0 {
                     i = i - 1;
-                    if self.hasIndex(o, i) {
+                    let hp21 = try self.hasIndex(o, i);
+                    if hp21 {
                         try self.setIndex(o, i + args.count, try self.getIndex(o, i));
                     } else {
-                        let _ = self.deleteOwn(o.asRef, self.internIndex(i + args.count));
+                        let hp22 = try self.deleteOwn(o.asRef, self.internIndex(i + args.count));
+                        let _ = hp22;
                     }
                 }
                 for j in 0..<args.count { try self.setIndex(o, j, args(j)); }
                 try self.setLength(o, len + args.count);
                 Value.int(len + args.count)
             },
-            .ArraySlice => {
+            .ArrayToLocaleString => {
                 let o = try self.toObject(this);
+                self.pushRoot(o);
                 let len = try self.lengthOf(o);
-                let start = relativeIndex(try self.toIntegerOrInfinity(a0), len);
-                let end = if a1.isUndefined { len } else { relativeIndex(try self.toIntegerOrInfinity(a1), len) };
-                var out: [Value] = [];
-                var i = start;
-                while i < end {
-                    out.append(if self.hasIndex(o, i) { try self.getIndex(o, i) } else { Value.empty });
-                    i = i + 1;
+                var out: Units = [];
+                let key = self.atom("toLocaleString");
+                for k in 0..<len {
+                    if k > 0 { out.append(44); }
+                    let e = try self.getIndex(o, k);
+                    if e.isNullish { continue; }
+                    let f = try self.getV(e, key);
+                    let s = try self.callValue(f, e, []);
+                    for u in try self.toUnits(s) { out.append(u); }
                 }
-                self.newArray(out)
-            },
-            .ArraySplice => {
-                let o = try self.toObject(this);
-                let len = try self.lengthOf(o);
-                let start = relativeIndex(try self.toIntegerOrInfinity(a0), len);
-                var deleteCount: Int64 = 0;
-                if args.count == 1 {
-                    deleteCount = len - start;
-                } else if args.count > 1 {
-                    let dc = try self.toIntegerOrInfinity(a1);
-                    let maxDc = Float64(from: len - start);
-                    let clamped = if dc < 0.0 { 0.0 } else if dc > maxDc { maxDc } else { dc };
-                    deleteCount = clamped.toInt64() ?? 0;
-                }
-                var items: [Value] = [];
-                for i in 2..<args.count { items.append(args(i)); }
-                var all: [Value] = [];
-                for i in 0..<len { all.append(if self.hasIndex(o, i) { try self.getIndex(o, i) } else { Value.empty }); }
-                var removed: [Value] = [];
-                for i in start..<(start + deleteCount) { removed.append(all(i)); }
-                var result: [Value] = [];
-                for i in 0..<start { result.append(all(i)); }
-                for x in items { result.append(x); }
-                for i in (start + deleteCount)..<len { result.append(all(i)); }
-                if self.isSimpleArray(o) {
-                    self.setDense(o.asRef, result);
-                } else {
-                    for i in 0..<result.count { try self.setIndex(o, i, result(i)); }
-                    for i in result.count..<len { let _ = self.deleteOwn(o.asRef, self.internIndex(i)); }
-                    try self.setLength(o, result.count);
-                }
-                self.newArray(removed)
-            },
-            .ArrayConcat => {
-                let o = try self.toObject(this);
-                var out: [Value] = [];
-                var parts: [Value] = [o];
-                for a in args { parts.append(a); }
-                for p in parts {
-                    var spreadable = self.isArray(p);
-                    if p.isObject {
-                        let s = try self.getFrom(p, symbolKey(WellKnown.isConcatSpreadable), p);
-                        if not s.isUndefined { spreadable = self.toBoolean(s); }
-                    }
-                    if spreadable {
-                        let len = try self.lengthOf(p);
-                        for i in 0..<len {
-                            out.append(if self.hasIndex(p, i) { try self.getIndex(p, i) } else { Value.empty });
-                        }
-                    } else {
-                        out.append(p);
-                    }
-                }
-                self.newArray(out)
+                let _ = self.roots.pop();
+                self.newString(out)
             },
             .ArrayJoin => {
                 let o = try self.toObject(this);
@@ -205,10 +133,12 @@ extend VM {
             .ArrayIndexOf => {
                 let o = try self.toObject(this);
                 let len = try self.lengthOf(o);
+                if len == 0 { return .Ok(.Some(if n == NativeFn.ArrayIncludes { Value.bool(false) } else { Value.int(-1) })); }
                 let from = if args.count > 1 { relativeIndex(try self.toIntegerOrInfinity(a1), len) } else { 0 };
                 var found: Int64 = -1;
                 for i in from..<len {
-                    if not self.hasIndex(o, i) { continue; }
+                    let hp25 = try self.hasIndex(o, i);
+                    if not hp25 { continue; }
                     if self.strictEquals(try self.getIndex(o, i), a0) {
                         found = i;
                         break;
@@ -219,6 +149,7 @@ extend VM {
             .ArrayLastIndexOf => {
                 let o = try self.toObject(this);
                 let len = try self.lengthOf(o);
+                if len == 0 { return .Ok(.Some(Value.int(-1))); }
                 var i = len - 1;
                 if args.count > 1 {
                     let f = try self.toIntegerOrInfinity(a1);
@@ -226,7 +157,8 @@ extend VM {
                 }
                 var found: Int64 = -1;
                 while i >= 0 {
-                    if self.hasIndex(o, i) {
+                    let hp26 = try self.hasIndex(o, i);
+                    if hp26 {
                         if self.strictEquals(try self.getIndex(o, i), a0) {
                             found = i;
                             break;
@@ -239,6 +171,7 @@ extend VM {
             .ArrayIncludes => {
                 let o = try self.toObject(this);
                 let len = try self.lengthOf(o);
+                if len == 0 { return .Ok(.Some(if n == NativeFn.ArrayIncludes { Value.bool(false) } else { Value.int(-1) })); }
                 let from = if args.count > 1 { relativeIndex(try self.toIntegerOrInfinity(a1), len) } else { 0 };
                 var found = false;
                 for i in from..<len {
@@ -254,40 +187,13 @@ extend VM {
                 let len = try self.lengthOf(o);
                 let f = try self.requireCallable(a0);
                 for i in 0..<len {
-                    if self.hasIndex(o, i) {
+                    let hp27 = try self.hasIndex(o, i);
+                    if hp27 {
                         let v = try self.getIndex(o, i);
                         let _ = try self.callValue(f, a1, [v, Value.int(i), o]);
                     }
                 }
                 Value.undefined
-            },
-            .ArrayMap or .ArrayFilter => {
-                let o = try self.toObject(this);
-                let len = try self.lengthOf(o);
-                let f = try self.requireCallable(a0);
-                let out = self.newArray([]);
-                self.pushRoot(out);
-                let isMap = n == NativeFn.ArrayMap;
-                if isMap { self.setArrayLength(out.asRef, len); }
-                for i in 0..<len {
-                    if not self.hasIndex(o, i) { continue; }
-                    let step = self.mapStep(o, f, a1, i);
-                    match step {
-                        .Ok((v, x)) => {
-                            if isMap {
-                                self.setElement(out.asRef, i, x);
-                            } else if self.toBoolean(x) {
-                                self.appendElement(out.asRef, v);
-                            }
-                        },
-                        .Err(e) => {
-                            self.popRoots(1);
-                            return .Err(e);
-                        }
-                    }
-                }
-                self.popRoots(1);
-                out
             },
             .ArrayReduce or .ArrayReduceRight => {
                 let o = try self.toObject(this);
@@ -300,13 +206,17 @@ extend VM {
                 if args.count > 1 {
                     acc = a1;
                 } else {
-                    while i >= 0 and i < len and not self.hasIndex(o, i) { i = i + stepBy; }
+                    while i >= 0 and i < len {
+                        if try self.hasIndex(o, i) { break; }
+                        i = i + stepBy;
+                    }
                     if i < 0 or i >= len { return self.throwType("Reduce of empty array with no initial value"); }
                     acc = try self.getIndex(o, i);
                     i = i + stepBy;
                 }
                 while i >= 0 and i < len {
-                    if self.hasIndex(o, i) {
+                    let hp29 = try self.hasIndex(o, i);
+                    if hp29 {
                         let v = try self.getIndex(o, i);
                         self.pushRoot(acc);
                         let next = self.callValue(f, Value.undefined, [acc, v, Value.int(i), o]);
@@ -324,7 +234,8 @@ extend VM {
                 let isSome = n == NativeFn.ArraySome;
                 var result = not isSome;
                 for i in 0..<len {
-                    if not self.hasIndex(o, i) { continue; }
+                    let hp30 = try self.hasIndex(o, i);
+                    if not hp30 { continue; }
                     let v = try self.getIndex(o, i);
                     let t = self.toBoolean(try self.callValue(f, a1, [v, Value.int(i), o]));
                     if isSome and t {
@@ -361,12 +272,16 @@ extend VM {
                 var lo: Int64 = 0;
                 var hi = len - 1;
                 while lo < hi {
-                    let hasLo = self.hasIndex(o, lo);
-                    let hasHi = self.hasIndex(o, hi);
+                    let hp31 = try self.hasIndex(o, lo);
+                    let hasLo = hp31;
+                    let hp32 = try self.hasIndex(o, hi);
+                    let hasHi = hp32;
                     let vl = if hasLo { try self.getIndex(o, lo) } else { Value.undefined };
                     let vh = if hasHi { try self.getIndex(o, hi) } else { Value.undefined };
-                    if hasHi { try self.setIndex(o, lo, vh); } else { let _ = self.deleteOwn(o.asRef, self.internIndex(lo)); }
-                    if hasLo { try self.setIndex(o, hi, vl); } else { let _ = self.deleteOwn(o.asRef, self.internIndex(hi)); }
+                    let hp33 = try self.deleteOwn(o.asRef, self.internIndex(lo));
+                    if hasHi { try self.setIndex(o, lo, vh); } else { let _ = hp33; }
+                    let hp34 = try self.deleteOwn(o.asRef, self.internIndex(hi));
+                    if hasLo { try self.setIndex(o, hi, vl); } else { let _ = hp34; }
                     lo = lo + 1;
                     hi = hi - 1;
                 }
@@ -379,7 +294,8 @@ extend VM {
                 var items: [Value] = [];
                 var holes: Int64 = 0;
                 for i in 0..<len {
-                    if self.hasIndex(o, i) { items.append(try self.getIndex(o, i)); } else { holes = holes + 1; }
+                    let hp35 = try self.hasIndex(o, i);
+                    if hp35 { items.append(try self.getIndex(o, i)); } else { holes = holes + 1; }
                 }
                 let holder = self.newArray(items);
                 self.pushRoot(holder);
@@ -387,7 +303,7 @@ extend VM {
                 self.popRoots(1);
                 let s = try sorted;
                 for i in 0..<s.count { try self.setIndex(o, i, s(i)); }
-                for i in s.count..<len { let _ = self.deleteOwn(o.asRef, self.internIndex(i)); }
+                for i in s.count..<len { let _ = try self.deleteOwn(o.asRef, self.internIndex(i)); }
                 o
             },
             .ArrayFill => {
@@ -413,13 +329,6 @@ extend VM {
                 let k = if rel >= 0.0 { rel } else { Float64(from: len) + rel };
                 if k < 0.0 or k >= Float64(from: len) { Value.undefined } else { try self.getIndex(o, k.toInt64() ?? 0) }
             },
-            .ArrayFlat => {
-                let o = try self.toObject(this);
-                let depth = if a0.isUndefined { 1.0 } else { try self.toIntegerOrInfinity(a0) };
-                var out: [Value] = [];
-                try self.flatten(o, depth, out);
-                self.newArray(out)
-            },
             .ArrayIteratorNext => {
                 if not this.isObject { return self.throwType("next called on incompatible receiver"); }
                 let (target, index, kind) = match self.kindAt(this.asRef) {
@@ -442,13 +351,6 @@ extend VM {
         .Ok(.Some(r))
     }
 
-    /// One map/filter callback call: the element and the callback's result.
-    mutating func mapStep(o: Value, f: Value, this: Value, i: Int64) -> Result[(Value, Value), Value] {
-        let v = try self.getIndex(o, i);
-        let x = try self.callValue(f, this, [v, Value.int(i), o]);
-        .Ok((v, x))
-    }
-
     mutating func arrayIterator(o: Value, kind: Int64) -> Value {
         self.newObjectKind(self.intrinsics.arrayIteratorProto, .ArrayIterator(target: o, index: 0, kind: kind))
     }
@@ -464,20 +366,6 @@ extend VM {
             }
         }
         .Ok(self.newString(out))
-    }
-
-    mutating func flatten(o: Value, depth: Float64, mutating out: Array[Value]) -> Result[(), Value] {
-        let len = try self.lengthOf(o);
-        for i in 0..<len {
-            if not self.hasIndex(o, i) { continue; }
-            let v = try self.getIndex(o, i);
-            if depth > 0.0 and self.isArray(v) {
-                try self.flatten(v, depth - 1.0, out);
-            } else {
-                out.append(v);
-            }
-        }
-        .Ok(())
     }
 
     /// A stable merge sort with the comparator `cmp` (or string order),

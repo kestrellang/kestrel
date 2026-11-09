@@ -70,6 +70,7 @@ enum NativeFn {
     case ArraySplice
     case ArrayConcat
     case ArrayJoin
+    case ArrayToLocaleString
     case ArrayToString
     case ArrayIndexOf
     case ArrayLastIndexOf
@@ -156,6 +157,10 @@ enum NativeFn {
     case AsyncGeneratorFunctionCtor
     // Set methods
     case SetUnion
+    // Proxy
+    case ProxyCtor
+    case ProxyRevocable
+    case ProxyRevoke
     // Typed arrays
     case ArrayBufferCtor
     case ArrayBufferIsView
@@ -313,6 +318,7 @@ enum NativeFn {
     case ReflectDeleteProperty
     case ReflectGetOwnPropertyDescriptor
     case ReflectPreventExtensions
+    case ReflectIsExtensible
     // natives_more.ks
     case ArrayCopyWithin
     case ArrayFlatMap
@@ -537,6 +543,7 @@ extend VM {
         if let .Some(r) = try self.iteratorNative(n, callee, this, args, newTarget) { return .Ok(r); }
         if let .Some(r) = try self.setMethodsNative(n, this, args) { return .Ok(r); }
         if let .Some(r) = try self.typedArrayNative(n, callee, this, args, newTarget) { return .Ok(r); }
+        if let .Some(r) = try self.proxyNative(n, callee, args, newTarget) { return .Ok(r); }
         self.throwType("built-in not implemented")
     }
 
@@ -579,10 +586,10 @@ extend VM {
         self.setV(o, k, v, true)
     }
 
-    mutating func hasIndex(o: Value, i: Int64) -> Bool {
+    mutating func hasIndex(o: Value, i: Int64) -> Result[Bool, Value] {
         if let .ArrayObject = self.kindAt(o.asRef) {
             if i < self.heap.objects(o.asRef).elements.count {
-                if not self.heap.objects(o.asRef).elements(i).isEmpty { return true; }
+                if not self.heap.objects(o.asRef).elements(i).isEmpty { return .Ok(true); }
             }
         }
         let k = self.internIndex(i);

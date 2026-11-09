@@ -62,6 +62,7 @@ extend VM {
         self.setupIterator();
         self.setupSetMethods();
         self.setupTypedArrays();
+        self.setupProxy();
         let objectCtor = self.ownValue(g.asRef, self.atom("Object"));
         self.method(objectCtor, "groupBy", .ObjectGroupBy, 2);
 
@@ -188,37 +189,19 @@ extend VM {
                     to = to + count - 1;
                 }
                 while count > 0 {
-                    if self.hasIndex(o, from) {
+                    let hp1 = try self.hasIndex(o, from);
+                    if hp1 {
                         try self.setIndex(o, to, try self.getIndex(o, from));
                     } else {
                         let k = self.internIndex(to);
-                        if not self.deleteOwn(o.asRef, k) { return self.throwType("Cannot delete property"); }
+                        let hp2 = try self.deleteOwn(o.asRef, k);
+                        if not hp2 { return self.throwType("Cannot delete property"); }
                     }
                     from = from + step;
                     to = to + step;
                     count = count - 1;
                 }
                 o
-            },
-            .ArrayFlatMap => {
-                let o = try self.toObject(this);
-                let len = try self.lengthOf(o);
-                let f = try self.requireCallable(a0);
-                var out: [Value] = [];
-                let holder = self.newArray([]);
-                self.pushRoot(holder);
-                for i in 0..<len {
-                    if not self.hasIndex(o, i) { continue; }
-                    let v = try self.getIndex(o, i);
-                    let mapped = try self.callValue(f, a1, [v, Value.int(i), o]);
-                    if self.isArray(mapped) {
-                        try self.flatten(mapped, 0.0, out);
-                    } else {
-                        out.append(mapped);
-                    }
-                    self.appendElement(holder.asRef, mapped);
-                }
-                self.newArray(out)
             },
             .ArrayToReversed => {
                 let o = try self.toObject(this);
@@ -297,15 +280,14 @@ extend VM {
                 let isGetter = n == NativeFn.ObjectLookupGetter;
                 var found = Value.undefined;
                 while o.isObject {
-                    if let .Some(p) = self.ownProperty(o.asRef, key) {
-                        if p.attrs & Attr.accessor != 0 {
-                            if let .AccessorPair(g, s) = self.kindAt(p.value.asRef) {
-                                found = if isGetter { g } else { s };
-                            }
+                    let desc = try self.getOwnPropertyV(o, key);
+                    if let .Some(p) = desc {
+                        if isAccessorDescriptor(p) {
+                            found = if isGetter { p.getter ?? Value.undefined } else { p.setter ?? Value.undefined };
                         }
                         break;
                     }
-                    o = self.heap.objects(o.asRef).proto;
+                    o = try self.getProto(o);
                 }
                 found
             },

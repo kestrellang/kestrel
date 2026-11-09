@@ -24,7 +24,7 @@ extend VM {
     // ------------------------------------------------------------------
 
     mutating func newObjectKind(proto: Value, kind: ObjectKind) -> Value {
-        let o = JSObject(shape: 0, slots: [], proto: proto, elements: [], length: 0, hasShapeIndices: false, kind: kind, extensible: true, isConstructor: false);
+        let o = JSObject(shape: 0, slots: [], proto: proto, elements: [], length: 0, hasShapeIndices: false, lengthWritable: true, kind: kind, extensible: true, isConstructor: false);
         Value.object(self.heap.allocObject(o))
     }
 
@@ -53,7 +53,7 @@ extend VM {
     func isSimpleArray(v: Value) -> Bool {
         if not self.isArray(v) { return false; }
         let r = v.asRef;
-        self.heap.objects(r).extensible and not self.heap.objects(r).hasShapeIndices
+        self.heap.objects(r).extensible and not self.heap.objects(r).hasShapeIndices and self.heap.objects(r).lengthWritable
             and self.heap.objects(r).elements.count == self.heap.objects(r).length
     }
 
@@ -71,6 +71,15 @@ extend VM {
         }
     }
 
+    /// IsArray, which throws for a revoked proxy.
+    mutating func isArrayV(v: Value) -> Result[Bool, Value] {
+        if self.isProxy(v) {
+            let (t, _) = try self.proxyParts(v);
+            return self.isArrayV(t);
+        }
+        .Ok(self.isArray(v))
+    }
+
     func isCallable(v: Value) -> Bool {
         if not v.isObject { return false; }
         match self.kindAt(v.asRef) {
@@ -78,6 +87,7 @@ extend VM {
             .NativeFunction(_) => true,
             .NativeClosure(_, _) => true,
             .BoundFunction(_, _, _) => true,
+            .ProxyObject(t, _) => self.isCallable(t),
             _ => false
         }
     }
@@ -190,7 +200,7 @@ extend VM {
                     // shape under their keys.
                 }
                 if self.isLengthKey(key) {
-                    return .Some(PropertyRecord(value: Value.int(o.length), attrs: Attr.writable));
+                    return .Some(PropertyRecord(value: Value.int(o.length), attrs: if o.lengthWritable { Attr.writable } else { 0 }));
                 }
             },
             .StringBox(s) => {
@@ -294,6 +304,15 @@ extend VM {
         if s >= 0 { self.heap.objects(r).slots(s) = value; }
     }
 
+    /// False for an index at or past an array's read-only length.
+    func canAddIndex(r: Ref, key: Key) -> Bool {
+        if let .ArrayObject = self.kindAt(r) {
+            let i = self.indexOfKey(key);
+            if i >= 0 and i >= self.heap.objects(r).length and not self.heap.objects(r).lengthWritable { return false; }
+        }
+        true
+    }
+
     /// Whether index `i` belongs in the dense elements: an array grows
     /// them by at most a million holes at a time.
     func isDenseIndex(r: Ref, i: Int64) -> Bool {
@@ -322,7 +341,12 @@ extend VM {
     }
 
     /// [[Delete]]: false for a non-configurable property.
-    mutating func deleteOwn(r: Ref, key: Key) -> Bool {
+    mutating func deleteOwn(r: Ref, key: Key) -> Result[Bool, Value] {
+        if let .ProxyObject(_, _) = self.kindAt(r) { return self.proxyDelete(Value.object(r), key); }
+        .Ok(self.deleteOrdinary(r, key))
+    }
+
+    mutating func deleteOrdinary(r: Ref, key: Key) -> Bool {
         let o = self.heap.objects(r);
         match o.kind {
             .ArrayObject => {
@@ -351,7 +375,12 @@ extend VM {
 
     /// [[OwnPropertyKeys]]: array indices ascending, then strings in
     /// creation order, then symbols.
-    mutating func ownKeys(r: Ref) -> Array[Key] {
+    mutating func ownKeys(r: Ref) -> Result[Array[Key], Value] {
+        if let .ProxyObject(_, _) = self.kindAt(r) { return self.proxyOwnKeys(Value.object(r)); }
+        .Ok(self.ordinaryOwnKeys(r))
+    }
+
+    mutating func ordinaryOwnKeys(r: Ref) -> Array[Key] {
         let o = self.heap.objects(r);
         var indices: [Int64] = [];
         var out: [Key] = [];
@@ -402,6 +431,7 @@ extend VM {
         var cur = obj;
         while cur.isObject {
             let r = cur.asRef;
+            if self.isProxy(cur) { return self.proxyGet(cur, key, receiver); }
             // A typed array's numeric keys never reach its prototype.
             if let .Some((d, n)) = self.taKeyIndex(r, key) {
                 if not self.taValidIndex(d, n) { return .Ok(Value.undefined); }
@@ -452,9 +482,19 @@ extend VM {
 
     /// OrdinarySet, returning whether it succeeded.
     mutating func ordinarySet(obj: Value, key: Key, value: Value, receiver: Value) -> Result[Bool, Value] {
+        // An array's own `length` goes through ArraySetLength, which
+        // validates the value and respects non-configurable elements.
+        if obj.same(receiver) and self.isLengthKey(key) {
+            if let .ArrayObject = self.kindAt(obj.asRef) {
+                if not self.heap.objects(obj.asRef).lengthWritable { return .Ok(false); }
+                let d = Descriptor(value: .Some(value), writable: .None, getter: .None, setter: .None, enumerable: .None, configurable: .None);
+                return self.arraySetLength(obj.asRef, d);
+            }
+        }
         var cur = obj;
         while cur.isObject {
             let r = cur.asRef;
+            if self.isProxy(cur) { return self.proxySet(cur, key, value, receiver); }
             // TypedArray [[Set]]: write the element when the typed array is
             // the receiver; an invalid index silently does nothing.
             if let .Some((d, n)) = self.taKeyIndex(r, key) {
@@ -482,6 +522,7 @@ extend VM {
             cur = self.heap.objects(r).proto;
         }
         if not receiver.isObject { return .Ok(false); }
+        if self.isProxy(receiver) { return self.setOnReceiver(receiver, key, value); }
         let rr = receiver.asRef;
         // A typed array receiver defines elements through its own [[DefineOwnProperty]].
         if let .Some((d, n)) = self.taKeyIndex(rr, key) {
@@ -495,6 +536,7 @@ extend VM {
             return .Ok(true);
         }
         if not self.heap.objects(rr).extensible { return .Ok(false); }
+        if not self.canAddIndex(rr, key) { return .Ok(false); }
         self.defineOwn(rr, key, value, Attr.all);
         .Ok(true)
     }
@@ -511,14 +553,28 @@ extend VM {
         self.setOn(self.heap.objects(proto.asRef).proto, key, value, v, strict)
     }
 
-    mutating func hasProperty(obj: Value, key: Key) -> Bool {
+    /// [[HasProperty]].
+    mutating func hasProperty(obj: Value, key: Key) -> Result[Bool, Value] {
         var cur = obj;
         while cur.isObject {
-            if let .Some((d, n)) = self.taKeyIndex(cur.asRef, key) { return self.taValidIndex(d, n); }
-            if self.hasOwn(cur.asRef, key) { return true; }
+            if self.isProxy(cur) { return self.proxyHas(cur, key); }
+            if let .Some((d, n)) = self.taKeyIndex(cur.asRef, key) { return .Ok(self.taValidIndex(d, n)); }
+            if self.hasOwn(cur.asRef, key) { return .Ok(true); }
             cur = self.heap.objects(cur.asRef).proto;
         }
-        false
+        .Ok(false)
+    }
+
+    /// OrdinarySetWithOwnDescriptor's last steps, for a receiver that may
+    /// be exotic: update its own data property or create one.
+    mutating func setOnReceiver(receiver: Value, key: Key, value: Value) -> Result[Bool, Value] {
+        let none = Descriptor(value: .Some(value), writable: .None, getter: .None, setter: .None, enumerable: .None, configurable: .None);
+        if let .Some(d) = try self.getOwnPropertyV(receiver, key) {
+            if isAccessorDescriptor(d) or not (d.writable ?? false) { return .Ok(false); }
+            return self.defineProperty(receiver.asRef, key, none);
+        }
+        let full = Descriptor(value: .Some(value), writable: .Some(true), getter: .None, setter: .None, enumerable: .Some(true), configurable: .Some(true));
+        self.defineProperty(receiver.asRef, key, full)
     }
 
     /// Defines `name`, `length` and the like on a function: not

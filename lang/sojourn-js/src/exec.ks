@@ -212,7 +212,8 @@ extend VM {
             .DeleteElem(dst, obj, key, strict) => {
                 let o = try self.toObject(self.reg(fi, obj));
                 let pk = try self.toKey(self.reg(fi, key));
-                let ok = self.deleteOwn(o.asRef, pk);
+                let hp13 = try self.deleteOwn(o.asRef, pk);
+                let ok = hp13;
                 if not ok and strict { return self.throwType("Cannot delete property '\(self.keyText(pk))'"); }
                 self.setReg(fi, dst, Value.bool(ok));
             },
@@ -422,7 +423,8 @@ extend VM {
             },
             .ForInNext(dst, iter, done) => {
                 let it = self.reg(fi, iter);
-                match self.forInNext(it) {
+                let next = try self.forInNext(it);
+                match next {
                     .Some(k) => self.setReg(fi, dst, k),
                     .None => self.frames(fi).pc = done
                 }
@@ -467,7 +469,8 @@ extend VM {
             if v.isEmpty { return .Err(self.tdzError(name)); }
             return .Ok(v);
         }
-        if self.hasProperty(self.global, name) { return self.getFrom(self.global, name, self.global); }
+        let hp14 = try self.hasProperty(self.global, name);
+        if hp14 { return self.getFrom(self.global, name, self.global); }
         if forTypeof { return .Ok(Value.undefined); }
         .Err(self.makeError(.ReferenceError, "\(self.keyText(name)) is not defined"))
     }
@@ -475,7 +478,8 @@ extend VM {
     /// HasBinding for a `with` object: `name` is on `obj` and its
     /// @@unscopables doesn't list it.
     mutating func withHas(obj: Value, name: Key) -> Result[Bool, Value] {
-        if not self.hasProperty(obj, name) { return .Ok(false); }
+        let hp15 = try self.hasProperty(obj, name);
+        if not hp15 { return .Ok(false); }
         let u = try self.getV(obj, symbolKey(WellKnown.unscopables));
         if not u.isObject { return .Ok(true); }
         let blocked = try self.getV(u, name);
@@ -489,7 +493,8 @@ extend VM {
             self.heap.envs(self.globalEnv).slots(slot) = v;
             return .Ok(());
         }
-        if strict and not self.hasProperty(self.global, name) {
+        let hp16 = try self.hasProperty(self.global, name);
+        if strict and not hp16 {
             return .Err(self.makeError(.ReferenceError, "\(self.keyText(name)) is not defined"));
         }
         self.setOn(self.global, name, v, self.global, strict)
@@ -539,10 +544,12 @@ extend VM {
     mutating func copyDataProperties(target: Value, src: Value, excluded: Array[Key]) -> Result[(), Value] {
         if src.isNullish { return .Ok(()); }
         let from = try self.toObject(src);
-        for k in self.ownKeys(from.asRef) {
+        let ownKeyList11 = try self.ownKeys(from.asRef);
+        for k in ownKeyList11 {
             if excluded.contains(k) { continue; }
-            if let .Some(p) = self.ownProperty(from.asRef, k) {
-                if p.attrs & Attr.enumerable == 0 { continue; }
+            let desc = try self.getOwnPropertyV(from, k);
+            if let .Some(p) = desc {
+                if not (p.enumerable ?? false) { continue; }
                 let v = try self.getFrom(from, k, from);
                 self.defineOwn(target.asRef, k, v, Attr.all);
             }

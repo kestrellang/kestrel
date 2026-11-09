@@ -87,14 +87,16 @@ extend VM {
             var seen: [Key] = [];
             var cur = o;
             while cur.isObject {
-                for k in self.ownKeys(cur.asRef) {
+                let ownKeyList12 = try self.ownKeys(cur.asRef);
+                for k in ownKeyList12 {
                     if keyIsSymbol(k) or seen.contains(k) { continue; }
                     seen.append(k);
-                    if let .Some(p) = self.ownProperty(cur.asRef, k) {
-                        if p.attrs & Attr.enumerable != 0 { keys.append(self.atomValues(k)); }
+                    let desc = try self.getOwnPropertyV(cur, k);
+                    if let .Some(d) = desc {
+                        if d.enumerable ?? false { keys.append(self.atomValues(k)); }
                     }
                 }
-                cur = self.heap.objects(cur.asRef).proto;
+                cur = try self.getProto(cur);
             }
             return .Ok(self.newObjectKind(Value.nullValue, .KeyIterator(object: o, keys: keys, index: 0)));
         }
@@ -102,7 +104,7 @@ extend VM {
     }
 
     /// The next key still present, or None.
-    mutating func forInNext(it: Value) -> Optional[Value] {
+    mutating func forInNext(it: Value) -> Result[Optional[Value], Value] {
         while true {
             let (obj, keys, index) = match self.kindAt(it.asRef) {
                 .KeyIterator(o, k, i) => (o, k, i),
@@ -113,9 +115,9 @@ extend VM {
             let k = keys(index);
             let key = self.atomOfUnits(self.units(k));
             // Keys deleted during the loop are skipped.
-            if self.hasProperty(obj, key) { return .Some(k); }
+            if try self.hasProperty(obj, key) { return .Ok(.Some(k)); }
         }
-        .None
+        .Ok(.None)
     }
 
     /// `{ value, done }`.

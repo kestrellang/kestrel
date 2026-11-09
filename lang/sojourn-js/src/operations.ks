@@ -227,7 +227,8 @@ extend VM {
                 if not b.isObject { return self.throwType("Cannot use 'in' operator to search for a key in a non-object"); }
                 let k = try self.toKey(a);
                 if self.isPrivateKey(k) { return .Ok(Value.bool(self.hasOwn(b.asRef, k))); }
-                return .Ok(Value.bool(self.hasProperty(b, k)));
+                let hp12 = try self.hasProperty(b, k);
+                return .Ok(Value.bool(hp12));
             },
             .InstanceOf => return .Ok(Value.bool(try self.instanceOf(a, b))),
             _ => {}
@@ -256,10 +257,10 @@ extend VM {
         if not v.isObject { return .Ok(false); }
         let proto = try self.getFrom(c, self.names.prototype, c);
         if not proto.isObject { return self.throwType("Function has non-object prototype in instanceof check"); }
-        var cur = self.heap.objects(v.asRef).proto;
+        var cur = try self.getProto(v);
         while cur.isObject {
             if cur.same(proto) { return .Ok(true); }
-            cur = self.heap.objects(cur.asRef).proto;
+            cur = try self.getProto(cur);
         }
         .Ok(false)
     }

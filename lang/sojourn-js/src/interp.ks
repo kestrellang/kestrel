@@ -140,6 +140,7 @@ extend VM {
                 for a in args { all.append(a); }
                 return self.callValue(target, boundThis, all);
             },
+            .ProxyObject(_, _) => return self.proxyCall(f, this, args),
             _ => return self.throwType("not a function")
         }
     }
@@ -162,6 +163,7 @@ extend VM {
                 let nt = if newTarget.same(f) { target } else { newTarget };
                 return self.construct(target, all, nt);
             },
+            .ProxyObject(_, _) => return self.proxyConstruct(f, args, newTarget),
             _ => return self.throwType("not a constructor")
         }
     }

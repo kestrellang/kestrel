@@ -117,7 +117,8 @@ extend VM {
                     let m = try self.toStringValue(a0);
                     self.defineHidden(e.asRef, self.names.message, m);
                 }
-                if a1.isObject and self.hasProperty(a1, self.names.cause) {
+                let hp37 = try self.hasProperty(a1, self.names.cause);
+                if a1.isObject and hp37 {
                     let c = try self.getFrom(a1, self.names.cause, a1);
                     self.defineHidden(e.asRef, self.names.cause, c);
                 }
@@ -214,24 +215,27 @@ extend VM {
             .ReflectOwnKeys => {
                 if not a0.isObject { return self.throwType("Reflect.ownKeys called on non-object"); }
                 var out: [Value] = [];
-                for k in self.ownKeys(a0.asRef) { out.append(self.keyValue(k)); }
+                let keys = try self.ownKeys(a0.asRef);
+                for k in keys { out.append(self.keyValue(k)); }
                 self.newArray(out)
             },
             .ReflectGetPrototypeOf => {
                 if not a0.isObject { return self.throwType("Reflect.getPrototypeOf called on non-object"); }
-                self.heap.objects(a0.asRef).proto
+                try self.getProto(a0)
             },
             .ReflectSetPrototypeOf => {
                 if not a0.isObject { return self.throwType("Reflect.setPrototypeOf called on non-object"); }
                 if not a1.isObject and not a1.isNull { return self.throwType("Object prototype may only be an Object or null"); }
-                Value.bool(try self.setPrototype(a0, a1))
+                Value.bool(try self.setProtoV(a0, a1))
             },
             .ReflectHas => {
                 if not a0.isObject { return self.throwType("Reflect.has called on non-object"); }
                 let k = try self.toKey(a1);
-                Value.bool(self.hasProperty(a0, k))
+                let hp38 = try self.hasProperty(a0, k);
+                Value.bool(hp38)
             },
             .ReflectApply => {
+                if not arg(args, 2).isObject { return self.throwType("CreateListFromArrayLike called on non-object"); }
                 let list = try self.argumentList(arg(args, 2));
                 try self.callValue(try self.requireCallable(a0), a1, list)
             },
@@ -239,6 +243,7 @@ extend VM {
                 if not self.isConstructor(a0) { return self.throwType("\(self.describe(a0)) is not a constructor"); }
                 let nt = if args.count > 2 { arg(args, 2) } else { a0 };
                 if not self.isConstructor(nt) { return self.throwType("\(self.describe(nt)) is not a constructor"); }
+                if not a1.isObject { return self.throwType("CreateListFromArrayLike called on non-object"); }
                 let list = try self.argumentList(a1);
                 try self.construct(a0, list, nt)
             },
@@ -263,17 +268,21 @@ extend VM {
             .ReflectDeleteProperty => {
                 if not a0.isObject { return self.throwType("Reflect.deleteProperty called on non-object"); }
                 let k = try self.toKey(a1);
-                Value.bool(self.deleteOwn(a0.asRef, k))
+                let hp39 = try self.deleteOwn(a0.asRef, k);
+                Value.bool(hp39)
             },
             .ReflectGetOwnPropertyDescriptor => {
                 if not a0.isObject { return self.throwType("Reflect.getOwnPropertyDescriptor called on non-object"); }
                 let k = try self.toKey(a1);
-                self.fromProperty(a0.asRef, k)
+                try self.ownDescriptorObject(a0, k)
+            },
+            .ReflectIsExtensible => {
+                if not a0.isObject { return self.throwType("Reflect.isExtensible called on non-object"); }
+                Value.bool(try self.isExtensibleV(a0))
             },
             .ReflectPreventExtensions => {
                 if not a0.isObject { return self.throwType("Reflect.preventExtensions called on non-object"); }
-                self.heap.objects(a0.asRef).extensible = false;
-                Value.bool(true)
+                Value.bool(try self.preventExtensionsV(a0))
             },
             _ => return .Ok(.None)
         };

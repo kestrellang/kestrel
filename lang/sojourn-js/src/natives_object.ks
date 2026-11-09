@@ -31,16 +31,22 @@ extend VM {
     mutating func toDescriptor(v: Value) -> Result[Descriptor, Value] {
         if not v.isObject { return self.throwType("Property description must be an object"); }
         var d = Descriptor(value: .None, writable: .None, getter: .None, setter: .None, enumerable: .None, configurable: .None);
-        if self.hasProperty(v, self.names.enumerable) { d.enumerable = .Some(self.toBoolean(try self.getFrom(v, self.names.enumerable, v))); }
-        if self.hasProperty(v, self.names.configurable) { d.configurable = .Some(self.toBoolean(try self.getFrom(v, self.names.configurable, v))); }
-        if self.hasProperty(v, self.names.value) { d.value = .Some(try self.getFrom(v, self.names.value, v)); }
-        if self.hasProperty(v, self.names.writable) { d.writable = .Some(self.toBoolean(try self.getFrom(v, self.names.writable, v))); }
-        if self.hasProperty(v, self.names.getKey) {
+        let hp4 = try self.hasProperty(v, self.names.enumerable);
+        if hp4 { d.enumerable = .Some(self.toBoolean(try self.getFrom(v, self.names.enumerable, v))); }
+        let hp5 = try self.hasProperty(v, self.names.configurable);
+        if hp5 { d.configurable = .Some(self.toBoolean(try self.getFrom(v, self.names.configurable, v))); }
+        let hp6 = try self.hasProperty(v, self.names.value);
+        if hp6 { d.value = .Some(try self.getFrom(v, self.names.value, v)); }
+        let hp7 = try self.hasProperty(v, self.names.writable);
+        if hp7 { d.writable = .Some(self.toBoolean(try self.getFrom(v, self.names.writable, v))); }
+        let hp8 = try self.hasProperty(v, self.names.getKey);
+        if hp8 {
             let g = try self.getFrom(v, self.names.getKey, v);
             if not g.isUndefined and not self.isCallable(g) { return self.throwType("Getter must be a function"); }
             d.getter = .Some(g);
         }
-        if self.hasProperty(v, self.names.setKey) {
+        let hp9 = try self.hasProperty(v, self.names.setKey);
+        if hp9 {
             let s = try self.getFrom(v, self.names.setKey, v);
             if not s.isUndefined and not self.isCallable(s) { return self.throwType("Setter must be a function"); }
             d.setter = .Some(s);
@@ -73,9 +79,56 @@ extend VM {
         o
     }
 
+    /// ArraySetLength: `length` is writable, non-enumerable and
+    /// non-configurable; shrinking deletes elements from the end and stops
+    /// at a non-configurable one.
+    mutating func arraySetLength(r: Ref, d: Descriptor) -> Result[Bool, Value] {
+        // The new length is converted (ToUint32, then ToNumber, as the
+        // spec has it) before the descriptor is validated.
+        var len: Int64 = 0;
+        if let .Some(v) = d.value {
+            len = toUint32(try self.toNumber(v));
+            let n = try self.toNumber(v);
+            if Float64(from: len) != n { return .Err(self.makeError(.RangeError, "Invalid array length")); }
+        }
+        if d.configurable ?? false { return .Ok(false); }
+        if d.enumerable ?? false { return .Ok(false); }
+        if isAccessorDescriptor(d) { return .Ok(false); }
+        let writable = self.heap.objects(r).lengthWritable;
+        if d.value.isNone {
+            if (d.writable ?? false) and not writable { return .Ok(false); }
+            if d.writable == .Some(false) { self.heap.objects(r).lengthWritable = false; }
+            return .Ok(true);
+        }
+        let old = self.heap.objects(r).length;
+        if not writable {
+            if d.writable ?? false { return .Ok(false); }
+            return .Ok(len == old);
+        }
+        let keepWritable = d.writable != .Some(false);
+        if len >= old {
+            self.setArrayLength(r, len);
+            if not keepWritable { self.heap.objects(r).lengthWritable = false; }
+            return .Ok(true);
+        }
+        // Stop at the highest non-configurable element at or past `len`.
+        var floor = len;
+        for k in self.shapes(self.heap.objects(r).shape).keys {
+            let i = self.indexOfKey(k);
+            if i >= floor {
+                let slot = self.shapeSlot(self.heap.objects(r).shape, k);
+                if self.shapes(self.heap.objects(r).shape).attrs(slot) & Attr.configurable == 0 { floor = i + 1; }
+            }
+        }
+        self.setArrayLength(r, floor);
+        if not keepWritable { self.heap.objects(r).lengthWritable = false; }
+        .Ok(floor == len)
+    }
+
     /// ValidateAndApplyPropertyDescriptor: defines or changes `key` on
     /// `r`, returning false when the change isn't allowed.
     mutating func defineProperty(r: Ref, key: Key, d: Descriptor) -> Result[Bool, Value] {
+        if let .ProxyObject(_, _) = self.kindAt(r) { return self.proxyDefine(Value.object(r), key, d); }
         // TypedArray [[DefineOwnProperty]] for numeric keys.
         if let .Some((ta, n)) = self.taKeyIndex(r, key) {
             if not self.taValidIndex(ta, n) { return .Ok(false); }
@@ -87,18 +140,11 @@ extend VM {
         }
         let current = self.ownProperty(r, key);
         let isArrayObject = match self.kindAt(r) { .ArrayObject => true, _ => false };
-        if isArrayObject and self.isLengthKey(key) {
-            if let .Some(v) = d.value {
-                let n = try self.toNumber(v);
-                let len = toUint32(n);
-                if Float64(from: len) != n { return .Err(self.makeError(.RangeError, "Invalid array length")); }
-                self.setArrayLength(r, len);
-            }
-            return .Ok(true);
-        }
+        if isArrayObject and self.isLengthKey(key) { return self.arraySetLength(r, d); }
         match current {
             .None => {
                 if not self.heap.objects(r).extensible { return .Ok(false); }
+                if not self.canAddIndex(r, key) { return .Ok(false); }
                 var attrs: Int64 = 0;
                 if d.enumerable ?? false { attrs = attrs | Attr.enumerable; }
                 if d.configurable ?? false { attrs = attrs | Attr.configurable; }
@@ -167,43 +213,60 @@ extend VM {
         .Ok(())
     }
 
-    /// Sets every own property's attributes for freeze (`frozen`) or seal.
-    mutating func setIntegrity(o: Value, frozen: Bool) {
-        let r = o.asRef;
-        for k in self.ownKeys(r) {
-            if let .Some(p) = self.ownProperty(r, k) {
-                if let .ArrayObject = self.kindAt(r) {
-                    if self.indexOfKey(k) >= 0 or self.isLengthKey(k) { continue; }
+    /// SetIntegrityLevel: freeze (`frozen`) or seal, returning false when
+    /// the object refuses to stop being extensible.
+    mutating func setIntegrity(o: Value, frozen: Bool) -> Result[Bool, Value] {
+        if not (try self.preventExtensionsV(o)) { return .Ok(false); }
+        let keys = try self.ownKeys(o.asRef);
+        for k in keys {
+            var d = Descriptor(value: .None, writable: .None, getter: .None, setter: .None, enumerable: .None, configurable: .Some(false));
+            if frozen {
+                let cur = try self.getOwnPropertyV(o, k);
+                match cur {
+                    .Some(c) => if not isAccessorDescriptor(c) { d.writable = .Some(false); },
+                    .None => continue
                 }
-                var attrs = p.attrs & (0 - 1 - Attr.configurable);
-                if frozen and attrs & Attr.accessor == 0 { attrs = attrs & (0 - 1 - Attr.writable); }
-                if attrs != p.attrs { self.reshape(r, k, attrs); }
             }
+            if not (try self.defineProperty(o.asRef, k, d)) { return self.throwType("Cannot redefine property: \(self.keyText(k))"); }
         }
-        self.heap.objects(r).extensible = false;
+        .Ok(true)
     }
 
-    mutating func testIntegrity(o: Value, frozen: Bool) -> Bool {
-        if not o.isObject { return true; }
-        let r = o.asRef;
-        if self.heap.objects(r).extensible { return false; }
-        for k in self.ownKeys(r) {
-            if let .Some(p) = self.ownProperty(r, k) {
-                if p.attrs & Attr.configurable != 0 { return false; }
-                if frozen and p.attrs & Attr.accessor == 0 and p.attrs & Attr.writable != 0 { return false; }
+    /// TestIntegrityLevel.
+    mutating func testIntegrity(o: Value, frozen: Bool) -> Result[Bool, Value] {
+        if not o.isObject { return .Ok(true); }
+        if try self.isExtensibleV(o) { return .Ok(false); }
+        let keys = try self.ownKeys(o.asRef);
+        for k in keys {
+            let cur = try self.getOwnPropertyV(o, k);
+            if let .Some(c) = cur {
+                if c.configurable ?? false { return .Ok(false); }
+                if frozen and isDataDescriptor(c) and (c.writable ?? false) { return .Ok(false); }
             }
         }
-        true
+        .Ok(true)
+    }
+
+    /// FromPropertyDescriptor of [[GetOwnProperty]]: a descriptor object
+    /// or undefined.
+    mutating func ownDescriptorObject(o: Value, key: Key) -> Result[Value, Value] {
+        let d = try self.getOwnPropertyV(o, key);
+        match d {
+            .Some(x) => .Ok(self.descriptorObject(x)),
+            .None => .Ok(Value.undefined)
+        }
     }
 
     mutating func keysArray(o: Value, which: Int64) -> Result[Value, Value] {
         // which: 0 keys, 1 values, 2 entries
         let obj = try self.toObject(o);
         var out: [Value] = [];
-        for k in self.ownKeys(obj.asRef) {
+        let ownKeyList3 = try self.ownKeys(obj.asRef);
+        for k in ownKeyList3 {
             if keyIsSymbol(k) { continue; }
-            if let .Some(p) = self.ownProperty(obj.asRef, k) {
-                if p.attrs & Attr.enumerable == 0 { continue; }
+            let desc = try self.getOwnPropertyV(obj, k);
+            if let .Some(p) = desc {
+                if not (p.enumerable ?? false) { continue; }
                 let kv = self.keyValue(k);
                 if which == 0 {
                     out.append(kv);
@@ -235,13 +298,13 @@ extend VM {
             .ObjectEntries => try self.keysArray(a0, 2),
             .ObjectGetPrototypeOf => {
                 let o = try self.toObject(a0);
-                self.heap.objects(o.asRef).proto
+                try self.getProto(o)
             },
             .ObjectSetPrototypeOf => {
                 if a0.isNullish { return self.throwType("Object.setPrototypeOf called on null or undefined"); }
                 if not a1.isObject and not a1.isNull { return self.throwType("Object prototype may only be an Object or null"); }
                 if a0.isObject {
-                    if not (try self.setPrototype(a0, a1)) { return self.throwType("Object.setPrototypeOf failed"); }
+                    if not (try self.setProtoV(a0, a1)) { return self.throwType("Object.setPrototypeOf failed"); }
                 }
                 a0
             },
@@ -263,21 +326,23 @@ extend VM {
             .ObjectGetOwnPropertyDescriptor => {
                 let o = try self.toObject(a0);
                 let k = try self.toKey(a1);
-                self.fromProperty(o.asRef, k)
+                try self.ownDescriptorObject(o, k)
             },
             .ObjectGetOwnPropertyDescriptors => {
                 let o = try self.toObject(a0);
                 let out = self.newObject();
-                for k in self.ownKeys(o.asRef) {
-                    let d = self.fromProperty(o.asRef, k);
-                    self.defineOwn(out.asRef, k, d, Attr.all);
+                let ownKeyList4 = try self.ownKeys(o.asRef);
+                for k in ownKeyList4 {
+                    let d = try self.ownDescriptorObject(o, k);
+                    if not d.isUndefined { self.defineOwn(out.asRef, k, d, Attr.all); }
                 }
                 out
             },
             .ObjectGetOwnPropertyNames => {
                 let o = try self.toObject(a0);
                 var out: [Value] = [];
-                for k in self.ownKeys(o.asRef) {
+                let ownKeyList5 = try self.ownKeys(o.asRef);
+                for k in ownKeyList5 {
                     if not keyIsSymbol(k) { out.append(self.keyValue(k)); }
                 }
                 self.newArray(out)
@@ -285,35 +350,38 @@ extend VM {
             .ObjectGetOwnPropertySymbols => {
                 let o = try self.toObject(a0);
                 var out: [Value] = [];
-                for k in self.ownKeys(o.asRef) {
+                let ownKeyList6 = try self.ownKeys(o.asRef);
+                for k in ownKeyList6 {
                     if keyIsSymbol(k) { out.append(self.keyValue(k)); }
                 }
                 self.newArray(out)
             },
-            .ObjectFreeze => {
-                if a0.isObject { self.setIntegrity(a0, true); }
+            .ObjectFreeze or .ObjectSeal => {
+                if a0.isObject {
+                    if not (try self.setIntegrity(a0, n == NativeFn.ObjectFreeze)) { return self.throwType("Cannot prevent extensions"); }
+                }
                 a0
             },
-            .ObjectSeal => {
-                if a0.isObject { self.setIntegrity(a0, false); }
-                a0
-            },
-            .ObjectIsFrozen => Value.bool(self.testIntegrity(a0, true)),
-            .ObjectIsSealed => Value.bool(self.testIntegrity(a0, false)),
+            .ObjectIsFrozen => Value.bool(try self.testIntegrity(a0, true)),
+            .ObjectIsSealed => Value.bool(try self.testIntegrity(a0, false)),
             .ObjectPreventExtensions => {
-                if a0.isObject { self.heap.objects(a0.asRef).extensible = false; }
+                if a0.isObject {
+                    if not (try self.preventExtensionsV(a0)) { return self.throwType("Cannot prevent extensions"); }
+                }
                 a0
             },
-            .ObjectIsExtensible => Value.bool(a0.isObject and self.heap.objects(a0.asRef).extensible),
+            .ObjectIsExtensible => Value.bool(if a0.isObject { try self.isExtensibleV(a0) } else { false }),
             .ObjectAssign => {
                 let target = try self.toObject(a0);
                 for i in 1..<args.count {
                     let src = args(i);
                     if src.isNullish { continue; }
                     let from = try self.toObject(src);
-                    for k in self.ownKeys(from.asRef) {
-                        if let .Some(p) = self.ownProperty(from.asRef, k) {
-                            if p.attrs & Attr.enumerable == 0 { continue; }
+                    let ownKeyList7 = try self.ownKeys(from.asRef);
+                    for k in ownKeyList7 {
+                        let desc = try self.getOwnPropertyV(from, k);
+                        if let .Some(p) = desc {
+                            if not (p.enumerable ?? false) { continue; }
                             let v = try self.getFrom(from, k, from);
                             try self.setOn(target, k, v, target, true);
                         }
@@ -322,48 +390,39 @@ extend VM {
                 target
             },
             .ObjectIs => Value.bool(self.sameValue(a0, a1)),
-            .ObjectFromEntries => {
-                let out = self.newObject();
-                self.pushRoot(out);
-                let entries = self.iterateToArray(a0);
-                self.popRoots(1);
-                for e in try entries {
-                    if not e.isObject { return self.throwType("Iterator value is not an entry object"); }
-                    let k = try self.toKey(try self.getIndex(e, 0));
-                    let v = try self.getIndex(e, 1);
-                    self.defineOwn(out.asRef, k, v, Attr.all);
-                }
-                out
-            },
+            .ObjectFromEntries => try self.objectFromEntries(a0),
             .ObjectHasOwn => {
                 let o = try self.toObject(a0);
                 let k = try self.toKey(a1);
-                Value.bool(self.hasOwn(o.asRef, k))
+                let d = try self.getOwnPropertyV(o, k);
+                Value.bool(d.isSome)
             },
             .HasOwnProperty => {
                 let k = try self.toKey(a0);
                 let o = try self.toObject(this);
-                Value.bool(self.hasOwn(o.asRef, k))
+                let d = try self.getOwnPropertyV(o, k);
+                Value.bool(d.isSome)
             },
             .IsPrototypeOf => {
                 if not a0.isObject { return .Ok(.Some(Value.bool(false))); }
                 let o = try self.toObject(this);
-                var cur = self.heap.objects(a0.asRef).proto;
+                var cur = try self.getProto(a0);
                 var found = false;
                 while cur.isObject {
                     if cur.same(o) {
                         found = true;
                         break;
                     }
-                    cur = self.heap.objects(cur.asRef).proto;
+                    cur = try self.getProto(cur);
                 }
                 Value.bool(found)
             },
             .PropertyIsEnumerable => {
                 let k = try self.toKey(a0);
                 let o = try self.toObject(this);
-                match self.ownProperty(o.asRef, k) {
-                    .Some(p) => Value.bool(p.attrs & Attr.enumerable != 0),
+                let d = try self.getOwnPropertyV(o, k);
+                match d {
+                    .Some(p) => Value.bool(p.enumerable ?? false),
                     .None => Value.bool(false)
                 }
             },
@@ -375,12 +434,12 @@ extend VM {
             .ObjectValueOf => try self.toObject(this),
             .ProtoGetter => {
                 let o = try self.toObject(this);
-                self.heap.objects(o.asRef).proto
+                try self.getProto(o)
             },
             .ProtoSetter => {
                 if this.isNullish { return self.throwType("Object.prototype.__proto__ called on null or undefined"); }
                 if (a0.isObject or a0.isNull) and this.isObject {
-                    if not (try self.setPrototype(this, a0)) { return self.throwType("Object.prototype.__proto__ setter failed"); }
+                    if not (try self.setProtoV(this, a0)) { return self.throwType("Object.prototype.__proto__ setter failed"); }
                 }
                 Value.undefined
             },
@@ -393,10 +452,13 @@ extend VM {
     mutating func setPrototype(o: Value, proto: Value) -> Result[Bool, Value] {
         let r = o.asRef;
         if self.heap.objects(r).proto.same(proto) { return .Ok(true); }
+        // %Object.prototype% is an immutable prototype exotic object.
+        if o.same(self.intrinsics.objectProto) { return .Ok(false); }
         if not self.heap.objects(r).extensible { return .Ok(false); }
         var cur = proto;
         while cur.isObject {
             if cur.same(o) { return .Ok(false); }
+            if self.isProxy(cur) { break; }
             cur = self.heap.objects(cur.asRef).proto;
         }
         self.heap.objects(r).proto = proto;
@@ -406,9 +468,11 @@ extend VM {
     mutating func defineProperties(o: Value, props: Value) -> Result[(), Value] {
         let p = try self.toObject(props);
         var descs: [(Key, Descriptor)] = [];
-        for k in self.ownKeys(p.asRef) {
-            if let .Some(rec) = self.ownProperty(p.asRef, k) {
-                if rec.attrs & Attr.enumerable == 0 { continue; }
+        let ownKeyList8 = try self.ownKeys(p.asRef);
+        for k in ownKeyList8 {
+            let desc = try self.getOwnPropertyV(p, k);
+            if let .Some(rec) = desc {
+                if not (rec.enumerable ?? false) { continue; }
                 let dv = try self.getFrom(p, k, p);
                 descs.append((k, try self.toDescriptor(dv)));
             }
@@ -425,8 +489,8 @@ extend VM {
         if this.isUndefined { return .Ok(self.str("[object Undefined]")); }
         if this.isNull { return .Ok(self.str("[object Null]")); }
         let o = try self.toObject(this);
-        var tag = match self.kindAt(o.asRef) {
-            .ArrayObject => "Array",
+        let isArr = try self.isArrayV(o);
+        var tag = if isArr { "Array" } else { match self.kindAt(o.asRef) {
             .ErrorObject => "Error",
             .BooleanBox(_) => "Boolean",
             .NumberBox(_) => "Number",
@@ -435,7 +499,7 @@ extend VM {
             .DateObject(_) => "Date",
             .RegExpObject(_, _, _) => "RegExp",
             _ => if self.isCallable(o) { "Function" } else { "Object" }
-        };
+        } };
         let t = try self.getFrom(o, symbolKey(WellKnown.toStringTag), o);
         if t.isString { tag = self.text(t); }
         .Ok(self.str("[object \(tag)]"))

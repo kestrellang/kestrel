@@ -27,7 +27,7 @@ extend VM {
         var st = JsonState(replacer: Value.undefined, allowList: .None, gap: [], indent: [], stack: []);
         if self.isCallable(replacer) {
             st.replacer = replacer;
-        } else if self.isArray(replacer) {
+        } else if try self.isArrayV(replacer) {
             var keys: [Key] = [];
             let len = try self.lengthOf(replacer);
             for i in 0..<len {
@@ -105,7 +105,8 @@ extend VM {
             return .Ok(.Some(unitsOf(if x.isFinite { numberToString(x) } else { "null" })));
         }
         if value.isObject and not self.isCallable(value) {
-            let out = if self.isArray(value) { try self.jsonArray(st, value) } else { try self.jsonObject(st, value) };
+            let isArr = try self.isArrayV(value);
+            let out = if isArr { try self.jsonArray(st, value) } else { try self.jsonObject(st, value) };
             return .Ok(.Some(out));
         }
         .Ok(.None)
@@ -158,10 +159,12 @@ extend VM {
         match st.allowList {
             .Some(list) => keys = list,
             .None => {
-                for k in self.ownKeys(value.asRef) {
+                let ownKeyList9 = try self.ownKeys(value.asRef);
+                for k in ownKeyList9 {
                     if keyIsSymbol(k) { continue; }
-                    if let .Some(p) = self.ownProperty(value.asRef, k) {
-                        if p.attrs & Attr.enumerable != 0 { keys.append(k); }
+                    let desc = try self.getOwnPropertyV(value, k);
+                    if let .Some(p) = desc {
+                        if p.enumerable ?? false { keys.append(k); }
                     }
                 }
             }
@@ -378,17 +381,18 @@ extend VM {
         let value = try self.getV(holder, key);
         if value.isObject {
             self.pushRoot(value);
-            if self.isArray(value) {
+            if try self.isArrayV(value) {
                 let len = try self.lengthOf(value);
                 for i in 0..<len {
                     try self.jsonReviveMember(value, self.internIndex(i), reviver);
                 }
             } else {
-                for k in self.ownKeys(value.asRef) {
+                let ownKeyList10 = try self.ownKeys(value.asRef);
+                for k in ownKeyList10 {
                     if keyIsSymbol(k) { continue; }
-                    let p = self.ownProperty(value.asRef, k);
+                    let p = try self.getOwnPropertyV(value, k);
                     if let .Some(rec) = p {
-                        if rec.attrs & Attr.enumerable != 0 { try self.jsonReviveMember(value, k, reviver); }
+                        if rec.enumerable ?? false { try self.jsonReviveMember(value, k, reviver); }
                     }
                 }
             }
@@ -400,7 +404,8 @@ extend VM {
     mutating func jsonReviveMember(value: Value, k: Key, reviver: Value) -> Result[(), Value] {
         let v = try self.jsonRevive(value, k, reviver);
         if v.isUndefined {
-            let _ = self.deleteOwn(value.asRef, k);
+            let hp10 = try self.deleteOwn(value.asRef, k);
+            let _ = hp10;
         } else {
             let desc = Descriptor(value: .Some(v), writable: .Some(true), getter: .None, setter: .None,
                                   enumerable: .Some(true), configurable: .Some(true));
