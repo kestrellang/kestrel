@@ -298,7 +298,7 @@ extend VM {
         self.fns.append(FnState(
             instrs: [], scopes: [], nextReg: 1, maxReg: 1, ctl: [], strict: strict,
             isArrow: isArrow, isScript: isScript, pendingLabels: [], chainJumps: [],
-            argumentsAt: 0, argumentSlots: [], usesArguments: false, isDerivedCtor: false, hasFields: false,
+            argumentsAt: 0, argumentSlots: [], needsContext: false, usesArguments: false, isDerivedCtor: false, hasFields: false,
             completion: -1, isGenerator: false, isAsync: false, isEval: false, isMethod: false, isFieldInit: false, inParams: false, paramNames: Set()
         ));
         var top = newCScope(true, isArrow);
@@ -308,6 +308,25 @@ extend VM {
         let at = self.emit(.Nop);
         let _ = self.emit(.Nop);
         self.fns(self.fnIndex()).argumentsAt = at;
+    }
+
+    /// The code being compiled reads the function context (super(),
+    /// new.target, direct eval): every arrow out to the nearest ordinary
+    /// function must capture it.
+    mutating func markNeedsContext() {
+        var i = self.fns.count - 1;
+        while i >= 0 and self.fns(i).isArrow {
+            self.fns(i).needsContext = true;
+            i = i - 1;
+        }
+    }
+
+    /// Whether the nearest non-arrow function is a constructor whose class
+    /// has fields (super() in an arrow initializes them too).
+    func enclosingFunctionHasFields() -> Bool {
+        var i = self.fns.count - 1;
+        while i >= 0 and self.fns(i).isArrow { i = i - 1; }
+        i >= 0 and self.fns(i).hasFields
     }
 
     /// Finishes the function on top of `self.fns`, returning its code index.
@@ -322,7 +341,7 @@ extend VM {
             isConstructor: not flags.isArrow and not flags.isMethod and not f.isGenerator and not f.isAsync,
             isClassConstructor: flags.isClassConstructor, isDerived: flags.isDerived,
             isGenerator: f.isGenerator, isAsync: f.isAsync,
-            sourceName: self.sourceName, argumentSlots: f.argumentSlots
+            sourceName: self.sourceName, argumentSlots: f.argumentSlots, needsContext: f.needsContext
         );
         self.codes.append(code);
         self.codes.count - 1

@@ -101,6 +101,8 @@ struct FnState {
     var argumentsAt: Int64
     /// See `Code.argumentSlots`.
     var argumentSlots: [Int64]
+    /// See `Code.needsContext`.
+    var needsContext: Bool
     var usesArguments: Bool
     var isDerivedCtor: Bool
     /// The class whose constructor this is runs field initializers.

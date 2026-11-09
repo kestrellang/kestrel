@@ -375,6 +375,7 @@ extend VM {
                 var h = if home >= 0 { self.reg(fi, home) } else { Value.undefined };
                 if home < 0 and self.codes(code).isArrow { h = self.homeOf(fi); }
                 let f = self.makeClosureObject(code, self.frames(fi).env, h);
+                if self.codes(code).needsContext { self.captureContext(fi, f); }
                 self.setReg(fi, dst, f);
             },
             .Call(dst, callee, this, args, argc) => {
@@ -396,10 +397,10 @@ extend VM {
             },
             .SuperCall(dst, args, hops, slot) => {
                 let argv = self.arrayElements(self.reg(fi, args));
-                let callee = self.frames(fi).callee;
+                let (callee, newTarget) = self.functionContext(fi);
+                if not callee.isObject { return self.throwType("'super' keyword unexpected here"); }
                 let parent = self.heap.objects(callee.asRef).proto;
                 if not self.isConstructor(parent) { return self.throwType("Super constructor is not a constructor"); }
-                let newTarget = self.frames(fi).newTarget;
                 let result = try self.construct(parent, argv, newTarget);
                 let e = self.envAt(self.frames(fi).env, hops);
                 if not self.heap.envs(e).slots(slot).isEmpty {
@@ -430,7 +431,10 @@ extend VM {
                 let a = self.makeArguments(fi);
                 self.setReg(fi, dst, a);
             },
-            .NewTarget(dst) => self.setReg(fi, dst, self.frames(fi).newTarget),
+            .NewTarget(dst) => {
+                let (_, nt) = self.functionContext(fi);
+                self.setReg(fi, dst, nt);
+            },
             .MakeClass(ctor, proto, superclass) => {
                 let p = try self.makeClass(self.reg(fi, ctor), if superclass >= 0 { self.reg(fi, superclass) } else { Value.empty });
                 self.setReg(fi, proto, p);
@@ -442,7 +446,7 @@ extend VM {
                 }
             },
             .InitFields(this) => {
-                let callee = self.frames(fi).callee;
+                let (callee, _) = self.functionContext(fi);
                 if let .Closure(_, _, _, fields) = self.kindAt(callee.asRef) {
                     if not fields.isUndefined { let _ = try self.callValue(fields, self.reg(fi, this), []); }
                 }
@@ -548,6 +552,30 @@ extend VM {
             }
         }
         .Ok(())
+    }
+
+    /// The callee and new.target that super() and new.target see in
+    /// frame `fi`: its own, or for an arrow (or eval code) the ones its
+    /// closure captured from the enclosing function.
+    func functionContext(fi: Int64) -> (Value, Value) {
+        let callee = self.frames(fi).callee;
+        if let .Closure(code, _, _, fields) = self.kindAt(callee.asRef) {
+            if self.codes(code).isArrow {
+                if not fields.isObject { return (Value.undefined, Value.undefined); }
+                let r = fields.asRef;
+                return (self.heap.objects(r).elements(0), self.heap.objects(r).elements(1));
+            }
+        }
+        (callee, self.frames(fi).newTarget)
+    }
+
+    /// Stores frame `fi`'s function context in arrow closure `f`.
+    mutating func captureContext(fi: Int64, f: Value) {
+        let (callee, nt) = self.functionContext(fi);
+        let ctx = self.newArray([callee, nt]);
+        if let .Closure(code, env, home, _) = self.kindAt(f.asRef) {
+            self.heap.objects(f.asRef).kind = .Closure(code: code, env: env, home: home, fields: ctx);
+        }
     }
 
     /// The object a WithGet/WithSet looks on: a `with` object (slot -1,

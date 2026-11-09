@@ -223,6 +223,7 @@ extend VM {
             }
         };
         let fnObj = self.makeClosureObject(code, self.frames(fi).env, self.homeOf(fi));
+        self.captureContext(fi, fnObj);
         let returnTo = self.frames(fi).base + dst;
         self.pushFrame(fnObj, Value.undefined, [], self.frames(fi).newTarget, false, returnTo)
     }

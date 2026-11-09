@@ -131,6 +131,7 @@ extend VM {
             .Await(argument) => try self.compileAwait(argument, dst),
             .MetaProperty(meta, _) => {
                 if meta != "new" { throw compileError("import.meta isn't supported yet"); }
+                self.markNeedsContext();
                 let _ = self.emit(.NewTarget(dst: dst));
             },
             .Import(_, _) => throw compileError("dynamic import isn't supported yet")
@@ -178,8 +179,9 @@ extend VM {
             let args = self.reg();
             try self.compileArgumentArray(arguments, args);
             let r = self.resolve("this");
+            self.markNeedsContext();
             let _ = self.emit(.SuperCall(dst: dst, args: args, hops: r.hops, slot: r.slot));
-            if self.fns(self.fnIndex()).hasFields {
+            if self.enclosingFunctionHasFields() {
                 let _ = self.emit(.InitFields(this: dst));
             }
             return .Ok(());
@@ -232,6 +234,7 @@ extend VM {
             if let .Item(x) = arguments(i) { try self.compileExpr(x, args + i); }
         }
         if isDirectEvalCallee(callee) and not optional and not isMethod {
+            self.markNeedsContext();
             let ctx = self.snapshotEvalContext();
             let _ = self.emit(.DirectEval(dst: dst, callee: f, this: this, args: args, argc: arguments.count, ctx: ctx));
             return .Ok(());

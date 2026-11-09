@@ -268,4 +268,8 @@ struct Code {
     /// For a mapped `arguments` object: each argument index's env slot
     /// (-1 for none). Empty when `arguments` is unmapped.
     var argumentSlots: [Int64]
+    /// An arrow (or eval code) that uses `super()`, `new.target` or a
+    /// direct eval: its closure captures the enclosing function's callee
+    /// and new.target (see `VM.functionContext`).
+    var needsContext: Bool
 }
