@@ -212,13 +212,7 @@ impl<'w> LowerCtx<'w> {
         );
         parents
             .into_iter()
-            .flat_map(|parent| {
-                self.query
-                    .children_of(parent)
-                    .iter()
-                    .copied()
-                    .collect::<Vec<_>>()
-            })
+            .flat_map(|parent| self.query.children_of(parent).to_vec())
             .filter(|&child| {
                 self.query.get::<NodeKind>(child) == kind.as_ref()
                     && self.witness_method_key(child) == key

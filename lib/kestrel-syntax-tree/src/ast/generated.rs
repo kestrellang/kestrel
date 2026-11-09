@@ -413,13 +413,13 @@ impl FieldDeclaration {
     pub fn visibility(&self) -> Option<Visibility> {
         support::child(&self.syntax)
     }
+    pub fn lazy_modifiers(&self) -> AstChildren<LazyModifier> {
+        support::children(&self.syntax)
+    }
     pub fn static_modifier(&self) -> Option<StaticModifier> {
         support::child(&self.syntax)
     }
     pub fn unsafe_modifier(&self) -> Option<UnsafeModifier> {
-        support::child(&self.syntax)
-    }
-    pub fn lazy_modifier(&self) -> Option<LazyModifier> {
         support::child(&self.syntax)
     }
     pub fn let_token(&self) -> Option<SyntaxToken> {

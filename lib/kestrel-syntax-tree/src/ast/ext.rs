@@ -190,9 +190,10 @@ impl FieldDeclaration {
         self.expressions().next()
     }
 
-    /// `lazy let|var`.
+    /// `lazy let|var`. The grammar takes `lazy` before or after `static`
+    /// (`lazy static var`, `static lazy var`), hence `lazy_modifiers`.
     pub fn is_lazy(&self) -> bool {
-        self.lazy_modifier().is_some()
+        self.lazy_modifiers().next().is_some()
     }
 
     /// Instance storage the user declared: not `static`, not `lazy` (its

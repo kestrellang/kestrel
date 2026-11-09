@@ -121,7 +121,7 @@ SubscriptBody =
   CodeBlock | PropertyAccessors
 
 FieldDeclaration =
-  AttributeList? Visibility StaticModifier? UnsafeModifier? LazyModifier? ('let' | 'var') Name
+  AttributeList? Visibility LazyModifier? StaticModifier? UnsafeModifier? LazyModifier? ('let' | 'var') Name
   FailableMarker? ':' Ty
   (PropertyAccessors ('=' Expression)? | '=' Expression PropertyAccessors?)? ';'?
 

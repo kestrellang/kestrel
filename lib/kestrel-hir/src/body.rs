@@ -850,7 +850,13 @@ pub struct HirStructPatField {
 /// Label is `None` for single-name params (no external label in Kestrel),
 /// `Some("by")` for shift ops, `Some("to")` for range ops.
 pub const BINARY_OP_PROTOCOLS: &[(BinaryOp, Builtin, Builtin, &str, Option<&str>)] = &[
-    (BinaryOp::Add, Builtin::AddOperatorProtocol, Builtin::AddOperatorMethod, "add", None),
+    (
+        BinaryOp::Add,
+        Builtin::AddOperatorProtocol,
+        Builtin::AddOperatorMethod,
+        "add",
+        None,
+    ),
     (
         BinaryOp::Sub,
         Builtin::SubtractOperatorProtocol,
@@ -1001,7 +1007,12 @@ pub const SHORT_CIRCUIT_OP_PROTOCOLS: &[(BinaryOp, Builtin, Builtin, &str, Optio
 
 /// (operator, protocol_builtin, method_builtin, method_name)
 pub const UNARY_OP_PROTOCOLS: &[(UnaryOp, Builtin, Builtin, &str)] = &[
-    (UnaryOp::Neg, Builtin::NegateOperatorProtocol, Builtin::NegateOperatorMethod, "negate"),
+    (
+        UnaryOp::Neg,
+        Builtin::NegateOperatorProtocol,
+        Builtin::NegateOperatorMethod,
+        "negate",
+    ),
     (
         UnaryOp::BitNot,
         Builtin::BitwiseNotOperatorProtocol,
@@ -1048,78 +1059,79 @@ pub const POSTFIX_OP_PROTOCOLS: &[(PostfixOp, Builtin, Builtin, &str)] = &[
 ///
 /// Most compound assign methods use single-name params (no label).
 /// Only shift-assign ops have a `"by"` label.
-pub const COMPOUND_ASSIGN_PROTOCOLS: &[(CompoundAssignOp, Builtin, Builtin, &str, Option<&str>)] = &[
-    (
-        CompoundAssignOp::AddAssign,
-        Builtin::AddAssignProtocol,
-        Builtin::AddAssignMethod,
-        "addAssign",
-        None,
-    ),
-    (
-        CompoundAssignOp::SubAssign,
-        Builtin::SubtractAssignProtocol,
-        Builtin::SubtractAssignMethod,
-        "subtractAssign",
-        None,
-    ),
-    (
-        CompoundAssignOp::MulAssign,
-        Builtin::MultiplyAssignProtocol,
-        Builtin::MultiplyAssignMethod,
-        "multiplyAssign",
-        None,
-    ),
-    (
-        CompoundAssignOp::DivAssign,
-        Builtin::DivideAssignProtocol,
-        Builtin::DivideAssignMethod,
-        "divideAssign",
-        None,
-    ),
-    (
-        CompoundAssignOp::RemAssign,
-        Builtin::RemainderAssignProtocol,
-        Builtin::RemainderAssignMethod,
-        "remainderAssign",
-        None,
-    ),
-    (
-        CompoundAssignOp::BitAndAssign,
-        Builtin::BitwiseAndAssignProtocol,
-        Builtin::BitwiseAndAssignMethod,
-        "bitwiseAndAssign",
-        None,
-    ),
-    (
-        CompoundAssignOp::BitOrAssign,
-        Builtin::BitwiseOrAssignProtocol,
-        Builtin::BitwiseOrAssignMethod,
-        "bitwiseOrAssign",
-        None,
-    ),
-    (
-        CompoundAssignOp::BitXorAssign,
-        Builtin::BitwiseXorAssignProtocol,
-        Builtin::BitwiseXorAssignMethod,
-        "bitwiseXorAssign",
-        None,
-    ),
-    (
-        CompoundAssignOp::ShlAssign,
-        Builtin::ShiftLeftAssignProtocol,
-        Builtin::ShiftLeftAssignMethod,
-        "shiftLeftAssign",
-        Some("by"),
-    ),
-    (
-        CompoundAssignOp::ShrAssign,
-        Builtin::ShiftRightAssignProtocol,
-        Builtin::ShiftRightAssignMethod,
-        "shiftRightAssign",
-        Some("by"),
-    ),
-];
+pub const COMPOUND_ASSIGN_PROTOCOLS: &[(CompoundAssignOp, Builtin, Builtin, &str, Option<&str>)] =
+    &[
+        (
+            CompoundAssignOp::AddAssign,
+            Builtin::AddAssignProtocol,
+            Builtin::AddAssignMethod,
+            "addAssign",
+            None,
+        ),
+        (
+            CompoundAssignOp::SubAssign,
+            Builtin::SubtractAssignProtocol,
+            Builtin::SubtractAssignMethod,
+            "subtractAssign",
+            None,
+        ),
+        (
+            CompoundAssignOp::MulAssign,
+            Builtin::MultiplyAssignProtocol,
+            Builtin::MultiplyAssignMethod,
+            "multiplyAssign",
+            None,
+        ),
+        (
+            CompoundAssignOp::DivAssign,
+            Builtin::DivideAssignProtocol,
+            Builtin::DivideAssignMethod,
+            "divideAssign",
+            None,
+        ),
+        (
+            CompoundAssignOp::RemAssign,
+            Builtin::RemainderAssignProtocol,
+            Builtin::RemainderAssignMethod,
+            "remainderAssign",
+            None,
+        ),
+        (
+            CompoundAssignOp::BitAndAssign,
+            Builtin::BitwiseAndAssignProtocol,
+            Builtin::BitwiseAndAssignMethod,
+            "bitwiseAndAssign",
+            None,
+        ),
+        (
+            CompoundAssignOp::BitOrAssign,
+            Builtin::BitwiseOrAssignProtocol,
+            Builtin::BitwiseOrAssignMethod,
+            "bitwiseOrAssign",
+            None,
+        ),
+        (
+            CompoundAssignOp::BitXorAssign,
+            Builtin::BitwiseXorAssignProtocol,
+            Builtin::BitwiseXorAssignMethod,
+            "bitwiseXorAssign",
+            None,
+        ),
+        (
+            CompoundAssignOp::ShlAssign,
+            Builtin::ShiftLeftAssignProtocol,
+            Builtin::ShiftLeftAssignMethod,
+            "shiftLeftAssign",
+            Some("by"),
+        ),
+        (
+            CompoundAssignOp::ShrAssign,
+            Builtin::ShiftRightAssignProtocol,
+            Builtin::ShiftRightAssignMethod,
+            "shiftRightAssign",
+            Some("by"),
+        ),
+    ];
 
 /// What an operator desugars to: a call to `method` (an `@builtin`-tagged
 /// requirement of `protocol`). `name`/`label` are its spelling — the call's
@@ -1154,17 +1166,19 @@ pub fn lookup_binary_op(op: &BinaryOp) -> Option<OperatorRequirement> {
     BINARY_OP_PROTOCOLS
         .iter()
         .find(|(o, ..)| o == op)
-        .map(|(_, protocol, method, name, label)| OperatorRequirement::new(*protocol, *method, name, *label))
+        .map(|(_, protocol, method, name, label)| {
+            OperatorRequirement::new(*protocol, *method, name, *label)
+        })
 }
 
 /// Look up the protocol for a short-circuit binary operator.
-pub fn lookup_short_circuit_op(
-    op: &BinaryOp,
-) -> Option<OperatorRequirement> {
+pub fn lookup_short_circuit_op(op: &BinaryOp) -> Option<OperatorRequirement> {
     SHORT_CIRCUIT_OP_PROTOCOLS
         .iter()
         .find(|(o, ..)| o == op)
-        .map(|(_, protocol, method, name, label)| OperatorRequirement::new(*protocol, *method, name, *label))
+        .map(|(_, protocol, method, name, label)| {
+            OperatorRequirement::new(*protocol, *method, name, *label)
+        })
 }
 
 /// Look up the protocol for a unary operator.
@@ -1184,13 +1198,13 @@ pub fn lookup_postfix_op(op: &PostfixOp) -> Option<OperatorRequirement> {
 }
 
 /// Look up the protocol for a compound assignment operator.
-pub fn lookup_compound_assign_op(
-    op: &CompoundAssignOp,
-) -> Option<OperatorRequirement> {
+pub fn lookup_compound_assign_op(op: &CompoundAssignOp) -> Option<OperatorRequirement> {
     COMPOUND_ASSIGN_PROTOCOLS
         .iter()
         .find(|(o, ..)| o == op)
-        .map(|(_, protocol, method, name, label)| OperatorRequirement::new(*protocol, *method, name, *label))
+        .map(|(_, protocol, method, name, label)| {
+            OperatorRequirement::new(*protocol, *method, name, *label)
+        })
 }
 
 // ===== Loop-label resolution =====

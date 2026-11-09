@@ -5606,10 +5606,10 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         // a copy is a wasted clone, and inside a type's own `clone()` (where
         // CopyValue isn't expanded to a clone call) a bitwise alias that the
         // scope exit then also drops (double free).
-        if self.declares_local_movably(block, tail) {
-            if let Some(v) = self.try_move_var_local(tail) {
-                return v;
-            }
+        if self.declares_local_movably(block, tail)
+            && let Some(v) = self.try_move_var_local(tail)
+        {
+            return v;
         }
         self.lower_expr(tail)
     }
