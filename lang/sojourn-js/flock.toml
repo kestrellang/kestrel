@@ -1,9 +1,0 @@
-[package]
-name = "sojourn-js"
-version = "0.1.0"
-description = "A JavaScript lexer and parser in pure Kestrel, the first piece of the Sojourn browser"
-author = "jkpdino"
-license = "MIT"
-repository = "https://github.com/kestrellang/kestrel"
-
-[dependencies]
