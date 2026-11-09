@@ -17,6 +17,46 @@ struct IntrinsicEntry {
 
 static TABLE: &[IntrinsicEntry] = &[
     IntrinsicEntry {
+        name: "i8_signed_mul_high",
+        op: Op::MulHigh(IntBits::I8, Signedness::Signed),
+        arity: 2,
+    },
+    IntrinsicEntry {
+        name: "i8_unsigned_mul_high",
+        op: Op::MulHigh(IntBits::I8, Signedness::Unsigned),
+        arity: 2,
+    },
+    IntrinsicEntry {
+        name: "i16_signed_mul_high",
+        op: Op::MulHigh(IntBits::I16, Signedness::Signed),
+        arity: 2,
+    },
+    IntrinsicEntry {
+        name: "i16_unsigned_mul_high",
+        op: Op::MulHigh(IntBits::I16, Signedness::Unsigned),
+        arity: 2,
+    },
+    IntrinsicEntry {
+        name: "i32_signed_mul_high",
+        op: Op::MulHigh(IntBits::I32, Signedness::Signed),
+        arity: 2,
+    },
+    IntrinsicEntry {
+        name: "i32_unsigned_mul_high",
+        op: Op::MulHigh(IntBits::I32, Signedness::Unsigned),
+        arity: 2,
+    },
+    IntrinsicEntry {
+        name: "i64_signed_mul_high",
+        op: Op::MulHigh(IntBits::I64, Signedness::Signed),
+        arity: 2,
+    },
+    IntrinsicEntry {
+        name: "i64_unsigned_mul_high",
+        op: Op::MulHigh(IntBits::I64, Signedness::Unsigned),
+        arity: 2,
+    },
+    IntrinsicEntry {
         name: "i1_eq",
         op: Op::BoolEq,
         arity: 2,

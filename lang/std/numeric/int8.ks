@@ -660,6 +660,14 @@ public struct Int8:
         (Int8(raw: lang.i8_mul(self.raw, other.raw)), Bool(boolLiteral: lang.i8_signed_mul_overflows(self.raw, other.raw)))
     }
 
+    /// The full double-width product `self * other` as `(low, high)`
+    /// halves: `low` is the wrapped product (as from `multiplyWrapping`),
+    /// `high` the bits above it. Compiles to one widening multiply. For
+    /// hashes, RNGs and bignum arithmetic.
+    public func multiplyFull(other: Int8) -> (Int8, Int8) {
+        (Int8(raw: lang.i8_mul(self.raw, other.raw)), Int8(raw: lang.i8_signed_mul_high(self.raw, other.raw)))
+    }
+
     /// Truncating integer division (`self / other`). For signed types,
     /// `minValue / -1` traps when overflow checks are on (and wraps
     /// when off); use `divideWrapping` or `divideChecked`.

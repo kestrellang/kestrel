@@ -64,8 +64,9 @@ pub enum ValueResolution {
 /// Query: resolve a value path to an entity.
 ///
 /// Handles:
-/// - Single-segment: function, enum case, field, etc. via ResolveName
-/// - Multi-segment: first segment resolved, then walk children
+/// - The first segment: a scope lookup via ResolveName
+/// - Later segments: member lookups (`walk_path_from`)
+/// - The last segment, whichever it is: `classify_terminal`
 /// - Type alias: resolves through to underlying type
 /// - Extension static methods: if no direct match, search extensions
 /// - Function overloads: multiple functions → Overloaded
@@ -79,18 +80,37 @@ pub struct ResolveValuePath {
 impl QueryFn for ResolveValuePath {
     type Output = ValueResolution;
 
+    /// A bare name is a one-segment path: the first segment is a scope
+    /// lookup, every later one a member lookup (`walk_path_from`), and
+    /// whichever segment ends the path is classified by `classify_terminal`,
+    /// so `C(...)` and `Module.C(...)` can't disagree about what `C` is.
     fn execute(&self, ctx: &QueryContext<'_>) -> ValueResolution {
-        if self.segments.is_empty() {
+        let Some((first, rest)) = self.segments.split_first() else {
             return ValueResolution::NotFound("<empty>".into());
-        }
-
-        // Single segment: simple name lookup
-        if self.segments.len() == 1 {
-            return resolve_single_segment(ctx, &self.segments[0], self.context, self.root);
-        }
-
-        // Multi-segment: resolve first segment, then walk
-        resolve_multi_segment(ctx, &self.segments, self.context, self.root)
+        };
+        let base = match resolve_head(ctx, first, self.context, self.root) {
+            Head::SelfType(target) if rest.is_empty() => {
+                return ValueResolution::SelfValue(target);
+            },
+            Head::SelfType(target) => target,
+            Head::Names(entities) if rest.is_empty() => {
+                return classify_terminal(ctx, entities, self.context, self.root);
+            },
+            Head::Names(entities) => match path_base(ctx, entities) {
+                Ok(base) => base,
+                Err(result) => return result,
+            },
+            Head::Ambiguous(entities) if rest.is_empty() => {
+                return ValueResolution::Ambiguous(entities);
+            },
+            // A prefix only has to name one type (`X.y`).
+            Head::Ambiguous(entities) => match path_base(ctx, entities) {
+                Ok(base) => base,
+                Err(result) => return result,
+            },
+            Head::Done(result) => return result,
+        };
+        walk_path_from(ctx, base, &self.segments, self.context, self.root)
     }
 }
 
@@ -123,171 +143,96 @@ fn try_resolve_self_value(ctx: &QueryContext<'_>, context: Entity, root: Entity)
     None
 }
 
-/// Resolve a single-segment value name.
-fn resolve_single_segment(
-    ctx: &QueryContext<'_>,
-    name: &str,
-    context: Entity,
-    root: Entity,
-) -> ValueResolution {
-    // Bare `Self` keyword: resolve to the enclosing type entity.
+/// What the first segment of a value path names, from a scope lookup.
+enum Head {
+    /// `Self`: the enclosing type.
+    SelfType(Entity),
+    /// Everything the name finds in scope (one entity, or an overload set).
+    Names(Vec<Entity>),
+    /// Conflicting declarations visible from different scopes.
+    Ambiguous(Vec<Entity>),
+    /// Settled already: not found, or `Self` out of scope.
+    Done(ValueResolution),
+}
+
+/// Look up the first segment in scope.
+fn resolve_head(ctx: &QueryContext<'_>, name: &str, context: Entity, root: Entity) -> Head {
     if name == "Self" {
         return match try_resolve_self_value(ctx, context, root) {
-            Some(target) => ValueResolution::SelfValue(target),
-            None => ValueResolution::SelfNotInScope,
+            Some(target) => Head::SelfType(target),
+            None => Head::Done(ValueResolution::SelfNotInScope),
         };
     }
-
-    let result = ctx.query(ResolveName {
+    match ctx.query(ResolveName {
         name: name.to_string(),
         context,
         root,
-    });
-
-    match result {
-        NameResolution::Found(entities) => {
-            // Check for special single-entity kinds
-            if entities.len() == 1 {
-                let e = entities[0];
-                match ctx.get::<NodeKind>(e) {
-                    Some(&NodeKind::TypeParameter) => {
-                        return ValueResolution::TypeParameter(e);
-                    },
-                    Some(&NodeKind::TypeAlias) => {
-                        // If inside a protocol, this is an associated type
-                        if let Some(parent) = ctx.parent_of(e)
-                            && ctx.get::<NodeKind>(parent) == Some(&NodeKind::Protocol)
-                        {
-                            return ValueResolution::AssociatedType {
-                                entity: e,
-                                container: None,
-                            };
-                        }
-                        // Free-standing alias — dereference to the underlying
-                        // entity so downstream (HIR, inference, call dispatch)
-                        // sees the concrete type. Mirrors what
-                        // `resolve_multi_segment` already does for intermediate
-                        // segments. Walks chains (`type A = B; type B = C`).
-                        let mut current = e;
-                        for _ in 0..8 {
-                            let Some(target) =
-                                resolve_type_alias_target(ctx, current, context, root)
-                            else {
-                                break;
-                            };
-                            if ctx.get::<NodeKind>(target) != Some(&NodeKind::TypeAlias) {
-                                return ValueResolution::Def(target);
-                            }
-                            current = target;
-                        }
-                    },
-                    _ => {},
-                }
-            }
-            classify_value_results(ctx, entities)
-        },
-        NameResolution::Ambiguous(entities) => ValueResolution::Ambiguous(entities),
-        NameResolution::NotFound => ValueResolution::NotFound(name.to_string()),
+    }) {
+        NameResolution::Found(entities) => Head::Names(entities),
+        NameResolution::Ambiguous(entities) => Head::Ambiguous(entities),
+        NameResolution::NotFound => Head::Done(ValueResolution::NotFound(name.to_string())),
     }
 }
 
-/// Resolve a multi-segment value path (e.g. `MyEnum.case` or `Module.func`).
-fn resolve_multi_segment(
+/// The single entity a path walks from when the first segment found several
+/// (`X.y` with `X` also naming a function): a lone type wins; overloads or
+/// several types can't be walked into.
+fn path_base(ctx: &QueryContext<'_>, entities: Vec<Entity>) -> Result<Entity, ValueResolution> {
+    if let [only] = entities.as_slice() {
+        return Ok(*only);
+    }
+    let types: Vec<Entity> = entities
+        .iter()
+        .filter(|&&e| ctx.has::<Typed>(e))
+        .copied()
+        .collect();
+    if let [only] = types.as_slice() {
+        return Ok(*only);
+    }
+    Err(ValueResolution::Ambiguous(entities))
+}
+
+/// Classify what the last segment of a path found, from scope or as a
+/// member: the one place that decides what a name means as a value.
+/// - a type parameter stays a type parameter (static access through bounds);
+/// - an alias inside a protocol is an associated type (a projection on Self);
+/// - a free-standing alias is the type it names;
+/// - otherwise one definition, an overload set, or ambiguous.
+fn classify_terminal(
     ctx: &QueryContext<'_>,
-    segments: &[String],
+    entities: Vec<Entity>,
     context: Entity,
     root: Entity,
 ) -> ValueResolution {
-    // Leading `Self.` resolves to the enclosing type entity; remaining
-    // segments walk through it just like any qualified path.
-    if segments[0] == "Self" {
-        let first_entity = match try_resolve_self_value(ctx, context, root) {
-            Some(target) => target,
-            None => return ValueResolution::SelfNotInScope,
-        };
-        // `Self.Item` inside a protocol (or its extension) is the same
-        // implicit-Self associated type as a bare `Item`, not a plain `Def`
-        // of the alias — so it lowers as a projection on Self.
-        if let [_, name] = segments
-            && ctx.get::<NodeKind>(first_entity) == Some(&NodeKind::Protocol)
-            && let Some(assoc) = ctx
-                .query(VisibleChildrenByName {
-                    parent: first_entity,
-                    name: name.clone(),
-                    context,
-                })
-                .iter()
-                .copied()
-                .find(|&e| ctx.get::<NodeKind>(e) == Some(&NodeKind::TypeAlias))
-        {
-            return ValueResolution::AssociatedType {
-                entity: assoc,
-                container: None,
-            };
+    if let [only] = entities.as_slice() {
+        let e = *only;
+        match ctx.get::<NodeKind>(e) {
+            Some(&NodeKind::TypeParameter) => return ValueResolution::TypeParameter(e),
+            Some(&NodeKind::TypeAlias) => {
+                if is_associated_type(ctx, e) {
+                    return ValueResolution::AssociatedType {
+                        entity: e,
+                        container: None,
+                    };
+                }
+                if let Some(target) = free_alias_target(ctx, e, context, root) {
+                    return ValueResolution::Def(target);
+                }
+            },
+            _ => {},
         }
-        return walk_path_from(ctx, first_entity, segments, context, root);
     }
-
-    // Resolve first segment
-    let first = &segments[0];
-    let first_result = ctx.query(ResolveName {
-        name: first.clone(),
-        context,
-        root,
-    });
-
-    let first_entity = match first_result {
-        NameResolution::Found(entities) => {
-            if entities.len() == 1 {
-                entities[0]
-            } else {
-                // Multiple matches: allow if all functions, otherwise
-                // try to disambiguate to a single type for qualified access
-                let all_fns = entities
-                    .iter()
-                    .all(|&e| ctx.get::<NodeKind>(e) == Some(&NodeKind::Function));
-                if all_fns {
-                    // Function overloads can't be used as multi-segment base
-                    return ValueResolution::Ambiguous(entities);
-                }
-                // Try to find a unique type
-                let types: Vec<Entity> = entities
-                    .iter()
-                    .filter(|&&e| ctx.has::<Typed>(e))
-                    .copied()
-                    .collect();
-                if types.len() == 1 {
-                    types[0]
-                } else {
-                    return ValueResolution::Ambiguous(entities);
-                }
-            }
-        },
-        NameResolution::Ambiguous(entities) => {
-            // Try to find a unique type among ambiguous results
-            let types: Vec<Entity> = entities
-                .iter()
-                .filter(|&&e| ctx.has::<Typed>(e))
-                .copied()
-                .collect();
-            if types.len() == 1 {
-                types[0]
-            } else {
-                return ValueResolution::Ambiguous(entities);
-            }
-        },
-        NameResolution::NotFound => {
-            return ValueResolution::NotFound(first.clone());
-        },
-    };
-
-    walk_path_from(ctx, first_entity, segments, context, root)
+    classify_value_results(ctx, entities)
 }
 
-/// Walk `segments[1..]` starting from a resolved first-segment entity.
-///
-/// Factored out so `Self`-leading paths (`Self.foo`, `Self.foo.bar`) can
-/// substitute the first entity and reuse the existing walking logic.
+/// An alias declared inside a protocol: an associated type.
+fn is_associated_type(ctx: &QueryContext<'_>, alias: Entity) -> bool {
+    ctx.parent_of(alias)
+        .is_some_and(|p| ctx.get::<NodeKind>(p) == Some(&NodeKind::Protocol))
+}
+
+/// Walk `segments[1..]` as member lookups, starting from the entity the
+/// first segment named (`Self`'s type for `Self.foo`).
 fn walk_path_from(
     ctx: &QueryContext<'_>,
     first_entity: Entity,
@@ -332,7 +277,7 @@ fn walk_path_from(
 
         if !children.is_empty() {
             if is_last {
-                return classify_value_results(ctx, children);
+                return classify_terminal(ctx, children, context, root);
             }
             // For intermediate segments, prefer types
             current = children
@@ -358,7 +303,7 @@ fn walk_path_from(
                 .map(|m| m.entity)
                 .collect();
             if is_last && !members.is_empty() {
-                return classify_value_results(ctx, members);
+                return classify_terminal(ctx, members, context, root);
             }
         }
 
@@ -422,6 +367,31 @@ fn walk_path_from(
 
     // Reached the end with a non-terminal entity
     ValueResolution::Def(current)
+}
+
+/// The concrete type a free-standing alias names, walking chains
+/// (`type A = B; type B = C`), so HIR, inference and call dispatch see the
+/// type itself wherever the alias is used as a value (`A(...)`,
+/// `Module.A(...)`). `None` for an associated type (an alias inside a
+/// protocol) or an alias whose target can't be resolved.
+fn free_alias_target(
+    ctx: &QueryContext<'_>,
+    alias: Entity,
+    context: Entity,
+    root: Entity,
+) -> Option<Entity> {
+    if is_associated_type(ctx, alias) {
+        return None;
+    }
+    let mut current = alias;
+    for _ in 0..8 {
+        let target = resolve_type_alias_target(ctx, current, context, root)?;
+        if ctx.get::<NodeKind>(target) != Some(&NodeKind::TypeAlias) {
+            return Some(target);
+        }
+        current = target;
+    }
+    None
 }
 
 /// Resolve through a type alias so member lookups see the aliased type.

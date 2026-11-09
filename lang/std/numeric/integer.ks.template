@@ -418,6 +418,14 @@ public struct {{TYPE_NAME}}:
         ({{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_mul(self.raw, other.raw)), Bool(boolLiteral: lang.{{LANG_TYPE}}_{{SIGNED_PREFIX}}mul_overflows(self.raw, other.raw)))
     }
 
+    /// The full double-width product `self * other` as `(low, high)`
+    /// halves: `low` is the wrapped product (as from `multiplyWrapping`),
+    /// `high` the bits above it. Compiles to one widening multiply. For
+    /// hashes, RNGs and bignum arithmetic.
+    public func multiplyFull(other: {{TYPE_NAME}}) -> ({{TYPE_NAME}}, {{TYPE_NAME}}) {
+        ({{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_mul(self.raw, other.raw)), {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_{{SIGNED_PREFIX}}mul_high(self.raw, other.raw)))
+    }
+
     /// Truncating integer division (`self / other`). For signed types,
 {{IF_SIGNED}}
     /// `minValue / -1` traps when overflow checks are on (and wraps
