@@ -11,6 +11,6 @@ func identity(n: Int64) -> Array[Array[Int64]] {
 @main
 func main() {
     for row in identity(5) {
-        println(row.joined(" "));
+        println(row.joined(by: " "));
     }
 }

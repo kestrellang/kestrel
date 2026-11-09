@@ -1,8 +1,8 @@
 // test: diagnostics
 // stdlib: true
 
-// A failable place may not exist, so it is computed and read-only: no
-// stored form, no `set`, and assignment through it is rejected.
+// A failable place may not exist, so it is computed: no stored form, and
+// assignment through it is rejected unless it declares a `set`.
 module Test
 
 import std.numeric.(Int64)
@@ -12,9 +12,10 @@ struct Stored {
     var x?: Int64 // ERROR(E637): a failable member needs a read accessor
 }
 
+// A failable place may declare `set`; its `newValue` is `Optional[Int64]`.
 struct WithSet {
     var items: Array[Int64]
-    var top?: Int64 { // ERROR(E637): a failable place cannot have a `set` accessor
+    var top?: Int64 {
         get { null }
         set { }
     }

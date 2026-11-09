@@ -278,6 +278,22 @@ impl<'w> LowerCtx<'w> {
             .find(|&e| self.world.get::<NodeKind>(e) == Some(&NodeKind::Setter))
     }
 
+    /// The `mutating ref` a plain `=` on `member` stores through. `None`
+    /// when it has none, or when it is failable with a `set`: there `=` may
+    /// target a missing place, so the setter (`newValue: Optional[T]`) takes
+    /// it, and the `mutating ref` serves `&mutating` binders only.
+    pub fn assignment_ref_accessor(&self, member: Entity) -> Option<Entity> {
+        if self
+            .world
+            .get::<kestrel_ast_builder::Failable>(member)
+            .is_some()
+            && self.find_setter_child(member).is_some()
+        {
+            return None;
+        }
+        self.find_ref_accessor_child(member, true)
+    }
+
     /// Find a `NodeKind::RefAccessor` child of a Field or Subscript entity
     /// (`mutating` selects the `mutating ref` vs the shared `ref` accessor).
     pub fn find_ref_accessor_child(&self, parent: Entity, mutating: bool) -> Option<Entity> {

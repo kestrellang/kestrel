@@ -66,8 +66,8 @@ func main() {
     inorder(tree, ino);
     var post = Array[Int64]();
     postorder(tree, post);
-    println("preorder:    \(pre.joined(" "))");
-    println("inorder:     \(ino.joined(" "))");
-    println("postorder:   \(post.joined(" "))");
-    println("level-order: \(levelOrder(tree).joined(" "))");
+    println("preorder:    \(pre.joined(by: " "))");
+    println("inorder:     \(ino.joined(by: " "))");
+    println("postorder:   \(post.joined(by: " "))");
+    println("level-order: \(levelOrder(tree).joined(by: " "))");
 }

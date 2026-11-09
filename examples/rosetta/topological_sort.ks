@@ -48,14 +48,14 @@ func main() {
         ("synopsys", []),
     ];
     match topoSort(deps) {
-        .Ok(order) => println(order.joined(" ")),
+        .Ok(order) => println(order.joined(by: " ")),
         .Err(e) => println(e),
     }
     // Adding dw04 as a dependency of dw01 creates a cycle.
     var cyclic = deps;
     cyclic(1) = ("dw01", ["ieee", "dw01", "dware", "gtech", "dw04"]);
     match topoSort(cyclic) {
-        .Ok(order) => println(order.joined(" ")),
+        .Ok(order) => println(order.joined(by: " ")),
         .Err(e) => println(e),
     }
 }

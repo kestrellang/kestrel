@@ -284,10 +284,11 @@ _Defined in `lang/std/system/process.ks`._
 #### function `wait`
 
 ```kestrel
-public mutating func wait(milliseconds: Int64) -> Result[Optional[ExitStatus], IoError]
+public mutating func wait(for: Duration) -> Result[Optional[ExitStatus], IoError]
 ```
 
-Waits up to `milliseconds` for the child to exit. `None` if it is
+Waits up to `duration` for the child to exit, as in
+`child.wait(for: .seconds(1))`. `None` if it is
 still running when the time is up; the child is left running.
 
 _Defined in `lang/std/system/process.ks`._
@@ -585,11 +586,12 @@ _Defined in `lang/std/system/process.ks`._
 #### function `timeout`
 
 ```kestrel
-public mutating func timeout(milliseconds: Int64) -> &mutating Command
+public mutating func timeout(Duration) -> &mutating Command
 ```
 
 Kills the child if `run` or `output` is still waiting on it after
-`milliseconds`; the call then fails with `TimedOut`.
+`duration`, as in `.timeout(.seconds(5))`. The call still succeeds, with status `.TimedOut`;
+`output()` keeps what the child wrote before it was killed.
 
 _Defined in `lang/std/system/process.ks`._
 
@@ -929,6 +931,17 @@ case Terminated
 ```
 
 It was ended from outside, by a signal such as `SIGKILL`.
+
+_Defined in `lang/std/system/process.ks`._
+
+#### case `TimedOut`
+
+```kestrel
+case TimedOut
+```
+
+It outlived the `Command`'s `timeout` and std killed it. Not an
+error: `output()` still returns whatever the child wrote before.
 
 _Defined in `lang/std/system/process.ks`._
 

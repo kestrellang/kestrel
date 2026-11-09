@@ -9,7 +9,7 @@ import std.memory.(Pointer, RawPointer)
 import std.collections.(Array, Slice)
 import std.iter.(Iterable)
 import std.ffi.(memmem)
-import std.text.(Formattable, Formatter, FormatOptions, Char, decodeUtf8, String, StringBuilder, StringSlice, CharsIterator, BytesView, CharsView, GraphemesView, LinesView, ByteIndex, CharIndex, GraphemeIndex, LineIndex, SplitView, SplitWhereView, _bytesEqual)
+import std.text.(Formattable, Formatter, FormatOptions, Char, decodeUtf8, String, StringBuilder, StringSlice, CharsIterator, BytesView, CharsView, GraphemesView, LinesView, WordsView, ByteIndex, CharIndex, GraphemeIndex, LineIndex, SplitView, SplitWhereView, _bytesEqual)
 import std.text.unicode as unicode
 
 // ============================================================================
@@ -80,6 +80,16 @@ extend Str {
     /// "a\nb\nc".lines.count;  // 3
     /// ```
     public var lines: LinesView { LinesView(slice: self.asSlice()) }
+
+    /// View over the whitespace-separated words. Runs of whitespace act as
+    /// one break and never yield empty words (unlike `split(by: " ")`).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// "  a  b\tc ".words.collect();  // ["a", "b", "c"]
+    /// ```
+    public var words: WordsView { WordsView(slice: self.asSlice()) }
 
     // -- Conversion ----------------------------------------------------------
 
@@ -361,12 +371,53 @@ extend Str {
     /// # Examples
     ///
     /// ```
-    /// "a,b,c".split(",").collect();   // ["a", "b", "c"]
-    /// "a,,b".split(",").count;        // 3 (empty segment preserved)
-    /// "a,".split(",").count;          // 2 (["a", ""])
+    /// "a,b,c".split(by: ",").collect();   // ["a", "b", "c"]
+    /// "a,,b".split(by: ",").count;        // 3 (empty segment preserved)
+    /// "a,".split(by: ",").count;          // 2 (["a", ""])
     /// ```
-    public func split(separator: some Str and not Static) -> SplitView {
+    public func split(by separator: some Str and not Static) -> SplitView {
         SplitView(slice: self.asSlice(), separator: separator.asSlice())
+    }
+
+    /// Like `split(by:)`, but yields at most `limit` pieces: the last one
+    /// holds the rest of the string, separators and all. `limit` must be
+    /// at least 1.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// "a,b,c".split(by: ",", limit: 2).collect();  // ["a", "b,c"]
+    /// "a,b,c".split(by: ",", limit: 1).collect();  // ["a,b,c"]
+    /// ```
+    public func split(by separator: some Str and not Static, limit limit: Int64) -> SplitView {
+        if limit < 1 {
+            fatalError("split(by:limit:): limit must be at least 1")
+        }
+        SplitView(slice: self.asSlice(), separator: separator.asSlice(), limit: limit)
+    }
+
+    /// Splits at the first occurrence of `separator`, returning the parts
+    /// before and after it, or `.None` when it doesn't occur.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// if let .Some((key, value)) = "port=8080".split(once: "=") {
+    ///     // key == "port", value == "8080"
+    /// }
+    /// "no-equals".split(once: "=");  // .None
+    /// ```
+    public func split(once separator: some Str and not Static) -> (StringSlice, StringSlice)? {
+        let slice = self.asSlice();
+        let sep = separator.asSlice();
+        match slice.firstIndex(of: sep) {
+            .Some(at) => {
+                let head = slice.subslice(from: 0, to: at.value);
+                let tail = slice.subslice(from: at.value + sep.bytes.count, to: slice.bytes.count);
+                .Some((head, tail))
+            },
+            .None => .None,
+        }
     }
 
     /// Returns a lazy view that splits at every code point matching

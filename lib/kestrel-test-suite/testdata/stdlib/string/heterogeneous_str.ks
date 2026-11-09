@@ -22,7 +22,7 @@ func main() -> lang.i64 {
     if owned.starts(with: alpha) == false { return 6 }
     if owned.ends(with: beta) == false { return 7 }
 
-    let parts = owned.asSlice().split(comma).collect();
+    let parts = owned.asSlice().split(by: comma).collect();
     if parts.count != 2 { return 8 }
     let alphaOwned: String = "alpha";
     let betaOwned: String = "beta";

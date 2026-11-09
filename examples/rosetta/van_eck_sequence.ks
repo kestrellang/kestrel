@@ -16,6 +16,6 @@ func main() {
         };
         last.insert(v, i);
     }
-    println("Terms 1-10:    \(seq.prefix(10).toArray().joined(" "))");
-    println("Terms 991-1000: \(seq.suffix(10).toArray().joined(" "))");
+    println("Terms 1-10:    \(seq.prefix(10).toArray().joined(by: " "))");
+    println("Terms 991-1000: \(seq.suffix(10).toArray().joined(by: " "))");
 }

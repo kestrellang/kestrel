@@ -46,7 +46,7 @@ func main() {
     println("First solution for 8 queens:");
     for row in 0..<8 {
         let line = (0..<8).iter().map { if it == eight.first(row) { "Q" } else { "." } }.collect();
-        println(line.joined(" "));
+        println(line.joined(by: " "));
     }
     for n in 1..=10 {
         var s = Solver(size: n);

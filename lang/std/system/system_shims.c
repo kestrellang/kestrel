@@ -164,6 +164,19 @@ int64_t kestrel_monotonic_ms(void) {
     return (int64_t)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
 }
 
+// Nanoseconds on the same never-jumping clock, for std.time's Stopwatch.
+int64_t kestrel_monotonic_ns(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (int64_t)ts.tv_sec * 1000000000 + ts.tv_nsec;
+}
+
+// Sleeps for `secs` seconds plus `nanos` nanoseconds, resuming after signals.
+void kestrel_sleep_ns(int64_t secs, int64_t nanos) {
+    struct timespec ts = {(time_t)secs, (long)nanos};
+    while (nanosleep(&ts, &ts) != 0 && errno == EINTR) {}
+}
+
 // ---------------------------------------------------------------------------
 // This process and machine
 // ---------------------------------------------------------------------------

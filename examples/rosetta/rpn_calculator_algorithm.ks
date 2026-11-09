@@ -5,7 +5,7 @@ module Main
 func evaluate(expr: String) -> Float64 {
     var stack = Array[Float64]();
     println("token  stack");
-    for piece in expr.split(" ") {
+    for piece in expr.split(by: " ") {
         let token = piece.toOwned();
         if let some x = Float64(parsing: token) {
             stack.append(x);

@@ -26,7 +26,7 @@ func main() {
         if not any { yearsWithout.append(year); }
     }
     println("\(found.count) months with five weekends");
-    println("first five: \(found.prefix(5).toArray().joined(", "))");
-    println("last five:  \(found.suffix(5).toArray().joined(", "))");
+    println("first five: \(found.prefix(5).toArray().joined(by: ", "))");
+    println("last five:  \(found.suffix(5).toArray().joined(by: ", "))");
     println("\(yearsWithout.count) years without one");
 }

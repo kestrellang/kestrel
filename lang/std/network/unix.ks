@@ -10,6 +10,7 @@ import std.streams.(IoError, Readable, Writable, FileDescriptor)
 import std.files.(Path)
 import std.memory.(RawPointer)
 import std.ffi.(malloc, free)
+import std.time.(Duration)
 
 /// A connected Unix stream socket. Closed when dropped.
 ///
@@ -73,16 +74,16 @@ public struct UnixStream: Readable, Writable, not Copyable {
     /// Closes the reading side, the writing side, or both.
     public mutating func shutdown(how: Shutdown) -> Result[(), IoError] { shutdownOn(self.fd, how) }
 
-    /// Makes a read that waits longer than `milliseconds` fail with
+    /// Makes a read that waits longer than `timeout` fail with
     /// `WouldBlock`. `None` waits forever.
-    public mutating func setReadTimeout(milliseconds milliseconds: Optional[Int64]) -> Result[(), IoError] {
-        setTimeout(self.fd, false, milliseconds)
+    public mutating func setReadTimeout(timeout: Optional[Duration]) -> Result[(), IoError] {
+        setTimeout(self.fd, false, timeout)
     }
 
-    /// Makes a write that waits longer than `milliseconds` fail with
+    /// Makes a write that waits longer than `timeout` fail with
     /// `WouldBlock`. `None` waits forever.
-    public mutating func setWriteTimeout(milliseconds milliseconds: Optional[Int64]) -> Result[(), IoError] {
-        setTimeout(self.fd, true, milliseconds)
+    public mutating func setWriteTimeout(timeout: Optional[Duration]) -> Result[(), IoError] {
+        setTimeout(self.fd, true, timeout)
     }
 
     /// Makes reads and writes return `WouldBlock` instead of waiting.

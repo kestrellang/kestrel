@@ -17,6 +17,6 @@ func inCarpet(x: Int64, y: Int64) -> Bool {
 func main() {
     let size = 27;
     for y in 0..<size {
-        println((0..<size).iter().map { if inCarpet(it, y) { "#" } else { " " } }.collect().joined(""));
+        println((0..<size).iter().map { if inCarpet(it, y) { "#" } else { " " } }.collect().joined(by: ""));
     }
 }

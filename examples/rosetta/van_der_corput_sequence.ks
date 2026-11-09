@@ -18,6 +18,6 @@ func vdc(n: Int64, base: Int64) -> Float64 {
 @main
 func main() {
     for base in 2..=5 {
-        println("base \(base): \((0..<10).iter().map { "\(vdc(it, base):.4)" }.collect().joined(" "))");
+        println("base \(base): \((0..<10).iter().map { "\(vdc(it, base):.4)" }.collect().joined(by: " "))");
     }
 }

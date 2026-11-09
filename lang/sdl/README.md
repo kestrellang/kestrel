@@ -17,7 +17,7 @@ sdl = { path = "../../lang/sdl" }
   - `init(title: String, width: Int64, height: Int64)`
   - `pollEvent() -> Event?` (mutating)
   - `render(body: (Renderer) -> ())` - draw inside the closure, then presents the frame
-  - `delay(ms: Milliseconds)`
+  - `delay(duration: Duration)`
 - **Renderer** - drawing surface passed to the `render` closure
   - `clear(color: Color)`, `setColor(color: Color)`
   - `fill(rect: Rectangle, color: Color)`, `fillRect(rect: Rectangle)` (uses current color)
@@ -26,7 +26,7 @@ sdl = { path = "../../lang/sdl" }
   - `init(title: String, width: Int64, height: Int64)`
   - `drawableSize: (Int64, Int64)` - the size in pixels, which can exceed the window size on high-DPI screens
   - `nativeWindow: NativeWindow` - the platform handles to make a GPU surface from
-  - `pollEvent() -> Event?` (mutating), `delay(ms: Milliseconds)`
+  - `pollEvent() -> Event?` (mutating), `delay(duration: Duration)`
   - `setRelativeMouseMode(enabled: Bool)` - capture the mouse for mouse look (pointer lock in a browser)
 - **NativeWindow** - `.Xlib(display, window)`, `.Wayland(display, surface)`, `.MetalLayer(layer)`, `.Windows(hinstance, hwnd)`, or `.Unsupported`
 - **Event** - `.Quit`, `.KeyDown(Key)`, `.KeyUp(Key)`, `.MouseDown(MouseButton, x, y)`, `.MouseUp(MouseButton, x, y)`, `.MouseMove(x, y, dx, dy)`, `.MouseWheel(clicks)`, `.Resized(width, height)`
@@ -34,7 +34,6 @@ sdl = { path = "../../lang/sdl" }
 - **Key** - letters, digits, F1-F12, arrows, modifiers, navigation, punctuation, and `.Other(Int32)` for unmapped scancodes
 - **Color** - `r/g/b/a` fields plus presets: `Color.black()`, `.white()`, `.red()`, `.green()`, `.blue()`, `.yellow()`, `.cyan()`, `.magenta()`
 - **Rectangle** - `x`, `y`, `width`, `height`
-- **Milliseconds** - `Milliseconds(16)` wrapper for `delay`
 - Free functions: `getTicks() -> UInt32`, `monotonicMs() -> Int64`
 
 ## Usage
@@ -42,7 +41,7 @@ sdl = { path = "../../lang/sdl" }
 A minimal game loop (lifted from `examples/sdl_pong`):
 
 ```kestrel
-import sdl.(Color, Rectangle, Milliseconds, Key, Event, Renderer, SDLApp)
+import sdl.(Color, Rectangle, Key, Event, Renderer, SDLApp)
 
 @main
 func main() -> lang.i32 {
@@ -71,7 +70,7 @@ func main() -> lang.i32 {
             renderer.drawText("PRESS [SPACE] TO START", 180, 200, 3);
         };
 
-        app.delay(Milliseconds(16));
+        app.delay(.milliseconds(16));
     }
 
     0

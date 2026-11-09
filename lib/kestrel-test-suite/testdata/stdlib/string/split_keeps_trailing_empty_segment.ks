@@ -10,7 +10,7 @@ module Test
 
 func segments(s: String) -> String {
     var out = "";
-    for part in s.split(",") { out.append("<"); out.append(part.toOwned()); out.append(">"); }
+    for part in s.split(by: ",") { out.append("<"); out.append(part.toOwned()); out.append(">"); }
     out
 }
 
@@ -30,6 +30,6 @@ func main() -> Int64 {
     if segments("a") != "<a>" { return 6 }
     if segmentsWhere("a,") != "<a><>" { return 7 }
     if segmentsWhere(",") != "<><>" { return 8 }
-    if "a,b,".split(",").count != 3 { return 9 }
+    if "a,b,".split(by: ",").count != 3 { return 9 }
     0
 }

@@ -21,7 +21,9 @@ use crate::generate::SubjectRoot;
 use crate::resolve::EqualityLhs;
 use crate::ty::{LiteralKind, TyKind, TySlot, TyVar};
 use crate::unify::{self, UnifyError};
-use kestrel_ast_builder::arg_binding::{BindArg, BindError, BindParam, Binding, bind_arguments};
+use kestrel_ast_builder::arg_binding::{
+    BindArg, BindError, BindParam, Binding, bind_arguments, names_unlabeled_param,
+};
 use kestrel_ast_builder::{Callable, InitEffect, Intrinsic, Name, NodeKind, TypeParams};
 use kestrel_copy_fold::CopyLayer;
 use kestrel_hecs::Entity;

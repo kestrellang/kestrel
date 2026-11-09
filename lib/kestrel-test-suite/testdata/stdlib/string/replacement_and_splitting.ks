@@ -34,7 +34,7 @@ module Test
 
             // ---- split(separator:) ----
             let csv: std.text.String = "a,b,c";
-            let parts = csv.split(",").collect();
+            let parts = csv.split(by: ",").collect();
             if parts.count != 3 { return 7 }
             if unsafe parts(unchecked: 0).toOwned().isEqual(to: "a") == false { return 8 }
             if unsafe parts(unchecked: 1).toOwned().isEqual(to: "b") == false { return 9 }
@@ -42,13 +42,13 @@ module Test
 
             // Split with no separator found
             let noSep: std.text.String = "hello";
-            let noParts = noSep.split(",").collect();
+            let noParts = noSep.split(by: ",").collect();
             if noParts.count != 1 { return 11 }
             if unsafe noParts(unchecked: 0).toOwned().isEqual(to: "hello") == false { return 12 }
 
             // Split with adjacent separators
             let adj: std.text.String = "a,,b";
-            let adjParts = adj.split(",").collect();
+            let adjParts = adj.split(by: ",").collect();
             if adjParts.count != 3 { return 13 }
             if unsafe adjParts(unchecked: 1).toOwned().isEqual(to: "") == false { return 14 }
 

@@ -21,6 +21,6 @@ func bigOmega(n: Int64) -> Int64 {
 func main() {
     for k in 1..=5 {
         let first = (2..).iter().filter { bigOmega(it) == k }.take(10).collect();
-        println("k = \(k): \(first.joined(" "))");
+        println("k = \(k): \(first.joined(by: " "))");
     }
 }

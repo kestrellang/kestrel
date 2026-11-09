@@ -13,7 +13,7 @@ func floyd(rows: Int64) {
             cells.append("\(n)".padded(leading: widths(col), with: ' '));
             n = n + 1;
         }
-        println(cells.joined(" "));
+        println(cells.joined(by: " "));
     }
 }
 

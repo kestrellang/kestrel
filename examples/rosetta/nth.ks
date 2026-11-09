@@ -19,6 +19,6 @@ func ordinal(n: Int64) -> String {
 @main
 func main() {
     for range in [0..<26, 250..<266, 1000..<1026] {
-        println(range.iter().map { ordinal(it) }.collect().joined(" "));
+        println(range.iter().map { ordinal(it) }.collect().joined(by: " "));
     }
 }

@@ -1621,7 +1621,7 @@ impl OssaBodyCtx<'_, '_> {
         // Stage 1.5: a `mutating ref` accessor is the write provider when
         // declared — RHS lowered FIRST (pinned evaluation order), then the
         // place ref is fabricated and stored through.
-        if let Some(accessor) = self.ctx.find_ref_accessor_child(resolved, true) {
+        if let Some(accessor) = self.ctx.assignment_ref_accessor(resolved) {
             self.ctx.register_name(accessor);
             let is_static = self
                 .ctx
@@ -1728,7 +1728,7 @@ impl OssaBodyCtx<'_, '_> {
         }
 
         // Stage 1.5: `mutating ref` write provider (global member — no receiver).
-        if let Some(accessor) = self.ctx.find_ref_accessor_child(entity, true) {
+        if let Some(accessor) = self.ctx.assignment_ref_accessor(entity) {
             self.ctx.register_name(accessor);
             let rhs = self.lower_expr(value_id);
             let pointee_ty = self.resolve_expr_type(target_id);
@@ -1765,7 +1765,7 @@ impl OssaBodyCtx<'_, '_> {
         // declared — RHS lowered FIRST (pinned evaluation order: the test
         // wave pins `x(i) = expr-that-mutates-x`), then receiver + index
         // args, then the place ref is fabricated and stored through.
-        if let Some(accessor) = self.ctx.find_ref_accessor_child(resolved, true) {
+        if let Some(accessor) = self.ctx.assignment_ref_accessor(resolved) {
             self.ctx.register_name(accessor);
             let is_static = self
                 .ctx
@@ -1893,7 +1893,7 @@ impl OssaBodyCtx<'_, '_> {
             return None;
         }
 
-        let mutating_ref = self.ctx.find_ref_accessor_child(resolved, true);
+        let mutating_ref = self.ctx.assignment_ref_accessor(resolved);
         let setter = if mutating_ref.is_none() {
             Some(self.write_setter(resolved, Some(receiver))?)
         } else {

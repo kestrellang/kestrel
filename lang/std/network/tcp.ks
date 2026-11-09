@@ -10,6 +10,7 @@ import std.result.(Result, Optional)
 import std.iter.(Iterator)
 import std.streams.(IoError, IoErrorKind, Readable, Writable, FileDescriptor)
 import std.system.(native_monotonic_ms)
+import std.time.(Duration)
 
 /// A TCP connection. Closed when dropped.
 ///
@@ -38,12 +39,13 @@ public struct TcpStream: Readable, Writable, not Copyable {
     }
 
     /// Like `connect(host, port)`, failing with `TimedOut` if no address
-    /// connects within `timeoutMilliseconds`, lookup included.
-    public static func connect(host: String, port: UInt16, timeoutMilliseconds timeoutMilliseconds: Int64) -> Result[TcpStream, IoError] {
-        if timeoutMilliseconds < 0 {
+    /// connects within `timeout`, lookup included. A negative timeout is
+    /// `InvalidInput`.
+    public static func connect(host: String, port: UInt16, timeout timeout: Duration) -> Result[TcpStream, IoError] {
+        if timeout.isNegative {
             return .Err(IoError.invalidInput)
         }
-        connectToAny(host, port, timeoutMilliseconds)
+        connectToAny(host, port, timeout.timeoutMilliseconds)
     }
 
     /// Connects to `address`.
@@ -52,13 +54,13 @@ public struct TcpStream: Readable, Writable, not Copyable {
         .Ok(TcpStream(unsafeDescriptor: FileDescriptor(fd)))
     }
 
-    /// Connects to `address`, failing with `TimedOut` after
-    /// `timeoutMilliseconds`.
-    public static func connect(to address: SocketAddress, timeoutMilliseconds timeoutMilliseconds: Int64) -> Result[TcpStream, IoError] {
-        if timeoutMilliseconds < 0 {
+    /// Connects to `address`, failing with `TimedOut` after `timeout`. A
+    /// negative timeout is `InvalidInput`.
+    public static func connect(to address: SocketAddress, timeout timeout: Duration) -> Result[TcpStream, IoError] {
+        if timeout.isNegative {
             return .Err(IoError.invalidInput)
         }
-        let fd = try connectSocket(address, streamKind(), timeoutMilliseconds);
+        let fd = try connectSocket(address, streamKind(), timeout.timeoutMilliseconds);
         .Ok(TcpStream(unsafeDescriptor: FileDescriptor(fd)))
     }
 
@@ -100,16 +102,16 @@ public struct TcpStream: Readable, Writable, not Copyable {
     /// Turns on TCP keepalive probes on an idle connection.
     public mutating func setKeepAlive(on: Bool) -> Result[(), IoError] { setFlag(self.fd, keepAliveOption(), on) }
 
-    /// Makes a read that waits longer than `milliseconds` fail with
+    /// Makes a read that waits longer than `timeout` fail with
     /// `WouldBlock`. `None` waits forever.
-    public mutating func setReadTimeout(milliseconds milliseconds: Optional[Int64]) -> Result[(), IoError] {
-        setTimeout(self.fd, false, milliseconds)
+    public mutating func setReadTimeout(timeout: Optional[Duration]) -> Result[(), IoError] {
+        setTimeout(self.fd, false, timeout)
     }
 
-    /// Makes a write that waits longer than `milliseconds` fail with
+    /// Makes a write that waits longer than `timeout` fail with
     /// `WouldBlock`. `None` waits forever.
-    public mutating func setWriteTimeout(milliseconds milliseconds: Optional[Int64]) -> Result[(), IoError] {
-        setTimeout(self.fd, true, milliseconds)
+    public mutating func setWriteTimeout(timeout: Optional[Duration]) -> Result[(), IoError] {
+        setTimeout(self.fd, true, timeout)
     }
 
     /// Makes reads and writes return `WouldBlock` instead of waiting, for

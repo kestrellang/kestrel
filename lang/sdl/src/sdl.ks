@@ -156,14 +156,6 @@ public struct Rectangle {
     public var height: Int64
 }
 
-public struct Milliseconds {
-    public var value: UInt32
-
-    public init(value: Int64) {
-        self.value = UInt32(truncating: value);
-    }
-}
-
 public enum Key {
     // Letters
     case A
@@ -374,8 +366,11 @@ public struct SDLApp : not Copyable {
         unsafe sdlRenderPresent(self.rendererPtr);
     }
 
-    public func delay(ms: Milliseconds) {
-        unsafe sdlDelay(ms.value);
+    /// Pauses for `duration` (whole milliseconds), as in
+    /// `app.delay(.milliseconds(16))`.
+    public func delay(duration: Duration) {
+        let ms = if duration.isNegative { 0 } else { duration.totalMilliseconds };
+        unsafe sdlDelay(UInt32(truncating: ms));
     }
 }
 
@@ -501,8 +496,11 @@ public struct SDLWindow: not Copyable {
         unsafe sdlSetRelativeMouseMode(if enabled { 1 } else { 0 });
     }
 
-    public func delay(ms: Milliseconds) {
-        unsafe sdlDelay(ms.value);
+    /// Pauses for `duration` (whole milliseconds), as in
+    /// `app.delay(.milliseconds(16))`.
+    public func delay(duration: Duration) {
+        let ms = if duration.isNegative { 0 } else { duration.totalMilliseconds };
+        unsafe sdlDelay(UInt32(truncating: ms));
     }
 }
 

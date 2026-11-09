@@ -41,6 +41,6 @@ func main() {
         board(y * 8 + x) = move;
     }
     for row in 0..<8 {
-        println((0..<8).iter().map { "\(board(row * 8 + it):>3)" }.collect().joined(""));
+        println((0..<8).iter().map { "\(board(row * 8 + it):>3)" }.collect().joined(by: ""));
     }
 }

@@ -10,6 +10,7 @@ import std.core.(Bool, Equatable)
 import std.result.(Optional, Result)
 import std.streams.(IoError, Readable, Writable, flushStandardOutput)
 import std.ffi.(malloc, free)
+import std.time.(Duration)
 
 // ============================================================================
 // THIS PROCESS
@@ -87,20 +88,25 @@ public enum ExitStatus: Equatable, Formattable {
     /// 11 for `SIGSEGV`, 2 for `SIGINT`), so a crash and a kill are told
     /// apart.
     case Terminated(signal: Int32)
+    /// It outlived the `Command`'s `timeout` and std killed it. Not an
+    /// error: `output()` still returns whatever the child wrote before.
+    case TimedOut
 
     /// True if it exited with code 0.
     public var isSuccess: Bool {
         match self {
             .Exited(code) => code.isSuccess,
-            .Terminated(_) => false
+            .Terminated(_) => false,
+            .TimedOut => false
         }
     }
 
-    /// The exit code, or `None` if it was terminated.
+    /// The exit code, or `None` if it was terminated or timed out.
     public var code: Optional[ExitCode] {
         match self {
             .Exited(code) => .Some(code),
-            .Terminated(_) => .None
+            .Terminated(_) => .None,
+            .TimedOut => .None
         }
     }
 
@@ -108,15 +114,17 @@ public enum ExitStatus: Equatable, Formattable {
         match (self, other) {
             (.Exited(a), .Exited(b)) => a.isEqual(to: b),
             (.Terminated(a), .Terminated(b)) => a == b,
+            (.TimedOut, .TimedOut) => true,
             _ => false
         }
     }
 
-    /// Prints `exit code 3` or `terminated by signal 9`.
+    /// Prints `exit code 3`, `terminated by signal 9` or `timed out`.
     public func format(mutating into writer: some Formatter, options: FormatOptions = FormatOptions.default()) {
         let text: String = match self {
             .Exited(code) => "exit code \(code.value)",
-            .Terminated(signal) => "terminated by signal \(signal)"
+            .Terminated(signal) => "terminated by signal \(signal)",
+            .TimedOut => "timed out"
         };
         _writePadded(into: writer, text, options)
     }
@@ -270,7 +278,7 @@ public struct Command: not Copyable {
             return if isExecutable(program) { .Some(program) } else { .None }
         }
         let path = Environment.variable("PATH") ?? "/usr/bin:/bin";
-        for directory in path.split(":") {
+        for directory in path.split(by: ":") {
             let dir = if directory.isEmpty { "." } else { directory.toOwned() };
             let candidate = "\(dir)/\(program)";
             if isExecutable(candidate) {
@@ -339,9 +347,11 @@ public struct Command: not Copyable {
     }
 
     /// Kills the child if `run` or `output` is still waiting on it after
-    /// `milliseconds`; the call then fails with `TimedOut`.
-    public mutating func timeout(milliseconds milliseconds: Int64) -> &mutating Command {
-        self.timeoutMilliseconds = .Some(milliseconds);
+    /// `duration`, as in `.timeout(.seconds(5))`. The call still succeeds,
+    /// with status `.TimedOut`; `output()` keeps what the child wrote before
+    /// it was killed.
+    public mutating func timeout(duration: Duration) -> &mutating Command {
+        self.timeoutMilliseconds = .Some(duration.timeoutMilliseconds);
         self
     }
 
@@ -349,9 +359,9 @@ public struct Command: not Copyable {
     ///
     /// # Errors
     ///
-    /// `NotFound` if the program doesn't exist, `PermissionDenied` if it
-    /// isn't executable, or a timeout error if `timeout` was set and hit.
-    /// A program that runs and fails is still `Ok`; check `isSuccess`.
+    /// `NotFound` if the program doesn't exist, or `PermissionDenied` if it
+    /// isn't executable. A program that runs and fails, or outlives its
+    /// `timeout` (status `.TimedOut`), is still `Ok`; check `isSuccess`.
     public func run() -> Result[ExitStatus, IoError] {
         var child = try self.spawn(Stdio.Inherit, Stdio.Inherit, Stdio.Inherit);
         child.finish(self.timeoutMilliseconds)
@@ -548,9 +558,15 @@ public struct Child: not Copyable {
         self.reap(blocking: false)
     }
 
-    /// Waits up to `milliseconds` for the child to exit. `None` if it is
-    /// still running when the time is up; the child is left running.
-    public mutating func wait(milliseconds milliseconds: Int64) -> Result[Optional[ExitStatus], IoError] {
+    /// Waits up to `duration` for the child to exit, as in
+    /// `child.wait(for: .seconds(1))`. `None` if it is still running when
+    /// the time is up; the child is left running.
+    public mutating func wait(for duration: Duration) -> Result[Optional[ExitStatus], IoError] {
+        self.waitMilliseconds(duration.timeoutMilliseconds)
+    }
+
+    /// `wait(for:)` in whole milliseconds, for std's own deadlines.
+    mutating func waitMilliseconds(milliseconds: Int64) -> Result[Optional[ExitStatus], IoError] {
         self.input = .None;
         let deadline = unsafe native_monotonic_ms() + milliseconds;
         var pause: Int32 = 1;
@@ -614,17 +630,23 @@ public struct Child: not Copyable {
         .Ok(.Some(status))
     }
 
-    /// `wait()`, or a timed wait that kills the child when time runs out.
+    /// `wait()`, or a timed wait that kills the child when time runs out
+    /// and reports `.TimedOut`.
     mutating func finish(timeoutMilliseconds: Optional[Int64]) -> Result[ExitStatus, IoError] {
         guard let .Some(limit) = timeoutMilliseconds else {
             return self.wait()
         }
-        if let .Some(status) = try self.wait(milliseconds: limit) {
+        if let .Some(status) = try self.waitMilliseconds(limit) {
             return .Ok(status)
         }
+        self.killForTimeout();
+        .Ok(.TimedOut)
+    }
+
+    /// Kills and reaps a child that outlived its timeout.
+    mutating func killForTimeout() {
         let _ = self.kill();
         let _ = self.wait();
-        .Err(IoError.timedOut)
     }
 
     /// Drains the piped output streams with `poll`, so a child filling one
@@ -658,9 +680,9 @@ public struct Child: not Copyable {
             if deadline >= 0 {
                 let left = deadline - unsafe native_monotonic_ms();
                 if left <= 0 {
-                    let _ = self.kill();
-                    let _ = self.wait();
-                    return .Err(IoError.timedOut)
+                    // Out of time: keep what was read so far.
+                    self.killForTimeout();
+                    return .Ok(Output(status: .TimedOut, standardOutput: outBytes, standardError: errBytes))
                 }
                 wait = Int32(from: left)
             }

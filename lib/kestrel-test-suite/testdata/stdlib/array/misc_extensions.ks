@@ -44,7 +44,7 @@ module Test
             // joined(separator:) - positional single-name param
             var nums = std.collections.Array[std.numeric.Int64]();
             nums.append(1); nums.append(2); nums.append(3);
-            let j = nums.joined(", ");
+            let j = nums.joined(by: ", ");
             if j != "1, 2, 3" { return 12 }
 
             // joined with empty separator (default)
@@ -53,13 +53,13 @@ module Test
 
             // joined on empty array
             let emptyNums = std.collections.Array[std.numeric.Int64]();
-            let jEmpty = emptyNums.joined(", ");
+            let jEmpty = emptyNums.joined(by: ", ");
             if jEmpty != "" { return 14 }
 
             // joined single element
             var single = std.collections.Array[std.numeric.Int64]();
             single.append(42);
-            let jSingle = single.joined("-");
+            let jSingle = single.joined(by: "-");
             if jSingle != "42" { return 15 }
 
             0

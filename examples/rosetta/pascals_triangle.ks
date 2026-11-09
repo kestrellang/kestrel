@@ -9,7 +9,7 @@ func main() {
     for n in 0..<rows {
         let indent = " ".repeated(2 * (rows - n - 1));
         let cells = row.map { "\(it:>3)" };
-        println("\(indent)\(cells.joined(" "))");
+        println("\(indent)\(cells.joined(by: " "))");
         // Each new entry is the sum of the two above it.
         var next = [1];
         for i in 1..<row.count { next.append(row(i - 1) + row(i)); }

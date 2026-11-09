@@ -1,6 +1,6 @@
 module SdlPong
 
-import sdl.(Color, Rectangle, Milliseconds, Key, Event, Renderer, SDLApp)
+import sdl.(Color, Rectangle, Key, Event, Renderer, SDLApp)
 
 // --- Game Components ---
 
@@ -254,7 +254,7 @@ func main() -> lang.i32 {
             ball.render(renderer);
         };
 
-        app.delay(Milliseconds(16));
+        app.delay(.milliseconds(16));
     }
 
     0

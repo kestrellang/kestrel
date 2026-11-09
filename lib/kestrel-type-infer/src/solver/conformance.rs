@@ -127,6 +127,18 @@ pub(super) fn solve_conforms(
     protocol_args: Vec<TyVar>,
 ) -> SolveResult {
     let resolved = ctx.resolve(ty);
+    // A compound assignment through a failable or throwing place
+    // (`d(k) += 1`): the analyzer always reports E214 for it, so stop the
+    // cascade without an E107.
+    if let ConformsOrigin::CompoundPlace(place) = origin
+        && ctx
+            .resolutions
+            .get(&place)
+            .is_some_and(|&member| kestrel_ast_builder::is_effectful_place(ctx.query_ctx, member))
+    {
+        ctx.poison(ty);
+        return SolveResult::Solved;
+    }
     match ctx.slot(resolved) {
         TySlot::Unresolved { .. } => SolveResult::Deferred(Constraint::Conforms {
             ty,

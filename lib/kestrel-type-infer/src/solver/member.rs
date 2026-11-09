@@ -71,7 +71,12 @@ pub(super) fn solve_for_loop_iterator(
         ctx.equal(result, iterable, span);
         return SolveResult::Solved;
     }
-    ctx.conforms_poisoning(iterable, protocol, span.clone());
+    ctx.conforms_poisoning(
+        iterable,
+        protocol,
+        span.clone(),
+        crate::constraint::ConformsOrigin::Expr,
+    );
     // `expr` is the desugared `Iterable.iter()` call: its tagged requirement is
     // recorded, so the member resolves through it; the name is its spelling.
     let Some(name) = ctx
@@ -1423,9 +1428,18 @@ pub(super) fn solve_member(
             expected,
             ..
         }) => {
+            let got = args[arg_index].label.clone();
+            let got_is_param_name = names_unlabeled_param(
+                resolution
+                    .param_types
+                    .iter()
+                    .map(|p| (p.label.as_deref(), p.name.as_str())),
+                got.as_deref(),
+            );
             return SolveResult::Error(InferError::LabelMismatch {
                 expected,
-                got: args[arg_index].label.clone(),
+                got,
+                got_is_param_name,
                 span,
             });
         },

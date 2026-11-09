@@ -128,8 +128,8 @@ if let .Some(t) = stack.top { ... }
 Reads produce `Optional[T]`: a `get` body returns `T?`, and a `ref` body
 lends `Optional[&T]`. Subscripts use the same marker after their parameter
 list: `subscript(checked index: Int64)? -> T`. Assigning to a failable
-place is E214, since it may not exist. A failable member needs a read
-accessor and can't declare `set` (E637).
+place is E214, since it may not exist, unless the member declares `set`
+(below). A failable member needs a read accessor (E637).
 
 To write through a failable place, declare a `mutating ref` that lends
 `Optional[&mutating T]`, and unwrap it with a `&mutating` payload binder:
@@ -145,6 +145,26 @@ var first?: T {
 }
 
 if let .Some(&mutating v) = stack.first { v += 1; }
+```
+
+A failable member may also declare `set`. Its `newValue` is `Optional[T]`,
+so the setter decides what assigning `null` means, and plain `=` calls it
+even when a `mutating ref` is declared too. `Dictionary` uses this:
+`dict(key) = v` inserts or replaces, and `dict(key) = null` removes.
+Compound assignment (`dict(key) += 1`) is still E214, since it needs the
+current value, which may be missing:
+
+```kestrel
+subscript(key: K)? -> V {
+    ref { ... }
+    mutating ref { ... }      // for `if let .Some(&mutating v) = dict(k)`
+    set {                     // for `dict(k) = …`; newValue: Optional[V]
+        match newValue {
+            .Some(v) => { let _ = self.insert(key, v); },
+            .None => { let _ = self.remove(key); },
+        }
+    }
+}
 ```
 
 A match whose arms have a `&mutating` binder reads the failable member

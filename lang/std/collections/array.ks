@@ -1906,12 +1906,12 @@ extend Array[T, A] where T: Formattable {
     /// # Examples
     ///
     /// ```
-    /// [1, 2, 3].joined(", ");  // "1, 2, 3"
-    /// [1, 2, 3].joined();       // "123"
-    /// ["a", "b"].joined("-");   // "a-b"
-    /// [].joined(", ");          // ""
+    /// [1, 2, 3].joined(by: ", ");  // "1, 2, 3"
+    /// [1, 2, 3].joined();           // "123"
+    /// ["a", "b"].joined(by: "-");   // "a-b"
+    /// [].joined(by: ", ");          // ""
     /// ```
-    public func joined(separator: String = "") -> String {
+    public func joined(by separator: String = "") -> String {
         if self.count == 0 {
             return ""
         }

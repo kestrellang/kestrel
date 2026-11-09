@@ -16,7 +16,7 @@ func main() -> lang.i64 {
         .Ok(.None) => {},
         _ => { return 3 }
     }
-    match child.wait(milliseconds: 20) {
+    match child.wait(for: .milliseconds(20)) {
         .Ok(.None) => {},
         _ => { return 4 }
     }

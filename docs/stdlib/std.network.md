@@ -775,11 +775,12 @@ _Defined in `lang/std/network/tcp.ks`._
 #### function `connect`
 
 ```kestrel
-public static func connect(String, UInt16, timeoutMilliseconds: Int64) -> Result[TcpStream, IoError]
+public static func connect(String, UInt16, timeout: Duration) -> Result[TcpStream, IoError]
 ```
 
 Like `connect(host, port)`, failing with `TimedOut` if no address
-connects within `timeoutMilliseconds`, lookup included.
+connects within `timeout`, lookup included. A negative timeout is
+`InvalidInput`.
 
 _Defined in `lang/std/network/tcp.ks`._
 
@@ -796,11 +797,11 @@ _Defined in `lang/std/network/tcp.ks`._
 #### function `connect`
 
 ```kestrel
-public static func connect(to: SocketAddress, timeoutMilliseconds: Int64) -> Result[TcpStream, IoError]
+public static func connect(to: SocketAddress, timeout: Duration) -> Result[TcpStream, IoError]
 ```
 
 Connects to `address`, failing with `TimedOut` after
-`timeoutMilliseconds`.
+`timeout`. A negative timeout is `InvalidInput`.
 
 _Defined in `lang/std/network/tcp.ks`._
 
@@ -887,10 +888,10 @@ _Defined in `lang/std/network/tcp.ks`._
 #### function `setReadTimeout`
 
 ```kestrel
-public mutating func setReadTimeout(milliseconds: Optional[Int64]) -> Result[(), IoError]
+public mutating func setReadTimeout(Optional[Duration]) -> Result[(), IoError]
 ```
 
-Makes a read that waits longer than `milliseconds` fail with
+Makes a read that waits longer than `timeout` fail with
 `WouldBlock`. `None` waits forever.
 
 _Defined in `lang/std/network/tcp.ks`._
@@ -898,10 +899,10 @@ _Defined in `lang/std/network/tcp.ks`._
 #### function `setWriteTimeout`
 
 ```kestrel
-public mutating func setWriteTimeout(milliseconds: Optional[Int64]) -> Result[(), IoError]
+public mutating func setWriteTimeout(Optional[Duration]) -> Result[(), IoError]
 ```
 
-Makes a write that waits longer than `milliseconds` fail with
+Makes a write that waits longer than `timeout` fail with
 `WouldBlock`. `None` waits forever.
 
 _Defined in `lang/std/network/tcp.ks`._
@@ -1141,10 +1142,10 @@ _Defined in `lang/std/network/udp.ks`._
 #### function `setReadTimeout`
 
 ```kestrel
-public mutating func setReadTimeout(milliseconds: Optional[Int64]) -> Result[(), IoError]
+public mutating func setReadTimeout(Optional[Duration]) -> Result[(), IoError]
 ```
 
-Makes a receive that waits longer than `milliseconds` fail with
+Makes a receive that waits longer than `timeout` fail with
 `WouldBlock`. `None` waits forever.
 
 _Defined in `lang/std/network/udp.ks`._
@@ -1152,10 +1153,10 @@ _Defined in `lang/std/network/udp.ks`._
 #### function `setWriteTimeout`
 
 ```kestrel
-public mutating func setWriteTimeout(milliseconds: Optional[Int64]) -> Result[(), IoError]
+public mutating func setWriteTimeout(Optional[Duration]) -> Result[(), IoError]
 ```
 
-Makes a send that waits longer than `milliseconds` fail with
+Makes a send that waits longer than `timeout` fail with
 `WouldBlock`. `None` waits forever.
 
 _Defined in `lang/std/network/udp.ks`._
@@ -1334,10 +1335,10 @@ _Defined in `lang/std/network/unix.ks`._
 #### function `setReadTimeout`
 
 ```kestrel
-public mutating func setReadTimeout(milliseconds: Optional[Int64]) -> Result[(), IoError]
+public mutating func setReadTimeout(Optional[Duration]) -> Result[(), IoError]
 ```
 
-Makes a read that waits longer than `milliseconds` fail with
+Makes a read that waits longer than `timeout` fail with
 `WouldBlock`. `None` waits forever.
 
 _Defined in `lang/std/network/unix.ks`._
@@ -1345,10 +1346,10 @@ _Defined in `lang/std/network/unix.ks`._
 #### function `setWriteTimeout`
 
 ```kestrel
-public mutating func setWriteTimeout(milliseconds: Optional[Int64]) -> Result[(), IoError]
+public mutating func setWriteTimeout(Optional[Duration]) -> Result[(), IoError]
 ```
 
-Makes a write that waits longer than `milliseconds` fail with
+Makes a write that waits longer than `timeout` fail with
 `WouldBlock`. `None` waits forever.
 
 _Defined in `lang/std/network/unix.ks`._

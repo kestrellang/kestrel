@@ -112,7 +112,7 @@ public func parseQueryString(qs: String) -> Array[(String, String)] {
         return result
     }
 
-    for pair in qs.split("&") {
+    for pair in qs.split(by: "&") {
         match pair.firstIndex(of: "=") {
             .Some(eqIdx) => {
                 let key = percentDecode(pair.subslice(from: 0, to: eqIdx.value).toOwned());
@@ -237,7 +237,7 @@ public func encodeQueryString(pairs: Array[(String, String)]) -> String {
 /// ```
 func splitSegments(path: String) -> Array[String] {
     var segments = [];
-    for part in path.split("/") {
+    for part in path.split(by: "/") {
         if part.bytes.count > 0 {
             segments.append(part.toOwned())
         }

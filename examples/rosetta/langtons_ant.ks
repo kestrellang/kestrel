@@ -27,6 +27,6 @@ func main() {
     // Print the interesting part of the grid.
     for row in 28..<80 {
         let line = (17..<83).iter().map { if black(row * size + it) { "#" } else { " " } }.collect();
-        println(line.joined("").trimmedEnd().toOwned());
+        println(line.joined(by: "").trimmedEnd().toOwned());
     }
 }

@@ -1282,7 +1282,7 @@ extend Set[T, H, A]: Hashable where T: Hashable, H: Hasher, H: Defaultable {
 /// Drives string interpolation. Empty sets render as `"{}"`. Element
 /// order in the output matches iteration order and is unspecified.
 extend Set[T, H, A]: Formattable where T: Formattable, T: Hashable, H: Hasher, H: Defaultable {
-    /// Renders the set as `"{" + elements.joined(", ") + "}"`,
+    /// Renders the set as `"{" + elements.joined(by: ", ") + "}"`,
     /// passing `options` to each element's `format`.
     ///
     /// # Examples

@@ -23,7 +23,7 @@ func isqrt(x: Int64) -> Int64 {
 @main
 func main() {
     println("isqrt of 0..65:");
-    println((0..=65).iter().map { isqrt(it) }.collect().joined(" "));
+    println((0..=65).iter().map { isqrt(it) }.collect().joined(by: " "));
     println("isqrt of odd powers of 7:");
     var p = 7;
     for k in 0..<11 {

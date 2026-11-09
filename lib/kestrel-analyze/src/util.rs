@@ -203,12 +203,15 @@ pub fn member_has_write_provider(cx: &BodyContext<'_>, expr_id: HirExprId) -> bo
         .query
         .query(kestrel_hir_lower::PlaceAccessors { entity: member })
         .is_some_and(|info| info.mutating_ref_accessor.is_some());
-    let has_setter_child = cx
-        .query
+    has_mutating_ref || has_setter_child(cx, member)
+}
+
+/// Does `member` (a subscript or computed property) declare a `set`.
+pub fn has_setter_child(cx: &BodyContext<'_>, member: kestrel_hecs::Entity) -> bool {
+    cx.query
         .children_of(member)
         .iter()
-        .any(|&c| cx.query.get::<NodeKind>(c) == Some(&NodeKind::Setter));
-    has_mutating_ref || has_setter_child
+        .any(|&c| cx.query.get::<NodeKind>(c) == Some(&NodeKind::Setter))
 }
 
 /// Syntactic pre-check: does this annotation mention a reference type

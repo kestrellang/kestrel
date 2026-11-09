@@ -149,7 +149,7 @@ public struct Cookie: Cloneable {
 /// ```
 public func parseCookieHeader(headerValue: String) -> Array[(String, String)] {
     var result = Array[(String, String)]();
-    for part in headerValue.split("; ") {
+    for part in headerValue.split(by: "; ") {
         let trimmedPart = part.trimmed();
         match trimmedPart.firstIndex(of: "=") {
             .Some(eqIdx) => {

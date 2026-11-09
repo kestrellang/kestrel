@@ -529,10 +529,10 @@ debug form (`"[1, 2, 3]"`), use `format()` directly.
 ##### Examples
 
 ```
-[1, 2, 3].joined(", ");  // "1, 2, 3"
+[1, 2, 3].joined(by: ", ");  // "1, 2, 3"
 [1, 2, 3].joined();       // "123"
-["a", "b"].joined("-");   // "a-b"
-[].joined(", ");          // ""
+["a", "b"].joined(by: "-");   // "a-b"
+[].joined(by: ", ");          // ""
 ```
 
 _Defined in `lang/std/collections/array.ks`._
@@ -3884,7 +3884,7 @@ _Conditional: `where K: Hashable, K: Formattable, V: Formattable, H: Hasher, H: 
 public func format(into: mutating some Formatter, FormatOptions) where K: Hashable, K: Formattable, V: Formattable, H: Hasher, H: Defaultable
 ```
 
-Renders the dictionary as `"{" + entries.joined(", ") + "}"`,
+Renders the dictionary as `"{" + entries.joined(by: ", ") + "}"`,
 passing `options` to each key and value's `format`.
 
 ##### Examples
@@ -5907,7 +5907,7 @@ _Conditional: `where T: Formattable, T: Hashable, H: Hasher, H: Defaultable`._
 public func format(into: mutating some Formatter, FormatOptions) where T: Formattable, T: Hashable, H: Hasher, H: Defaultable
 ```
 
-Renders the set as `"{" + elements.joined(", ") + "}"`,
+Renders the set as `"{" + elements.joined(by: ", ") + "}"`,
 passing `options` to each element's `format`.
 
 ##### Examples
@@ -6331,7 +6331,7 @@ Multi-pass lazy view over the segments between occurrences of
 `separator`. `toArray()` copies them into owned arrays.
 
 ```
-[1, 0, 2, 0, 3].split(0).toArray();   // [[1], [2], [3]]
+[1, 0, 2, 0, 3].split(by: 0).toArray();   // [[1], [2], [3]]
 ```
 
 _Defined in `lang/std/collections/views.ks`._

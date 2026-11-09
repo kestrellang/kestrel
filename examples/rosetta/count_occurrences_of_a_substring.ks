@@ -4,7 +4,7 @@ module Main
 
 // Non-overlapping matches, scanning left to right.
 func countSubstring(s: String, sub: String) -> Int64 {
-    s.split(sub).count - 1
+    s.split(by: sub).count - 1
 }
 
 @main

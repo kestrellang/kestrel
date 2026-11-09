@@ -44,7 +44,7 @@ func main() -> lang.i64 {
     // ArraySplitView via toArray().
     var arr2 = std.collections.Array[std.numeric.Int64]();
     arr2.append(1); arr2.append(0); arr2.append(2); arr2.append(0); arr2.append(3);
-    let parts = arr2.split(0).toArray();
+    let parts = arr2.split(by: 0).toArray();
     if parts.count != 3 { return 15 }
 
     // Eager map/filter via Slice extension.

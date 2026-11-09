@@ -19,7 +19,7 @@ func main() {
     for n in 2..=10 {
         var start: Array[Int64] = [1];
         for k in 0..<(n - 1) { start.append(1 << k); }
-        println("\(names(n - 2):>10): \(nStep(start, 10).joined(" "))");
+        println("\(names(n - 2):>10): \(nStep(start, 10).joined(by: " "))");
     }
-    println("\("lucas":>10): \(nStep([2, 1], 10).joined(" "))");
+    println("\("lucas":>10): \(nStep([2, 1], 10).joined(by: " "))");
 }

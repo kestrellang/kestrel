@@ -201,7 +201,7 @@ extend Headers {
     /// ```
     public static func parse(from headerBlock: String) -> Headers {
         var headers = Headers();
-        for line in headerBlock.split("\r\n") {
+        for line in headerBlock.split(by: "\r\n") {
             if line.bytes.count == 0 {
                 break
             }

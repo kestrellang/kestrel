@@ -4,7 +4,9 @@
 //! statement binding, and local variable, then emits constraints
 //! capturing the type relationships between them.
 
-use kestrel_ast_builder::arg_binding::{BindArg, BindError, BindParam, Binding, bind_arguments};
+use kestrel_ast_builder::arg_binding::{
+    BindArg, BindError, BindParam, Binding, bind_arguments, names_unlabeled_param,
+};
 use kestrel_ast_builder::{Callable, InitEffect, Name, NodeKind, TypeParams};
 use kestrel_hecs::Entity;
 use kestrel_hir::Builtin;
@@ -425,6 +427,27 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
                         BindError::AmbiguousTrailingClosure { candidates, .. } => {
                             InferError::AmbiguousTrailingClosure { candidates, span }
                         },
+                        // `greet(name: x)` against `func greet(name: String)`:
+                        // say the label is the param's name, not "no overload".
+                        BindError::LabelMismatch {
+                            arg_label,
+                            expected,
+                            ..
+                        } if names_unlabeled_param(
+                            callable
+                                .params
+                                .iter()
+                                .map(|p| (p.label.as_deref(), p.name.as_str())),
+                            arg_label.as_deref(),
+                        ) =>
+                        {
+                            InferError::LabelMismatch {
+                                expected,
+                                got: arg_label,
+                                got_is_param_name: true,
+                                span,
+                            }
+                        },
                         _ => InferError::NoMatchingOverload {
                             name: ctx
                                 .query_ctx
@@ -597,7 +620,11 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
                 // recv_tv. The downstream Member constraint then sees an Error
                 // receiver and absorbs without emitting "no member" cascades.
                 if ctx.poison_protocol_call_recv_on_failure.contains(&id) {
-                    ctx.conforms_poisoning(recv_tv, *protocol, span.clone());
+                    let origin = match ctx.compound_place_calls.contains(&id) {
+                        true => crate::constraint::ConformsOrigin::CompoundPlace(*receiver),
+                        false => crate::constraint::ConformsOrigin::Expr,
+                    };
+                    ctx.conforms_poisoning(recv_tv, *protocol, span.clone(), origin);
                 } else {
                     ctx.conforms(recv_tv, *protocol, span.clone());
                 }
@@ -1380,6 +1407,16 @@ fn mark_sugar_primary(
             // inner is the addAssign ProtocolCall (or HirExpr::Error if the
             // AST place check rejected the LHS at desugar time).
             ctx.poison_protocol_call_recv_on_failure.insert(inner);
+            // A member place may be a failable read (`d(k) += 1`):
+            // the analyzer's E214 owns that error, not a Conforms E107.
+            if let HirExpr::ProtocolCall { receiver, .. } = &hir.exprs[inner]
+                && matches!(
+                    hir.exprs[*receiver],
+                    HirExpr::Field { .. } | HirExpr::Call { .. } | HirExpr::MethodCall { .. }
+                )
+            {
+                ctx.compound_place_calls.insert(inner);
+            }
         },
         SugarKind::StringInterpolation => {
             // inner is Block { stmts: [Let($dsi, .init(...)), appends...],
@@ -4255,6 +4292,7 @@ pub(crate) fn check_variant_pattern_labels(
             ctx.report_error(InferError::LabelMismatch {
                 expected,
                 got: Some(got.clone()),
+                got_is_param_name: false,
                 span: span.clone(),
             });
         }

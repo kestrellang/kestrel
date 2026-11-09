@@ -13,7 +13,8 @@
 //! `get { }` and `ref { }` on one member.
 //!
 //! ### E620 -- `duplicate_write_provider` (Error, Correctness)
-//! `set { }` and `mutating ref { }` on one member.
+//! `set { }` and `mutating ref { }` on one member, unless it is failable:
+//! there the two do different jobs (see E637).
 //!
 //! ### E621 -- `ref_accessor_in_protocol` (Error, Correctness)
 //! A `modifying` accessor on a protocol or protocol-extension member, a
@@ -34,9 +35,11 @@
 //!
 //! ### E637 -- `invalid_failable_member` (Error, Correctness)
 //! A failable member (`var first?: T`, `subscript(...)? -> T`) that is
-//! stored (no read accessor) or declares `set`: a place that may not exist
-//! can't be assigned. It may declare a `mutating ref` (`Optional[&mutating
-//! T]`), written through with a `&mutating` payload binder.
+//! stored (no read accessor), or a throwing one (`-> T throws E`) that
+//! declares `set`. Either may declare a `mutating ref` (`Optional[&mutating
+//! T]` / `Result[&mutating T, E]`), written through with a `&mutating`
+//! payload binder. A failable member may also declare `set`, whose
+//! `newValue` is `Optional[T]`: plain `=` calls it (`dict(k) = null`).
 //!
 //! Observers (E638) and `lazy` (E639) are their own analyzers
 //! (`observer.rs`, `lazy.rs`); this one skips members they own.
@@ -241,10 +244,11 @@ impl DeclCheck for PlaceAccessorAnalyzer {
             });
         }
 
-        // E637: a failable (`?`) or throwing (`throws E`) member is a
-        // computed place with no `set`. Writes go through a `mutating ref`
+        // E637: a failable (`?`) or throwing (`throws E`) member needs a
+        // read accessor. Writes go through a `mutating ref`
         // (`Optional[&mutating T]` / `Result[&mutating T, E]`), reached by a
-        // `&mutating` payload binder.
+        // `&mutating` payload binder. A failable member may also declare
+        // `set`, which receives `Optional[T]`; a throwing one may not.
         if kestrel_ast_builder::is_effectful_place(cx.query, cx.entity) {
             let throwing = cx.query.has::<kestrel_ast_builder::Throwing>(cx.entity);
             let (member, label, read_note) = if throwing {
@@ -265,7 +269,9 @@ impl DeclCheck for PlaceAccessorAnalyzer {
                     format!("a {member} member needs a read accessor"),
                     read_note,
                 ))
-            } else if declared.set || has_setter_child {
+            } else if throwing && (declared.set || has_setter_child) {
+                // A failable `set` takes `Optional[T]` (`dict(k) = null`
+                // removes); a throwing place has no such absent value.
                 Some((
                     format!("a {member} place cannot have a `set` accessor"),
                     "assignment to a place that may not exist is rejected (E214)",
@@ -305,8 +311,12 @@ impl DeclCheck for PlaceAccessorAnalyzer {
             });
         }
 
-        // E620: at most one WRITE provider.
-        if has_setter_child && has_mutating_ref {
+        // E620: at most one WRITE provider. A failable member may have both:
+        // its `mutating ref` writes through a place that exists (`&mutating`
+        // binder) and its `set` takes plain `=`, which may target a missing
+        // one (`newValue: Optional[T]`).
+        let failable = cx.query.has::<kestrel_ast_builder::Failable>(cx.entity);
+        if has_setter_child && has_mutating_ref && !failable {
             diags.push(AnalyzeDiagnostic {
                 descriptor_id: descriptor("E620").id,
                 severity: descriptor("E620").default_severity,

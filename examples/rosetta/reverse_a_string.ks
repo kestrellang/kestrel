@@ -10,5 +10,5 @@ func main() {
     let accented = "as\u{301}df\u{311}";
     var graphemes = accented.graphemes.iter().collect();
     graphemes.reverse();
-    println(graphemes.joined(""));
+    println(graphemes.joined(by: ""));
 }

@@ -13,5 +13,5 @@ func dayOfWeek(year: Int64, month: Int64, day: Int64) -> Int64 {
 @main
 func main() {
     let years = (2008..=2121).iter().filter { dayOfWeek(it, 12, 25) == 0 }.collect();
-    println(years.joined(" "));
+    println(years.joined(by: " "));
 }

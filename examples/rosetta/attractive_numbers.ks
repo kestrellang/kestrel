@@ -28,6 +28,6 @@ func main() {
     let attractive = (1..=120).iter().filter { isPrime(primeFactorCount(it)) }.collect();
     println("Attractive numbers up to 120:");
     for row in attractive.chunks(of: 20).toArray() {
-        println(row.map { "\(it:>4)" }.joined(""));
+        println(row.map { "\(it:>4)" }.joined(by: ""));
     }
 }

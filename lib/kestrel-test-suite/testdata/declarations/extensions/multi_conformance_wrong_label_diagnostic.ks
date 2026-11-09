@@ -21,5 +21,5 @@ extend S: Conv[Int64] { func conv(x: Int64) -> Int64 { 10 } }
 extend S: Conv[Int32] { func conv(x: Int32) -> Int64 { 20 } }
 
 func test(s: S) -> Int64 {
-    s.conv(x: 5) // ERROR: wrong argument label
+    s.conv(x: 5) // ERROR: is the parameter's name, not an argument label
 }

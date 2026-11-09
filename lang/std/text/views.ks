@@ -3543,25 +3543,40 @@ public struct SplitViewIterator: Iterator, Cloneable {
     fileprivate var sourceLen: Int64
     fileprivate var index: Int64
     fileprivate var done: Bool
+    // Pieces still allowed before the rest is yielded unsplit; 0 = no limit.
+    fileprivate var piecesLeft: Int64
 
     public init(slice slice: StringSlice, separator separator: StringSlice) {
+        self.init(slice: slice, separator: separator, limit: 0)
+    }
+
+    /// @name With Limit
+    /// Yields at most `limit` pieces (0 = no limit); the last holds the rest.
+    public init(slice slice: StringSlice, separator separator: StringSlice, limit limit: Int64) {
         self.slice = slice;
         self.separator = separator;
         self.sourceLen = (slice.end - slice.start);
         self.index = 0;
         self.done = false;
+        self.piecesLeft = limit;
     }
 
-    fileprivate init(slice slice: StringSlice, separator separator: StringSlice, index index: Int64, done done: Bool) {
+    fileprivate init(slice slice: StringSlice, separator separator: StringSlice, index index: Int64, done done: Bool, piecesLeft piecesLeft: Int64) {
         self.slice = slice;
         self.separator = separator;
         self.sourceLen = (slice.end - slice.start);
         self.index = index;
         self.done = done;
+        self.piecesLeft = piecesLeft;
     }
 
     public func clone() -> SplitViewIterator {
-        SplitViewIterator(slice: self.slice.clone(), separator: self.separator.clone(), index: self.index, done: self.done)
+        SplitViewIterator(slice: self.slice.clone(), separator: self.separator.clone(), index: self.index, done: self.done, piecesLeft: self.piecesLeft)
+    }
+
+    /// Counts a non-final piece against the limit, if there is one.
+    fileprivate mutating func tookPiece() {
+        if self.piecesLeft > 0 { self.piecesLeft = self.piecesLeft - 1 }
     }
 
     public mutating func next() -> StringSlice? {
@@ -3569,6 +3584,14 @@ public struct SplitViewIterator: Iterator, Cloneable {
 
         let start = self.index;
         let sepLen = self.separator.bytes.count;
+
+        // Last piece the limit allows: the rest of the source, unsplit. An
+        // empty source still has no pieces.
+        if self.piecesLeft == 1 {
+            self.done = true;
+            if self.sourceLen == 0 { return .None }
+            return .Some(self.slice.subslice(from: start, to: self.sourceLen))
+        }
 
         if sepLen == 0 {
             // Empty separator — split per code point
@@ -3580,6 +3603,7 @@ public struct SplitViewIterator: Iterator, Cloneable {
             let result = decodeUtf8(rawPtr, self.sourceLen, at: self.index);
             if let .Some(decoded) = result {
                 self.index = self.index + decoded.bytesConsumed;
+                self.tookPiece();
                 return .Some(self.slice.subslice(from: start, to: self.index))
             }
             self.done = true;
@@ -3597,6 +3621,7 @@ public struct SplitViewIterator: Iterator, Cloneable {
                 let diff: lang.i64 = lang.i64_sub(result.address.raw, base.address.raw);
                 let matchIndex = self.index + Int64(intLiteral: diff);
                 self.index = matchIndex + sepLen;
+                self.tookPiece();
                 return .Some(self.slice.subslice(from: start, to: matchIndex))
             }
         }
@@ -3621,7 +3646,7 @@ public struct SplitViewIterator: Iterator, Cloneable {
 /// # Examples
 ///
 /// ```
-/// let view = "a,b,c".asSlice().split(",");
+/// let view = "a,b,c".asSlice().split(by: ",");
 /// view.first();            // Some("a")
 /// view.count;              // 3
 /// view.collect();          // [StringSlice("a"), StringSlice("b"), StringSlice("c")]
@@ -3632,18 +3657,28 @@ public struct SplitView: Iterable, Cloneable {
 
     fileprivate var slice: StringSlice
     fileprivate var separator: StringSlice
+    // At most this many pieces, the last holding the rest; 0 = no limit.
+    fileprivate var limit: Int64
 
     public init(slice slice: StringSlice, separator separator: StringSlice) {
+        self.init(slice: slice, separator: separator, limit: 0)
+    }
+
+    /// @name With Limit
+    /// Splits into at most `limit` pieces (0 = no limit); the last piece
+    /// holds the rest of the source unsplit.
+    public init(slice slice: StringSlice, separator separator: StringSlice, limit limit: Int64) {
         self.slice = slice;
         self.separator = separator;
+        self.limit = limit;
     }
 
     public func clone() -> SplitView {
-        SplitView(slice: self.slice.clone(), separator: self.separator.clone())
+        SplitView(slice: self.slice.clone(), separator: self.separator.clone(), limit: self.limit)
     }
 
     public func iter() -> SplitViewIterator {
-        SplitViewIterator(slice: self.slice.clone(), separator: self.separator.clone())
+        SplitViewIterator(slice: self.slice.clone(), separator: self.separator.clone(), limit: self.limit)
     }
 
     /// True when the source slice is empty.
@@ -3681,6 +3716,105 @@ public struct SplitView: Iterable, Cloneable {
         var result = Array[String]();
         for segment in self {
             result.append(segment.toOwned())
+        }
+        result
+    }
+}
+
+// ============================================================================
+// WORDS VIEW
+// ============================================================================
+
+/// ASCII whitespace, the same set `trimmed()` strips: space, tab, `\n`,
+/// `\r` and form feed.
+fileprivate func isWordBreak(b: UInt8) -> Bool {
+    b == 32 or b == 9 or b == 10 or b == 13 or b == 12
+}
+
+/// Iterator over the whitespace-separated words of a string. Runs of
+/// whitespace count as one break, and leading/trailing whitespace yields
+/// nothing, so no word is ever empty.
+public struct WordsIterator: Iterator, Cloneable {
+    type Item = StringSlice
+
+    fileprivate var slice: StringSlice
+    fileprivate var index: Int64
+
+    /// @name From Slice
+    /// Iterates the words of `slice` from its start.
+    public init(slice slice: StringSlice) {
+        self.slice = slice;
+        self.index = 0;
+    }
+
+    fileprivate init(slice slice: StringSlice, index index: Int64) {
+        self.slice = slice;
+        self.index = index;
+    }
+
+    public func clone() -> WordsIterator {
+        WordsIterator(slice: self.slice.clone(), index: self.index)
+    }
+
+    public mutating func next() -> StringSlice? {
+        let len = self.slice.bytes.count;
+        // Skip the whitespace before the word.
+        while self.index < len and isWordBreak(self.slice.bytes(self.index)) {
+            self.index = self.index + 1
+        }
+        if self.index >= len { return .None }
+        let start = self.index;
+        while self.index < len and isWordBreak(self.slice.bytes(self.index)) == false {
+            self.index = self.index + 1
+        }
+        .Some(self.slice.subslice(from: start, to: self.index))
+    }
+}
+
+/// Lazy view over the whitespace-separated words of a string, each a
+/// zero-copy `StringSlice`. Unlike `split(by: " ")`, runs of whitespace
+/// never produce empty pieces.
+///
+/// # Examples
+///
+/// ```
+/// "  a  b\tc ".words.count;   // 3
+/// ```
+public struct WordsView: Iterable, Cloneable {
+    type Item = StringSlice
+    type TargetIterator = WordsIterator
+
+    fileprivate var slice: StringSlice
+
+    /// @name From Slice
+    /// A view over the words of `slice`.
+    public init(slice slice: StringSlice) {
+        self.slice = slice;
+    }
+
+    public func clone() -> WordsView { WordsView(slice: self.slice.clone()) }
+
+    public func iter() -> WordsIterator { WordsIterator(slice: self.slice.clone()) }
+
+    /// True when there are no words (the source is empty or all whitespace).
+    public var isEmpty: Bool {
+        var it = self.iter();
+        it.next().isNone
+    }
+
+    /// Number of words. O(n).
+    public var count: Int64 {
+        var n: Int64 = 0;
+        for _ in self { n = n + 1 }
+        n
+    }
+
+    /// Collects the words into an array of owned strings. (A word borrows
+    /// the source string, so an array of slices can't exist.)
+    public func collect() -> Array[String] {
+        var result = Array[String]();
+        for word in self {
+            result.append(word.toOwned())
         }
         result
     }

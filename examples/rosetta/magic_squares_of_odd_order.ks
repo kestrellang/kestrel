@@ -16,7 +16,7 @@ func main() {
     let n = 5;
     let square = magicSquare(n);
     for row in square {
-        println(row.map { "\(it:>3)" }.joined(""));
+        println(row.map { "\(it:>3)" }.joined(by: ""));
     }
     println("Magic constant: \(square(0).iter().sum())");
     // Check every row, column and both diagonals.

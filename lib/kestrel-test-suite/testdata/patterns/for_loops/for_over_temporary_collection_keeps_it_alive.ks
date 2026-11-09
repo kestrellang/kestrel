@@ -38,7 +38,7 @@ func main() -> Int64 {
     if setBytes != 14 { return 2 }
 
     var parts = 0;
-    for p in "a&bb&ccc".split("&") { parts += p.bytes.count; }
+    for p in "a&bb&ccc".split(by: "&") { parts += p.bytes.count; }
     if parts != 6 { return 3 }
     0
 }
