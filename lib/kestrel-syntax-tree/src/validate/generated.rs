@@ -103,6 +103,7 @@ pub(super) static RULES: &[(K, R)] = &[
         R::Seq(&[
             R::Opt(&R::Kind(K::AttributeList)),
             R::Kind(K::Visibility),
+            R::Opt(&R::Kind(K::UnsafeModifier)),
             R::Opt(&R::Kind(K::StaticModifier)),
             R::Opt(&R::Kind(K::UnsafeModifier)),
             R::Opt(&R::Alt(&[R::Kind(K::Mutating), R::Kind(K::Consuming)])),
@@ -120,6 +121,7 @@ pub(super) static RULES: &[(K, R)] = &[
         R::Seq(&[
             R::Opt(&R::Kind(K::AttributeList)),
             R::Kind(K::Visibility),
+            R::Opt(&R::Kind(K::UnsafeModifier)),
             R::Opt(&R::Kind(K::StaticModifier)),
             R::Opt(&R::Kind(K::UnsafeModifier)),
             R::Kind(K::Subscript),
@@ -137,6 +139,7 @@ pub(super) static RULES: &[(K, R)] = &[
             R::Opt(&R::Kind(K::AttributeList)),
             R::Kind(K::Visibility),
             R::Opt(&R::Kind(K::LazyModifier)),
+            R::Opt(&R::Kind(K::UnsafeModifier)),
             R::Opt(&R::Kind(K::StaticModifier)),
             R::Opt(&R::Kind(K::UnsafeModifier)),
             R::Opt(&R::Kind(K::LazyModifier)),
