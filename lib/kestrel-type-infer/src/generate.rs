@@ -620,7 +620,11 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
                 // recv_tv. The downstream Member constraint then sees an Error
                 // receiver and absorbs without emitting "no member" cascades.
                 if ctx.poison_protocol_call_recv_on_failure.contains(&id) {
-                    ctx.conforms_poisoning(recv_tv, *protocol, span.clone());
+                    let origin = match ctx.compound_place_calls.contains(&id) {
+                        true => crate::constraint::ConformsOrigin::CompoundPlace(*receiver),
+                        false => crate::constraint::ConformsOrigin::Expr,
+                    };
+                    ctx.conforms_poisoning(recv_tv, *protocol, span.clone(), origin);
                 } else {
                     ctx.conforms(recv_tv, *protocol, span.clone());
                 }
@@ -1403,6 +1407,16 @@ fn mark_sugar_primary(
             // inner is the addAssign ProtocolCall (or HirExpr::Error if the
             // AST place check rejected the LHS at desugar time).
             ctx.poison_protocol_call_recv_on_failure.insert(inner);
+            // A member place may be a failable read (`d(k) += 1`):
+            // the analyzer's E214 owns that error, not a Conforms E107.
+            if let HirExpr::ProtocolCall { receiver, .. } = &hir.exprs[inner]
+                && matches!(
+                    hir.exprs[*receiver],
+                    HirExpr::Field { .. } | HirExpr::Call { .. } | HirExpr::MethodCall { .. }
+                )
+            {
+                ctx.compound_place_calls.insert(inner);
+            }
         },
         SugarKind::StringInterpolation => {
             // inner is Block { stmts: [Let($dsi, .init(...)), appends...],

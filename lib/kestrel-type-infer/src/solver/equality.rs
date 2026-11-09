@@ -926,7 +926,7 @@ pub(crate) fn optional_ref_decay_site(
 
 /// `tv` as `Optional[&T]` or `Optional[&mutating T]` (a lent failable
 /// read): the Optional entity and `T`.
-fn lent_optional_payload(ctx: &InferCtx<'_>, tv: TyVar) -> Option<(Entity, TyVar)> {
+pub(super) fn lent_optional_payload(ctx: &InferCtx<'_>, tv: TyVar) -> Option<(Entity, TyVar)> {
     let optional = ctx.resolver.builtin(Builtin::OptionalEnum)?;
     let TySlot::Resolved(TyKind::Enum { entity, args } | TyKind::Struct { entity, args }) =
         ctx.slot(ctx.resolve(tv))

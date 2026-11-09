@@ -232,6 +232,11 @@ pub struct InferCtx<'a> {
     /// gen helpers before they recurse into `inner`.
     pub(crate) poison_protocol_call_recv_on_failure: HashSet<HirExprId>,
 
+    /// Compound-assign ProtocolCalls whose receiver is a member place
+    /// (`d(k) += 1`, `b.head += 1`): their receiver Conforms uses
+    /// [`ConformsOrigin::CompoundPlace`](crate::constraint::ConformsOrigin).
+    pub(crate) compound_place_calls: HashSet<HirExprId>,
+
     /// The `Iterable.iter()` ProtocolCall of each `for` loop. Its `gen_expr`
     /// arm emits `Constraint::ForLoopIterator` instead of a plain protocol
     /// call, which picks "the iterable is the iterator" vs `iter()` once the
@@ -538,6 +543,7 @@ impl<'a> InferCtx<'a> {
             formation_site: None,
             eager: false,
             poison_protocol_call_recv_on_failure: HashSet::default(),
+            compound_place_calls: HashSet::default(),
             for_loop_iter_calls: HashSet::default(),
             direct_iterators: HashSet::default(),
             mutating_lends: HashSet::default(),
@@ -1364,13 +1370,19 @@ impl<'a> InferCtx<'a> {
         });
     }
 
-    pub fn conforms_poisoning(&mut self, ty: TyVar, protocol: Entity, span: Span) {
+    pub fn conforms_poisoning(
+        &mut self,
+        ty: TyVar,
+        protocol: Entity,
+        span: Span,
+        origin: crate::constraint::ConformsOrigin,
+    ) {
         self.emit(Constraint::Conforms {
             ty,
             protocol,
             span,
             poison_ty_on_failure: true,
-            origin: crate::constraint::ConformsOrigin::Expr,
+            origin,
             protocol_args: Vec::new(),
         });
     }

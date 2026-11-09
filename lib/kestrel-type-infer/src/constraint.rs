@@ -25,6 +25,11 @@ use crate::ty::TyVar;
 pub enum ConformsOrigin {
     Expr,
     TypeArg,
+    /// An `Expr` obligation on a compound assignment's member place
+    /// (`d(k) += 1`), carrying that place. When it resolves to a failable
+    /// member, the analyzer reports E214, so a failure poisons silently
+    /// instead of adding E107.
+    CompoundPlace(kestrel_hir::body::HirExprId),
 }
 
 /// Which associated type an `Associated` constraint projects (G29).

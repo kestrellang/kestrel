@@ -71,7 +71,12 @@ pub(super) fn solve_for_loop_iterator(
         ctx.equal(result, iterable, span);
         return SolveResult::Solved;
     }
-    ctx.conforms_poisoning(iterable, protocol, span.clone());
+    ctx.conforms_poisoning(
+        iterable,
+        protocol,
+        span.clone(),
+        crate::constraint::ConformsOrigin::Expr,
+    );
     // `expr` is the desugared `Iterable.iter()` call: its tagged requirement is
     // recorded, so the member resolves through it; the name is its spelling.
     let Some(name) = ctx
