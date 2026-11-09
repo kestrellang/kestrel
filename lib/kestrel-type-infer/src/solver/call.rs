@@ -311,6 +311,28 @@ pub(super) fn solve_overloaded_call(
                 .filter(|&c| types_compatible(ctx, c, &args))
                 .collect();
 
+            // The most specific candidate wins: when a concrete overload and
+            // a generic one both fit (`init(from: CString)` and
+            // `init[I](from: I)` for a `CString` argument), take the concrete.
+            let compatible = if compatible.len() > 1 {
+                let concrete: Vec<Entity> = compatible
+                    .iter()
+                    .copied()
+                    .filter(|&c| {
+                        ctx.query_ctx
+                            .get::<TypeParams>(c)
+                            .is_none_or(|tp| tp.0.is_empty())
+                    })
+                    .collect();
+                if concrete.len() == 1 {
+                    concrete
+                } else {
+                    compatible
+                }
+            } else {
+                compatible
+            };
+
             match compatible.len() {
                 0 => SolveResult::Error(InferError::NoMember {
                     receiver: result,

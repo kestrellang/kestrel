@@ -193,11 +193,16 @@ pub(crate) fn apply_ref_decay_defaults_into(ctx: &mut InferCtx<'_>, only: Option
     }
     for (to, pointee) in decays {
         // Re-check: an earlier decay in this batch may have pinned it.
-        if matches!(
-            ctx.slot(ctx.resolve(to)),
-            TySlot::Unresolved { literal: None }
-        ) && unify::unify(ctx, to, pointee).is_ok()
-        {
+        let before = ctx.resolve(to);
+        if !matches!(ctx.slot(before), TySlot::Unresolved { literal: None }) {
+            continue;
+        }
+        let _ = unify::unify(ctx, to, pointee);
+        // Progress only if the target actually changed. `unify` also answers
+        // Ok when it absorbs an error-typed pointee and leaves the target
+        // unresolved; counting that re-ran this rule forever.
+        let after = ctx.resolve(to);
+        if after != before || !matches!(ctx.slot(after), TySlot::Unresolved { literal: None }) {
             progress = true;
         }
     }

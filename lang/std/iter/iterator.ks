@@ -245,7 +245,7 @@ extend Iterator {
     ///
     /// ```
     /// for (i, item) in arr.iter().enumerate() {
-    ///     print("Index \{i}: \{item}")
+    ///     print("Index \(i): \(item)")
     /// };
     /// ```
     public consuming func enumerate() -> EnumerateIterator[Self] {
@@ -426,9 +426,9 @@ extend Iterator {
     ///
     /// ```
     /// [1, 2, 3].iter()
-    ///     .inspect { print("before filter: \{it}") }
+    ///     .inspect { print("before filter: \(it)") }
     ///     .filter { it > 1 }
-    ///     .inspect { print("after filter: \{it}") }
+    ///     .inspect { print("after filter: \(it)") }
     ///     .collect();
     /// ```
     public consuming func inspect(consuming inspector: escaping (Item) -> ()) -> InspectIterator[Self] {

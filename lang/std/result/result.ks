@@ -29,8 +29,8 @@ import std.iter.(Iterator)
 /// }
 ///
 /// match parseAndDouble("21") {
-///     .Ok(let v)  => print("got \{v}"),
-///     .Err(let e) => print("failed: \{e}")
+///     .Ok(let v)  => print("got \(v)"),
+///     .Err(let e) => print("failed: \(e)")
 /// }
 /// ```
 ///
@@ -285,7 +285,7 @@ public enum Result[T, E]: Tryable, not Copyable where T: not Static {
     ///
     /// ```
     /// parsePort(input)
-    ///     .inspect { print("port = \{it}") }
+    ///     .inspect { print("port = \(it)") }
     ///     .map { it + 1 };
     /// ```
     public consuming func inspect(mutating fn: mutating (T) -> ()) -> Result[T, E] {
@@ -306,7 +306,7 @@ public enum Result[T, E]: Tryable, not Copyable where T: not Static {
     ///
     /// ```
     /// parsePort(input)
-    ///     .inspectErr { print("failed: \{it}") }
+    ///     .inspectErr { print("failed: \(it)") }
     ///     .mapErr { AppError.Parse(it) };
     /// ```
     public consuming func inspectErr(mutating fn: mutating (E) -> ()) -> Result[T, E] {

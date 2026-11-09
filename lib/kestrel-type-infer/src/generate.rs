@@ -3348,10 +3348,10 @@ fn emit_where_clause_constraints_with_subs(
 /// value) at its source site with a clean `DoesNotConform`, instead of letting
 /// it reach the post-mono containment backstop (Inv-3b) as an ICE.
 ///
-/// Scoped deliberately to the Copyable/Cloneable bounds: other where-clause
-/// bounds (`Hashable`, `Comparable`, …) are already enforced at
-/// value-construction sites, so surfacing them here would be an orthogonal,
-/// larger change. The helper only pushes `conforms` constraints (it never
+/// A written type is also checked against its params' other bounds
+/// (`Hashable`, `Comparable`, …): nothing else checks a type that is only
+/// annotated or built (`var d: [P: Int64] = [:]`), so a bad argument used to
+/// surface only after monomorphization, inside std. The helper only pushes `conforms` constraints (it never
 /// re-enters `lower_hir_ty`), so it can't recurse — nested args get their own
 /// well-formedness from the recursive lowering of `arg_tvs` above.
 /// Which builtin bounds a type-formation site checks (the single place the
@@ -3359,8 +3359,8 @@ fn emit_where_clause_constraints_with_subs(
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum FormationScope {
     /// A type the program forms explicitly — an annotation, parameter,
-    /// return, field, literal default or constructor: Copyable, Cloneable
-    /// and Static bounds.
+    /// return, field, literal default or constructor: every declared bound
+    /// (Copyable, Cloneable and Static included).
     Written,
     /// A type inference forms by instantiating a member's signature
     /// (`collect() -> Array[Item]`): the Static bound only — the
@@ -3394,7 +3394,7 @@ pub(crate) fn emit_formation_wellformedness(
         checked.extend(builtin(Builtin::Copyable));
         checked.extend(builtin(Builtin::Cloneable));
     }
-    if checked.is_empty() {
+    if checked.is_empty() && scope == FormationScope::Inferred {
         return;
     }
     // Positional map from the type's declared params to the formed args.
@@ -3421,7 +3421,10 @@ pub(crate) fn emit_formation_wellformedness(
         let Some(param) = subject.as_param() else {
             continue;
         };
-        if !checked.contains(&protocol) {
+        // A written type is checked against every bound its params
+        // declare (`Dictionary[K, V] where K: Hashable`); an inferred one
+        // only against the builtin ones (see `FormationScope`).
+        if scope == FormationScope::Inferred && !checked.contains(&protocol) {
             continue;
         }
         let Some(pos) = params.iter().position(|p| *p == param) else {

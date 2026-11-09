@@ -1620,7 +1620,7 @@ extend Dictionary[K, V, H, A]: Formattable where K: Hashable, K: Formattable, V:
     /// ```
     /// ["a": 1, "b": 2].format();  // "{a: 1, b: 2}"  — order unspecified
     /// Dictionary[String, Int64]().format();  // "{}"
-    /// "\{["a": 1, "b": 2]}";      // "{a: 1, b: 2}"  via interpolation
+    /// "\(["a": 1, "b": 2])";      // "{a: 1, b: 2}"  via interpolation
     /// ```
     public func format(mutating into writer: some Formatter, options: FormatOptions = FormatOptions.default()) {
         writer.append(char: '{');
