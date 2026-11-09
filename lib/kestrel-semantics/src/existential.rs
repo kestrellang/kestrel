@@ -138,6 +138,10 @@ pub struct Layout {
     /// every `Dispatchable` entry, in this order; parents' requirements live
     /// in the parents' tables.
     pub requirements: Vec<(Entity, Dispatch)>,
+    /// The dispatchable `{ get set }` property requirements, in declaration
+    /// order: each gets a setter slot after every [`Layout::slots`] entry, so
+    /// a write through an existential reaches the payload's setter.
+    pub setters: Vec<Entity>,
     /// Directly refined protocols (one parent-table pointer each).
     pub parents: Vec<Entity>,
 }
@@ -149,6 +153,17 @@ impl Layout {
             .iter()
             .filter(|(_, d)| matches!(d, Dispatch::Dispatchable { .. }))
             .map(|(e, _)| *e)
+    }
+
+    /// Where `requirement` lives among the table's function words (after
+    /// the parent-table pointers): its getter/method slot, or with `setter`
+    /// its setter slot.
+    pub fn slot_index(&self, requirement: Entity, setter: bool) -> Option<usize> {
+        if !setter {
+            return self.slots().position(|r| r == requirement);
+        }
+        let i = self.setters.iter().position(|&r| r == requirement)?;
+        Some(self.slots().count() + i)
     }
 }
 
@@ -167,7 +182,7 @@ impl QueryFn for ExistentialLayout {
             protocol: self.protocol,
             root: self.root,
         });
-        let requirements = members
+        let requirements: Vec<(Entity, Dispatch)> = members
             .iter()
             .filter(|m| m.extension.is_none() && m.declaring_protocol == self.protocol)
             .map(|m| {
@@ -177,6 +192,15 @@ impl QueryFn for ExistentialLayout {
                 });
                 (m.entity, dispatch)
             })
+            .collect();
+        let setters = requirements
+            .iter()
+            .filter(|(r, d)| {
+                matches!(d, Dispatch::Dispatchable { .. })
+                    && ctx.get::<NodeKind>(*r) == Some(&NodeKind::Field)
+                    && ctx.get::<kestrel_ast_builder::Settable>(*r).is_some()
+            })
+            .map(|(r, _)| *r)
             .collect();
         let parents = ctx
             .query(ConformingProtocols {
@@ -189,6 +213,7 @@ impl QueryFn for ExistentialLayout {
             .collect();
         Arc::new(Layout {
             requirements,
+            setters,
             parents,
         })
     }

@@ -97,8 +97,7 @@ impl OssaBodyCtx<'_, '_> {
             self.ctx.world.get::<NodeKind>(resolved),
             Some(NodeKind::Subscript)
         ) {
-            self.ctx
-                .find_ref_accessor_child(resolved, false)
+            self.read_place_provider(resolved, expr_id)
                 .unwrap_or(resolved)
         } else {
             resolved
@@ -727,9 +726,7 @@ impl OssaBodyCtx<'_, '_> {
             self.ctx.world.get::<NodeKind>(entity),
             Some(NodeKind::Subscript)
         ) {
-            self.ctx
-                .find_ref_accessor_child(entity, false)
-                .unwrap_or(entity)
+            self.read_place_provider(entity, expr_id).unwrap_or(entity)
         } else {
             entity
         };
@@ -917,9 +914,13 @@ impl OssaBodyCtx<'_, '_> {
                 (idx, val)
             })
             .collect();
-        // `lazy var` caches are never arguments: they start empty.
+        // `lazy var` caches are never arguments: they start empty. A
+        // defaulted field left out of the call (`S(a: 1)` for `var b = 3`)
+        // gets its default, lowered inline as an explicit init does.
         let mut fields = fields;
         if known_struct {
+            let defaults = self.field_default_values_except(result_ty, &fields);
+            fields.extend(defaults);
             fields.extend(self.empty_lazy_caches(result_ty));
         }
 

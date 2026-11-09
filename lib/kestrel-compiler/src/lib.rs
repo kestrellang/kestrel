@@ -367,9 +367,7 @@ impl Compiler {
         output_path: &Path,
         options: &kestrel_codegen_llvm::CodegenOptions,
     ) -> Result<(), kestrel_codegen_llvm::CodegenError> {
-        let to_llvm = |e: kestrel_codegen_cranelift::CodegenError| {
-            kestrel_codegen_llvm::CodegenError::Unsupported(e.to_string())
-        };
+        let to_llvm = shared_pipeline_error_to_llvm;
         let mir = self.lower_to_mir().map_err(to_llvm)?;
         self.ensure_no_lowering_errors().map_err(to_llvm)?;
         let mono = self.monomorphize_mir(mir).map_err(to_llvm)?;
@@ -1226,5 +1224,23 @@ mod tests {
             2,
             "f2 should have module + struct"
         );
+    }
+}
+
+/// Carry a shared-pipeline error (lowering, mono, verification — typed with
+/// the Cranelift backend's error) into the LLVM backend's error, keeping its
+/// variant. Wrapping its `Display` in `Unsupported` printed
+/// "unsupported: unsupported: …" at -O1.
+fn shared_pipeline_error_to_llvm(
+    e: kestrel_codegen_cranelift::CodegenError,
+) -> kestrel_codegen_llvm::CodegenError {
+    use kestrel_codegen_cranelift::CodegenError as Shared;
+    use kestrel_codegen_llvm::CodegenError as Llvm;
+    match e {
+        Shared::Unsupported(msg) => Llvm::Unsupported(msg),
+        Shared::LinkerError(msg) => Llvm::LinkerError(msg),
+        Shared::IoError(err) => Llvm::IoError(err),
+        Shared::CompilationFailed(failures) => Llvm::CompilationFailed(failures),
+        other => Llvm::Unsupported(other.to_string()),
     }
 }

@@ -575,5 +575,4 @@ impl FrontEndLayer<'_, '_> {
                     .map(|t| self.hir_to_ety(&t))
             })
     }
-
 }

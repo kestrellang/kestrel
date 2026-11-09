@@ -661,13 +661,11 @@ pub(super) fn solve_member(
         Ok(res) => res,
         Err(crate::resolve::MemberError::NotFound) => {
             // Fall back to static member search
-            match ctx.resolver.resolve_static_member(
-                &recv_kind,
-                name,
-                &args,
-                is_call,
-                &|ext| extension_applies(ctx, ext, &recv_kind),
-            ) {
+            match ctx
+                .resolver
+                .resolve_static_member(&recv_kind, name, &args, is_call, &|ext| {
+                    extension_applies(ctx, ext, &recv_kind)
+                }) {
                 Ok(res) => res,
                 Err(_) => {
                     // Lazy `Indirection` peel: the member is on neither the
@@ -693,6 +691,14 @@ pub(super) fn solve_member(
                             explicit_type_args: explicit_type_args.to_vec(),
                             span,
                         });
+                    }
+                    // An operator's hidden method (`subtract` for `-`) is never
+                    // the user's word: its `Conforms` constraint already reports
+                    // `S !: Subtractable`, so a second "no member 'subtract'"
+                    // only leaks the hook name. Poison the result instead.
+                    if ctx.operator_members.contains_key(&expr) {
+                        ctx.poison(result);
+                        return SolveResult::Solved;
                     }
                     return SolveResult::Error(member_not_found_error(
                         ctx, receiver, &recv_kind, name, is_call, span,
@@ -816,13 +822,11 @@ pub(super) fn solve_member(
             // The member exists but is static — fall back to static resolution.
             // Only error if static resolution also fails (the instance-on-static
             // diagnostic is for cases where no static call is possible).
-            match ctx.resolver.resolve_static_member(
-                &recv_kind,
-                name,
-                &args,
-                is_call,
-                &|ext| extension_applies(ctx, ext, &recv_kind),
-            ) {
+            match ctx
+                .resolver
+                .resolve_static_member(&recv_kind, name, &args, is_call, &|ext| {
+                    extension_applies(ctx, ext, &recv_kind)
+                }) {
                 Ok(res) => res,
                 // Called on the type already (`L.bind(port: 0)`): the static
                 // member exists, only no overload takes these labels.
@@ -900,6 +904,13 @@ pub(super) fn solve_member(
     for source in sources {
         match applicability(ctx, source, &recv_kind) {
             kestrel_entail::Tri::Holds => {},
+            // An operator hook (`subtract` for `-`) found on a protocol the
+            // receiver doesn't conform to: the operator's `Conforms` already
+            // reports `S !: Subtractable`, so poison instead of a second error.
+            kestrel_entail::Tri::Fails if ctx.operator_members.contains_key(&expr) => {
+                ctx.poison(result);
+                return SolveResult::Solved;
+            },
             kestrel_entail::Tri::Fails if !crate::solver_entail::has_open_var(ctx, receiver) => {
                 return SolveResult::Error(InferError::NoMember {
                     receiver,
@@ -1050,7 +1061,10 @@ pub(super) fn solve_member(
                 .map(|tp| tp.0.iter().map(|&p| ctx.param(p)).collect::<Vec<TyVar>>())
                 .unwrap_or_default()
         } else {
-            recv_view.as_ref().map(|(_, args)| args.clone()).unwrap_or_default()
+            recv_view
+                .as_ref()
+                .map(|(_, args)| args.clone())
+                .unwrap_or_default()
         };
     let recv_entity = recv_view.map(|(e, _)| e);
     if let Some(entity) = recv_entity {
@@ -1496,9 +1510,14 @@ pub(super) fn solve_member(
     );
     // A failable read that a `&mutating` binder writes through lends
     // `Optional[&mutating T]` from the `mutating ref` instead.
-    let mutating_read = ctx.mutating_scrutinee_exprs.contains(&expr);
+    let mutating_read = ctx.mutating_place_reads.contains(&expr);
+    // A read in a mutable-place context (returned as `&mutating T`) takes
+    // the `mutating ref` when there is one, and is typed `&mutating T`.
+    let lends_mutating =
+        mutating_read && place_accessors.is_some_and(|info| info.mutating_ref_accessor.is_some());
     let read_accessor = place_accessors.and_then(|info| match failable {
         true => info.failable_read_accessor(mutating_read),
+        false if lends_mutating => info.mutating_ref_accessor,
         false => info.ref_accessor,
     });
     let ret_tv = match read_accessor {
@@ -1518,7 +1537,14 @@ pub(super) fn solve_member(
                 &subs,
             )
         },
-        Some(_) if wraps_ref => ctx.ref_ty(ret_tv, false),
+        // A computed property resolves as `Field` and reads as plain `T`,
+        // except in a mutable-place context, where it lends `&mutating T`.
+        Some(_) if wraps_ref || lends_mutating => {
+            if lends_mutating {
+                ctx.mutating_lends.insert(expr);
+            }
+            ctx.ref_ty(ret_tv, lends_mutating)
+        },
         _ => ret_tv,
     };
     let args_decay = !matches!(resolution.kind, crate::resolve::MemberKind::Field { .. });
@@ -1531,7 +1557,12 @@ pub(super) fn solve_member(
 /// Does `ext`'s target admit `recv`? Unknown (an open var in the receiver)
 /// admits — the same rule the instance path's ambiguity filter uses.
 pub(crate) fn extension_applies(ctx: &InferCtx<'_>, ext: Entity, recv: &TyKind) -> bool {
-    !applicability(ctx, crate::constraint::ApplicableSource::Extension(ext), recv).fails()
+    !applicability(
+        ctx,
+        crate::constraint::ApplicableSource::Extension(ext),
+        recv,
+    )
+    .fails()
 }
 
 fn has_enum_case(ctx: &InferCtx<'_>, kind: &TyKind, name: &str) -> bool {
@@ -1590,13 +1621,11 @@ pub(super) fn solve_implicit(
             // it is a call, without them a read (only a var/func name clash
             // can tell the two apart).
             let is_call = !args.is_empty();
-            match ctx.resolver.resolve_static_member(
-                &kind,
-                name,
-                &args,
-                is_call,
-                &|ext| extension_applies(ctx, ext, &kind),
-            ) {
+            match ctx
+                .resolver
+                .resolve_static_member(&kind, name, &args, is_call, &|ext| {
+                    extension_applies(ctx, ext, &kind)
+                }) {
                 Ok(res) => res,
                 // The case exists but its labels/arity don't fit the args
                 // (`Shape.Rectangle(width: 5.0)`): an overload mismatch, not
@@ -1766,7 +1795,10 @@ pub(crate) fn requirement_call(
         return;
     };
     // The receiver kind is unused when the member is already known.
-    let Ok(resolution) = ctx.resolver.resolve_single_member(&TyKind::Error, requirement) else {
+    let Ok(resolution) = ctx
+        .resolver
+        .resolve_single_member(&TyKind::Error, requirement)
+    else {
         ctx.poison(result);
         return;
     };
@@ -1781,7 +1813,13 @@ pub(crate) fn requirement_call(
         .iter()
         .copied()
         .zip(proto_args.iter().copied())
-        .chain(resolution.type_params.iter().copied().zip(own_args.iter().copied()))
+        .chain(
+            resolution
+                .type_params
+                .iter()
+                .copied()
+                .zip(own_args.iter().copied()),
+        )
         .collect();
 
     ctx.resolutions.insert(expr, requirement);

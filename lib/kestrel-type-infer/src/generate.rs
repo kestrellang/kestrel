@@ -79,11 +79,44 @@ pub fn generate(ctx: &mut InferCtx<'_>, hir: &HirBody, param_types: &[TyVar], re
 /// return-position borrow / ref-to-ref pass-through in `solve_coerce`
 /// handles it. Call before generating `value`.
 fn mark_return_value(ctx: &mut InferCtx<'_>, hir: &HirBody, value: HirExprId) {
-    if !matches!(
-        ctx.slot(ctx.resolve(ctx.return_ty)),
-        TySlot::Resolved(TyKind::Ref { .. })
-    ) {
-        mark_arm_value(ctx, hir, value);
+    match ctx.slot(ctx.resolve(ctx.return_ty)) {
+        TySlot::Resolved(TyKind::Ref { mutating: true, .. }) => {
+            mark_mutating_place_read(ctx, hir, value)
+        },
+        TySlot::Resolved(TyKind::Ref { .. }) => {},
+        _ => mark_arm_value(ctx, hir, value),
+    }
+}
+
+/// A value returned as `&mutating T` lends a mutable place: a subscript or
+/// computed-property read there (`self.v(0)`, `xs(0)`) goes through its
+/// `mutating ref` (see `mutating_place_reads`). Walks block tails and
+/// `if`/`match` branches, the value's leaves.
+fn mark_mutating_place_read(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) {
+    match &hir.exprs[id] {
+        HirExpr::Block { body, .. } => {
+            if let Some(tail) = body.tail_expr {
+                mark_mutating_place_read(ctx, hir, tail);
+            }
+        },
+        HirExpr::If {
+            then_body,
+            else_body,
+            ..
+        } => {
+            let tails = [Some(then_body), else_body.as_ref()];
+            for tail in tails.into_iter().flatten().filter_map(|b| b.tail_expr) {
+                mark_mutating_place_read(ctx, hir, tail);
+            }
+        },
+        HirExpr::Match { arms, .. } => {
+            for arm in arms {
+                mark_mutating_place_read(ctx, hir, arm.body);
+            }
+        },
+        _ => {
+            ctx.mutating_place_reads.insert(id);
+        },
     }
 }
 
@@ -840,7 +873,7 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
         } => {
             ctx.scrutinee_exprs.insert(*scrutinee);
             if hir.arms_borrow_mode(arms) == Some(true) {
-                ctx.mutating_scrutinee_exprs.insert(*scrutinee);
+                ctx.mutating_place_reads.insert(*scrutinee);
             }
             let scrut_tv = gen_expr(ctx, hir, *scrutinee);
             // Stage-1 transparent place: a scrutinee is a VALUE context, so a
@@ -1054,7 +1087,8 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
             // to each literal element. Falls back to fresh on the default path.
             let arr_tv = ctx.fresh_literal(LiteralKind::Array);
             ctx.literal_spans.insert(arr_tv, span.clone());
-            let conformer = adopt_conformer_expectation(ctx, arr_tv, &expect, LiteralKind::Array, span);
+            let conformer =
+                adopt_conformer_expectation(ctx, arr_tv, &expect, LiteralKind::Array, span);
             let elem_tv = ctx.fresh();
             associated_builtin(ctx, arr_tv, Builtin::ArrayLiteralElement, elem_tv, span);
             // Bidirectional hint: if the enclosing `let` annotated this array
@@ -1124,10 +1158,9 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
             // knows its `Key`/`Value`: each entry is checked against them, so
             // mixed values each build the target's `Value` and nested literals
             // / implicit members (`.Str(s)`) see it as their expected type.
-            let checked_entry = (conformer
-                && expectation_known(ctx, key_tv)
-                && expectation_known(ctx, val_tv))
-            .then_some((key_tv, val_tv));
+            let checked_entry =
+                (conformer && expectation_known(ctx, key_tv) && expectation_known(ctx, val_tv))
+                    .then_some((key_tv, val_tv));
             for entry in entries {
                 // Literal entries always decay refs to owned (stage 1.5).
                 mark_arm_value(ctx, hir, entry.key);
@@ -1657,7 +1690,13 @@ fn gen_pat(
             let rest_tv = ctx.fresh();
             if let Some(proto) = ctx.resolver.builtin(kestrel_hir::Builtin::ArrayMatchable) {
                 ctx.conforms(scrutinee_tv, proto, span.clone());
-                associated_builtin(ctx, scrutinee_tv, Builtin::ArrayMatchableElement, elem_tv, span);
+                associated_builtin(
+                    ctx,
+                    scrutinee_tv,
+                    Builtin::ArrayMatchableElement,
+                    elem_tv,
+                    span,
+                );
                 // `Rest` has no @builtin tag yet, so it is still bound by name.
                 ctx.associated(scrutinee_tv, "Rest", rest_tv, span.clone());
             }
@@ -2030,42 +2069,48 @@ fn gen_struct_init(
             .copied()
             .collect();
 
-        // Auto-generated memberwise inits require one labeled argument per
-        // field, in declaration order, with the label matching the field name.
-        // Mismatches here silently truncate via zip() below, so validate upfront.
-        if args.len() != fields.len() {
-            let struct_name = qctx
-                .get::<Name>(struct_entity)
+        // Auto-generated memberwise inits take one labeled argument per field,
+        // in declaration order, labeled with the field name. A field with a
+        // default (`var b = 3`) may be left out; its default fills it in MIR
+        // (`emit_struct_construct`).
+        let struct_name = || {
+            qctx.get::<Name>(struct_entity)
                 .map(|n| n.0.clone())
-                .unwrap_or_else(|| "<struct>".into());
-            ctx.report_error(InferError::MemberwiseInitArity {
-                struct_name,
-                expected: fields.len(),
-                got: args.len(),
-                span: span.clone(),
-            });
-        } else {
-            for (arg, &field) in args.iter().zip(fields.iter()) {
-                let expected_label = qctx
-                    .get::<Name>(field)
-                    .map(|n| n.0.clone())
-                    .unwrap_or_default();
-                if arg.label.as_deref() != Some(expected_label.as_str()) {
-                    let struct_name = qctx
-                        .get::<Name>(struct_entity)
-                        .map(|n| n.0.clone())
-                        .unwrap_or_else(|| "<struct>".into());
+                .unwrap_or_else(|| "<struct>".into())
+        };
+        // With no defaults the count alone decides: say so, as one error.
+        let has_defaults = fields
+            .iter()
+            .any(|&f| qctx.get::<kestrel_ast_builder::Valued>(f).is_some());
+        let arity_only = !has_defaults && args.len() != fields.len();
+        let mut next = 0;
+        for (index, &field) in fields.iter().enumerate().take_while(|_| !arity_only) {
+            let expected_label = qctx
+                .get::<Name>(field)
+                .map(|n| n.0.clone())
+                .unwrap_or_default();
+            let arg = match args.get(next) {
+                Some(arg) if arg.label.as_deref() == Some(expected_label.as_str()) => arg,
+                _ if qctx.get::<kestrel_ast_builder::Valued>(field).is_some() => continue,
+                Some(arg) => {
                     ctx.report_error(InferError::MemberwiseInitLabel {
-                        struct_name,
+                        struct_name: struct_name(),
                         expected: expected_label,
                         got: arg.label.clone(),
                         span: span.clone(),
                     });
-                }
-            }
-        }
-
-        for (index, (arg, &field)) in args.iter().zip(fields.iter()).enumerate() {
+                    arg
+                },
+                None => {
+                    ctx.report_error(InferError::MemberwiseInitMissing {
+                        struct_name: struct_name(),
+                        field: expected_label,
+                        span: span.clone(),
+                    });
+                    break;
+                },
+            };
+            next += 1;
             if let Some(hir_ty) = qctx.query(LowerTypeAnnotation {
                 entity: field,
                 root,
@@ -2077,6 +2122,20 @@ fn gen_struct_init(
                 };
                 ctx.coerce_because(arg.ty, field_tv, arg.value, span.clone(), reason);
             }
+        }
+        if arity_only || args.len() > fields.len() {
+            ctx.report_error(InferError::MemberwiseInitArity {
+                struct_name: struct_name(),
+                expected: fields.len(),
+                got: args.len(),
+                span: span.clone(),
+            });
+        } else if let Some(extra) = args.get(next) {
+            ctx.report_error(InferError::MemberwiseInitUnexpected {
+                struct_name: struct_name(),
+                label: extra.label.clone(),
+                span: span.clone(),
+            });
         }
     }
 
@@ -2983,7 +3042,10 @@ fn instantiate_entity_inner(
     if let Some(ext) = qctx
         .parent_of(entity)
         .filter(|&p| qctx.get::<NodeKind>(p) == Some(&NodeKind::Extension))
-        && let Some(target) = qctx.query(kestrel_name_res::ExtensionTargetEntity { extension: ext, root })
+        && let Some(target) = qctx.query(kestrel_name_res::ExtensionTargetEntity {
+            extension: ext,
+            root,
+        })
     {
         let owner_args: Vec<TyVar> = qctx
             .get::<TypeParams>(target)
@@ -2992,7 +3054,8 @@ fn instantiate_entity_inner(
             .iter()
             .filter_map(|p| subs.iter().find(|(e, _)| e == p).map(|&(_, tv)| tv))
             .collect();
-        type_arg_vars = bind_extension_pattern_params(ctx, Some(ext), &owner_args, &mut subs, site_span);
+        type_arg_vars =
+            bind_extension_pattern_params(ctx, Some(ext), &owner_args, &mut subs, site_span);
     }
     type_arg_vars.extend(fresh_type_args.iter().copied());
 
@@ -3122,10 +3185,12 @@ pub(crate) fn bind_extension_pattern_params(
         return Vec::new();
     };
     let root = ctx.root;
-    let pattern = ctx.query_ctx.query(kestrel_name_res::ExtensionPatternParams {
-        extension: ext,
-        root,
-    });
+    let pattern = ctx
+        .query_ctx
+        .query(kestrel_name_res::ExtensionPatternParams {
+            extension: ext,
+            root,
+        });
     if pattern.is_empty() {
         return Vec::new();
     }
@@ -3144,7 +3209,10 @@ pub(crate) fn bind_extension_pattern_params(
         .collect();
     let written = ctx
         .query_ctx
-        .query(kestrel_hir_lower::LowerExtensionTargetTypeArgs { extension: ext, root })
+        .query(kestrel_hir_lower::LowerExtensionTargetTypeArgs {
+            extension: ext,
+            root,
+        })
         .unwrap_or_default();
     for (hir_arg, &owner_arg) in written.iter().zip(owner_args) {
         let pattern_tv = lower_hir_ty_with_subs(ctx, hir_arg, subs);
@@ -3473,7 +3541,13 @@ fn extract_array_elem_hint(ctx: &InferCtx<'_>, tv: TyVar) -> Option<TyVar> {
 /// spelling: a conformer that also binds another protocol's same-named
 /// `Element` must not hand that one to a literal or pattern. Without the
 /// stdlib tag there is no such protocol, so nothing is constrained.
-fn associated_builtin(ctx: &mut InferCtx<'_>, container: TyVar, tag: Builtin, result: TyVar, span: &Span) {
+fn associated_builtin(
+    ctx: &mut InferCtx<'_>,
+    container: TyVar,
+    tag: Builtin,
+    result: TyVar,
+    span: &Span,
+) {
     if let Some(assoc) = ctx.resolver.builtin(tag) {
         ctx.associated_entity(container, assoc, result, span.clone());
     }
@@ -4190,7 +4264,11 @@ fn gen_struct_pat(
     // Field types name the struct's params; bind them to the scrutinee's
     // args (as `gen_variant_pat` does for enum payloads), so `Wrap[Page] {
     // value: p }` types `p` as `Page`, not `T`.
-    let subs: Vec<(Entity, TyVar)> = type_params.iter().copied().zip(fresh_args.iter().copied()).collect();
+    let subs: Vec<(Entity, TyVar)> = type_params
+        .iter()
+        .copied()
+        .zip(fresh_args.iter().copied())
+        .collect();
     let struct_tv = ctx.named(entity, fresh_args);
 
     // Scrutinee must be this struct type

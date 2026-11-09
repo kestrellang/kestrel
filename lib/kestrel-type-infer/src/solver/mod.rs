@@ -50,8 +50,8 @@ pub(crate) use conformance::*;
 pub(crate) use defaults::*;
 pub(crate) use equality::*;
 use lower::*;
-pub(crate) use member::{extension_applies, requirement_call, try_indirection_peel};
 use member::*;
+pub(crate) use member::{extension_applies, requirement_call, try_indirection_peel};
 
 /// Diagnose type parameters at generic call sites that inference couldn't
 /// pin down. Lib1 silently defaulted these to `Never` (RFC 1216-style
@@ -666,9 +666,12 @@ pub(crate) fn report_unsolved(ctx: &mut InferCtx<'_>) {
                     kestrel_debug::ktrace!("entail", "conformance left undecided by an open var");
                     continue;
                 }
-                if poison_ty_on_failure {
-                    ctx.poison(ty);
-                }
+                // The diagnostic names the type as it was, not the poison.
+                let ty = if poison_ty_on_failure {
+                    ctx.poison_keeping_shown(ty)
+                } else {
+                    ty
+                };
                 (
                     InferError::DoesNotConform {
                         ty,
@@ -714,9 +717,12 @@ pub(crate) fn report_unsolved(ctx: &mut InferCtx<'_>) {
                 span,
                 is_call,
                 result,
+                expr,
                 ..
             } => {
-                if ctx.is_error(ctx.resolve(receiver)) {
+                // An operator's hidden method: its `Conforms` reports the
+                // failure (see `solve_member`), so don't leak the hook name.
+                if ctx.is_error(ctx.resolve(receiver)) || ctx.operator_members.contains_key(&expr) {
                     ctx.poison(result);
                     continue;
                 }
