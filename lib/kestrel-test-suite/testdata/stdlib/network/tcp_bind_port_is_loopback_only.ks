@@ -13,7 +13,7 @@ func main() -> lang.i64 {
     let address = local.localAddress().unwrap();
     if not address.ip.isLoopback { return 2 }
     // "localhost" resolves to the same loopback family, so a client finds it.
-    let client = match TcpStream.connect("localhost", address.port, timeoutMilliseconds: 2000) {
+    let client = match TcpStream.connect("localhost", address.port, timeout: .milliseconds(2000)) {
         .Ok(c) => c,
         .Err(_) => return 3
     };

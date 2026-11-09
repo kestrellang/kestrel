@@ -19,7 +19,7 @@ func main() -> lang.i64 {
     let address = listener.localAddress().unwrap();
     if address.port == 0 { return 2 }
 
-    var client = match TcpStream.connect(to: address, timeoutMilliseconds: 2000) { .Ok(c) => c, .Err(_) => return 3 };
+    var client = match TcpStream.connect(to: address, timeout: .milliseconds(2000)) { .Ok(c) => c, .Err(_) => return 3 };
     var (server, peer) = match listener.accept() { .Ok(p) => p, .Err(_) => return 4 };
     if peer.ip != IpAddress.V4(Ipv4Address.localhost) { return 5 }
     if client.peerAddress().unwrap() != address { return 6 }

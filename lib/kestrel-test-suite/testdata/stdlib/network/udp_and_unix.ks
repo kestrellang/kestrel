@@ -26,7 +26,7 @@ func main() -> lang.i64 {
     // Connected: `send(buf)` goes to the fixed peer.
     if a.connect(to: bAddress).isErr { return 7 }
     if a.send(unsafe Slice.lend(start: ping.pointer, count: 2)).isErr { return 8 }
-    if b.setReadTimeout(milliseconds: .Some(2000)).isErr { return 9 }
+    if b.setReadTimeout(.Some(.milliseconds(2000))).isErr { return 9 }
     match b.receive(into: buf.asMutableSlice()) {
         .Ok(n) => if n != 2 { return 10 },
         .Err(_) => return 11

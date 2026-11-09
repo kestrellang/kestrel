@@ -11,6 +11,7 @@ import std.result.(Result, Optional)
 import std.memory.(RawPointer)
 import std.streams.(IoError)
 import std.ffi.(malloc, free)
+import std.time.(Duration)
 
 /// How `shutdown` closes a connection.
 public enum Shutdown {
@@ -136,10 +137,11 @@ internal func setFlag(fd: Int32, option: Int32, on: Bool) -> Result[(), IoError]
     check(unsafe native_set_flag(fd, option, if on { 1 } else { 0 }))
 }
 
-/// Sets the read (`write` false) or write timeout; `None` blocks.
-internal func setTimeout(fd: Int32, write: Bool, milliseconds: Optional[Int64]) -> Result[(), IoError] {
-    let ms = match milliseconds {
-        .Some(n) => if n < 0 { return .Err(IoError.invalidInput) } else { n },
+/// Sets the read (`write` false) or write timeout; `None` blocks. A
+/// negative timeout is `InvalidInput`.
+internal func setTimeout(fd: Int32, write: Bool, timeout: Optional[Duration]) -> Result[(), IoError] {
+    let ms = match timeout {
+        .Some(d) => if d.isNegative { return .Err(IoError.invalidInput) } else { d.timeoutMilliseconds },
         .None => -1
     };
     check(unsafe native_set_timeout(fd, if write { 1 } else { 0 }, ms))

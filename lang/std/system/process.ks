@@ -10,6 +10,7 @@ import std.core.(Bool, Equatable)
 import std.result.(Optional, Result)
 import std.streams.(IoError, Readable, Writable, flushStandardOutput)
 import std.ffi.(malloc, free)
+import std.time.(Duration)
 
 // ============================================================================
 // THIS PROCESS
@@ -346,10 +347,11 @@ public struct Command: not Copyable {
     }
 
     /// Kills the child if `run` or `output` is still waiting on it after
-    /// `milliseconds`. The call still succeeds, with status `.TimedOut`;
-    /// `output()` keeps what the child wrote before it was killed.
-    public mutating func timeout(milliseconds milliseconds: Int64) -> &mutating Command {
-        self.timeoutMilliseconds = .Some(milliseconds);
+    /// `duration`, as in `.timeout(.seconds(5))`. The call still succeeds,
+    /// with status `.TimedOut`; `output()` keeps what the child wrote before
+    /// it was killed.
+    public mutating func timeout(duration: Duration) -> &mutating Command {
+        self.timeoutMilliseconds = .Some(duration.timeoutMilliseconds);
         self
     }
 
@@ -556,9 +558,15 @@ public struct Child: not Copyable {
         self.reap(blocking: false)
     }
 
-    /// Waits up to `milliseconds` for the child to exit. `None` if it is
-    /// still running when the time is up; the child is left running.
-    public mutating func wait(milliseconds milliseconds: Int64) -> Result[Optional[ExitStatus], IoError] {
+    /// Waits up to `duration` for the child to exit, as in
+    /// `child.wait(for: .seconds(1))`. `None` if it is still running when
+    /// the time is up; the child is left running.
+    public mutating func wait(for duration: Duration) -> Result[Optional[ExitStatus], IoError] {
+        self.waitMilliseconds(duration.timeoutMilliseconds)
+    }
+
+    /// `wait(for:)` in whole milliseconds, for std's own deadlines.
+    mutating func waitMilliseconds(milliseconds: Int64) -> Result[Optional[ExitStatus], IoError] {
         self.input = .None;
         let deadline = unsafe native_monotonic_ms() + milliseconds;
         var pause: Int32 = 1;
@@ -628,7 +636,7 @@ public struct Child: not Copyable {
         guard let .Some(limit) = timeoutMilliseconds else {
             return self.wait()
         }
-        if let .Some(status) = try self.wait(milliseconds: limit) {
+        if let .Some(status) = try self.waitMilliseconds(limit) {
             return .Ok(status)
         }
         self.killForTimeout();

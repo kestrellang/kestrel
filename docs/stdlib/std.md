@@ -14,4 +14,5 @@
 - [`std.streams`](std.streams.md)
 - [`std.system`](std.system.md)
 - [`std.text`](std.text.md)
+- [`std.time`](std.time.md)
 

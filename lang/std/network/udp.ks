@@ -8,6 +8,7 @@ import std.core.(Bool)
 import std.result.(Result, Optional)
 import std.streams.(IoError, FileDescriptor)
 import std.ffi.(malloc, free)
+import std.time.(Duration)
 
 /// A UDP socket. Closed when dropped.
 ///
@@ -79,16 +80,16 @@ public struct UdpSocket: not Copyable {
     /// Allows sending to a broadcast address.
     public mutating func setBroadcast(on: Bool) -> Result[(), IoError] { setFlag(self.fd, broadcastOption(), on) }
 
-    /// Makes a receive that waits longer than `milliseconds` fail with
+    /// Makes a receive that waits longer than `timeout` fail with
     /// `WouldBlock`. `None` waits forever.
-    public mutating func setReadTimeout(milliseconds milliseconds: Optional[Int64]) -> Result[(), IoError] {
-        setTimeout(self.fd, false, milliseconds)
+    public mutating func setReadTimeout(timeout: Optional[Duration]) -> Result[(), IoError] {
+        setTimeout(self.fd, false, timeout)
     }
 
-    /// Makes a send that waits longer than `milliseconds` fail with
+    /// Makes a send that waits longer than `timeout` fail with
     /// `WouldBlock`. `None` waits forever.
-    public mutating func setWriteTimeout(milliseconds milliseconds: Optional[Int64]) -> Result[(), IoError] {
-        setTimeout(self.fd, true, milliseconds)
+    public mutating func setWriteTimeout(timeout: Optional[Duration]) -> Result[(), IoError] {
+        setTimeout(self.fd, true, timeout)
     }
 
     /// Makes sends and receives return `WouldBlock` instead of waiting.

@@ -23,8 +23,8 @@ public struct Instant: Equatable, Comparable, Hashable, Formattable, Cloneable {
     // The single constructor that establishes the invariant: any `nanoseconds`
     // (negative or >= 1e9) is folded into the floored seconds.
     public init(secondsSinceEpoch seconds: Int64, nanoseconds nanoseconds: Int64 = 0) {
-        self.secs = seconds + floorDiv(nanoseconds, Duration.NANOS_PER_SEC);
-        self.nanos = floorMod(nanoseconds, Duration.NANOS_PER_SEC);
+        self.secs = seconds + floorDiv(nanoseconds, 1_000_000_000);
+        self.nanos = floorMod(nanoseconds, 1_000_000_000);
     }
 
     public init(millisecondsSinceEpoch ms: Int64) {
@@ -43,7 +43,7 @@ public struct Instant: Equatable, Comparable, Hashable, Formattable, Cloneable {
     // --- Arithmetic ---
 
     public func advanced(by duration: Duration) -> Instant {
-        Instant(secondsSinceEpoch: self.secs + duration.secs, nanoseconds: self.nanos + duration.nanos)
+        Instant(secondsSinceEpoch: self.secs + duration.totalSeconds, nanoseconds: self.nanos + duration.subsecondNanoseconds)
     }
 
     // --- Difference ---

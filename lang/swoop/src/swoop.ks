@@ -49,12 +49,12 @@ import swoop.tls.(TlsStream)
 public struct Swoop: Cloneable {
     var _baseUrl: String
     var _headers: Headers
-    var _timeoutSeconds: Int64
+    var _timeout: Duration
 
     public init() {
         self._baseUrl = "";
         self._headers = Headers();
-        self._timeoutSeconds = 30;
+        self._timeout = Duration.seconds(30);
     }
 
     /// Creates a client with a base URL. Relative paths passed to verb
@@ -62,17 +62,17 @@ public struct Swoop: Cloneable {
     public init(baseUrl url: String) {
         self._baseUrl = url;
         self._headers = Headers();
-        self._timeoutSeconds = 30;
+        self._timeout = Duration.seconds(30);
     }
 
-    init(baseUrl: String, headers: Headers, timeoutSeconds: Int64) {
+    init(baseUrl: String, headers: Headers, timeout: Duration) {
         self._baseUrl = baseUrl;
         self._headers = headers;
-        self._timeoutSeconds = timeoutSeconds;
+        self._timeout = timeout;
     }
 
     public func clone() -> Swoop {
-        Swoop(self._baseUrl.clone(), self._headers.clone(), self._timeoutSeconds)
+        Swoop(self._baseUrl.clone(), self._headers.clone(), self._timeout)
     }
 
     // ====================================================================
@@ -83,12 +83,12 @@ public struct Swoop: Cloneable {
     public func header(name: String, value: String) -> Swoop {
         var newHeaders = self._headers;
         newHeaders.add(name, value);
-        Swoop(self._baseUrl, newHeaders, self._timeoutSeconds)
+        Swoop(self._baseUrl, newHeaders, self._timeout)
     }
 
-    /// Returns a new Swoop with a timeout.
-    public func timeout(seconds: Int64) -> Swoop {
-        Swoop(self._baseUrl, self._headers, seconds)
+    /// Returns a new Swoop with a timeout, as in `.timeout(.seconds(10))`.
+    public func timeout(duration: Duration) -> Swoop {
+        Swoop(self._baseUrl, self._headers, duration)
     }
 
     // ====================================================================

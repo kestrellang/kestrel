@@ -3,7 +3,7 @@ module datetime_regressions
 // Self-checking regression program for the datetime package. Build and run
 // with `lang/datetime/tests/run.sh`; exits non-zero if any check fails.
 
-import datetime.(Date, Time, DateTime, ZonedDateTime, Instant, Duration, Period, TimeZone, Format, FakeClock, Weekday, TimeUnit)
+import datetime.(Date, Time, DateTime, ZonedDateTime, Instant, Period, TimeZone, Format, FakeClock, Weekday, TimeUnit)
 import std.system.(exit)
 
 struct Checker {
