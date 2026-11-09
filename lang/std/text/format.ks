@@ -7,6 +7,7 @@ import std.numeric.(Int64)
 import std.text.(String, Char, Str, StringBuilder)
 import std.result.(Optional)
 import std.collections.(Array)
+import std.memory.(Allocator, GlobalAllocator)
 
 // ============================================================================
 // FORMAT ENUMS
@@ -411,7 +412,7 @@ extend Formattable {
 /// `0X`) that appears at the start of `content` is emitted *before* the
 /// zero-padding so the result matches the C `printf` "%08d" convention,
 /// e.g. `-5` with width 8 → `-0000005` rather than `000000-5`.
-public func _writePadded(mutating into writer: some Formatter, content: String, options: FormatOptions) {
+public func _writePadded[A](mutating into writer: some Formatter, content: String[A], options: FormatOptions) where A: Allocator {
     if let .Some(width) = options.width {
         let currentLen = content.chars.count;
         if width > currentLen {
@@ -614,7 +615,9 @@ public struct DefaultStringInterpolation: Interpolatable, Cloneable {
 }
 
 /// `String` interpolates through `DefaultStringInterpolation`.
-extend String: ExpressibleByStringInterpolation {
+// Default strings only: the accumulator's buffer comes from the global
+// allocator, so another `A` would need a copy.
+extend String[GlobalAllocator]: ExpressibleByStringInterpolation {
     /// The accumulator `String` interpolation builds into.
     public type Interpolation = DefaultStringInterpolation
 

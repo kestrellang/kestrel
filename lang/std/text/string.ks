@@ -6,7 +6,7 @@ import std.core.(Bool, Equal, NotEqual, Equatable, Matchable, Comparable, Clonea
 import std.text.(Formattable, Formatter, StringBuilder, _writePadded)
 import std.numeric.(Int64, UInt8)
 import std.result.(Optional)
-import std.memory.(Layout, Pointer, RawPointer, SystemAllocator, RcBox, CowBox, UnsafeSlice)
+import std.memory.(Allocator, GlobalAllocator, Layout, Pointer, RawPointer, RcBox, CowBox, UnsafeSlice)
 import std.iter.(Iterator, Iterable)
 import std.collections.(Sliceable, Slice)
 import std.numeric.(UInt32)
@@ -36,21 +36,21 @@ func _bytesEqual(a a: Pointer[UInt8], b b: Pointer[UInt8], n n: Int64) -> Bool {
     unsafe memcmp(a.asRaw(), b.asRaw(), n) == 0
 }
 
-/// Allocates a typed `Pointer[UInt8]` of `layout` bytes, panicking on
-/// allocator failure. Centralizes the `SystemAllocator()`/cast/panic
-/// boilerplate that every constructor would otherwise duplicate.
-func _textAlloc(layout: Layout) -> Pointer[UInt8] {
-    var allocator = SystemAllocator();
-    match allocator.allocate(layout) {
+/// Allocates a typed `Pointer[UInt8]` of `layout` bytes from `allocator`,
+/// panicking on failure. Centralizes the allocate/cast/panic boilerplate
+/// that every constructor would otherwise duplicate.
+func _textAlloc[A](layout: Layout, from allocator: A) -> Pointer[UInt8] where A: Allocator {
+    var a = allocator;
+    match a.allocate(layout) {
         .Some(p) => p.cast[UInt8](),
         .None => fatalError("String allocation failed")
     }
 }
 
-/// Frees a buffer previously returned by `_textAlloc`.
-func _textDealloc(ptr: Pointer[UInt8], layout: Layout) {
-    var allocator = SystemAllocator();
-    unsafe allocator.deallocate(ptr.asRaw(), layout)
+/// Gives a buffer previously returned by `_textAlloc` back to `allocator`.
+func _textDealloc[A](ptr: Pointer[UInt8], layout: Layout, to allocator: A) where A: Allocator {
+    var a = allocator;
+    unsafe a.deallocate(ptr.asRaw(), layout)
 }
 
 /// Lexicographic byte-wise comparison via libc `memcmp`. Returns the
@@ -73,33 +73,45 @@ func _bytesCompare(a a: Pointer[UInt8], b b: Pointer[UInt8], n n: Int64) -> Orde
 // STRING STORAGE (Internal)
 // ============================================================================
 
-/// Internal heap buffer for `String` — the value sitting inside the `RcBox`.
+/// The bytes of a `String`: what a `StringSlice` borrows.
 ///
-/// Owns a `Pointer[UInt8]` plus its `len` and `cap`. Cloning allocates
-/// a fresh buffer (used by COW); the deinit deallocates if `cap > 0`.
-/// `cap == 0` means the storage owns no buffer: the empty string (null
+/// `cap == 0` means the bytes are not owned: the empty string (null
 /// pointer, `len == 0`) or a string literal borrowing its static bytes
 /// (`len > 0`). Such bytes are read-only; every write path goes through
 /// `String.grow`, which copies them into an owned buffer first.
 ///
 /// # Representation
 ///
-/// `(ptr: Pointer[UInt8], len: Int64, cap: Int64)`.
-struct StringStorage: Cloneable {
+/// `(ptr: Pointer[UInt8], len: Int64, cap: Int64)`. Plain data: the
+/// `StringStorage` holding it owns the buffer.
+struct StringBytes {
     var ptr: Pointer[UInt8]
     var len: Int64
     var cap: Int64
+}
+
+/// Internal heap buffer for `String` — the value sitting inside the `CowBox`.
+///
+/// Owns the buffer `bytes` points at, and the allocator it came from.
+/// Cloning allocates a fresh buffer from that allocator (used by COW);
+/// the deinit gives it back if `cap > 0`.
+///
+/// # Representation
+///
+/// `(bytes: StringBytes, allocator: A)`.
+struct StringStorage[A]: Cloneable where A: Allocator {
+    var bytes: StringBytes
+    var allocator: A
 
     /// @name From Fields
     /// Constructs a storage record from a pointer, length, and capacity.
     ///
     /// Internal: callers must ensure `ptr` is either a fresh allocation
-    /// of `cap` bytes (with `len <= cap`), static bytes with `cap == 0`,
-    /// or a null pointer with both counts zero.
-    init(ptr ptr: Pointer[UInt8], len len: Int64, cap cap: Int64) {
-        self.ptr = ptr;
-        self.len = len;
-        self.cap = cap;
+    /// of `cap` bytes from `allocator` (with `len <= cap`), static bytes
+    /// with `cap == 0`, or a null pointer with both counts zero.
+    init(ptr ptr: Pointer[UInt8], len len: Int64, cap cap: Int64, allocator allocator: A) {
+        self.bytes = StringBytes(ptr: ptr, len: len, cap: cap);
+        self.allocator = allocator;
     }
 
     /// Allocates a new buffer and copies the bytes.
@@ -108,24 +120,23 @@ struct StringStorage: Cloneable {
     /// happen. Preserves an allocated buffer even when `len == 0` so
     /// that a grow → write sequence doesn't lose the buffer through a
     /// clone chain (CopyValue on Named types expands to clone calls).
-    func clone() -> StringStorage {
+    func clone() -> StringStorage[A] {
+        let b = self.bytes;
         // `cap == 0` owns nothing: either the empty string or a literal's
         // static bytes. Both are shared as-is.
-        if self.cap == 0 {
-            return StringStorage(ptr: self.ptr, len: self.len, cap: 0)
+        if b.cap == 0 {
+            return StringStorage(ptr: b.ptr, len: b.len, cap: 0, allocator: self.allocator)
         }
-        let layout = Layout.array[UInt8](self.cap);
-        let newPtr = _textAlloc(layout);
-        if self.len > 0 {
-            _memcpyBytes(dst: newPtr, src: self.ptr, n: self.len);
-        }
-        StringStorage(ptr: newPtr, len: self.len, cap: self.cap)
+        var allocator = self.allocator;
+        let newPtr = _textAlloc(Layout.array[UInt8](b.cap), from: allocator);
+        _memcpyBytes(dst: newPtr, src: b.ptr, n: b.len);
+        StringStorage(ptr: newPtr, len: b.len, cap: b.cap, allocator: allocator)
     }
 
     /// Frees the buffer if any was allocated.
     deinit {
-        if self.cap > 0 {
-            _textDealloc(self.ptr, Layout.array[UInt8](self.cap))
+        if self.bytes.cap > 0 {
+            _textDealloc(self.bytes.ptr, Layout.array[UInt8](self.bytes.cap), to: self.allocator)
         }
     }
 }
@@ -182,232 +193,92 @@ struct StringStorage: Cloneable {
 ///   points) is O(n).
 /// - Clones do not share mutation; `s.clone()` and `s` will diverge as
 ///   soon as either is mutated.
-public struct String: Str, Iterable, Equatable, Equal[String], Equal[StringSlice], NotEqual[String], NotEqual[StringSlice], Matchable, Comparable, Cloneable, Formattable, Addable, ExpressibleByStringLiteral, Hashable, Defaultable {
+public struct String[A = GlobalAllocator]: Str, Iterable, Equatable, Equal[String[A]], Equal[StringSlice], NotEqual[String[A]], NotEqual[StringSlice], Matchable, Comparable, Cloneable, Formattable, Hashable where A: Allocator {
     /// The element type yielded by iteration — always `Char`.
     type Item = Char
     /// The iterator type returned by `iter()`.
     type TargetIterator = CharsIterator
-    type Equal[String].Output = Bool
+    type Equal[String[A]].Output = Bool
     type Equal[StringSlice].Output = Bool
-    type NotEqual[String].Output = Bool
+    type NotEqual[String[A]].Output = Bool
     type NotEqual[StringSlice].Output = Bool
-    /// The output type of `+` (concatenation) — always `String`.
-    type Output = String
 
-    /// The additive identity for strings — the empty string `""`.
-    public static var zero: String { get { "" } }
-
-    private var storage: CowBox[StringStorage]
+    fileprivate var storage: CowBox[StringStorage[A]]
 
     // Helper accessors for storage fields
-    private func ptr() -> Pointer[UInt8] { self.storage.value.ptr }
-    private func len() -> Int64 { self.storage.value.len }
-    private func cap() -> Int64 { self.storage.value.cap }
+    fileprivate func ptr() -> Pointer[UInt8] { self.storage.value.bytes.ptr }
+    fileprivate func len() -> Int64 { self.storage.value.bytes.len }
+    fileprivate func cap() -> Int64 { self.storage.value.bytes.cap }
 
     // ========================================================================
-    // CONSTRUCTORS
+    // CONSTRUCTORS (explicit allocator)
     // ========================================================================
 
-    /// @name Empty
-    /// Constructs an empty string.
-    ///
-    /// Allocates no buffer; the empty string is represented by a null
-    /// pointer with zero length and capacity. Required by
-    /// `Defaultable`.
+    /// @name Empty With Allocator
+    /// An empty string whose buffer will come from `allocator`. Nothing is
+    /// allocated until the first write.
     ///
     /// # Examples
     ///
     /// ```
-    /// let s = String();
-    /// s.isEmpty;     // true
-    /// s.bytes.count; // 0
+    /// var s = String[ArenaAllocator](allocator: arena);
+    /// s.append("hi");  // the bytes live in `arena`
     /// ```
-    public init() {
+    public init(allocator allocator: A) {
         self.storage = CowBox(StringStorage(
             ptr: Pointer[UInt8].nullPointer(),
             len: 0,
-            cap: 0
+            cap: 0,
+            allocator: allocator
         ));
     }
 
-    /// @name With Capacity
-    /// Constructs an empty string with at least `capacity` bytes preallocated.
-    ///
-    /// Useful before a series of appends whose total byte count is
-    /// known: avoids the geometric-growth reallocations the default
-    /// constructor would incur. A non-positive `capacity` is treated
-    /// as zero.
+    /// @name With Capacity and Allocator
+    /// An empty string with at least `capacity` bytes preallocated from
+    /// `allocator`. A non-positive `capacity` allocates nothing.
     ///
     /// # Errors
     ///
-    /// Panics with `"String allocation failed"` if the system
-    /// allocator returns null.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// var s = String(capacity: 64);
-    /// s.bytes.count;  // 0
-    /// s.capacity;   // 64
-    /// ```
-    public init(capacity capacity: Int64) {
-        if capacity > 0 {
-            self.storage = CowBox(StringStorage(
-                ptr: _textAlloc(Layout.array[UInt8](capacity)),
-                len: 0,
-                cap: capacity
-            ))
+    /// Panics with `"String allocation failed"` if the allocator returns
+    /// null.
+    public init(capacity capacity: Int64, allocator allocator: A) {
+        if capacity <= 0 {
+            self.init(allocator: allocator)
         } else {
             self.storage = CowBox(StringStorage(
-                ptr: Pointer[UInt8].nullPointer(),
+                ptr: _textAlloc(Layout.array[UInt8](capacity), from: allocator),
                 len: 0,
-                cap: 0
+                cap: capacity,
+                allocator: allocator
             ))
         }
     }
 
-    /// @name String Literal
-    /// Compiler-emitted constructor for string literals.
-    ///
-    /// Receives a pointer into the literal pool and a length, and borrows
-    /// those bytes without copying them: the storage records `cap == 0`
-    /// ("owns nothing"). The first write copies the bytes into a heap
-    /// buffer (`grow`), so the literal pool is never written or freed.
-    ///
-    /// `ptr` must stay valid for the whole program, as literal-pool
-    /// bytes do.
-    public init(stringLiteral ptr: lang.ptr[lang.i8], length: lang.i64) {
-        let byteLen = Int64(intLiteral: length);
-        let bytes = if byteLen > 0 {
-            RawPointer(raw: ptr).cast[UInt8]()
+    /// @name Copying Bytes
+    /// Copies `count` bytes from `ptr` into a buffer from `allocator`,
+    /// without UTF-8 validation. Module-internal: the one place a string
+    /// is built from a byte range.
+    init(copying ptr: Pointer[UInt8], count count: Int64, allocator allocator: A) {
+        if count <= 0 {
+            self.init(allocator: allocator)
         } else {
-            Pointer[UInt8].nullPointer()
-        };
-        self.storage = CowBox(StringStorage(ptr: bytes, len: byteLen, cap: 0));
+            let newPtr = _textAlloc(Layout.array[UInt8](count), from: allocator);
+            _memcpyBytes(dst: newPtr, src: ptr, n: count);
+            self.storage = CowBox(StringStorage(ptr: newPtr, len: count, cap: count, allocator: allocator))
+        }
     }
 
     /// @name From Storage
-    /// Wraps an existing `CowBox[StringStorage]` as a new `String`.
+    /// Wraps an existing `CowBox[StringStorage[A]]` as a new `String`.
     ///
     /// Module-internal — used by `clone()`, `StringBuilder.build()`,
     /// and other std.text code that constructs strings from raw storage.
-    init(storage storage: CowBox[StringStorage]) {
+    init(storage storage: CowBox[StringStorage[A]]) {
         self.storage = storage;
     }
 
-    /// @name From UTF-8
-    /// Constructs a string from validated UTF-8 bytes, returning `null`
-    /// if the input is not valid UTF-8.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// let s = String(fromUtf8: "héllo".bytes);  // Some("héllo")
-    /// ```
-    public init[S](fromUtf8 fromUtf8: &S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized {
-        let bytes = fromUtf8.asUnsafeSlice();
-        let count = bytes.count;
-        if count == 0 {
-            self.storage = CowBox(StringStorage(
-                ptr: Pointer[UInt8].nullPointer(),
-                len: 0,
-                cap: 0
-            ))
-        } else {
-            let rawPtr: lang.ptr[lang.i8] = lang.cast_ptr[_, lang.i8](bytes.pointer.asRaw().raw);
-            var i: Int64 = 0;
-            while i < count {
-                match decodeUtf8(rawPtr, count, at: i) {
-                    .Some(decoded) => i = i + decoded.bytesConsumed,
-                    .None => return null
-                }
-            }
-            let newPtr = _textAlloc(Layout.array[UInt8](count));
-            _memcpyBytes(dst: newPtr, src: bytes.pointer, n: count);
-            self.storage = CowBox(StringStorage(ptr: newPtr, len: count, cap: count))
-        }
-    }
-
-    /// @name From UTF-8 Unchecked
-    /// Constructs a string by copying bytes without UTF-8 validation.
-    ///
-    /// # Safety
-    ///
-    /// The caller must ensure the bytes are valid UTF-8.
-    public init[S](fromUtf8Unchecked fromUtf8Unchecked: &S) where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized {
-        let bytes = fromUtf8Unchecked.asUnsafeSlice();
-        let count = bytes.count;
-        if count == 0 {
-            self.storage = CowBox(StringStorage(
-                ptr: Pointer[UInt8].nullPointer(),
-                len: 0,
-                cap: 0
-            ))
-        } else {
-            let newPtr = _textAlloc(Layout.array[UInt8](count));
-            _memcpyBytes(dst: newPtr, src: bytes.pointer, n: count);
-            self.storage = CowBox(StringStorage(ptr: newPtr, len: count, cap: count))
-        }
-    }
-
-    /// @name From UTF-8 Lossy
-    /// Constructs a string from bytes, replacing invalid UTF-8 sequences
-    /// with the Unicode replacement character (U+FFFD).
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// let s = String(fromUtf8Lossy: mixedBytes);  // invalid bytes become '�'
-    /// ```
-    public init[S](fromUtf8Lossy fromUtf8Lossy: &S) where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized {
-        let bytes = fromUtf8Lossy.asUnsafeSlice();
-        let count = bytes.count;
-        if count == 0 {
-            self.storage = CowBox(StringStorage(
-                ptr: Pointer[UInt8].nullPointer(),
-                len: 0,
-                cap: 0
-            ))
-        } else {
-            // Worst case: every byte is invalid → 3 bytes per replacement char
-            var result = StringBuilder(capacity: count * 3);
-            let rawPtr: lang.ptr[lang.i8] = lang.cast_ptr[_, lang.i8](bytes.pointer.asRaw().raw);
-            var i: Int64 = 0;
-            while i < count {
-                match decodeUtf8(rawPtr, count, at: i) {
-                    .Some(decoded) => {
-                        result.append(char: decoded.char);
-                        i = i + decoded.bytesConsumed
-                    },
-                    .None => {
-                        result.append(char: Char(unchecked: UInt32(intLiteral: 0xFFFD)));
-                        i = i + 1
-                    }
-                }
-            }
-            let built = result.build();
-            self.storage = built.storage
-        }
-    }
-
-    /// Internal helper: copies `count` bytes from `ptr` without validation.
-    static func fromBytesUnchecked(ptr: Pointer[UInt8], count: Int64) -> String {
-        if count == 0 {
-            return String()
-        }
-        let newPtr = _textAlloc(Layout.array[UInt8](count));
-        _memcpyBytes(dst: newPtr, src: ptr, n: count);
-        String(storage: CowBox(StringStorage(ptr: newPtr, len: count, cap: count)))
-    }
-
-    /// Internal helper: copies `count` bytes from a raw `lang.ptr[lang.i8]`.
-    static func fromRawBytes(rawPtr: lang.ptr[lang.i8], count: Int64) -> String {
-        if count <= 0 {
-            return String()
-        }
-        let typedPtr: lang.ptr[UInt8] = lang.cast_ptr[_, UInt8](rawPtr);
-        String.fromBytesUnchecked(Pointer(raw: typedPtr), count)
-    }
+    /// The allocator this string's buffer comes from.
+    public var allocator: A { self.storage.value.allocator }
 
     // ========================================================================
     // VIEW PROPERTIES
@@ -437,7 +308,7 @@ public struct String: Str, Iterable, Equatable, Equal[String], Equal[StringSlice
     /// Returns a `StringSlice` covering the whole string. It borrows the
     /// string — zero-copy, no refcount.
     public func asSlice() -> StringSlice {
-        let b = &self;
+        let b = &self.storage.value.bytes;
         StringSlice(base: b, start: 0, end: self.len())
     }
 
@@ -481,19 +352,20 @@ public struct String: Str, Iterable, Equatable, Equal[String], Equal[StringSlice
         }
 
         let newLayout = Layout.array[UInt8](newCap);
-        let newPtr = _textAlloc(newLayout);
+        let newPtr = _textAlloc(newLayout, from: self.allocator);
         if not self.storage.isUnique {
             // Shared: copy straight into the bigger buffer. Writing through
             // `value` would fork an exact-size copy first, then copy again.
             let myLen = self.len();
             _memcpyBytes(dst: newPtr, src: self.ptr(), n: myLen);
-            self.storage = CowBox(StringStorage(ptr: newPtr, len: myLen, cap: newCap));
+            self.storage = CowBox(StringStorage(ptr: newPtr, len: myLen, cap: newCap, allocator: self.allocator));
             return
         }
-        let s = &mutating self.storage.value;
+        let allocator = self.allocator;
+        let s = &mutating self.storage.value.bytes;
         _memcpyBytes(dst: newPtr, src: s.ptr, n: s.len);
         if s.cap > 0 {
-            _textDealloc(s.ptr, Layout.array[UInt8](s.cap))
+            _textDealloc(s.ptr, Layout.array[UInt8](s.cap), to: allocator)
         }
         s.ptr = newPtr;
         s.cap = newCap
@@ -524,7 +396,7 @@ public struct String: Str, Iterable, Equatable, Equal[String], Equal[StringSlice
         let myLen = self.len();
         self.grow(myLen + otherLen);
         let srcPtr = slice._rawPtr().offset(by: slice.start);
-        let s = &mutating self.storage.value;
+        let s = &mutating self.storage.value.bytes;
         _memcpyBytes(dst: s.ptr.offset(by: s.len), src: srcPtr, n: otherLen);
         s.len = s.len + otherLen
     }
@@ -545,7 +417,7 @@ public struct String: Str, Iterable, Equatable, Equal[String], Equal[StringSlice
     public mutating func append(char c: Char) {
         let utf8Len = c.utf8Length();
         self.grow(self.len() + utf8Len);
-        let s = &mutating self.storage.value;
+        let s = &mutating self.storage.value.bytes;
         // Encode to buffer
         let rawPtr: lang.ptr[lang.i8] = lang.cast_ptr[_, lang.i8](s.ptr.asRaw().raw);
         let written = encodeUtf8(c, rawPtr, at: s.len);
@@ -559,7 +431,7 @@ public struct String: Str, Iterable, Equatable, Equal[String], Equal[StringSlice
     /// inside the stdlib (e.g. an encoder that already produced bytes).
     internal mutating func appendByte(byte: UInt8) {
         self.grow(self.len() + 1);
-        let s = &mutating self.storage.value;
+        let s = &mutating self.storage.value.bytes;
         unsafe s.ptr.offset(by: s.len).write(byte);
         s.len = s.len + 1
     }
@@ -576,7 +448,7 @@ public struct String: Str, Iterable, Equatable, Equal[String], Equal[StringSlice
             return
         }
         self.grow(self.len() + n);
-        let s = &mutating self.storage.value;
+        let s = &mutating self.storage.value.bytes;
         _memcpyBytes(dst: s.ptr.offset(by: s.len), src: ptr, n: n);
         s.len = s.len + n
     }
@@ -587,12 +459,12 @@ public struct String: Str, Iterable, Equatable, Equal[String], Equal[StringSlice
     /// `end - start` bytes, so walking the string yields O(N²) behaviour.
     /// For iteration, use `decodeUtf8` with a running byte offset, or the
     /// `chars()` / `bytes()` views.
-    internal func substringBytes(from start: Int64, to end: Int64) -> String {
+    internal func substringBytes(from start: Int64, to end: Int64) -> String[A] {
         let myLen = self.len();
         if start >= end or start < 0 or end > myLen {
-            return String()
+            return String[A](allocator: self.allocator)
         }
-        String.fromBytesUnchecked(self.ptr().offset(by: start), end - start)
+        String[A](copying: self.ptr().offset(by: start), count: end - start, allocator: self.allocator)
     }
 
     /// Truncates the string to length zero, keeping the allocated buffer.
@@ -602,10 +474,10 @@ public struct String: Str, Iterable, Equatable, Equal[String], Equal[StringSlice
     public mutating func clear() {
         // Shared storage: start fresh instead of forking a copy to discard.
         if not self.storage.isUnique {
-            self = String();
+            self = String[A](allocator: self.allocator);
             return
         }
-        self.storage.value.len = 0
+        self.storage.value.bytes.len = 0
     }
 
     // ========================================================================
@@ -648,7 +520,7 @@ public struct String: Str, Iterable, Equatable, Equal[String], Equal[StringSlice
     // a new buffer, so this only forks when the storage is shared.
     private mutating func truncateBytes(n: Int64) {
         if n < self.len() {
-            self.storage.value.len = n
+            self.storage.value.bytes.len = n
         }
     }
 
@@ -667,7 +539,7 @@ public struct String: Str, Iterable, Equatable, Equal[String], Equal[StringSlice
             self = self.substringBytes(from: n, to: myLen);
             return
         }
-        let s = &mutating self.storage.value;
+        let s = &mutating self.storage.value.bytes;
         let _ = unsafe memmove(s.ptr.asRaw(), s.ptr.offset(by: n).asRaw(), myLen - n);
         s.len = myLen - n
     }
@@ -720,7 +592,7 @@ public struct String: Str, Iterable, Equatable, Equal[String], Equal[StringSlice
         let myLen = self.len();
         // A literal borrows read-only bytes; take a writable copy first.
         self.grow(myLen);
-        let s = &mutating self.storage.value;
+        let s = &mutating self.storage.value.bytes;
         for i in 0..<myLen {
             let byte = unsafe s.ptr.offset(by: i).read();
             let v: lang.i32 = lang.cast_i8_i32(byte.raw);
@@ -737,7 +609,7 @@ public struct String: Str, Iterable, Equatable, Equal[String], Equal[StringSlice
         let myLen = self.len();
         // A literal borrows read-only bytes; take a writable copy first.
         self.grow(myLen);
-        let s = &mutating self.storage.value;
+        let s = &mutating self.storage.value.bytes;
         for i in 0..<myLen {
             let byte = unsafe s.ptr.offset(by: i).read();
             let v: lang.i32 = lang.cast_i8_i32(byte.raw);
@@ -760,7 +632,7 @@ public struct String: Str, Iterable, Equatable, Equal[String], Equal[StringSlice
             self.lowercaseAscii();
             return
         }
-        self = self.lowercased()
+        self.setContents(self.lowercased())
     }
 
     /// Replaces this string with its uppercase form using full Unicode case mapping.
@@ -772,7 +644,14 @@ public struct String: Str, Iterable, Equatable, Equal[String], Equal[StringSlice
             self.uppercaseAscii();
             return
         }
-        self = self.uppercased()
+        self.setContents(self.uppercased())
+    }
+
+    // Replaces the contents with `text`, keeping this string's allocator
+    // (and its buffer, when unique and big enough).
+    private mutating func setContents(text: String) {
+        self.clear();
+        self.append(text)
     }
 
     // True when every byte is below 0x80, so ASCII case mapping is exact.
@@ -796,7 +675,7 @@ public struct String: Str, Iterable, Equatable, Equal[String], Equal[StringSlice
         if pattern.isEmpty or not self.contains(pattern) {
             return
         }
-        self = self.replaced(pattern, with: replacement)
+        self.setContents(self.replaced(pattern, with: replacement))
     }
 
     // ========================================================================
@@ -815,22 +694,6 @@ public struct String: Str, Iterable, Equatable, Equal[String], Equal[StringSlice
     // PROTOCOL CONFORMANCES
     // ========================================================================
 
-    /// Returns the concatenation `self + other`. Required by `Addable`.
-    /// When `self` is uniquely owned (refcount 1), appends in place —
-    /// no allocation. Otherwise builds a fresh string with both halves.
-    public consuming func add(consuming other: String) -> String {
-        if self.storage.isUnique {
-            var result = self;
-            result.append(other);
-            result
-        } else {
-            var result = String(capacity: self.len() + other.len());
-            result.append(self);
-            result.append(other);
-            result
-        }
-    }
-
     /// Returns true if both strings have the same byte sequence.
     ///
     /// Pure byte-wise equality — not normalization-aware. For
@@ -842,7 +705,7 @@ public struct String: Str, Iterable, Equatable, Equal[String], Equal[StringSlice
     /// "abc".isEqual(to: "abc");  // true
     /// "abc".isEqual(to: "ABC");  // false
     /// ```
-    public func isEqual(to other: String) -> Bool {
+    public func isEqual(to other: String[A]) -> Bool {
         let myLen = self.len();
         let otherLen = other.len();
         if myLen != otherLen {
@@ -851,11 +714,11 @@ public struct String: Str, Iterable, Equatable, Equal[String], Equal[StringSlice
         _bytesEqual(a: self.ptr(), b: other.ptr(), n: myLen)
     }
 
-    public func equal(to other: String) -> Bool {
+    public func equal(to other: String[A]) -> Bool {
         self.isEqual(to: other)
     }
 
-    public func notEqual(to other: String) -> Bool {
+    public func notEqual(to other: String[A]) -> Bool {
         if self.isEqual(to: other) { false } else { true }
     }
 
@@ -871,7 +734,7 @@ public struct String: Str, Iterable, Equatable, Equal[String], Equal[StringSlice
     /// dispatches through here. Cost is `O(len)` per arm because the
     /// compiler emits one call per literal — past a handful of arms,
     /// E316 will suggest an `if/else if` chain instead.
-    public func matches(other: String) -> Bool {
+    public func matches(other: String[A]) -> Bool {
         self.isEqual(to: other)
     }
 
@@ -890,7 +753,7 @@ public struct String: Str, Iterable, Equatable, Equal[String], Equal[StringSlice
     /// "abc".compare("ab");   // Greater
     /// "abc".compare("abc");  // Equal
     /// ```
-    public func compare(other: String) -> Ordering {
+    public func compare(other: String[A]) -> Ordering {
         let myLen = self.len();
         let otherLen = other.len();
         var minLen: Int64 = myLen;
@@ -925,7 +788,7 @@ public struct String: Str, Iterable, Equatable, Equal[String], Equal[StringSlice
     /// Returns a shallow clone — storage is shared until either side mutates.
     ///
     /// O(1). Mutation triggers a deep copy via `CowBox.write()`.
-    public func clone() -> String {
+    public func clone() -> String[A] {
         String(storage: self.storage.clone())
     }
 
@@ -973,5 +836,206 @@ extend String {
             b.append(char: c)
         }
         self = b.build();
+    }
+}
+
+// Constructors that make their own allocator, and the conformances built
+// on them: a literal, `String()` and `zero` have no allocator to take.
+extend String[A]: Defaultable, ExpressibleByStringLiteral, Addable where A: Defaultable {
+    /// The output type of `+` (concatenation) — always `String`.
+    type Output = String[A]
+
+    /// The additive identity for strings — the empty string `""`.
+    public static var zero: String[A] { get { "" } }
+
+    /// Returns the concatenation `self + other`. Required by `Addable`.
+    /// When `self` is uniquely owned (refcount 1), appends in place —
+    /// no allocation. Otherwise builds a fresh string with both halves.
+    public consuming func add(consuming other: String[A]) -> String[A] {
+        if self.storage.isUnique {
+            var result = self;
+            result.append(other);
+            result
+        } else {
+            var result = String[A](capacity: self.len() + other.len(), allocator: self.allocator);
+            result.append(self);
+            result.append(other);
+            result
+        }
+    }
+
+    /// @name Empty
+    /// Constructs an empty string.
+    ///
+    /// Allocates no buffer; the empty string is represented by a null
+    /// pointer with zero length and capacity. Required by
+    /// `Defaultable`. The buffer, once there is one, comes from a
+    /// default-made `A`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let s = String();
+    /// s.isEmpty;     // true
+    /// s.bytes.count; // 0
+    /// ```
+    public init() {
+        self.init(allocator: A())
+    }
+
+    /// @name With Capacity
+    /// Constructs an empty string with at least `capacity` bytes preallocated.
+    ///
+    /// Useful before a series of appends whose total byte count is
+    /// known: avoids the geometric-growth reallocations the default
+    /// constructor would incur. A non-positive `capacity` is treated
+    /// as zero.
+    ///
+    /// # Errors
+    ///
+    /// Panics with `"String allocation failed"` if the allocator
+    /// returns null.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// var s = String(capacity: 64);
+    /// s.bytes.count;  // 0
+    /// s.capacity;   // 64
+    /// ```
+    public init(capacity capacity: Int64) {
+        self.init(capacity: capacity, allocator: A())
+    }
+
+    /// @name String Literal
+    /// Compiler-emitted constructor for string literals.
+    ///
+    /// Receives a pointer into the literal pool and a length, and borrows
+    /// those bytes without copying them: the storage records `cap == 0`
+    /// ("owns nothing"). The first write copies the bytes into a heap
+    /// buffer (`grow`), so the literal pool is never written or freed.
+    ///
+    /// `ptr` must stay valid for the whole program, as literal-pool
+    /// bytes do.
+    public init(stringLiteral ptr: lang.ptr[lang.i8], length: lang.i64) {
+        let byteLen = Int64(intLiteral: length);
+        let bytes = if byteLen > 0 {
+            RawPointer(raw: ptr).cast[UInt8]()
+        } else {
+            Pointer[UInt8].nullPointer()
+        };
+        self.storage = CowBox(StringStorage(ptr: bytes, len: byteLen, cap: 0, allocator: A()));
+    }
+
+    /// @name From UTF-8
+    /// Constructs a string from validated UTF-8 bytes, returning `null`
+    /// if the input is not valid UTF-8.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let s = String(fromUtf8: "héllo".bytes);  // Some("héllo")
+    /// ```
+    public init[S](fromUtf8 fromUtf8: &S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized {
+        let bytes = fromUtf8.asUnsafeSlice();
+        let count = bytes.count;
+        if count == 0 {
+            self.storage = CowBox(StringStorage(
+                ptr: Pointer[UInt8].nullPointer(),
+                len: 0,
+                cap: 0,
+                allocator: A()
+            ))
+        } else {
+            let rawPtr: lang.ptr[lang.i8] = lang.cast_ptr[_, lang.i8](bytes.pointer.asRaw().raw);
+            var i: Int64 = 0;
+            while i < count {
+                match decodeUtf8(rawPtr, count, at: i) {
+                    .Some(decoded) => i = i + decoded.bytesConsumed,
+                    .None => return null
+                }
+            }
+            self.init(copying: bytes.pointer, count: count, allocator: A())
+        }
+    }
+
+    /// @name From UTF-8 Unchecked
+    /// Constructs a string by copying bytes without UTF-8 validation.
+    ///
+    /// # Safety
+    ///
+    /// The caller must ensure the bytes are valid UTF-8.
+    public init[S](fromUtf8Unchecked fromUtf8Unchecked: &S) where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized {
+        let bytes = fromUtf8Unchecked.asUnsafeSlice();
+        let count = bytes.count;
+        if count == 0 {
+            self.storage = CowBox(StringStorage(
+                ptr: Pointer[UInt8].nullPointer(),
+                len: 0,
+                cap: 0,
+                allocator: A()
+            ))
+        } else {
+            self.init(copying: bytes.pointer, count: count, allocator: A())
+        }
+    }
+
+    /// @name From UTF-8 Lossy
+    /// Constructs a string from bytes, replacing invalid UTF-8 sequences
+    /// with the Unicode replacement character (U+FFFD).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let s = String(fromUtf8Lossy: mixedBytes);  // invalid bytes become '�'
+    /// ```
+    public init[S](fromUtf8Lossy fromUtf8Lossy: &S) where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized {
+        let bytes = fromUtf8Lossy.asUnsafeSlice();
+        let count = bytes.count;
+        if count == 0 {
+            self.storage = CowBox(StringStorage(
+                ptr: Pointer[UInt8].nullPointer(),
+                len: 0,
+                cap: 0,
+                allocator: A()
+            ))
+        } else {
+            // Worst case: every byte is invalid → 3 bytes per replacement char
+            var result = StringBuilder[A](capacity: count * 3);
+            let rawPtr: lang.ptr[lang.i8] = lang.cast_ptr[_, lang.i8](bytes.pointer.asRaw().raw);
+            var i: Int64 = 0;
+            while i < count {
+                match decodeUtf8(rawPtr, count, at: i) {
+                    .Some(decoded) => {
+                        result.append(char: decoded.char);
+                        i = i + decoded.bytesConsumed
+                    },
+                    .None => {
+                        result.append(char: Char(unchecked: UInt32(intLiteral: 0xFFFD)));
+                        i = i + 1
+                    }
+                }
+            }
+            let built = result.build();
+            self.storage = built.storage
+        }
+    }
+}
+
+// Byte-copying helpers for the rest of std.text, which builds default
+// strings.
+extend String[GlobalAllocator] {
+    /// Internal helper: copies `count` bytes from `ptr` without validation.
+    static func fromBytesUnchecked(ptr: Pointer[UInt8], count: Int64) -> String {
+        String(copying: ptr, count: count, allocator: GlobalAllocator())
+    }
+
+    /// Internal helper: copies `count` bytes from a raw `lang.ptr[lang.i8]`.
+    static func fromRawBytes(rawPtr: lang.ptr[lang.i8], count: Int64) -> String {
+        if count <= 0 {
+            return String()
+        }
+        let typedPtr: lang.ptr[UInt8] = lang.cast_ptr[_, UInt8](rawPtr);
+        String.fromBytesUnchecked(Pointer(raw: typedPtr), count)
     }
 }

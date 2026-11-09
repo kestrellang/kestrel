@@ -26,7 +26,7 @@ module std.ffi
 import std.ffi.(FFISafe, malloc, free, memcpy)
 import std.numeric.(Int64, UInt8)
 import std.memory.(Pointer, RawPointer)
-import std.core.(Convertible, Bool)
+import std.core.(Convertible, Bool, Defaultable)
 import std.collections.(Slice)
 import std.text.(String)
 
@@ -184,7 +184,7 @@ extend String {
 // ============================================================================
 
 /// String can be explicitly converted from a CString.
-extend String: Convertible[CString] {
+extend String[A]: Convertible[CString] where A: Defaultable {
     /// @name From CString
     /// Builds a `String` by copying the bytes out of `cstring`, excluding the null terminator.
     ///
@@ -217,7 +217,7 @@ extend String: Convertible[CString] {
             // checked copy is the fast path; only invalid input pays for
             // the lossy decode.
             let bytes = unsafe Slice.lend(start: cstring.raw, count: cstring.length);
-            self = String(fromUtf8: bytes) ?? String(fromUtf8Lossy: bytes);
+            self = String[A](fromUtf8: bytes) ?? String[A](fromUtf8Lossy: bytes);
         }
     }
 }
