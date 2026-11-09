@@ -345,7 +345,9 @@ extend VM {
         try self.emitCleanup(target);
         let c = self.fns(f).ctl(target);
         if isBreak and c.iter >= 0 { try self.emitIteratorClose(c); }
+        // The cleanup already popped down to the construct just inside the target.
         var depth = self.scopeDepth();
+        if target + 1 < self.fns(f).ctl.count { depth = self.fns(f).ctl(target + 1).envDepth; }
         while depth > c.envDepth {
             let _ = self.emit(.PopEnv);
             depth = depth - 1;
@@ -403,7 +405,14 @@ extend VM {
         let result = self.compileStmt(block);
         // Scopes may have gained an `arguments` binding; keep the top one.
         let top = self.fns(f).scopes(0);
-        self.fns(f).ctl = savedCtl;
+        // A break or continue in the finally block targets an outer
+        // construct: keep its jump for patching.
+        var merged = savedCtl;
+        for j in 0..<at {
+            merged(j).breaks = self.fns(f).ctl(j).breaks;
+            merged(j).continues = self.fns(f).ctl(j).continues;
+        }
+        self.fns(f).ctl = merged;
         self.fns(f).scopes = savedScopes;
         self.fns(f).scopes(0) = top;
         result

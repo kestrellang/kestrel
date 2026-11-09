@@ -892,9 +892,22 @@ extend VM {
         let privateNames = privates.names;
         let methodNames = privates.methodNames;
         let methodKinds = privates.methodKinds;
-        let pushedPrivate = not privateNames.isEmpty;
+        // Computed field keys are evaluated once, with the methods, into
+        // hidden class-scope bindings the field initializers read.
+        var members = c.body;
+        var fieldKeyNames: [String] = [];
+        for i in 0..<members.count {
+            if let .Field(.Computed(_), isStatic, value) = members(i) {
+                let n = "%fieldkey\(i)";
+                fieldKeyNames.append(n);
+                let ref = Expr(kind: .Identifier(n), span: Span(start: 0, end: 0), parenthesized: false);
+                members(i) = .Field(key: .Computed(ref), isStatic: isStatic, value: value);
+            }
+        }
+        let pushedPrivate = not privateNames.isEmpty or not fieldKeyNames.isEmpty;
         if pushedPrivate {
             var sc = newCScope(false, false);
+            for n in fieldKeyNames { let _ = sc.declare(n); }
             for n in privateNames { let _ = sc.declare(n); }
             for i in 0..<methodNames.count { let _ = sc.declare(privateMethodSlot(methodNames(i), methodKinds(i))); }
             let size = sc.size;
@@ -911,7 +924,7 @@ extend VM {
         // The constructor, written or default.
         var instanceFields: [ClassMember] = [];
         var ctorFn: Optional[Function] = .None;
-        for m in c.body {
+        for m in members {
             match m {
                 .Method(_, kind, _, function) => if kind == MethodKind.Constructor { ctorFn = .Some(function); },
                 .Field(_, isStatic, _) => if not isStatic { instanceFields.append(m); },
@@ -928,10 +941,16 @@ extend VM {
         let proto = self.reg();
         let _ = self.emit(.MakeClass(ctor: dst, proto: proto, superclass: superclass));
 
-        // Methods and accessors.
-        for m in c.body {
+        // Methods, accessors, and computed field keys, in order.
+        for i in 0..<c.body.count {
+            let m = c.body(i);
             let mark = self.regMark();
             match m {
+                .Field(key, _, _) => if let .Computed(_) = key {
+                    let k = self.reg();
+                    try self.compileKey(key, k);
+                    self.emitSetName("%fieldkey\(i)", k, .Declare);
+                },
                 .Method(key, kind, isStatic, function) => if kind != MethodKind.Constructor {
                     let home = if isStatic { dst } else { proto };
                     if let .Private(n) = key {
@@ -965,7 +984,7 @@ extend VM {
         if let .Some(own) = c.id { self.emitSetName(own, dst, .Declare); }
 
         // Static fields and blocks run now, in order, with `this` the class.
-        for m in c.body {
+        for m in members {
             let mark = self.regMark();
             match m {
                 .Field(_, isStatic, _) => if isStatic {
