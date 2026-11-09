@@ -7,7 +7,7 @@ module js
 // integer-indexed exotic object: numeric keys never reach its shape or
 // prototype, but read and write its buffer (`taKeyIndex` is the hook the
 // property protocol in object.ks calls). Values are stored little-endian.
-// BigInt64Array and BigUint64Array wait for BigInt.
+// BigInt64Array and BigUint64Array hold BigInts; the rest numbers.
 
 /// Element types, `TypedArrayData.kind`.
 struct TAKind {
@@ -20,14 +20,19 @@ struct TAKind {
     static var uint32: Int64 { 6 }
     static var float32: Int64 { 7 }
     static var float64: Int64 { 8 }
-    static var count: Int64 { 9 }
+    static var bigInt64: Int64 { 9 }
+    static var bigUint64: Int64 { 10 }
+    static var count: Int64 { 11 }
 }
 
-func taElementSize(kind: Int64) -> Int64 { [1, 1, 1, 2, 2, 4, 4, 4, 8](kind) }
+func taElementSize(kind: Int64) -> Int64 { [1, 1, 1, 2, 2, 4, 4, 4, 8, 8, 8](kind) }
+
+/// The element type is BigInt (content type BigInt, in the spec's terms).
+func taIsBig(kind: Int64) -> Bool { kind >= TAKind.bigInt64 }
 
 func taName(kind: Int64) -> String {
     ["Int8Array", "Uint8Array", "Uint8ClampedArray", "Int16Array", "Uint16Array",
-     "Int32Array", "Uint32Array", "Float32Array", "Float64Array"](kind)
+     "Int32Array", "Uint32Array", "Float32Array", "Float64Array", "BigInt64Array", "BigUint64Array"](kind)
 }
 
 /// The largest buffer this engine allocates.
@@ -131,7 +136,7 @@ extend VM {
         }
         let dvTag = self.str("DataView");
         self.defineOwn(dvProto.asRef, symbolKey(WellKnown.toStringTag), dvTag, Attr.configurable);
-        let kindNames = ["Int8", "Uint8", "", "Int16", "Uint16", "Int32", "Uint32", "Float32", "Float64"];
+        let kindNames = ["Int8", "Uint8", "", "Int16", "Uint16", "Int32", "Uint32", "Float32", "Float64", "BigInt64", "BigUint64"];
         for kind in 0..<TAKind.count {
             if kind == TAKind.uint8Clamped { continue; }
             let getName = "get" + kindNames(kind);
@@ -194,15 +199,32 @@ extend VM {
         .Ok(i.toInt64() ?? 0)
     }
 
-    /// Reads one `kind` value at byte `at` of buffer `id`.
-    func rawGet(id: Int64, at: Int64, kind: Int64, little: Bool) -> Value {
-        let size = taElementSize(kind);
+    /// The `size` bytes at `at` of buffer `id`, as an integer.
+    func rawBits(id: Int64, at: Int64, size: Int64, little: Bool) -> UInt64 {
         var bits: UInt64 = 0;
         for i in 0..<size {
             let b = UInt64(from: self.heap.buffers(id).bytes(at + i));
             let shift = if little { 8 * i } else { 8 * (size - 1 - i) };
             bits = bits | (b << shift);
         }
+        bits
+    }
+
+    /// Reads one `kind` value at byte `at` of buffer `id`.
+    mutating func rawGet(id: Int64, at: Int64, kind: Int64, little: Bool) -> Value {
+        if taIsBig(kind) {
+            let bits = self.rawBits(id, at, 8, little);
+            let b = if kind == TAKind.bigInt64 { bnFromInt(Int64(bitPattern: bits)) } else { bnFromU64(bits, false) };
+            return self.newBigInt(b);
+        }
+        self.rawNumber(id, at, kind, little)
+    }
+
+    /// Reads one number-kind value: no allocation, so property lookups can.
+    func rawNumber(id: Int64, at: Int64, kind: Int64, little: Bool) -> Value {
+        if taIsBig(kind) { return Value.undefined; }
+        let size = taElementSize(kind);
+        let bits = self.rawBits(id, at, size, little);
         if kind == TAKind.float32 { return Value.number(Float64(from: Float32(bitPattern: UInt32(truncating: bits)))); }
         if kind == TAKind.float64 { return Value.number(Float64(bitPattern: bits)); }
         var n = Int64(bitPattern: bits);
@@ -212,10 +234,14 @@ extend VM {
         Value.int(n)
     }
 
-    /// Writes number `x` as one `kind` value at byte `at` of buffer `id`.
-    mutating func rawSet(id: Int64, at: Int64, kind: Int64, x: Float64, little: Bool) {
+    /// Writes `v` (a number, or a BigInt for the BigInt kinds) as one
+    /// `kind` value at byte `at` of buffer `id`.
+    mutating func rawSet(id: Int64, at: Int64, kind: Int64, v: Value, little: Bool) {
         let size = taElementSize(kind);
-        let bits: UInt64 = if kind == TAKind.float32 {
+        let x = if v.isNumber { v.asNumber } else { 0.0 };
+        let bits: UInt64 = if taIsBig(kind) {
+            bigLow64(self.bigOf(v))
+        } else if kind == TAKind.float32 {
             UInt64(from: x.toFloat32().bitPattern)
         } else if kind == TAKind.float64 {
             x.bitPattern
@@ -248,14 +274,28 @@ extend VM {
         d.length
     }
 
-    func taGet(d: TypedArrayData, i: Int64) -> Value {
+    mutating func taGet(d: TypedArrayData, i: Int64) -> Value {
         let id = self.bufferId(d.buffer);
         self.rawGet(id, d.offset + i * taElementSize(d.kind), d.kind, true)
     }
 
-    mutating func taPut(d: TypedArrayData, i: Int64, x: Float64) {
+    /// An element without allocating: undefined for the BigInt kinds,
+    /// whose values `ownPropertyValue` fills in.
+    func taGetPure(d: TypedArrayData, i: Int64) -> Value {
         let id = self.bufferId(d.buffer);
-        self.rawSet(id, d.offset + i * taElementSize(d.kind), d.kind, x, true);
+        self.rawNumber(id, d.offset + i * taElementSize(d.kind), d.kind, true)
+    }
+
+    /// Writes element `i`; `v` is already the kind's type (`taConvert`).
+    mutating func taPut(d: TypedArrayData, i: Int64, v: Value) {
+        let id = self.bufferId(d.buffer);
+        self.rawSet(id, d.offset + i * taElementSize(d.kind), d.kind, v, true);
+    }
+
+    /// ToBigInt or ToNumber, by the element type.
+    mutating func taConvert(kind: Int64, v: Value) -> Result[Value, Value] {
+        if taIsBig(kind) { return .Ok(self.newBigInt(try self.toBigInt(v))); }
+        .Ok(Value.number(try self.toNumber(v)))
     }
 
     /// IsValidIntegerIndex.
@@ -298,7 +338,7 @@ extend VM {
     /// TypedArraySetElement: converts first, then writes if the index is
     /// (still) valid.
     mutating func taSetElement(d: TypedArrayData, n: Float64, v: Value) -> Result[(), Value] {
-        let x = try self.toNumber(v);
+        let x = try self.taConvert(d.kind, v);
         if self.taValidIndex(d, n) { self.taPut(d, n.toInt64() ?? 0, x); }
         .Ok(())
     }
@@ -356,7 +396,11 @@ extend VM {
             if self.isDetached(src.buffer) { return self.throwType("Cannot construct from a detached ArrayBuffer"); }
             let o = try self.newTypedArray(kind, src.length, proto);
             let d = self.taData(o) ?? src;
-            for i in 0..<src.length { self.taPut(d, i, self.taGet(src, i).asNumber); }
+            if taIsBig(kind) != taIsBig(src.kind) { return self.throwType("Content type of the source doesn't match \(taName(kind))"); }
+            for i in 0..<src.length {
+                let v = self.taGet(src, i);
+                self.taPut(d, i, v);
+            }
             return .Ok(o);
         }
         if self.bufferId(a0) >= 0 {
@@ -414,10 +458,10 @@ extend VM {
         .Ok(out)
     }
 
-    /// The typed array's elements as numbers.
-    func taNumbers(d: TypedArrayData) -> Array[Float64] {
-        var out: [Float64] = [];
-        for i in 0..<self.taLength(d) { out.append(self.taGet(d, i).asNumber); }
+    /// The typed array's elements.
+    mutating func taValues(d: TypedArrayData) -> Array[Value] {
+        var out: [Value] = [];
+        for i in 0..<self.taLength(d) { out.append(self.taGet(d, i)); }
         out
     }
 
@@ -429,11 +473,11 @@ extend VM {
     }
 
     /// The default typed array sort: numeric, -0 before +0, NaN last.
-    func taSortNumbers(xs: Array[Float64]) -> Array[Float64] {
+    func taSortNumbers(xs: Array[Value]) -> Array[Value] {
         var work = xs;
         var width: Int64 = 1;
         while width < work.count {
-            var next: [Float64] = [];
+            var next: [Value] = [];
             var lo: Int64 = 0;
             while lo < work.count {
                 let mid = if lo + width < work.count { lo + width } else { work.count };
@@ -441,7 +485,7 @@ extend VM {
                 var i = lo;
                 var j = mid;
                 while i < mid and j < hi {
-                    if numberSortLess(work(j), work(i)) {
+                    if self.taSortLess(work(j), work(i)) {
                         next.append(work(j));
                         j = j + 1;
                     } else {
@@ -459,17 +503,19 @@ extend VM {
         work
     }
 
+    /// The default order: numbers as numberSortLess, BigInts by value.
+    func taSortLess(a: Value, b: Value) -> Bool {
+        if a.isBigInt and b.isBigInt { return bnCmp(self.bigOf(a), self.bigOf(b)) < 0; }
+        numberSortLess(a.asNumber, b.asNumber)
+    }
+
     /// The sorted elements of `d`, by `cmp` or numerically.
     mutating func taSorted(d: TypedArrayData, cmp: Value) -> Result[Array[Value], Value] {
-        let nums = self.taNumbers(d);
-        if cmp.isUndefined {
-            var out: [Value] = [];
-            for x in self.taSortNumbers(nums) { out.append(Value.number(x)); }
-            return .Ok(out);
-        }
-        var items: [Value] = [];
-        for x in nums { items.append(Value.number(x)); }
-        self.mergeSort(items, cmp)
+        let nums = self.taValues(d);
+        if cmp.isUndefined { return .Ok(self.taSortNumbers(nums)); }
+        // The comparator may collect garbage: keep BigInt elements alive.
+        for x in nums { self.pushRoot(x); }
+        self.mergeSort(nums, cmp)
     }
 
     // ------------------------------------------------------------------
@@ -510,7 +556,7 @@ extend VM {
             .None => return self.throwType("DataView method called on incompatible receiver")
         };
         let index = try self.toIndex(arg(args, 0));
-        let x = if isSet { try self.toNumber(arg(args, 1)) } else { 0.0 };
+        let x = if isSet { try self.taConvert(kind, arg(args, 1)) } else { Value.undefined };
         let little = self.toBoolean(arg(args, if isSet { 2 } else { 1 }));
         if self.isDetached(buffer) { return self.throwType("Cannot perform DataView access on a detached ArrayBuffer"); }
         if index + taElementSize(kind) > length { return .Err(self.makeError(.RangeError, "Offset is outside the bounds of the DataView")); }
@@ -716,7 +762,7 @@ extend VM {
                 }
             },
             .TAFill => {
-                let x = try self.toNumber(a0);
+                let x = try self.taConvert(d.kind, a0);
                 let k = try self.relativeArg(a1, len, 0);
                 let end = try self.relativeArg(arg(args, 2), len, len);
                 if self.isDetached(d.buffer) { return self.throwType("Cannot fill a detached ArrayBuffer"); }
@@ -814,8 +860,8 @@ extend VM {
                 var lo: Int64 = 0;
                 var hi = len - 1;
                 while lo < hi {
-                    let a = self.taGet(d, lo).asNumber;
-                    let b = self.taGet(d, hi).asNumber;
+                    let a = self.taGet(d, lo);
+                    let b = self.taGet(d, hi);
                     self.taPut(d, lo, b);
                     self.taPut(d, hi, a);
                     lo = lo + 1;
@@ -880,7 +926,7 @@ extend VM {
             .TASort => {
                 let sorted = try self.taSorted(d, a0);
                 let n2 = if sorted.count < self.taLength(d) { sorted.count } else { self.taLength(d) };
-                for i in 0..<n2 { self.taPut(d, i, sorted(i).asNumber); }
+                for i in 0..<n2 { self.taPut(d, i, sorted(i)); }
                 this
             },
             .TAToSorted => {
@@ -889,27 +935,30 @@ extend VM {
                 self.pushRoot(o);
                 let od = self.taData(o) ?? d;
                 let sorted = try self.taSorted(d, a0);
-                for i in 0..<sorted.count { self.taPut(od, i, sorted(i).asNumber); }
+                for i in 0..<sorted.count { self.taPut(od, i, sorted(i)); }
                 o
             },
             .TAToReversed => {
                 let p = self.typedArrayProtos(d.kind);
                 let o = try self.newTypedArray(d.kind, len, p);
                 let od = self.taData(o) ?? d;
-                for i in 0..<len { self.taPut(od, i, self.taGet(d, len - 1 - i).asNumber); }
+                for i in 0..<len {
+                    let v = self.taGet(d, len - 1 - i);
+                    self.taPut(od, i, v);
+                }
                 o
             },
             .TAWith => {
                 let rel = try self.toIntegerOrInfinity(a0);
                 let actual = if rel >= 0.0 { rel } else { Float64(from: len) + rel };
-                let x = try self.toNumber(a1);
+                let x = try self.taConvert(d.kind, a1);
                 if not self.taValidIndex(d, actual) { return .Err(self.makeError(.RangeError, "Invalid typed array index")); }
                 let p = self.typedArrayProtos(d.kind);
                 let o = try self.newTypedArray(d.kind, len, p);
                 let od = self.taData(o) ?? d;
                 let at = actual.toInt64() ?? 0;
                 for i in 0..<len {
-                    let v = if i == at { x } else { self.taGet(d, i).asNumber };
+                    let v = if i == at { x } else { self.taGet(d, i) };
                     self.taPut(od, i, v);
                 }
                 o
@@ -933,7 +982,8 @@ extend VM {
             if self.isDetached(src.buffer) { return self.throwType("Cannot set from a detached ArrayBuffer"); }
             if Float64(from: src.length) + offset > Float64(from: targetLen) { return .Err(self.makeError(.RangeError, "offset is out of bounds")); }
             // Read everything first: the two may share a buffer.
-            let nums = self.taNumbers(src);
+            if taIsBig(d.kind) != taIsBig(src.kind) { return self.throwType("Content type of the source doesn't match \(taName(d.kind))"); }
+            let nums = self.taValues(src);
             let at = offset.toInt64() ?? 0;
             for i in 0..<nums.count { self.taPut(d, at + i, nums(i)); }
             return .Ok(Value.undefined);
@@ -979,3 +1029,10 @@ func numberSortLess(a: Float64, b: Float64) -> Bool {
 
 /// 1 as an Int64, for building bit masks with `<<`.
 func oneBit() -> Int64 { 1 }
+
+/// The low 64 bits of `a` in two's complement (ToBigInt64/ToBigUint64's
+/// bit pattern).
+func bigLow64(a: BigNum) -> UInt64 {
+    let u = bnAsUintN(64, a);
+    (limb(u.mag, 1) << 32) | limb(u.mag, 0)
+}

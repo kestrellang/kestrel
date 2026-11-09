@@ -23,7 +23,10 @@ extend VM {
             .Null => self.load(dst, Value.nullValue),
             .BoolLit(b) => self.load(dst, Value.bool(b)),
             .Number(n) => self.load(dst, Value.number(n)),
-            .BigInt(_) => throw compileError("BigInt isn't supported yet"),
+            .BigInt(digits) => {
+                let a = self.atom(digits);
+                let _ = self.emit(.LoadBigInt(dst: dst, atom: a));
+            },
             .StringLit(s) => self.loadString(dst, s),
             .Regex(pattern, flags) => {
                 // An invalid literal is an early error.
@@ -926,7 +929,7 @@ extend VM {
                     try self.emitRunWithThis(code, dst);
                 },
                 .StaticBlock(body) => {
-                    let fun = Function(id: .None, params: [], body: .Block(body), isAsync: false, isGenerator: false);
+                    let fun = Function(id: .None, params: [], body: .Block(body), isAsync: false, isGenerator: false, hasDirectEval: false);
                     var mf = plainFlags();
                     mf.isMethod = true;
                     let code = try self.compileFunction(fun, "", mf);
@@ -1015,14 +1018,14 @@ struct Reference {
 /// `constructor(...args) { super(...args); }` or `constructor() {}`.
 func defaultConstructor(derived: Bool) -> Function {
     if not derived {
-        return Function(id: .None, params: [], body: .Block([]), isAsync: false, isGenerator: false);
+        return Function(id: .None, params: [], body: .Block([]), isAsync: false, isGenerator: false, hasDirectEval: false);
     }
     let noSpan = Span(start: 0, end: 0);
     let args = Expr(kind: .Identifier("args"), span: noSpan, parenthesized: false);
     let sup = Expr(kind: .Super, span: noSpan, parenthesized: false);
     let call = Expr(kind: .Call(callee: sup, arguments: [.Spread(args)], optional: false), span: noSpan, parenthesized: false);
     let body = [Stmt(kind: .Expression(call), span: noSpan)];
-    Function(id: .None, params: [.Rest(.Identifier("args"))], body: .Block(body), isAsync: false, isGenerator: false)
+    Function(id: .None, params: [.Rest(.Identifier("args"))], body: .Block(body), isAsync: false, isGenerator: false, hasDirectEval: false)
 }
 
 func hasSpread(args: Array[Argument]) -> Bool {

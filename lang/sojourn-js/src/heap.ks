@@ -62,6 +62,7 @@ enum ObjectKind {
     case NumberBox(Float64)
     case StringBox(Value)
     case SymbolBox(Value)
+    case BigIntBox(Value)
     case ArgumentsObject
     /// A getter/setter pair stored in an accessor property's slot.
     case AccessorPair(getter: Value, setter: Value)
@@ -336,7 +337,7 @@ struct Heap {
     }
 
     mutating func markValue(v: Value, mutating m: Marker) {
-        if v.isString {
+        if v.isString or v.isBigInt {
             self.stringMarks(v.asRef) = true;
             return;
         }
@@ -427,6 +428,7 @@ func traceKind(kind: ObjectKind, mutating m: Marker) {
             m.values.append(home);
             m.values.append(fields);
         },
+        .BigIntBox(b) => m.values.append(b),
         .ProxyObject(target, handler) => {
             m.values.append(target);
             m.values.append(handler);

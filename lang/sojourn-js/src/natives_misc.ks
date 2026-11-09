@@ -37,7 +37,12 @@ extend VM {
         let a1 = arg(args, 1);
         let r: Value = match n {
             .NumberCtor => {
-                let v = if args.count == 0 { 0.0 } else { try self.toNumber(a0) };
+                // ToNumeric, with a BigInt converted to its nearest number.
+                var v = 0.0;
+                if args.count > 0 {
+                    let prim = try self.toNumeric(a0);
+                    v = if prim.isBigInt { bnToFloat(self.bigOf(prim)) } else { prim.asNumber };
+                }
                 if newTarget.isUndefined { return .Ok(.Some(Value.number(v))); }
                 let proto = try self.prototypeFor(newTarget, self.intrinsics.numberProto);
                 self.newObjectKind(proto, .NumberBox(v))

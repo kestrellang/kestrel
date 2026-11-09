@@ -383,6 +383,7 @@ extend Parser {
                 current = self.expr(.Member(object: current, property: .Computed(prop), optional: false), start);
             } else if self.at("(") and allowCall {
                 let args = try self.parseArguments();
+                if let .Identifier(n) = current.kind { if n == "eval" { self.sawDirectEval = true; } }
                 current = self.expr(.Call(callee: current, arguments: args, optional: false), start);
             } else if self.tok.kind == TokenKind.Template or self.tok.kind == TokenKind.TemplateHead {
                 if inChain { throw self.error("tagged template in an optional chain"); }
@@ -867,6 +868,8 @@ extend Parser {
     }
 
     mutating func parseParamsAndBody(id: Optional[String], isAsync: Bool, isGenerator: Bool, isMethod: Bool) -> Result[Function, SyntaxError] {
+        let outerEval = self.sawDirectEval;
+        self.sawDirectEval = false;
         let paramStart = self.tok.start;
         let params = try self.parseFormalParameters();
         self.enterFunctionScope(params);
@@ -896,7 +899,9 @@ extend Parser {
         }
         try self.advance();
         self.exitScope();
-        .Ok(Function(id: id, params: params, body: .Block(body), isAsync: isAsync, isGenerator: isGenerator))
+        let hasEval = self.sawDirectEval;
+        self.sawDirectEval = outerEval;
+        .Ok(Function(id: id, params: params, body: .Block(body), isAsync: isAsync, isGenerator: isGenerator, hasDirectEval: hasEval))
     }
 
     /// Bound parameter names can't repeat when `unique`, and in strict
@@ -959,6 +964,8 @@ extend Parser {
     }
 
     mutating func parseArrowBody(start: Int64, params: Array[Pattern], isAsync: Bool) -> Result[Expr, SyntaxError] {
+        let outerEval = self.sawDirectEval;
+        self.sawDirectEval = false;
         let names = boundNames(params);
         if self.at("{") {
             let bodyStart = self.tok.start;
@@ -976,7 +983,9 @@ extend Parser {
             }
             try self.advance();
             self.exitScope();
-            let f = Function(id: .None, params: params, body: .Block(body), isAsync: isAsync, isGenerator: false);
+            let hasEval = self.sawDirectEval;
+            self.sawDirectEval = outerEval;
+            let f = Function(id: .None, params: params, body: .Block(body), isAsync: isAsync, isGenerator: false, hasDirectEval: hasEval);
             return .Ok(self.expr(.ArrowFunction(f), start));
         }
         try self.checkParameterNames(names, start, true);
@@ -985,7 +994,9 @@ extend Parser {
         self.enterFunctionScope(params);
         let value = try self.parseAssignment(true);
         self.exitScope();
-        let f = Function(id: .None, params: params, body: .Expression(value), isAsync: isAsync, isGenerator: false);
+        let hasEval = self.sawDirectEval;
+        self.sawDirectEval = outerEval;
+        let f = Function(id: .None, params: params, body: .Expression(value), isAsync: isAsync, isGenerator: false, hasDirectEval: hasEval);
         .Ok(self.expr(.ArrowFunction(f), start))
     }
 

@@ -9,6 +9,8 @@ module js
 
 /// Value tags: the top 16 bits of a boxed value.
 struct Tag {
+    /// A BigInt: its payload indexes the string space (natives_bigint.ks).
+    static var bigint: UInt64 { 0xFFF8 }
     static var undefined: UInt64 { 0xFFF9 }
     static var nullValue: UInt64 { 0xFFFA }
     static var bool: UInt64 { 0xFFFB }
@@ -40,6 +42,7 @@ struct Value {
     static func object(r: Ref) -> Value { Value.boxed(Tag.object, r) }
     static func string(r: Ref) -> Value { Value.boxed(Tag.string, r) }
     static func symbol(r: Ref) -> Value { Value.boxed(Tag.symbol, r) }
+    static func bigint(r: Ref) -> Value { Value.boxed(Tag.bigint, r) }
     static var undefined: Value { Value.boxed(Tag.undefined, 0) }
     static var nullValue: Value { Value.boxed(Tag.nullValue, 0) }
     static var empty: Value { Value.boxed(Tag.empty, 0) }
@@ -47,7 +50,7 @@ struct Value {
     var tag: UInt64 { self.bits >> 48 }
     var payload: Int64 { Int64(bitPattern: self.bits & 0xFFFFFFFFFFFF) }
 
-    var isNumber: Bool { self.tag < Tag.undefined }
+    var isNumber: Bool { self.tag < Tag.bigint }
     var isUndefined: Bool { self.tag == Tag.undefined }
     var isNull: Bool { self.tag == Tag.nullValue }
     var isNullish: Bool { self.tag == Tag.undefined or self.tag == Tag.nullValue }
@@ -56,8 +59,9 @@ struct Value {
     var isObject: Bool { self.tag == Tag.object }
     var isString: Bool { self.tag == Tag.string }
     var isSymbol: Bool { self.tag == Tag.symbol }
+    var isBigInt: Bool { self.tag == Tag.bigint }
     /// The value refers to a heap cell, which the GC must trace.
-    var isCell: Bool { self.tag >= Tag.object }
+    var isCell: Bool { self.tag >= Tag.object or self.tag == Tag.bigint }
 
     var asNumber: Float64 { Float64(bitPattern: self.bits) }
     var asBool: Bool { self.payload != 0 }

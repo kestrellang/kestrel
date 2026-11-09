@@ -11,6 +11,7 @@ extend VM {
         }
         if v.isBool { return v.asBool; }
         if v.isString { return self.heap.strings(v.asRef).count > 0; }
+        if v.isBigInt { return not self.bigIsZero(v); }
         if v.isNullish or v.isEmpty { return false; }
         true
     }
@@ -51,6 +52,7 @@ extend VM {
         if v.isBool { return .Ok(if v.asBool { 1.0 } else { 0.0 }); }
         if v.isString { return .Ok(stringToNumber(self.units(v))); }
         if v.isSymbol { return self.throwType("Cannot convert a Symbol value to a number"); }
+        if v.isBigInt { return self.throwType("Cannot convert a BigInt value to a number"); }
         let p = try self.toPrimitive(v, "number");
         self.toNumber(p)
     }
@@ -63,6 +65,7 @@ extend VM {
         if v.isNull { return .Ok(unitsOf("null")); }
         if v.isBool { return .Ok(unitsOf(if v.asBool { "true" } else { "false" })); }
         if v.isSymbol { return self.throwType("Cannot convert a Symbol value to a string"); }
+        if v.isBigInt { return .Ok(unitsOf(bnToString(self.bigOf(v), 10))); }
         let p = try self.toPrimitive(v, "string");
         self.toUnits(p)
     }
@@ -86,6 +89,7 @@ extend VM {
         if v.isString { return .Ok(self.newObjectKind(self.intrinsics.stringProto, .StringBox(v))); }
         if v.isNumber { return .Ok(self.newObjectKind(self.intrinsics.numberProto, .NumberBox(v.asNumber))); }
         if v.isBool { return .Ok(self.newObjectKind(self.intrinsics.booleanProto, .BooleanBox(v.asBool))); }
+        if v.isBigInt { return .Ok(self.newObjectKind(self.intrinsics.bigintProto, .BigIntBox(v))); }
         .Ok(self.newObjectKind(self.intrinsics.symbolProto, .SymbolBox(v)))
     }
 
@@ -119,6 +123,7 @@ extend VM {
         if v.isUndefined { return "undefined"; }
         if v.isNull { return "object"; }
         if v.isSymbol { return "symbol"; }
+        if v.isBigInt { return "bigint"; }
         if self.isCallable(v) { "function" } else { "object" }
     }
 
@@ -129,6 +134,7 @@ extend VM {
     func strictEquals(a: Value, b: Value) -> Bool {
         if a.isNumber and b.isNumber { return a.asNumber == b.asNumber; }
         if a.isString and b.isString { return unitsEqual(self.units(a), self.units(b)); }
+        if a.isBigInt and b.isBigInt { return bnEq(self.bigOf(a), self.bigOf(b)); }
         a.same(b)
     }
 
@@ -155,7 +161,10 @@ extend VM {
         if a.isObject and b.isObject { return .Ok(a.same(b)); }
         if a.isBool and b.isBool { return .Ok(a.same(b)); }
         if a.isSymbol and b.isSymbol { return .Ok(a.same(b)); }
+        if a.isBigInt and b.isBigInt { return .Ok(self.strictEquals(a, b)); }
         if a.isNullish or b.isNullish { return .Ok(false); }
+        if a.isBigInt and (b.isNumber or b.isString) { return .Ok(self.bigLooseEquals(a, b)); }
+        if b.isBigInt and (a.isNumber or a.isString) { return .Ok(self.bigLooseEquals(b, a)); }
         if a.isNumber and b.isString { return .Ok(a.asNumber == stringToNumber(self.units(b))); }
         if a.isString and b.isNumber { return .Ok(stringToNumber(self.units(a)) == b.asNumber); }
         if a.isBool { return self.looseEquals(Value.number(if a.asBool { 1.0 } else { 0.0 }), b); }
@@ -187,8 +196,12 @@ extend VM {
             pa = try self.toPrimitive(a, "number");
         }
         if pa.isString and pb.isString { return .Ok(.Some(unitsLess(self.units(pa), self.units(pb)))); }
-        let x = try self.toNumber(pa);
-        let y = try self.toNumber(pb);
+        if (pa.isBigInt and pb.isString) or (pa.isString and pb.isBigInt) { return .Ok(self.bigLessThan(pa, pb)); }
+        let na = try self.toNumeric(pa);
+        let nb = try self.toNumeric(pb);
+        if na.isBigInt or nb.isBigInt { return .Ok(self.bigLessThan(na, nb)); }
+        let x = na.asNumber;
+        let y = nb.asNumber;
         if x.isNaN or y.isNaN { return .Ok(.None); }
         .Ok(.Some(x < y))
     }
@@ -205,9 +218,9 @@ extend VM {
                     for x in v { u.append(x); }
                     return .Ok(self.newString(u));
                 }
-                let x = try self.toNumber(pa);
-                let y = try self.toNumber(pb);
-                return .Ok(Value.number(x + y));
+                let x = try self.toNumeric(pa);
+                let y = try self.toNumeric(pb);
+                return self.numericBinary(op, x, y);
             },
             .StrictEq => return .Ok(Value.bool(self.strictEquals(a, b))),
             .StrictNotEq => return .Ok(Value.bool(not self.strictEquals(a, b))),
@@ -233,9 +246,9 @@ extend VM {
             .InstanceOf => return .Ok(Value.bool(try self.instanceOf(a, b))),
             _ => {}
         }
-        let x = try self.toNumber(a);
-        let y = try self.toNumber(b);
-        .Ok(Value.number(arithmetic(op, x, y)))
+        let x = try self.toNumeric(a);
+        let y = try self.toNumeric(b);
+        self.numericBinary(op, x, y)
     }
 
     mutating func instanceOf(v: Value, target: Value) -> Result[Bool, Value] {
@@ -284,6 +297,10 @@ extend VM {
                 return .Ok(v);
             },
             _ => {}
+        }
+        if op != UnOp.Plus {
+            let nv = try self.toNumeric(v);
+            if nv.isBigInt { return self.bigUnary(op, nv); }
         }
         let n = try self.toNumber(v);
         let r = match op {

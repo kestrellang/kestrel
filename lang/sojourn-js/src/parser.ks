@@ -66,6 +66,8 @@ struct Parser {
     /// Locals named by `export { a }`, checked once the module is parsed.
     var exportedLocals: Array[String]
     var exportedLocalPositions: Array[Int64]
+    /// A direct `eval(...)` call was parsed in the current function.
+    var sawDirectEval: Bool
 
     init(source source: String, isModule isModule: Bool) {
         self.lexer = Lexer(text: source);
@@ -86,6 +88,7 @@ struct Parser {
         self.exportedNames = Set();
         self.exportedLocals = [];
         self.exportedLocalPositions = [];
+        self.sawDirectEval = false;
     }
 
     /// Parses a whole script or module.
@@ -304,6 +307,28 @@ func isStrictReserved(name: String) -> Bool {
 /// Parses `source` as a script.
 func parseScript(source: String) -> Result[Program, SyntaxError] {
     var p = Parser(source: source, isModule: false);
+    p.parseProgram()
+}
+
+/// What the code around a direct eval allows inside it.
+struct EvalSyntax {
+    var strict: Bool
+    var inFunction: Bool
+    var allowNewTarget: Bool
+    var allowSuperProperty: Bool
+    var allowSuperCall: Bool
+    var inFieldInit: Bool
+}
+
+/// Parses eval code: a script, with what its surroundings allow.
+func parseEvalSource(source: String, syntax: EvalSyntax) -> Result[Program, SyntaxError] {
+    var p = Parser(source: source, isModule: false);
+    p.ctx.strict = syntax.strict;
+    p.ctx.inFunction = syntax.inFunction;
+    p.ctx.allowNewTarget = syntax.allowNewTarget;
+    p.ctx.allowSuperProperty = syntax.allowSuperProperty;
+    p.ctx.allowSuperCall = syntax.allowSuperCall;
+    p.ctx.inFieldInit = syntax.inFieldInit;
     p.parseProgram()
 }
 

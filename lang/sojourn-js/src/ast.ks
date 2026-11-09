@@ -154,6 +154,9 @@ struct Function {
     var body: FunctionBody
     var isAsync: Bool
     var isGenerator: Bool
+    /// The body (not counting nested functions) calls `eval(...)`
+    /// directly, so its scopes must be visible at run time.
+    var hasDirectEval: Bool
 }
 
 enum FunctionBody {

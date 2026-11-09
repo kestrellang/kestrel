@@ -23,8 +23,7 @@ def limit_memory():
 
 # Features the engine doesn't support yet.
 UNSUPPORTED = {
-    "iterator-chunking", "iterator-includes", "Iterator.prototype.join", "joint-iteration",
-    "BigInt", "regexp-unicode-property-escapes",
+    "iterator-chunking", "iterator-includes", "Iterator.prototype.join", "joint-iteration", "regexp-unicode-property-escapes",
     "regexp-v-flag",
     "regexp-modifiers", "regexp-duplicate-named-groups", "SharedArrayBuffer", "Atomics", "WeakRef", "FinalizationRegistry",
     "tail-call-optimization", "dynamic-import",

@@ -76,6 +76,7 @@ struct Intrinsics {
     var typedArrayProto: Value
     var typedArrayCtor: Value
     var dataViewProto: Value
+    var bigintProto: Value
 }
 
 /// Well-known symbols, by symbol id.
@@ -197,7 +198,7 @@ struct VM {
             throwTypeError: u, promiseCtor: u, promiseProto: u, asyncFunctionProto: u, aggregateErrorProto: u,
             asyncIteratorProto: u, asyncFromSyncIteratorProto: u, asyncGeneratorFunctionProto: u, asyncGeneratorProto: u,
             iteratorHelperProto: u, wrapForValidIteratorProto: u,
-            arrayBufferProto: u, typedArrayProto: u, typedArrayCtor: u, dataViewProto: u
+            arrayBufferProto: u, typedArrayProto: u, typedArrayCtor: u, dataViewProto: u, bigintProto: u
         );
         self.sourceName = "";
         self.depth = 0;
@@ -332,7 +333,7 @@ struct VM {
          i.throwTypeError, i.promiseCtor, i.promiseProto, i.asyncFunctionProto, i.aggregateErrorProto,
          i.asyncIteratorProto, i.asyncFromSyncIteratorProto, i.asyncGeneratorFunctionProto, i.asyncGeneratorProto,
          i.iteratorHelperProto, i.wrapForValidIteratorProto,
-         i.arrayBufferProto, i.typedArrayProto, i.typedArrayCtor, i.dataViewProto];
+         i.arrayBufferProto, i.typedArrayProto, i.typedArrayCtor, i.dataViewProto, i.bigintProto];
         for v in self.typedArrayProtos { out.append(v); }
         for v in self.typedArrayCtors { out.append(v); }
         out

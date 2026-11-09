@@ -157,6 +157,13 @@ enum NativeFn {
     case AsyncGeneratorFunctionCtor
     // Set methods
     case SetUnion
+    // BigInt
+    case BigIntCtor
+    case BigIntAsIntN
+    case BigIntAsUintN
+    case BigIntToString
+    case BigIntToLocaleString
+    case BigIntValueOf
     // Proxy
     case ProxyCtor
     case ProxyRevocable
@@ -544,6 +551,7 @@ extend VM {
         if let .Some(r) = try self.setMethodsNative(n, this, args) { return .Ok(r); }
         if let .Some(r) = try self.typedArrayNative(n, callee, this, args, newTarget) { return .Ok(r); }
         if let .Some(r) = try self.proxyNative(n, callee, args, newTarget) { return .Ok(r); }
+        if let .Some(r) = try self.bigintNative(n, this, args, newTarget) { return .Ok(r); }
         self.throwType("built-in not implemented")
     }
 

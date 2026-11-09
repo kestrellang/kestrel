@@ -88,6 +88,11 @@ extend VM {
             let a = self.atomOfUnits(self.units(v));
             return (tag << 48) | UInt64(bitPattern: a);
         }
+        if v.isBigInt {
+            let tag: UInt64 = 0xFFF7;
+            let a = self.atom(bnToString(self.bigOf(v), 10));
+            return (tag << 48) | UInt64(bitPattern: a);
+        }
         if v.isNumber and v.asNumber == 0.0 { return Value.int(0).bits; }
         v.bits
     }

@@ -7,6 +7,12 @@ extend VM {
         match instr {
             .Load(dst, value) => self.setReg(fi, dst, value),
             .LoadString(dst, atom) => self.setReg(fi, dst, self.atomValues(atom)),
+            .LoadBigInt(dst, atom) => {
+                let digits = unitsOf(self.atomNames(atom));
+                let b = stringToBigNumTrimmed(digits) ?? bnZero();
+                let v = self.newBigInt(b);
+                self.setReg(fi, dst, v);
+            },
             .Move(dst, src) => self.setReg(fi, dst, self.reg(fi, src)),
             .Nop => {},
 

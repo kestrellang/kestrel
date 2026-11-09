@@ -66,6 +66,8 @@ enum Instr {
     case Load(dst: Int64, value: Value)
     /// An interned string literal.
     case LoadString(dst: Int64, atom: Key)
+    /// A BigInt literal, from its decimal digits.
+    case LoadBigInt(dst: Int64, atom: Key)
     case Move(dst: Int64, src: Int64)
 
     // Variables

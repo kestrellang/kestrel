@@ -217,7 +217,7 @@ extend VM {
                 // Numeric keys are elements or nothing, never shape slots.
                 if let .Some(n) = self.canonicalNumeric(key) {
                     if not self.taValidIndex(d, n) { return .None; }
-                    let v = self.taGet(d, n.toInt64() ?? 0);
+                    let v = self.taGetPure(d, n.toInt64() ?? 0);
                     return .Some(PropertyRecord(value: v, attrs: Attr.writable | Attr.enumerable | Attr.configurable));
                 }
             },
@@ -230,6 +230,12 @@ extend VM {
 
     /// Like `ownProperty`, but fills in a string wrapper's characters.
     mutating func ownPropertyValue(r: Ref, key: Key) -> Optional[PropertyRecord] {
+        // BigInt typed array elements are allocated on read.
+        if let .Some((d, n)) = self.taKeyIndex(r, key) {
+            if not self.taValidIndex(d, n) { return .None; }
+            let v = self.taGet(d, n.toInt64() ?? 0);
+            return .Some(PropertyRecord(value: v, attrs: Attr.writable | Attr.enumerable | Attr.configurable));
+        }
         if let .StringBox(s) = self.kindAt(r) {
             let i = self.indexOfKey(key);
             let u = self.units(s);
@@ -467,6 +473,7 @@ extend VM {
         if v.isNumber { return self.getFrom(self.intrinsics.numberProto, key, v); }
         if v.isBool { return self.getFrom(self.intrinsics.booleanProto, key, v); }
         if v.isSymbol { return self.getFrom(self.intrinsics.symbolProto, key, v); }
+        if v.isBigInt { return self.getFrom(self.intrinsics.bigintProto, key, v); }
         let what = if v.isNull { "null" } else { "undefined" };
         self.throwType("Cannot read properties of \(what) (reading '\(self.keyText(key))')")
     }
