@@ -69,8 +69,11 @@
 //! **Message:** "cannot assign to failable place '{name}'"
 //!
 //! A failable member (`var first?: T`, `subscript(...)? -> T`) may not
-//! exist, so plain and compound assignment through it are rejected — there
-//! is no place to store into when it is absent.
+//! exist, so assignment through it is rejected — there is no place to store
+//! into when it is absent. The exception is a plain `=` on a failable member
+//! that declares `set`: the setter takes `Optional[T]` and decides what an
+//! absent place means (`dict(k) = v` inserts, `dict(k) = null` removes).
+//! Compound assignment needs the current value, so it is always rejected.
 
 use crate::context::BodyContext;
 use crate::diagnostic::*;
@@ -137,7 +140,7 @@ impl BodyCheck for AssignmentAnalyzer {
             let HirExpr::Assign { target, .. } = expr else {
                 continue;
             };
-            if push_if_failable(cx, *target, &mut diags) {
+            if push_if_failable(cx, *target, AssignShape::Plain, &mut diags) {
                 continue;
             }
             check_target(cx, *target, is_initializer, &mut diags);
@@ -161,7 +164,7 @@ impl BodyCheck for AssignmentAnalyzer {
             let HirExpr::ProtocolCall { receiver, .. } = &cx.hir.exprs[*inner] else {
                 continue;
             };
-            if push_if_failable(cx, *receiver, &mut diags) {
+            if push_if_failable(cx, *receiver, AssignShape::Compound, &mut diags) {
                 continue;
             }
             if !matches!(
@@ -207,15 +210,30 @@ impl BodyCheck for AssignmentAnalyzer {
     }
 }
 
-/// E214: `target` resolves to a failable member. Returns whether it did.
+/// Plain `=` or compound `op=`: only a plain assignment can use a failable
+/// member's setter, since compound assignment reads the current value first.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum AssignShape {
+    Plain,
+    Compound,
+}
+
+/// E214: `target` resolves to a failable member that can't take this
+/// assignment. Returns whether it reported.
 fn push_if_failable(
     cx: &BodyContext<'_>,
     target: HirExprId,
+    shape: AssignShape,
     diags: &mut Vec<AnalyzeDiagnostic>,
 ) -> bool {
     let Some(member) = util::failable_member(cx, target) else {
         return false;
     };
+    let has_setter = util::has_setter_child(cx, member);
+    // A failable setter takes `Optional[T]`: plain `=` goes through it.
+    if shape == AssignShape::Plain && has_setter {
+        return false;
+    }
     let name = match cx.query.get::<NodeKind>(member) {
         Some(NodeKind::Subscript) => "subscript".to_string(),
         _ => cx
@@ -239,11 +257,17 @@ fn push_if_failable(
             message: "this place may not exist".into(),
             is_primary: true,
         }],
-        notes: vec![
+        notes: vec![if has_setter {
+            // Compound on a settable failable place (`dict(k) += 1`).
+            "compound assignment needs the current value, which may be missing; \
+             update it with a `&mutating` payload binder (`if let .Some(&mutating v) = …`) \
+             or a non-failable form of the place (for a Dictionary, `dict(key, default: v) += …`)"
+                .into()
+        } else {
             "write through its `mutating ref` with a `&mutating` payload binder \
              (`if let .Some(&mutating v) = …`), or through the type's own API"
-                .into(),
-        ],
+                .into()
+        }],
     });
     true
 }

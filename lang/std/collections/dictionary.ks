@@ -612,8 +612,9 @@ public struct Dictionary[K, V, H = DefaultHasher, A = GlobalAllocator]: Iterable
     ///
     /// Reads lend `Optional[&V]` (a binding copies it out); a `&mutating`
     /// payload binder updates the stored value in place with one lookup.
-    /// The place never inserts or removes: use `insert(key, value)`,
-    /// `remove(key)`, or `dict(key, default: v)` to insert when missing.
+    /// Assigning a value inserts or replaces it, and assigning `null`
+    /// removes the key. Compound assignment (`dict(k) += 1`) is rejected,
+    /// since the key may be missing: use `dict(key, default: v) += 1`.
     ///
     /// # Examples
     ///
@@ -621,6 +622,8 @@ public struct Dictionary[K, V, H = DefaultHasher, A = GlobalAllocator]: Iterable
     /// var dict = ["a": 1, "b": 2];
     /// dict("a");           // Some(1)
     /// dict("z");           // None
+    /// dict("z") = 26;      // inserts "z": 26
+    /// dict("b") = null;    // removes "b"
     /// if let .Some(&mutating v) = dict("a") { v += 10; }  // "a": 11
     /// ```
     public subscript(key: K)? -> V {
@@ -634,6 +637,14 @@ public struct Dictionary[K, V, H = DefaultHasher, A = GlobalAllocator]: Iterable
             let index = self.probe(key, self.hashKey(key));
             if index < 0 { return null; }
             .Some(self.mutatingValueAt(index))
+        }
+        // `newValue` is `Optional[V]`: a value inserts or replaces, `null`
+        // removes.
+        set {
+            match newValue {
+                .Some(value) => { let _ = self.insert(key, value); },
+                .None => { let _ = self.remove(key); },
+            }
         }
     }
 
