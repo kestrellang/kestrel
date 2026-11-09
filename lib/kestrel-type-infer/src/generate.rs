@@ -2918,8 +2918,14 @@ fn instantiate_entity_inner(
     } else {
         type_param_entities.iter().map(|_| ctx.fresh()).collect()
     };
-    // The padded slots fall back to their declared defaults.
-    if written_len < explicit_type_args.len() {
+    // The padded slots fall back to their declared defaults, and so does
+    // every param of a nominal named bare (`String.make()`).
+    let bare_nominal = written_len == 0
+        && matches!(
+            qctx.get::<NodeKind>(entity),
+            Some(NodeKind::Struct | NodeKind::Enum)
+        );
+    if written_len < explicit_type_args.len() || bare_nominal {
         for (&tv, &param) in fresh_type_args
             .iter()
             .zip(&type_param_entities)
@@ -2999,7 +3005,10 @@ fn instantiate_entity_inner(
                 .unwrap_or_default();
             for &param in &target_type_params {
                 if !subs.iter().any(|(e, _)| *e == param) {
+                    // Unpinned, a defaulted param (`String`'s `A`) takes its
+                    // default, as it does for `String()`.
                     let fresh = ctx.fresh();
+                    ctx.defer_type_param_default(fresh, param);
                     subs.push((param, fresh));
                 }
             }
@@ -3376,7 +3385,7 @@ pub(crate) fn emit_formation_wellformedness(
 /// Copyable/Static wellformedness bounds against `rawany P` would only be
 /// cascades of it.
 fn is_invalid_existential_box(ctx: &InferCtx<'_>, entity: Entity, args: &[HirTy]) -> bool {
-    matches!(args, [HirTy::RawExistential { .. }])
+    matches!(args, [HirTy::RawExistential { .. }, ..])
         && ctx
             .query_ctx
             .query(kestrel_semantics::ExistentialBoxDefect {

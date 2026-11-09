@@ -104,7 +104,7 @@ impl BodyCheck for ExistentialBoxBodyAnalyzer {
 /// Report every `B[rawany P]` inside `ty` whose `B` is not a valid box.
 fn check_ty(ctx: &QueryContext<'_>, root: Entity, ty: &HirTy, out: &mut Vec<AnalyzeDiagnostic>) {
     if let HirTy::Struct { entity, args, span } | HirTy::Enum { entity, args, span } = ty
-        && let [HirTy::RawExistential { .. }] = args.as_slice()
+        && let [HirTy::RawExistential { .. }, ..] = args.as_slice()
         && let Some(defect) = ctx.query(ExistentialBoxDefect {
             entity: *entity,
             root,

@@ -1639,20 +1639,26 @@ fn resolve_conformance_type_arg(
                     // Remap extension params to the struct's params
                     let entity = ext_to_struct.get(&entity).copied().unwrap_or(entity);
                     if cx.query.get::<NodeKind>(entity) == Some(&NodeKind::TypeParameter) {
-                        Some(ResolvedTy::Param { entity })
-                    } else {
-                        let type_args = segments
-                            .last()
-                            .map(|s| s.type_args.as_slice())
-                            .unwrap_or(&[]);
-                        let args: Vec<ResolvedTy> = type_args
-                            .iter()
-                            .filter_map(|arg| {
-                                resolve_conformance_type_arg(cx, arg, context, ext_to_struct)
-                            })
-                            .collect();
-                        Some(ResolvedTy::Named { entity, args })
+                        return Some(ResolvedTy::Param { entity });
                     }
+                    let type_args = segments
+                        .last()
+                        .map(|s| s.type_args.as_slice())
+                        .unwrap_or(&[]);
+                    let mut args: Vec<ResolvedTy> = type_args
+                        .iter()
+                        .filter_map(|arg| {
+                            resolve_conformance_type_arg(cx, arg, context, ext_to_struct)
+                        })
+                        .collect();
+                    pad_with_declared_defaults(cx, entity, &mut args);
+                    // An alias names its target (`GlobalAllocator` is
+                    // `SystemAllocator`, `ArrayOf[T]` is `Array[T]`), which is
+                    // what the method's lowered types carry.
+                    if let Some(target) = expand_alias(cx, entity, &args) {
+                        return Some(target);
+                    }
+                    Some(ResolvedTy::Named { entity, args })
                 },
                 _ => None,
             }
@@ -1686,6 +1692,57 @@ fn resolve_conformance_type_arg(
         AstType::Unit(_) => Some(ResolvedTy::Tuple(Vec::new())),
         AstType::Never(_) => Some(ResolvedTy::Never),
         _ => None,
+    }
+}
+
+/// The target of type alias `entity` at `args`: the alias's annotation,
+/// resolved from the alias's own scope, with its params replaced by `args`
+/// (`type Pair[T] = Tuple2[T, T]` at `[Int64]` is `Tuple2[Int64, Int64]`).
+/// `None` for anything but an alias with a target.
+fn expand_alias(
+    cx: &CompilationContext<'_>,
+    entity: Entity,
+    args: &[ResolvedTy],
+) -> Option<ResolvedTy> {
+    if cx.query.get::<NodeKind>(entity) != Some(&NodeKind::TypeAlias) {
+        return None;
+    }
+    let target = cx
+        .query
+        .get::<TypeAnnotation>(entity)
+        .map(|a| a.0.clone())?;
+    let target = resolve_conformance_type_arg(cx, &target, entity, &HashMap::new())?;
+    let params = cx
+        .query
+        .get::<TypeParams>(entity)
+        .map(|tp| tp.0.clone())
+        .unwrap_or_default();
+    Some(kestrel_type_infer::substitute_resolved_ty(
+        &target, &params, args,
+    ))
+}
+
+/// Fill the trailing params of `entity` that `args` leaves out with their
+/// declared defaults (`String` is `String[GlobalAllocator]`), as every other
+/// annotation does, so it compares equal to the method's `String`.
+fn pad_with_declared_defaults(
+    cx: &CompilationContext<'_>,
+    entity: Entity,
+    args: &mut Vec<ResolvedTy>,
+) {
+    let params = cx
+        .query
+        .get::<TypeParams>(entity)
+        .map(|tp| tp.0.clone())
+        .unwrap_or_default();
+    for &param in params.iter().skip(args.len()) {
+        let Some(ast) = cx.query.get::<TypeAnnotation>(param).map(|a| a.0.clone()) else {
+            return;
+        };
+        let Some(ty) = resolve_conformance_type_arg(cx, &ast, entity, &HashMap::new()) else {
+            return;
+        };
+        args.push(ty);
     }
 }
 

@@ -1083,6 +1083,7 @@ dependencies = [
  "kestrel-ast-builder",
  "kestrel-hecs",
  "kestrel-hir",
+ "kestrel-hir-lower",
  "kestrel-name-res",
  "kestrel-span",
  "kestrel-type-infer",
