@@ -155,6 +155,15 @@ enum Instr {
     /// Appends everything `src` iterates.
     case ArraySpread(arr: Int64, src: Int64)
     /// Defines an own enumerable data property (object literals).
+    /// Names the anonymous function in `fn` after the property key in
+    /// `key` (a computed key, known only at run time).
+    case SetFunctionName(fn: Int64, key: Int64)
+    /// Loads template site `site`'s cached template object and jumps to
+    /// `target`, or falls through to build it.
+    case GetTemplateObject(dst: Int64, site: Int64, target: Int64)
+    /// Finishes a template object (non-enumerable `raw`, both frozen) and
+    /// caches it for `site`.
+    case CacheTemplateObject(strings: Int64, raw: Int64, site: Int64)
     case DefineProp(obj: Int64, key: Int64, src: Int64)
     /// A class evaluation's fresh private name `#x`: a symbol `GetElem`,
     /// `SetElem`, `DefineProp` and `in` treat as private (`privateGet`).

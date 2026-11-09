@@ -102,6 +102,7 @@ extend VM {
             .WithSet(h, sl, n, s, st, _) => Instr.WithSet(hops: h, slot: sl, name: n, src: s, strict: st, target: target),
             .EnterTry(_, e) => Instr.EnterTry(handler: target, exception: e),
             .ForInNext(d, it, _) => Instr.ForInNext(dst: d, iter: it, done: target),
+            .GetTemplateObject(d, s, _) => Instr.GetTemplateObject(dst: d, site: s, target: target),
             .IteratorNext(d, it, _) => Instr.IteratorNext(dst: d, iter: it, done: target),
             _ => i
         };

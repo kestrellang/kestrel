@@ -761,6 +761,10 @@ extend VM {
         let strings = argv;
         let raw = self.reg();
         let t = self.reg();
+        // Each site builds its frozen template object once.
+        let site = self.templateSiteCount;
+        self.templateSiteCount = site + 1;
+        let cached = self.emit(.GetTemplateObject(dst: strings, site: site, target: 0));
         let _ = self.emit(.NewArray(dst: strings));
         let _ = self.emit(.NewArray(dst: raw));
         for q in quasi.quasis {
@@ -772,8 +776,8 @@ extend VM {
             self.loadString(t, q.raw);
             let _ = self.emit(.ArrayAppend(arr: raw, src: t));
         }
-        let ic = self.newIC();
-        let _ = self.emit(.SetProp(obj: strings, key: self.atom("raw"), src: raw, ic: ic, strict: true));
+        let _ = self.emit(.CacheTemplateObject(strings: strings, raw: raw, site: site));
+        self.patchHere(cached);
         for i in 0..<quasi.expressions.count {
             try self.compileExpr(quasi.expressions(i), argv + 1 + i);
         }
@@ -798,6 +802,8 @@ extend VM {
                         try self.compileKey(key, k);
                         let v = self.reg();
                         try self.compileNamed(value, v, name);
+                        // A computed key names an anonymous function at run time.
+                        if computed and isAnonymousFunction(value) { let _ = self.emit(.SetFunctionName(fn: v, key: k)); }
                         let _ = self.emit(.DefineProp(obj: dst, key: k, src: v));
                     }
                 },
@@ -1058,7 +1064,12 @@ extend VM {
                 try self.compileKey(key, k);
                 let v = self.reg();
                 match value {
-                    .Some(x) => try self.compileNamed(x, v, self.keyName(key)),
+                    .Some(x) => {
+                        try self.compileNamed(x, v, self.keyName(key));
+                        if let .Computed(_) = key {
+                            if isAnonymousFunction(x) { let _ = self.emit(.SetFunctionName(fn: v, key: k)); }
+                        }
+                    },
                     .None => self.load(v, Value.undefined)
                 }
                 let _ = self.emit(.DefineProp(obj: this, key: k, src: v));

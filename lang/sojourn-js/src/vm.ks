@@ -142,6 +142,10 @@ struct VM {
     var fns: [FnState]
     /// Each direct eval call site's compile-time scope, by DirectEval's ctx.
     var evalContexts: [EvalContext]
+    /// Tagged template sites compiled so far, and their template objects
+    /// once built (undefined before), by site.
+    var templateSiteCount: Int64
+    var templateObjects: [Value]
     /// The context indirect eval compiles in, or -1 before first use.
     var globalEvalCtx: Int64
     /// Script-level lexical names seen so far (compile time).
@@ -188,6 +192,8 @@ struct VM {
         self.caches = [];
         self.fns = [];
         self.evalContexts = [];
+        self.templateSiteCount = 0;
+        self.templateObjects = [];
         self.globalEvalCtx = -1;
         self.globalLexicalNames = Set();
         self.globalLexicals = [:];
@@ -312,6 +318,7 @@ struct VM {
         for v in self.roots { values.append(v); }
         for v in self.atomValues { values.append(v); }
         for v in self.symbols { values.append(v); }
+        for v in self.templateObjects { values.append(v); }
         values.append(self.global);
         for v in self.intrinsicValues() { values.append(v); }
         for f in self.frames {

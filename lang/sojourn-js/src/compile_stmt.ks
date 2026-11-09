@@ -494,7 +494,16 @@ extend VM {
         if let .Some(body) = finalizer {
             let _ = self.emit(.LeaveTry);
             let _ = self.fns(f).ctl.pop();
+            // A finally block that completes normally keeps the try's
+            // completion value; one that jumps out gives its own.
+            let completion = self.fns(f).completion;
+            let saved = self.reg();
+            if completion >= 0 {
+                let _ = self.emit(.Move(dst: saved, src: completion));
+                self.load(completion, Value.undefined);
+            }
             try self.compileStmt(Stmt(kind: .Block(body), span: Span(start: 0, end: 0)));
+            if completion >= 0 { let _ = self.emit(.Move(dst: completion, src: saved)); }
             let over = self.emit(.Jump(target: 0));
             self.patchHere(finallyTry);
             try self.compileStmt(Stmt(kind: .Block(body), span: Span(start: 0, end: 0)));

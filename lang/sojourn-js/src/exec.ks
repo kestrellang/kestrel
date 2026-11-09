@@ -291,6 +291,25 @@ extend VM {
                 let r = self.reg(fi, arr).asRef;
                 for x in items { self.appendElement(r, x); }
             },
+            .GetTemplateObject(dst, site, target) => {
+                if site < self.templateObjects.count and not self.templateObjects(site).isUndefined {
+                    self.setReg(fi, dst, self.templateObjects(site));
+                    self.frames(fi).pc = target;
+                }
+            },
+            .CacheTemplateObject(strings, raw, site) => {
+                let s = self.reg(fi, strings);
+                let rw = self.reg(fi, raw);
+                let _ = try self.setIntegrity(rw, true);
+                self.defineOwn(s.asRef, self.atom("raw"), rw, 0);
+                let _ = try self.setIntegrity(s, true);
+                while self.templateObjects.count <= site { self.templateObjects.append(Value.undefined); }
+                self.templateObjects(site) = s;
+            },
+            .SetFunctionName(fn, key) => {
+                let pk = try self.toKey(self.reg(fi, key));
+                self.nameFunctionIfAnonymous(self.reg(fi, fn), pk, "");
+            },
             .DefineProp(obj, key, src) => {
                 let pk = try self.toKey(self.reg(fi, key));
                 let o = self.reg(fi, obj);
@@ -573,7 +592,9 @@ extend VM {
     mutating func nameFunctionIfAnonymous(f: Value, key: Key, prefix: String) {
         if not f.isObject { return; }
         if let .Some(p) = self.ownProperty(f.asRef, self.names.name) {
-            if p.value.isString and self.units(p.value).count > 0 { return; }
+            // A computed accessor was compiled with just its prefix ("get ").
+            if not p.value.isString { return; }
+            if self.units(p.value).count > 0 and self.text(p.value) != prefix { return; }
         }
         let base = if keyIsSymbol(key) {
             let d = self.symbols(symbolOfKey(key));
