@@ -608,8 +608,9 @@ ClosureParams =
 ClosureParam =
   'mutating'? Pattern (':' Ty)?
 
+// A `=> { … }` arm needs no comma before an arm on the next line.
 ExprMatch =
-  'match' Expression '{' (MatchArm (',' MatchArm)* ','?)? '}'
+  'match' Expression '{' (MatchArm (','? MatchArm)* ','?)? '}'
 
 MatchArm =
   Pattern MatchArmGuard? '=>' Expression

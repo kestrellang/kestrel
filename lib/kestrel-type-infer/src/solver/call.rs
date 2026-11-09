@@ -269,89 +269,99 @@ pub(super) fn solve_overloaded_call(
         .map(|n| n.0.clone())
         .unwrap_or_else(|| "<overloaded>".into());
 
-    let arg_labels: Vec<BindArg> = args.iter().map(BindArg::from).collect();
+    match narrow_overloads(ctx, &candidates, &args) {
+        Narrowed::Open(matched) => SolveResult::Deferred(Constraint::OverloadedCall {
+            candidates: matched,
+            type_args,
+            args,
+            result,
+            expr,
+            span,
+        }),
+        Narrowed::ByLabels(picks) => match picks.as_slice() {
+            [] => SolveResult::Error(InferError::NoMatchingOverload {
+                name: overload_name,
+                span,
+            }),
+            [one] => emit_resolved_call(ctx, *one, &type_args, args, result, expr, span),
+            _ => unreachable!("ByLabels holds at most one candidate"),
+        },
+        Narrowed::ByTypes(picks) => match picks.as_slice() {
+            [] => SolveResult::Error(InferError::NoMember {
+                receiver: result,
+                name: overload_name,
+                is_call: true,
+                span,
+            }),
+            [one] => emit_resolved_call(ctx, *one, &type_args, args, result, expr, span),
+            // Receiver-less: an overloaded module-level function call has
+            // no receiver type — `result` is the call result, not a
+            // receiver, so don't render it (#210).
+            _ => SolveResult::Error(InferError::AmbiguousMember {
+                receiver: None,
+                name: overload_name,
+                span,
+            }),
+        },
+    }
+}
 
-    // Step 1: filter candidates by label/arity
+/// What [`narrow_overloads`] could decide about a set of same-name candidates.
+pub(super) enum Narrowed {
+    /// Several fit the labels and an argument type is still open: wait.
+    Open(Vec<Entity>),
+    /// At most one candidate takes these labels/arity.
+    ByLabels(Vec<Entity>),
+    /// The label matches, narrowed by the (concrete) argument types; more
+    /// than one left is an ambiguity.
+    ByTypes(Vec<Entity>),
+}
+
+/// Pick among overloads by labels/arity, then by argument types. The single
+/// rule both free overloaded calls and same-label inits on a type use.
+pub(super) fn narrow_overloads(
+    ctx: &InferCtx<'_>,
+    candidates: &[Entity],
+    args: &[CallArg],
+) -> Narrowed {
+    let arg_labels: Vec<BindArg> = args.iter().map(BindArg::from).collect();
     let matched: Vec<Entity> = candidates
         .iter()
         .copied()
         .filter(|&c| {
-            let Some(callable) = ctx.query_ctx.get::<Callable>(c) else {
-                return false;
-            };
-            labels_match(&callable.params, &arg_labels)
+            ctx.query_ctx
+                .get::<Callable>(c)
+                .is_some_and(|callable| labels_match(&callable.params, &arg_labels))
         })
         .collect();
-
-    match matched.len() {
-        0 => SolveResult::Error(InferError::NoMatchingOverload {
-            name: overload_name,
-            span,
-        }),
-        1 => emit_resolved_call(ctx, matched[0], &type_args, args, result, expr, span),
-        _ => {
-            // Multiple label matches — need type-based disambiguation.
-            // Defer until all arg types are concrete.
-            let all_concrete = args.iter().all(|a| ctx.is_concrete(ctx.resolve(a.ty)));
-            if !all_concrete {
-                return SolveResult::Deferred(Constraint::OverloadedCall {
-                    candidates: matched,
-                    type_args,
-                    args,
-                    result,
-                    expr,
-                    span,
-                });
-            }
-
-            // Check each candidate's param types against concrete arg types
-            let compatible: Vec<Entity> = matched
-                .iter()
-                .copied()
-                .filter(|&c| types_compatible(ctx, c, &args))
-                .collect();
-
-            // The most specific candidate wins: when a concrete overload and
-            // a generic one both fit (`init(from: CString)` and
-            // `init[I](from: I)` for a `CString` argument), take the concrete.
-            let compatible = if compatible.len() > 1 {
-                let concrete: Vec<Entity> = compatible
-                    .iter()
-                    .copied()
-                    .filter(|&c| {
-                        ctx.query_ctx
-                            .get::<TypeParams>(c)
-                            .is_none_or(|tp| tp.0.is_empty())
-                    })
-                    .collect();
-                if concrete.len() == 1 {
-                    concrete
-                } else {
-                    compatible
-                }
-            } else {
-                compatible
-            };
-
-            match compatible.len() {
-                0 => SolveResult::Error(InferError::NoMember {
-                    receiver: result,
-                    name: overload_name,
-                    is_call: true,
-                    span,
-                }),
-                1 => emit_resolved_call(ctx, compatible[0], &type_args, args, result, expr, span),
-                // Receiver-less: an overloaded module-level function call has
-                // no receiver type — `result` is the call result, not a
-                // receiver, so don't render it (#210).
-                _ => SolveResult::Error(InferError::AmbiguousMember {
-                    receiver: None,
-                    name: overload_name,
-                    span,
-                }),
-            }
-        },
+    if matched.len() <= 1 {
+        return Narrowed::ByLabels(matched);
     }
+    if !args.iter().all(|a| ctx.is_concrete(ctx.resolve(a.ty))) {
+        return Narrowed::Open(matched);
+    }
+    let compatible: Vec<Entity> = matched
+        .into_iter()
+        .filter(|&c| types_compatible(ctx, c, args))
+        .collect();
+    // The most specific candidate wins: when a concrete overload and a
+    // generic one both fit (`init(from: CString)` and `init[I](from: I)` for
+    // a `CString` argument), take the concrete.
+    if compatible.len() > 1 {
+        let concrete: Vec<Entity> = compatible
+            .iter()
+            .copied()
+            .filter(|&c| {
+                ctx.query_ctx
+                    .get::<TypeParams>(c)
+                    .is_none_or(|tp| tp.0.is_empty())
+            })
+            .collect();
+        if concrete.len() == 1 {
+            return Narrowed::ByTypes(concrete);
+        }
+    }
+    Narrowed::ByTypes(compatible)
 }
 
 /// Emit constraints for a resolved overloaded call: instantiate the selected
