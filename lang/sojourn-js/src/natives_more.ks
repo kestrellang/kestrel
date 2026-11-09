@@ -57,6 +57,7 @@ extend VM {
         self.setupCollections();
         self.setupDate();
         self.setupGenerators();
+        self.setupRegExp();
         let objectCtor = self.ownValue(g.asRef, self.atom("Object"));
         self.method(objectCtor, "groupBy", .ObjectGroupBy, 2);
 
@@ -431,6 +432,20 @@ extend VM {
     /// String.prototype.replace and replaceAll with a string pattern.
     mutating func stringReplace(this: Value, search: Value, replace: Value, all: Bool) -> Result[Value, Value] {
         if this.isNullish { return self.throwType("String.prototype.replace called on null or undefined"); }
+        if not search.isNullish {
+            if all {
+                let isRx = try self.isRegExp(search);
+                if isRx {
+                    let flags = try self.getV(search, self.atom("flags"));
+                    if flags.isNullish { return self.throwType("flags is null or undefined"); }
+                    if not (try self.toUnits(flags)).contains(103) {
+                        return self.throwType("replaceAll must be called with a global RegExp");
+                    }
+                }
+            }
+            let m = try self.getMethod(search, symbolKey(WellKnown.replace));
+            if not m.isUndefined { return self.callValue(m, search, [this, replace]); }
+        }
         let s = try self.toUnits(this);
         let needle = try self.toUnits(search);
         let functional = self.isCallable(replace);

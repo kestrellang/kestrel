@@ -212,6 +212,12 @@ extend VM {
                 let o = self.newObject();
                 self.setReg(fi, dst, o);
             },
+            .NewRegExp(dst, pattern, flags) => {
+                let p = self.atomValues(pattern);
+                let f = self.atomValues(flags);
+                let rx = try self.regexpCreate(p, f);
+                self.setReg(fi, dst, rx);
+            },
             .NewArray(dst) => {
                 let a = self.newArray([]);
                 self.setReg(fi, dst, a);

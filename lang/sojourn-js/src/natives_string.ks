@@ -145,6 +145,11 @@ extend VM {
             .StringTrimStart => self.newString(unitsTrim(try self.thisUnits(this, "trimStart"), true, false)),
             .StringTrimEnd => self.newString(unitsTrim(try self.thisUnits(this, "trimEnd"), false, true)),
             .StringSplit => {
+                if this.isNullish { return self.throwType("String.prototype.split called on null or undefined"); }
+                if not a0.isNullish {
+                    let m = try self.getMethod(a0, symbolKey(WellKnown.split));
+                    if not m.isUndefined { return .Ok(.Some(try self.callValue(m, a0, [this, a1]))); }
+                }
                 let s = try self.thisUnits(this, "split");
                 let limit = if a1.isUndefined { 4294967295 } else { toUint32(try self.toNumber(a1)) };
                 if a0.isUndefined {

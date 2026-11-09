@@ -424,9 +424,9 @@ extend VM {
             .StringBox(_) => "String",
             .ArgumentsObject => "Arguments",
             .DateObject(_) => "Date",
+            .RegExpObject(_, _, _) => "RegExp",
             _ => if self.isCallable(o) { "Function" } else { "Object" }
         };
-        if self.heap.objects(o.asRef).proto.same(self.intrinsics.regexpProto) { tag = "RegExp"; }
         let t = try self.getFrom(o, symbolKey(WellKnown.toStringTag), o);
         if t.isString { tag = self.text(t); }
         .Ok(self.str("[object \(tag)]"))

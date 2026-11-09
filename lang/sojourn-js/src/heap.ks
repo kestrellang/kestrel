@@ -79,6 +79,9 @@ enum ObjectKind {
     case DateObject(Float64)
     /// A generator object: its suspended frame is `Heap.generators(id)`.
     case Generator(id: Int64)
+    /// A RegExp: its program (`VM.regexPrograms`), source and flags.
+    case RegExpObject(id: Int64, source: Value, flags: Value)
+    case RegExpStringIterator(regexp: Value, string: Value, global: Bool, unicode: Bool, done: Bool)
 }
 
 /// Generator states.
@@ -374,6 +377,14 @@ func traceKind(kind: ObjectKind, mutating m: Marker) {
         .ArrayIterator(t, _, _) => m.values.append(t),
         .StringIterator(t, _) => m.values.append(t),
         .CollectionIterator(t, _, _) => m.values.append(t),
+        .RegExpObject(_, s, f) => {
+            m.values.append(s);
+            m.values.append(f);
+        },
+        .RegExpStringIterator(r, s, _, _, _) => {
+            m.values.append(r);
+            m.values.append(s);
+        },
         _ => {}
     }
 }

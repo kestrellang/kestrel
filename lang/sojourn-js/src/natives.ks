@@ -299,6 +299,28 @@ enum NativeFn {
     case GeneratorNext
     case GeneratorReturn
     case GeneratorThrow
+    // natives_regexp.ks
+    case RegExpCompile
+    case RegExpDotAll
+    case RegExpFlags
+    case RegExpGlobal
+    case RegExpHasIndices
+    case RegExpIgnoreCase
+    case RegExpMultiline
+    case RegExpSource
+    case RegExpSticky
+    case RegExpStringIteratorNext
+    case RegExpSymbolMatch
+    case RegExpSymbolMatchAll
+    case RegExpSymbolReplace
+    case RegExpSymbolSearch
+    case RegExpSymbolSplit
+    case RegExpTest
+    case RegExpUnicode
+    case RegExpUnicodeSets
+    case StringMatch
+    case StringMatchAll
+    case StringSearch
 }
 
 func arg(args: Array[Value], i: Int64) -> Value {
@@ -375,6 +397,7 @@ extend VM {
         if let .Some(r) = try self.collectionNative(n, this, args, newTarget) { return .Ok(r); }
         if let .Some(r) = try self.dateNative(n, this, args, newTarget) { return .Ok(r); }
         if let .Some(r) = try self.generatorNative(n, this, args) { return .Ok(r); }
+        if let .Some(r) = try self.regexpNative(n, callee, this, args, newTarget) { return .Ok(r); }
         self.throwType("built-in not implemented")
     }
 

@@ -112,6 +112,8 @@ enum Instr {
     case SuperSet(key: Int64, src: Int64, this: Int64)
     case NewObject(dst: Int64)
     case NewArray(dst: Int64)
+    /// A regex literal: a fresh RegExp each evaluation.
+    case NewRegExp(dst: Int64, pattern: Key, flags: Key)
     /// Appends `src` to an array literal; an empty value makes a hole.
     case ArrayAppend(arr: Int64, src: Int64)
     /// Appends everything `src` iterates.

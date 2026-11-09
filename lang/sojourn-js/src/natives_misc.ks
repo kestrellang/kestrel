@@ -136,22 +136,6 @@ extend VM {
                 for u in msg { out.append(u); }
                 self.newString(out)
             },
-            .RegExpCtor => {
-                let proto = try self.prototypeFor(if newTarget.isUndefined { callee } else { newTarget }, self.intrinsics.regexpProto);
-                let o = self.newObjectKind(proto, .Ordinary);
-                let src = if a0.isUndefined { self.str("(?:)") } else { try self.toStringValue(a0) };
-                let flags = if a1.isUndefined { self.str("") } else { try self.toStringValue(a1) };
-                self.defineOwn(o.asRef, self.atom("source"), src, Attr.configurable);
-                self.defineOwn(o.asRef, self.atom("flags"), flags, Attr.configurable);
-                self.defineOwn(o.asRef, self.names.lastIndex, Value.int(0), Attr.writable);
-                o
-            },
-            .RegExpExec => return self.throwType("regular expressions aren't supported yet"),
-            .RegExpToString => {
-                let s = try self.toText(try self.getV(this, self.atom("source")));
-                let f = try self.toText(try self.getV(this, self.atom("flags")));
-                self.str("/\(s)/\(f)")
-            },
             .MathAbs => Value.number((try self.mathArg(args, 0)).abs()),
             .MathFloor => Value.number((try self.mathArg(args, 0)).floor()),
             .MathCeil => Value.number((try self.mathArg(args, 0)).ceil()),

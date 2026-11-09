@@ -60,6 +60,7 @@ struct Intrinsics {
     var setIteratorProto: Value
     var generatorProto: Value
     var generatorFunctionProto: Value
+    var regexpStringIteratorProto: Value
     var throwTypeError: Value
 }
 
@@ -73,6 +74,11 @@ struct WellKnown {
     static var asyncIterator: Int64 { 5 }
     static var isConcatSpreadable: Int64 { 6 }
     static var species: Int64 { 7 }
+    static var matchSym: Int64 { 8 }
+    static var matchAll: Int64 { 9 }
+    static var replace: Int64 { 10 }
+    static var search: Int64 { 11 }
+    static var split: Int64 { 12 }
 }
 
 /// Atoms the engine uses often.
@@ -131,6 +137,9 @@ struct VM {
     /// Calls deep, to turn runaway recursion into a RangeError.
     var depth: Int64
     var randomState: UInt64
+    /// Compiled regular expressions, and their ids by "flags/source".
+    var regexPrograms: [RxProgram]
+    var regexCache: [String: Int64]
 
     init() {
         self.heap = Heap();
@@ -162,11 +171,14 @@ struct VM {
             referenceErrorProto: u, syntaxErrorProto: u, evalErrorProto: u, uriErrorProto: u,
             iteratorProto: u, arrayIteratorProto: u, stringIteratorProto: u, regexpProto: u,
             mapIteratorProto: u, setIteratorProto: u, generatorProto: u, generatorFunctionProto: u,
+            regexpStringIteratorProto: u,
             throwTypeError: u
         );
         self.sourceName = "";
         self.depth = 0;
         self.randomState = 0x2545F4914F6CDD1D;
+        self.regexPrograms = [];
+        self.regexCache = [:];
         self.globalEnv = self.heap.allocEnv(Env(slots: [], parent: -1));
         self.names = Names(
             length: self.atom("length"), prototype: self.atom("prototype"), constructor: self.atom("constructor"),
@@ -280,7 +292,8 @@ struct VM {
          i.symbolProto, i.errorProto, i.typeErrorProto, i.rangeErrorProto, i.referenceErrorProto,
          i.syntaxErrorProto, i.evalErrorProto, i.uriErrorProto, i.iteratorProto,
          i.arrayIteratorProto, i.stringIteratorProto, i.regexpProto, i.mapIteratorProto,
-         i.setIteratorProto, i.generatorProto, i.generatorFunctionProto, i.throwTypeError]
+         i.setIteratorProto, i.generatorProto, i.generatorFunctionProto, i.regexpStringIteratorProto,
+         i.throwTypeError]
     }
 
     mutating func pushRoot(v: Value) { self.roots.append(v); }

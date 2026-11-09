@@ -47,9 +47,10 @@ extend VM {
     }
 
     mutating func setupRealm() {
-        // Well-known symbols take ids 0 through 7, in WellKnown's order.
+        // Well-known symbols take ids 0 through 12, in WellKnown's order.
         for d in ["Symbol.iterator", "Symbol.hasInstance", "Symbol.toPrimitive", "Symbol.toStringTag",
-                  "Symbol.unscopables", "Symbol.asyncIterator", "Symbol.isConcatSpreadable", "Symbol.species"] {
+                  "Symbol.unscopables", "Symbol.asyncIterator", "Symbol.isConcatSpreadable", "Symbol.species",
+                  "Symbol.match", "Symbol.matchAll", "Symbol.replace", "Symbol.search", "Symbol.split"] {
             let s = self.str(d);
             let _ = self.newSymbol(s);
         }
@@ -211,7 +212,9 @@ extend VM {
         for (name, id) in [("iterator", WellKnown.iterator), ("hasInstance", WellKnown.hasInstance),
                            ("toPrimitive", WellKnown.toPrimitive), ("toStringTag", WellKnown.toStringTag),
                            ("unscopables", WellKnown.unscopables), ("asyncIterator", WellKnown.asyncIterator),
-                           ("isConcatSpreadable", WellKnown.isConcatSpreadable), ("species", WellKnown.species)] {
+                           ("isConcatSpreadable", WellKnown.isConcatSpreadable), ("species", WellKnown.species),
+                           ("match", WellKnown.matchSym), ("matchAll", WellKnown.matchAll), ("replace", WellKnown.replace),
+                           ("search", WellKnown.search), ("split", WellKnown.split)] {
             self.constant(symbolCtor, name, Value.symbol(id));
         }
         self.method(symbolProto, "toString", .SymbolToString, 0);
@@ -234,14 +237,6 @@ extend VM {
         self.intrinsics.syntaxErrorProto = self.makeErrorType("SyntaxError", .SyntaxErrorCtor, errorCtor, errorProto);
         self.intrinsics.evalErrorProto = self.makeErrorType("EvalError", .EvalErrorCtor, errorCtor, errorProto);
         self.intrinsics.uriErrorProto = self.makeErrorType("URIError", .URIErrorCtor, errorCtor, errorProto);
-
-        // RegExp (objects only; matching isn't implemented yet)
-        let regexpProto = self.newObject();
-        self.intrinsics.regexpProto = regexpProto;
-        let _ = self.constructorFor("RegExp", .RegExpCtor, 2, regexpProto);
-        self.method(regexpProto, "exec", .RegExpExec, 1);
-        self.method(regexpProto, "test", .RegExpExec, 1);
-        self.method(regexpProto, "toString", .RegExpToString, 0);
 
         // Math
         let math = self.newObject();

@@ -26,16 +26,16 @@ extend VM {
             .BigInt(_) => throw compileError("BigInt isn't supported yet"),
             .StringLit(s) => self.loadString(dst, s),
             .Regex(pattern, flags) => {
-                let callee = self.reg();
-                self.emitGetName("RegExp", callee, false);
-                let args = self.reg();
-                let _ = self.emit(.NewArray(dst: args));
-                let t = self.reg();
-                self.loadString(t, pattern);
-                let _ = self.emit(.ArrayAppend(arr: args, src: t));
-                self.loadString(t, flags);
-                let _ = self.emit(.ArrayAppend(arr: args, src: t));
-                let _ = self.emit(.New(dst: dst, callee: callee, args: args));
+                // An invalid literal is an early error.
+                let p = unitsOf(pattern);
+                let f = match parseRxFlags(unitsOf(flags)) {
+                    .Some(x) => x,
+                    .None => throw compileError("Invalid regular expression flags")
+                };
+                if let .Err(message) = compileRegex(p, f) {
+                    throw compileError("Invalid regular expression: /\(pattern)/: \(message)");
+                }
+                let _ = self.emit(.NewRegExp(dst: dst, pattern: self.atom(pattern), flags: self.atom(flags)));
             },
             .Template(t) => try self.compileTemplate(t, dst),
             .TaggedTemplate(tag, quasi) => try self.compileTaggedTemplate(tag, quasi, dst),
