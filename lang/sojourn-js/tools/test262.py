@@ -23,13 +23,13 @@ def limit_memory():
 
 # Features the engine doesn't support yet.
 UNSUPPORTED = {
-    "generators", "async-functions", "async-iteration", "class-fields-private",
+    "async-functions", "async-iteration", "class-fields-private",
     "class-methods-private", "class-static-methods-private", "class-fields-private-in",
     "BigInt", "Proxy", "Promise", "regexp-named-groups", "regexp-unicode-property-escapes",
     "regexp-lookbehind", "regexp-dotall", "regexp-match-indices", "regexp-v-flag",
     "regexp-modifiers", "regexp-duplicate-named-groups", "TypedArray", "ArrayBuffer",
     "DataView", "SharedArrayBuffer", "Atomics", "WeakRef", "FinalizationRegistry",
-    "WeakMap", "WeakSet", "Map", "Set", "tail-call-optimization", "dynamic-import",
+    "tail-call-optimization", "dynamic-import",
     "import-meta", "top-level-await", "Temporal", "ShadowRealm", "decorators",
     "Intl", "intl-normative-optional", "cross-realm", "IsHTMLDDA", "host-gc-required",
     "explicit-resource-management", "promise-with-resolvers", "Array.fromAsync",

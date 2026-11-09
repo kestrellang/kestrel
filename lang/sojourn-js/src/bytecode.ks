@@ -57,6 +57,7 @@ enum ErrorKind {
     case ReferenceError
     case RangeError
     case SyntaxError
+    case URIError
 }
 
 enum Instr {
@@ -171,6 +172,17 @@ enum Instr {
     case IteratorNext(dst: Int64, iter: Int64, done: Int64)
     /// Calls the iterator's `return`, if any (leaving a loop early).
     case IteratorClose(iter: Int64)
+
+    // Generators
+    /// After the prologue: suspends the new frame into a generator object
+    /// and returns that to the caller.
+    case GeneratorStart
+    /// Suspends with `src`. On resume, `dst` gets the sent value and
+    /// `dst + 1` the resume mode (0 next, 1 throw, 2 return). A `raw`
+    /// yield (from `yield*`) hands `src` out as the iterator result itself.
+    case Yield(dst: Int64, src: Int64, raw: Bool)
+    /// Throws a TypeError unless `src` is an object (iterator results).
+    case RequireObjectResult(src: Int64)
     case Nop
 }
 
@@ -189,6 +201,7 @@ struct Code {
     var isConstructor: Bool
     var isClassConstructor: Bool
     var isDerived: Bool
+    var isGenerator: Bool
     /// Where the function line came from, for error messages.
     var sourceName: String
 }

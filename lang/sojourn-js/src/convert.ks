@@ -117,6 +117,14 @@ func numberToString(n: Float64) -> String {
     if n == 0.0 { return "0"; }
     if n.isInfinite { return if n > 0.0 { "Infinity" } else { "-Infinity" }; }
     if n < 0.0 { return "-\(numberToString(0.0 - n))"; }
+    let (d, point) = shortestDigits(n);
+    formatDigits(d, d.bytes.count, point)
+}
+
+/// The shortest round-trip digits of a positive finite number, without
+/// leading or trailing zeros, and how many come before the point: `n`
+/// is 0.d × 10^point.
+func shortestDigits(n: Float64) -> (String, Int64) {
     // Kestrel prints the shortest round-trip digits, as `123.45` or `1.2e-7`.
     let text = "\(n)";
     var mantissa = "";
@@ -157,8 +165,7 @@ func numberToString(n: Float64) -> String {
     while end > lead + 1 and ds(end - 1) == '0' { end = end - 1; }
     var d = "";
     for i in lead..<end { d.append(char: ds(i)); }
-    let k = end - lead;
-    formatDigits(d, k, point)
+    (d, point)
 }
 
 /// Lays out digits `d` (`k` of them) with the decimal point after `n` of

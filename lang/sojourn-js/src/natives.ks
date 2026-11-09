@@ -182,6 +182,7 @@ enum NativeFn {
     case MathHypot
     // JSON, Reflect
     case JSONStringify
+    case JSONParse
     case ReflectOwnKeys
     case ReflectGetPrototypeOf
     case ReflectSetPrototypeOf
@@ -194,6 +195,110 @@ enum NativeFn {
     case ReflectDeleteProperty
     case ReflectGetOwnPropertyDescriptor
     case ReflectPreventExtensions
+    // natives_more.ks
+    case ArrayCopyWithin
+    case ArrayFlatMap
+    case ArrayToReversed
+    case ArrayToSorted
+    case ArrayToSpliced
+    case ArrayWith
+    case DecodeURI
+    case DecodeURIComponent
+    case EncodeURI
+    case EncodeURIComponent
+    case Escape
+    case MathAcosh
+    case MathAsinh
+    case MathAtanh
+    case MathClz32
+    case MathCosh
+    case MathExpm1
+    case MathFround
+    case MathImul
+    case MathLog1p
+    case MathSinh
+    case MathTanh
+    case NumberToExponential
+    case NumberToPrecision
+    case ObjectDefineGetter
+    case ObjectDefineSetter
+    case ObjectGroupBy
+    case ObjectLookupGetter
+    case ObjectLookupSetter
+    case StringAnchor
+    case StringBig
+    case StringBlink
+    case StringBold
+    case StringFixed
+    case StringFontcolor
+    case StringFontsize
+    case StringIsWellFormed
+    case StringItalics
+    case StringLink
+    case StringRaw
+    case StringReplace
+    case StringReplaceAll
+    case StringSmall
+    case StringStrike
+    case StringSub
+    case StringSup
+    case StringToWellFormed
+    case Unescape
+    // natives_collections.ks
+    case CollectionIteratorNext
+    case MapClear
+    case MapCtor
+    case MapDelete
+    case MapEntries
+    case MapForEach
+    case MapGet
+    case MapGroupBy
+    case MapHas
+    case MapKeys
+    case MapSet
+    case MapSize
+    case MapValues
+    case SetAdd
+    case SetCtor
+    case SetValues
+    case WeakMapCtor
+    case WeakSetCtor
+    // natives_date.ks
+    case DateCtor
+    case DateGetDate
+    case DateGetDay
+    case DateGetFullYear
+    case DateGetHours
+    case DateGetMilliseconds
+    case DateGetMinutes
+    case DateGetMonth
+    case DateGetSeconds
+    case DateGetTime
+    case DateGetTimezoneOffset
+    case DateGetYear
+    case DateNow
+    case DateParse
+    case DateSetDate
+    case DateSetFullYear
+    case DateSetHours
+    case DateSetMilliseconds
+    case DateSetMinutes
+    case DateSetMonth
+    case DateSetSeconds
+    case DateSetTime
+    case DateSetYear
+    case DateToDateString
+    case DateToISOString
+    case DateToJSON
+    case DateToPrimitive
+    case DateToString
+    case DateToTimeString
+    case DateToUTCString
+    case DateUTC
+    // natives_generator.ks
+    case GeneratorNext
+    case GeneratorReturn
+    case GeneratorThrow
 }
 
 func arg(args: Array[Value], i: Int64) -> Value {
@@ -211,7 +316,21 @@ func relativeIndex(rel: Float64, len: Int64) -> Int64 {
 }
 
 extend VM {
+    /// Calls a built-in. Its receiver and arguments stay rooted while it
+    /// runs, and any roots it leaves (say, on an early error return) are
+    /// dropped after.
     mutating func callNative(n: NativeFn, callee: Value, this: Value, args: Array[Value], newTarget: Value) -> Result[Value, Value] {
+        let mark = self.roots.count;
+        self.pushRoot(callee);
+        self.pushRoot(this);
+        self.pushRoot(newTarget);
+        for a in args { self.pushRoot(a); }
+        let result = self.callNativeUnrooted(n, callee, this, args, newTarget);
+        self.truncateRoots(mark);
+        result
+    }
+
+    mutating func callNativeUnrooted(n: NativeFn, callee: Value, this: Value, args: Array[Value], newTarget: Value) -> Result[Value, Value] {
         let a0 = arg(args, 0);
         let a1 = arg(args, 1);
         match n {
@@ -244,7 +363,7 @@ extend VM {
             .ThrowTypeError => return self.throwType("'caller', 'callee', and 'arguments' properties may not be accessed"),
             .ReturnThis => return .Ok(this),
             .FunctionProto => return .Ok(Value.undefined),
-            .FunctionCtor => return self.throwType("the Function constructor isn't supported yet"),
+            .FunctionCtor => return self.functionConstructor(args),
             _ => {}
         }
         if let .Some(r) = try self.objectNative(n, this, args, newTarget) { return .Ok(r); }
@@ -252,6 +371,10 @@ extend VM {
         if let .Some(r) = try self.arrayNative(n, this, args, newTarget) { return .Ok(r); }
         if let .Some(r) = try self.stringNative(n, this, args, newTarget) { return .Ok(r); }
         if let .Some(r) = try self.miscNative(n, callee, this, args, newTarget) { return .Ok(r); }
+        if let .Some(r) = try self.moreNative(n, this, args) { return .Ok(r); }
+        if let .Some(r) = try self.collectionNative(n, this, args, newTarget) { return .Ok(r); }
+        if let .Some(r) = try self.dateNative(n, this, args, newTarget) { return .Ok(r); }
+        if let .Some(r) = try self.generatorNative(n, this, args) { return .Ok(r); }
         self.throwType("built-in not implemented")
     }
 
@@ -268,7 +391,7 @@ extend VM {
 
     /// ToLength(obj.length).
     mutating func lengthOf(o: Value) -> Result[Int64, Value] {
-        if self.isArray(o) { return .Ok(self.heap.objects(o.asRef).elements.count); }
+        if self.isArray(o) { return .Ok(self.heap.objects(o.asRef).length); }
         let l = try self.getV(o, self.names.length);
         let n = try self.toIntegerOrInfinity(l);
         if n <= 0.0 { return .Ok(0); }
@@ -279,8 +402,10 @@ extend VM {
     mutating func getIndex(o: Value, i: Int64) -> Result[Value, Value] {
         if o.isObject {
             if let .ArrayObject = self.kindAt(o.asRef) {
-                let els = self.heap.objects(o.asRef).elements;
-                if i < els.count and not els(i).isEmpty { return .Ok(els(i)); }
+                if i < self.heap.objects(o.asRef).elements.count {
+                    let e = self.heap.objects(o.asRef).elements(i);
+                    if not e.isEmpty { return .Ok(e); }
+                }
             }
         }
         let k = self.internIndex(i);
@@ -294,8 +419,9 @@ extend VM {
 
     mutating func hasIndex(o: Value, i: Int64) -> Bool {
         if let .ArrayObject = self.kindAt(o.asRef) {
-            let els = self.heap.objects(o.asRef).elements;
-            if i < els.count and not els(i).isEmpty { return true; }
+            if i < self.heap.objects(o.asRef).elements.count {
+                if not self.heap.objects(o.asRef).elements(i).isEmpty { return true; }
+            }
         }
         let k = self.internIndex(i);
         self.hasProperty(o, k)

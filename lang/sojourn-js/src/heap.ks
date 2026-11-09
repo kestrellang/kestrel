@@ -70,6 +70,44 @@ enum ObjectKind {
     /// Iterators over arrays (and array-likes) and strings.
     case ArrayIterator(target: Value, index: Int64, kind: Int64)
     case StringIterator(target: Value, index: Int64)
+    /// A Map, Set, WeakMap or WeakSet (`CollectionKind`): its entries
+    /// are `Heap.maps(id)`.
+    case Collection(id: Int64, kind: Int64)
+    /// `kind` 0 yields keys, 1 values, 2 [key, value] pairs.
+    case CollectionIterator(target: Value, index: Int64, kind: Int64)
+    /// A Date: its time value (NaN for an invalid date).
+    case DateObject(Float64)
+    /// A generator object: its suspended frame is `Heap.generators(id)`.
+    case Generator(id: Int64)
+}
+
+/// Generator states.
+struct GenState {
+    static var suspendedStart: Int64 { 0 }
+    static var suspendedYield: Int64 { 1 }
+    static var executing: Int64 { 2 }
+    static var completed: Int64 { 3 }
+}
+
+/// A generator's suspended frame and its registers.
+struct GenData {
+    var frame: Frame
+    var registers: [Value]
+    var state: Int64
+    /// Where the next resume writes the sent value (and mode after it).
+    var resumeReg: Int64
+    /// Whether the last yield handed out an iterator result as is.
+    var raw: Bool
+}
+
+/// A collection's entries in insertion order. Deleted entries stay as
+/// `Value.empty` holes so iterators keep their positions.
+struct MapData {
+    var keys: [Value]
+    var values: [Value]
+    /// `VM.collectionKey` of each live key to its position.
+    var index: [UInt64: Int64]
+    var size: Int64
 }
 
 struct JSObject {
@@ -78,7 +116,14 @@ struct JSObject {
     /// The prototype: an object, or null.
     var proto: Value
     /// Dense indexed elements, for arrays. Holes are `Value.empty`.
+    /// Elements with attributes, accessors, and ones far past the dense
+    /// part live in the shape under their index keys instead.
     var elements: [Value]
+    /// Arrays only: `length`, which may exceed `elements.count`.
+    var length: Int64
+    /// Arrays only: whether any index lives in the shape, which turns
+    /// off the natives' dense fast paths.
+    var hasShapeIndices: Bool
     var kind: ObjectKind
     var extensible: Bool
     /// Functions only: whether `new` works on it.
@@ -103,6 +148,12 @@ struct Heap {
     var envs: [Env]
     var envMarks: [Bool]
     var freeEnvs: [Int64]
+    /// Collection entries, owned by one `ObjectKind.Collection` object
+    /// each and freed with it.
+    var maps: [MapData]
+    var freeMaps: [Int64]
+    var generators: [GenData]
+    var freeGenerators: [Int64]
     /// Cells allocated since the last collection, which decides when to
     /// collect next.
     var allocated: Int64
@@ -119,6 +170,10 @@ struct Heap {
         self.envs = [];
         self.envMarks = [];
         self.freeEnvs = [];
+        self.maps = [];
+        self.freeMaps = [];
+        self.generators = [];
+        self.freeGenerators = [];
         self.allocated = 0;
         self.threshold = 100000;
     }
@@ -156,6 +211,25 @@ struct Heap {
         self.envs.append(e);
         self.envMarks.append(false);
         self.envs.count - 1
+    }
+
+    mutating func allocMap() -> Int64 {
+        let empty = MapData(keys: [], values: [], index: [:], size: 0);
+        if let .Some(id) = self.freeMaps.pop() {
+            self.maps(id) = empty;
+            return id;
+        }
+        self.maps.append(empty);
+        self.maps.count - 1
+    }
+
+    mutating func allocGenerator(g: GenData) -> Int64 {
+        if let .Some(id) = self.freeGenerators.pop() {
+            self.generators(id) = g;
+            return id;
+        }
+        self.generators.append(g);
+        self.generators.count - 1
     }
 
     func wantsCollection() -> Bool { self.allocated >= self.threshold }
@@ -209,6 +283,21 @@ struct Heap {
         for s in o.slots { m.values.append(s); }
         for s in o.elements { m.values.append(s); }
         m.values.append(o.proto);
+        if let .Collection(id, _) = o.kind {
+            for k in self.maps(id).keys { m.values.append(k); }
+            for x in self.maps(id).values { m.values.append(x); }
+        }
+        if let .Generator(id) = o.kind {
+            let g = self.generators(id);
+            for x in g.registers { m.values.append(x); }
+            let f = g.frame;
+            m.envs.append(f.env);
+            m.envs.append(f.funcEnv);
+            for a in f.args { m.values.append(a); }
+            m.values.append(f.callee);
+            m.values.append(f.newTarget);
+            for h in f.handlers { m.envs.append(h.env); }
+        }
         traceKind(o.kind, m);
     }
 
@@ -217,6 +306,17 @@ struct Heap {
             if self.objectMarks(i) == true {
                 self.objectMarks(i) = false;
             } else if not isFreeObject(self.objects(i)) {
+                let kind = self.objects(i).kind;
+                if let .Collection(id, _) = kind {
+                    self.maps(id) = MapData(keys: [], values: [], index: [:], size: 0);
+                    self.freeMaps.append(id);
+                }
+                if let .Generator(id) = kind {
+                    self.generators(id).registers = [];
+                    self.generators(id).frame.args = [];
+                    self.generators(id).state = GenState.completed;
+                    self.freeGenerators.append(id);
+                }
                 self.objects(i) = freeObject();
                 self.freeObjects.append(i);
             }
@@ -273,13 +373,14 @@ func traceKind(kind: ObjectKind, mutating m: Marker) {
         },
         .ArrayIterator(t, _, _) => m.values.append(t),
         .StringIterator(t, _) => m.values.append(t),
+        .CollectionIterator(t, _, _) => m.values.append(t),
         _ => {}
     }
 }
 
 /// A freed object slot: shape -1.
 func freeObject() -> JSObject {
-    JSObject(shape: -1, slots: [], proto: Value.nullValue, elements: [], kind: .Ordinary, extensible: false, isConstructor: false)
+    JSObject(shape: -1, slots: [], proto: Value.nullValue, elements: [], length: 0, hasShapeIndices: false, kind: .Ordinary, extensible: false, isConstructor: false)
 }
 
 func isFreeObject(o: JSObject) -> Bool { o.shape == -1 }

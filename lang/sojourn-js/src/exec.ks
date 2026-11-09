@@ -218,12 +218,12 @@ extend VM {
             },
             .ArrayAppend(arr, src) => {
                 let r = self.reg(fi, arr).asRef;
-                self.heap.objects(r).elements.append(self.reg(fi, src));
+                self.appendElement(r, self.reg(fi, src));
             },
             .ArraySpread(arr, src) => {
                 let items = try self.iterateToArray(self.reg(fi, src));
                 let r = self.reg(fi, arr).asRef;
-                for x in items { self.heap.objects(r).elements.append(x); }
+                for x in items { self.appendElement(r, x); }
             },
             .DefineProp(obj, key, src) => {
                 let pk = try self.toKey(self.reg(fi, key));
@@ -353,6 +353,24 @@ extend VM {
                 self.frames(fi).handlers.append(Handler(pc: handler, exception: exception, env: env));
             },
             .LeaveTry => { let _ = self.frames(fi).handlers.pop(); },
+
+            // Generators
+            .GeneratorStart => return self.startGenerator(fi, stop),
+            .Yield(dst, src, raw) => {
+                let v = self.reg(fi, src);
+                let gen = self.frames(fi).generator;
+                let id = match self.kindAt(gen.asRef) { .Generator(x) => x, _ => -1 };
+                self.suspendFrame(fi, id);
+                self.heap.generators(id).state = GenState.suspendedYield;
+                self.heap.generators(id).resumeReg = dst;
+                self.heap.generators(id).raw = raw;
+                self.popFrame();
+                return .Ok(.Done(v));
+            },
+            .RequireObjectResult(src) => {
+                let v = self.reg(fi, src);
+                if not v.isObject { return self.throwType("Iterator result \(self.describe(v)) is not an object"); }
+            },
 
             // Iteration
             .ForInPrepare(dst, obj) => {

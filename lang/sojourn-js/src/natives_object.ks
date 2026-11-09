@@ -94,15 +94,9 @@ extend VM {
                 if d.enumerable ?? false { attrs = attrs | Attr.enumerable; }
                 if d.configurable ?? false { attrs = attrs | Attr.configurable; }
                 if isAccessorDescriptor(d) {
-                    if isArrayObject and self.indexOfKey(key) >= 0 {
-                        return self.throwType("accessor array elements aren't supported yet");
-                    }
                     self.defineAccessorOwn(r, key, d.getter ?? Value.undefined, d.setter ?? Value.undefined, attrs);
                 } else {
                     if d.writable ?? false { attrs = attrs | Attr.writable; }
-                    if isArrayObject and self.indexOfKey(key) >= 0 and attrs != Attr.all {
-                        return self.throwType("array elements with attributes aren't supported yet");
-                    }
                     self.defineOwn(r, key, d.value ?? Value.undefined, attrs);
                 }
                 return .Ok(true);
@@ -147,9 +141,6 @@ extend VM {
                     if let .Some(w) = d.writable { writable = w; }
                     if writable { attrs = attrs | Attr.writable; }
                     let v = d.value ?? (if wasAccessor { Value.undefined } else { p.value });
-                    if isArrayObject and self.indexOfKey(key) >= 0 and attrs != Attr.all {
-                        return self.throwType("array elements with attributes aren't supported yet");
-                    }
                     self.defineOwn(r, key, v, attrs);
                 }
                 .Ok(true)
@@ -432,6 +423,7 @@ extend VM {
             .NumberBox(_) => "Number",
             .StringBox(_) => "String",
             .ArgumentsObject => "Arguments",
+            .DateObject(_) => "Date",
             _ => if self.isCallable(o) { "Function" } else { "Object" }
         };
         if self.heap.objects(o.asRef).proto.same(self.intrinsics.regexpProto) { tag = "RegExp"; }

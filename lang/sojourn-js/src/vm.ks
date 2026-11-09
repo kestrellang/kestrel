@@ -32,6 +32,8 @@ struct Frame {
     /// The caller's register (absolute) that gets the result, or -1.
     var returnTo: Int64
     var handlers: [Handler]
+    /// The generator object a generator body's frame belongs to.
+    var generator: Value
 }
 
 /// The realm's prototypes and well-known objects.
@@ -54,6 +56,10 @@ struct Intrinsics {
     var arrayIteratorProto: Value
     var stringIteratorProto: Value
     var regexpProto: Value
+    var mapIteratorProto: Value
+    var setIteratorProto: Value
+    var generatorProto: Value
+    var generatorFunctionProto: Value
     var throwTypeError: Value
 }
 
@@ -155,6 +161,7 @@ struct VM {
             booleanProto: u, symbolProto: u, errorProto: u, typeErrorProto: u, rangeErrorProto: u,
             referenceErrorProto: u, syntaxErrorProto: u, evalErrorProto: u, uriErrorProto: u,
             iteratorProto: u, arrayIteratorProto: u, stringIteratorProto: u, regexpProto: u,
+            mapIteratorProto: u, setIteratorProto: u, generatorProto: u, generatorFunctionProto: u,
             throwTypeError: u
         );
         self.sourceName = "";
@@ -225,7 +232,8 @@ struct VM {
             .TypeError => self.intrinsics.typeErrorProto,
             .ReferenceError => self.intrinsics.referenceErrorProto,
             .RangeError => self.intrinsics.rangeErrorProto,
-            .SyntaxError => self.intrinsics.syntaxErrorProto
+            .SyntaxError => self.intrinsics.syntaxErrorProto,
+            .URIError => self.intrinsics.uriErrorProto
         };
         let e = self.newObjectKind(proto, .ErrorObject);
         let m = self.str(message);
@@ -252,13 +260,7 @@ struct VM {
         for v in self.atomValues { values.append(v); }
         for v in self.symbols { values.append(v); }
         values.append(self.global);
-        let i = self.intrinsics;
-        for v in [i.objectProto, i.functionProto, i.arrayProto, i.stringProto, i.numberProto, i.booleanProto,
-                  i.symbolProto, i.errorProto, i.typeErrorProto, i.rangeErrorProto, i.referenceErrorProto,
-                  i.syntaxErrorProto, i.evalErrorProto, i.uriErrorProto, i.iteratorProto,
-                  i.arrayIteratorProto, i.stringIteratorProto, i.regexpProto, i.throwTypeError] {
-            values.append(v);
-        }
+        for v in self.intrinsicValues() { values.append(v); }
         for f in self.frames {
             envs.append(f.env);
             envs.append(f.funcEnv);
@@ -266,13 +268,29 @@ struct VM {
             values.append(f.callee);
             values.append(f.newTarget);
             for h in f.handlers { envs.append(h.env); }
+            values.append(f.generator);
         }
         self.heap.collect(values, envs);
+    }
+
+    /// Every intrinsic, for the GC. A new `Intrinsics` field goes here too.
+    func intrinsicValues() -> Array[Value] {
+        let i = self.intrinsics;
+        [i.objectProto, i.functionProto, i.arrayProto, i.stringProto, i.numberProto, i.booleanProto,
+         i.symbolProto, i.errorProto, i.typeErrorProto, i.rangeErrorProto, i.referenceErrorProto,
+         i.syntaxErrorProto, i.evalErrorProto, i.uriErrorProto, i.iteratorProto,
+         i.arrayIteratorProto, i.stringIteratorProto, i.regexpProto, i.mapIteratorProto,
+         i.setIteratorProto, i.generatorProto, i.generatorFunctionProto, i.throwTypeError]
     }
 
     mutating func pushRoot(v: Value) { self.roots.append(v); }
 
     mutating func popRoots(n: Int64) {
         for _ in 0..<n { let _ = self.roots.pop(); }
+    }
+
+    /// Drops roots back to an earlier `roots.count`.
+    mutating func truncateRoots(mark: Int64) {
+        while self.roots.count > mark { let _ = self.roots.pop(); }
     }
 }

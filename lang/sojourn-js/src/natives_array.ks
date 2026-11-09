@@ -14,10 +14,9 @@ extend VM {
                 if args.count == 1 and a0.isNumber {
                     let len = toUint32(a0.asNumber);
                     if Float64(from: len) != a0.asNumber { return .Err(self.makeError(.RangeError, "Invalid array length")); }
-                    if len > 10000000 { return .Err(self.makeError(.RangeError, "sparse arrays aren't supported yet")); }
                     self.setArrayLength(a.asRef, len);
                 } else {
-                    self.heap.objects(a.asRef).elements = args;
+                    self.setDense(a.asRef, args);
                 }
                 a
             },
@@ -48,16 +47,16 @@ extend VM {
                             }
                         }
                     }
-                    self.heap.objects(out.asRef).elements.append(v);
+                    self.appendElement(out.asRef, v);
                 }
                 self.popRoots(1);
                 out
             },
             .ArrayPush => {
                 let o = try self.toObject(this);
-                if self.isArray(o) and self.heap.objects(o.asRef).extensible {
-                    for a in args { self.heap.objects(o.asRef).elements.append(a); }
-                    return .Ok(.Some(Value.int(self.heap.objects(o.asRef).elements.count)));
+                if self.isSimpleArray(o) {
+                    for a in args { self.appendElement(o.asRef, a); }
+                    return .Ok(.Some(Value.int(self.heap.objects(o.asRef).length)));
                 }
                 var len = try self.lengthOf(o);
                 for a in args {
@@ -88,8 +87,9 @@ extend VM {
                     return .Ok(.Some(Value.undefined));
                 }
                 let first = try self.getIndex(o, 0);
-                if self.isArray(o) {
+                if self.isSimpleArray(o) {
                     let _ = self.heap.objects(o.asRef).elements.remove(at: 0);
+                    self.heap.objects(o.asRef).length = len - 1;
                     return .Ok(.Some(if first.isEmpty { Value.undefined } else { first }));
                 }
                 for i in 1..<len {
@@ -105,10 +105,10 @@ extend VM {
             },
             .ArrayUnshift => {
                 let o = try self.toObject(this);
-                if self.isArray(o) {
+                if self.isSimpleArray(o) {
                     var els = args;
                     for e in self.heap.objects(o.asRef).elements { els.append(e); }
-                    self.heap.objects(o.asRef).elements = els;
+                    self.setDense(o.asRef, els);
                     return .Ok(.Some(Value.int(els.count)));
                 }
                 let len = try self.lengthOf(o);
@@ -161,8 +161,8 @@ extend VM {
                 for i in 0..<start { result.append(all(i)); }
                 for x in items { result.append(x); }
                 for i in (start + deleteCount)..<len { result.append(all(i)); }
-                if self.isArray(o) {
-                    self.heap.objects(o.asRef).elements = result;
+                if self.isSimpleArray(o) {
+                    self.setDense(o.asRef, result);
                 } else {
                     for i in 0..<result.count { try self.setIndex(o, i, result(i)); }
                     for i in result.count..<len { let _ = self.deleteOwn(o.asRef, self.internIndex(i)); }
@@ -275,9 +275,9 @@ extend VM {
                     match step {
                         .Ok((v, x)) => {
                             if isMap {
-                                self.heap.objects(out.asRef).elements(i) = x;
+                                self.setElement(out.asRef, i, x);
                             } else if self.toBoolean(x) {
-                                self.heap.objects(out.asRef).elements.append(v);
+                                self.appendElement(out.asRef, v);
                             }
                         },
                         .Err(e) => {

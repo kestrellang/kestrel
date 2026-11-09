@@ -249,7 +249,8 @@ extend VM {
         self.fns.append(FnState(
             instrs: [], scopes: [], nextReg: 1, maxReg: 1, ctl: [], strict: strict,
             isArrow: isArrow, isScript: isScript, pendingLabels: [], chainJumps: [],
-            argumentsAt: 0, usesArguments: false, isDerivedCtor: false, hasFields: false
+            argumentsAt: 0, usesArguments: false, isDerivedCtor: false, hasFields: false,
+            completion: -1, isGenerator: false
         ));
         var top = newCScope(true, isArrow);
         if not isArrow { let _ = top.declare("this"); }
@@ -269,8 +270,9 @@ extend VM {
         let code = Code(
             name: name, instrs: f.instrs, registers: f.maxReg, envSize: f.scopes(0).size,
             length: length, isArrow: flags.isArrow, isStrict: f.strict,
-            isConstructor: not flags.isArrow and not flags.isMethod,
+            isConstructor: not flags.isArrow and not flags.isMethod and not f.isGenerator,
             isClassConstructor: flags.isClassConstructor, isDerived: flags.isDerived,
+            isGenerator: f.isGenerator,
             sourceName: self.sourceName
         );
         self.codes.append(code);
@@ -300,13 +302,16 @@ extend VM {
             let _ = self.emit(.DeclareGlobalFunction(name: self.atom(name), src: t));
         }
         self.freeRegs(to: 1);
+        let completion = self.reg();
+        self.load(completion, Value.undefined);
+        self.fns(f).completion = completion;
         for s in p.body { try self.compileStmt(s); }
+        let _ = self.emit(.Return(src: completion));
         .Ok(self.endFunction("<script>", 0, plainFlags()))
     }
 
     /// Compiles a function, returning its code index.
     mutating func compileFunction(f: Function, name: String, flags: FnFlags) -> Result[Int64, SyntaxError] {
-        if f.isGenerator { throw compileError("generators aren't supported yet"); }
         if f.isAsync { throw compileError("async functions aren't supported yet"); }
         let body = match f.body { .Block(b) => b, .Expression(_) => [] };
         let strict = self.strict() or hasUseStrict(body) or flags.isClassConstructor;
@@ -314,6 +319,7 @@ extend VM {
         let fi = self.fnIndex();
         self.fns(fi).isDerivedCtor = flags.isDerived;
         self.fns(fi).hasFields = flags.hasFields;
+        self.fns(fi).isGenerator = f.isGenerator;
 
         // Declare everything the function's top scope holds.
         let top = self.fns(fi).scopes.count - 1;
@@ -360,6 +366,9 @@ extend VM {
             self.emitGetName("this", t, false);
             let _ = self.emit(.InitFields(this: t));
         }
+        // A generator's body runs on the first next(); parameters and
+        // hoisting happen at the call.
+        if f.isGenerator { let _ = self.emit(.GeneratorStart); }
         self.freeRegs(to: 1);
 
         match f.body {

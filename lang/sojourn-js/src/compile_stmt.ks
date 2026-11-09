@@ -12,7 +12,9 @@ extend VM {
         self.fns(f).pendingLabels = [];
         match s.kind {
             .Expression(e) => {
-                let r = self.reg();
+                // Script code keeps the last expression's value for eval.
+                let completion = self.fns(self.fnIndex()).completion;
+                let r = if completion >= 0 { completion } else { self.reg() };
                 try self.compileExpr(e, r);
             },
             .Directive(_) => {},

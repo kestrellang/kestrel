@@ -26,6 +26,12 @@ extend VM {
             if r.isObject { return self.throwType("Cannot convert object to primitive value"); }
             return .Ok(r);
         }
+        self.ordinaryToPrimitive(v, hint)
+    }
+
+    /// OrdinaryToPrimitive: toString then valueOf for "string", the
+    /// other way round otherwise.
+    mutating func ordinaryToPrimitive(v: Value, hint: String) -> Result[Value, Value] {
         let first = if hint == "string" { self.names.toString } else { self.names.valueOf };
         let second = if hint == "string" { self.names.valueOf } else { self.names.toString };
         for k in [first, second] {
@@ -94,8 +100,10 @@ extend VM {
             }
             return .Ok(self.atom(numberToString(n)));
         }
-        let p = try self.toPrimitive(v, "string");
-        self.toKey(p)
+        let p = if v.isObject { try self.toPrimitive(v, "string") } else { v };
+        if p.isSymbol or p.isNumber or p.isString { return self.toKey(p); }
+        let u = try self.toUnits(p);
+        .Ok(self.atomOfUnits(u))
     }
 
     /// A key as a value: a string or a symbol.

@@ -273,6 +273,7 @@ extend VM {
         let json = self.newObject();
         self.defineHidden(g.asRef, self.atom("JSON"), json);
         self.method(json, "stringify", .JSONStringify, 3);
+        self.method(json, "parse", .JSONParse, 2);
         let reflect = self.newObject();
         self.defineHidden(g.asRef, self.atom("Reflect"), reflect);
         for (name, n, len) in [
@@ -305,6 +306,7 @@ extend VM {
         self.defineHidden(host.asRef, self.atom("global"), g);
         self.method(host, "evalScript", .EvalScript, 1);
         self.method(host, "gc", .GC, 0);
+        self.setupMore();
     }
 
     mutating func makeErrorType(name: String, n: NativeFn, errorCtor: Value, errorProto: Value) -> Value {

@@ -118,7 +118,7 @@ extend VM {
             .Sequence(items) => {
                 for x in items { try self.compileExpr(x, dst); }
             },
-            .Yield(_, _) => throw compileError("generators aren't supported yet"),
+            .Yield(argument, delegate) => try self.compileYield(argument, delegate, dst),
             .Await(_) => throw compileError("async functions aren't supported yet"),
             .MetaProperty(meta, _) => {
                 if meta != "new" { throw compileError("import.meta isn't supported yet"); }
@@ -369,6 +369,110 @@ extend VM {
         try self.compileExpr(value, r);
         let _ = self.emit(.Binary(op: compoundOp(op), dst: dst, a: dst, b: r));
         try self.writeReference(ref, dst);
+        .Ok(())
+    }
+
+    /// `yield x` and `yield* iterable`.
+    mutating func compileYield(argument: Optional[Expr], delegate: Bool, dst: Int64) -> Result[(), SyntaxError] {
+        let mark = self.regMark();
+        let v = self.reg();
+        match argument {
+            .Some(e) => try self.compileExpr(e, v),
+            .None => self.load(v, Value.undefined)
+        }
+        if delegate {
+            try self.compileYieldStar(v, dst);
+            self.freeRegs(to: mark);
+            return .Ok(());
+        }
+        let sent = self.regs(2);
+        let _ = self.emit(.Yield(dst: sent, src: v, raw: false));
+        try self.emitResumeModes(sent);
+        let _ = self.emit(.Move(dst: dst, src: sent));
+        self.freeRegs(to: mark);
+        .Ok(())
+    }
+
+    /// After a yield: rethrows for throw(), returns (running finally
+    /// blocks) for return(), and falls through for next().
+    mutating func emitResumeModes(sent: Int64) -> Result[(), SyntaxError] {
+        let t = self.reg();
+        let c = self.reg();
+        self.load(c, Value.int(1));
+        let _ = self.emit(.Binary(op: .StrictEq, dst: t, a: sent + 1, b: c));
+        let notThrow = self.emit(.JumpIf(cond: t, target: 0, when: false));
+        let _ = self.emit(.Throw(src: sent));
+        self.patchHere(notThrow);
+        self.load(c, Value.int(2));
+        let _ = self.emit(.Binary(op: .StrictEq, dst: t, a: sent + 1, b: c));
+        let normal = self.emit(.JumpIf(cond: t, target: 0, when: false));
+        try self.emitCleanup(-1);
+        let _ = self.emit(.Return(src: sent));
+        self.patchHere(normal);
+        .Ok(())
+    }
+
+    /// `yield*`: forwards next/throw/return to the inner iterator and
+    /// yields its results as they are (ECMA-262 §15.5.5).
+    mutating func compileYieldStar(src: Int64, dst: Int64) -> Result[(), SyntaxError] {
+        let iter = self.regs(2);
+        let _ = self.emit(.GetIterator(iter: iter, obj: src));
+        let recv = self.regs(2);
+        self.load(recv, Value.undefined);
+        self.load(recv + 1, Value.int(0));
+        let res = self.reg();
+        let t = self.reg();
+        let c = self.reg();
+        let m = self.reg();
+        let argReg = self.reg();
+        let done = self.reg();
+        let top = self.here();
+        self.load(c, Value.int(1));
+        let _ = self.emit(.Binary(op: .StrictEq, dst: t, a: recv + 1, b: c));
+        let toThrow = self.emit(.JumpIf(cond: t, target: 0, when: true));
+        self.load(c, Value.int(2));
+        let _ = self.emit(.Binary(op: .StrictEq, dst: t, a: recv + 1, b: c));
+        let toReturn = self.emit(.JumpIf(cond: t, target: 0, when: true));
+        // next(v)
+        let _ = self.emit(.Move(dst: argReg, src: recv));
+        let _ = self.emit(.Call(dst: res, callee: iter + 1, this: iter, args: argReg, argc: 1));
+        let afterNext = self.emit(.Jump(target: 0));
+        // throw(v): forward it, or close the iterator and fail.
+        self.patchHere(toThrow);
+        let _ = self.emit(.GetProp(dst: m, obj: iter, key: self.atom("throw"), ic: self.newIC()));
+        let noThrow = self.emit(.JumpIfNullish(src: m, target: 0));
+        let _ = self.emit(.Move(dst: argReg, src: recv));
+        let _ = self.emit(.Call(dst: res, callee: m, this: iter, args: argReg, argc: 1));
+        let afterThrow = self.emit(.Jump(target: 0));
+        self.patchHere(noThrow);
+        let _ = self.emit(.IteratorClose(iter: iter));
+        let _ = self.emit(.ThrowError(kind: .TypeError, message: "The iterator does not provide a 'throw' method"));
+        // return(v): forward it; a done result returns from here.
+        self.patchHere(toReturn);
+        let _ = self.emit(.GetProp(dst: m, obj: iter, key: self.atom("return"), ic: self.newIC()));
+        let noReturn = self.emit(.JumpIfNullish(src: m, target: 0));
+        let _ = self.emit(.Move(dst: argReg, src: recv));
+        let _ = self.emit(.Call(dst: res, callee: m, this: iter, args: argReg, argc: 1));
+        let _ = self.emit(.RequireObjectResult(src: res));
+        let _ = self.emit(.GetProp(dst: done, obj: res, key: self.names.done, ic: self.newIC()));
+        let returnNotDone = self.emit(.JumpIf(cond: done, target: 0, when: false));
+        let _ = self.emit(.GetProp(dst: done, obj: res, key: self.names.value, ic: self.newIC()));
+        try self.emitCleanup(-1);
+        let _ = self.emit(.Return(src: done));
+        self.patchHere(noReturn);
+        try self.emitCleanup(-1);
+        let _ = self.emit(.Return(src: recv));
+        // A next/throw result: done ends the yield*, else yield it as is.
+        self.patchHere(afterNext);
+        self.patchHere(afterThrow);
+        let _ = self.emit(.RequireObjectResult(src: res));
+        let _ = self.emit(.GetProp(dst: done, obj: res, key: self.names.done, ic: self.newIC()));
+        let finished = self.emit(.JumpIf(cond: done, target: 0, when: true));
+        self.patchHere(returnNotDone);
+        let _ = self.emit(.Yield(dst: recv, src: res, raw: true));
+        let _ = self.emit(.Jump(target: top));
+        self.patchHere(finished);
+        let _ = self.emit(.GetProp(dst: dst, obj: res, key: self.names.value, ic: self.newIC()));
         .Ok(())
     }
 

@@ -24,7 +24,7 @@ extend VM {
     // ------------------------------------------------------------------
 
     mutating func newObjectKind(proto: Value, kind: ObjectKind) -> Value {
-        let o = JSObject(shape: 0, slots: [], proto: proto, elements: [], kind: kind, extensible: true, isConstructor: false);
+        let o = JSObject(shape: 0, slots: [], proto: proto, elements: [], length: 0, hasShapeIndices: false, kind: kind, extensible: true, isConstructor: false);
         Value.object(self.heap.allocObject(o))
     }
 
@@ -32,8 +32,29 @@ extend VM {
 
     mutating func newArray(elements: Array[Value]) -> Value {
         let a = self.newObjectKind(self.intrinsics.arrayProto, .ArrayObject);
-        self.heap.objects(a.asRef).elements = elements;
+        self.setDense(a.asRef, elements);
         a
+    }
+
+    /// Replaces an array's elements wholesale; `length` follows.
+    mutating func setDense(r: Ref, elements: Array[Value]) {
+        self.heap.objects(r).length = elements.count;
+        self.heap.objects(r).elements = elements;
+    }
+
+    /// Appends to a simple array (a literal or a fresh result).
+    mutating func appendElement(r: Ref, v: Value) {
+        self.heap.objects(r).elements.append(v);
+        self.heap.objects(r).length = self.heap.objects(r).elements.count;
+    }
+
+    /// An array the natives may treat as its dense `elements`: every
+    /// index is there, and `length` is theirs.
+    func isSimpleArray(v: Value) -> Bool {
+        if not self.isArray(v) { return false; }
+        let r = v.asRef;
+        self.heap.objects(r).extensible and not self.heap.objects(r).hasShapeIndices
+            and self.heap.objects(r).elements.count == self.heap.objects(r).length
     }
 
     func kindOf(v: Value) -> ObjectKind { self.heap.objects(v.asRef).kind }
@@ -162,10 +183,13 @@ extend VM {
                     if i < o.elements.count and not o.elements(i).isEmpty {
                         return .Some(PropertyRecord(value: o.elements(i), attrs: Attr.all));
                     }
-                    return .None;
+                    if i >= o.length { return .None; }
+                    // A hole may be an element with attributes, an
+                    // accessor or a sparse element, which live in the
+                    // shape under their keys.
                 }
                 if self.isLengthKey(key) {
-                    return .Some(PropertyRecord(value: Value.int(o.elements.count), attrs: Attr.writable));
+                    return .Some(PropertyRecord(value: Value.int(o.length), attrs: Attr.writable));
                 }
             },
             .StringBox(s) => {
@@ -207,8 +231,17 @@ extend VM {
         if let .ArrayObject = self.kindAt(r) {
             let i = self.indexOfKey(key);
             if i >= 0 {
-                self.setElement(r, i, value);
-                return;
+                let inShape = self.shapeSlot(self.heap.objects(r).shape, key) >= 0;
+                if attrs == Attr.all and self.isDenseIndex(r, i) {
+                    if inShape { self.reshape(r, key, -1); }
+                    self.setElement(r, i, value);
+                    return;
+                }
+                // Everything else lives in the shape; a dense slot stays
+                // a hole.
+                if i < self.heap.objects(r).elements.count { self.heap.objects(r).elements(i) = Value.empty; }
+                if i >= self.heap.objects(r).length { self.heap.objects(r).length = i + 1; }
+                self.heap.objects(r).hasShapeIndices = true;
             }
             if self.isLengthKey(key) {
                 if value.isNumber {
@@ -238,7 +271,7 @@ extend VM {
     mutating func writeOwn(r: Ref, key: Key, value: Value) {
         if let .ArrayObject = self.kindAt(r) {
             let i = self.indexOfKey(key);
-            if i >= 0 {
+            if i >= 0 and self.shapeSlot(self.heap.objects(r).shape, key) < 0 and self.isDenseIndex(r, i) {
                 self.setElement(r, i, value);
                 return;
             }
@@ -252,20 +285,31 @@ extend VM {
         if s >= 0 { self.heap.objects(r).slots(s) = value; }
     }
 
+    /// Whether index `i` belongs in the dense elements: an array grows
+    /// them by at most a million holes at a time.
+    func isDenseIndex(r: Ref, i: Int64) -> Bool {
+        i < self.heap.objects(r).elements.count + 1000000
+    }
+
     mutating func setElement(r: Ref, i: Int64, value: Value) {
         while self.heap.objects(r).elements.count <= i {
             self.heap.objects(r).elements.append(Value.empty);
         }
         self.heap.objects(r).elements(i) = value;
+        if i >= self.heap.objects(r).length { self.heap.objects(r).length = i + 1; }
     }
 
     mutating func setArrayLength(r: Ref, n: Int64) {
+        // Attributed elements past the new end go too.
+        var doomed: [Key] = [];
+        for k in self.shapes(self.heap.objects(r).shape).keys {
+            if self.indexOfKey(k) >= n { doomed.append(k); }
+        }
+        for k in doomed { self.reshape(r, k, -1); }
         while self.heap.objects(r).elements.count > n {
             let _ = self.heap.objects(r).elements.pop();
         }
-        while self.heap.objects(r).elements.count < n {
-            self.heap.objects(r).elements.append(Value.empty);
-        }
+        self.heap.objects(r).length = n;
     }
 
     /// [[Delete]]: false for a non-configurable property.
@@ -274,8 +318,8 @@ extend VM {
         match o.kind {
             .ArrayObject => {
                 let i = self.indexOfKey(key);
-                if i >= 0 {
-                    if i < o.elements.count { self.heap.objects(r).elements(i) = Value.empty; }
+                if i >= 0 and i < o.elements.count and not o.elements(i).isEmpty {
+                    self.heap.objects(r).elements(i) = Value.empty;
                     return true;
                 }
                 if self.isLengthKey(key) { return false; }
@@ -315,11 +359,9 @@ extend VM {
         for k in shape.keys {
             if self.indexOfKey(k) >= 0 { extraIndexKeys.append(k); }
         }
-        var fromShape: [Int64] = [];
-        for k in extraIndexKeys { fromShape.append(self.indexOfKey(k)); }
-        fromShape.sort();
+        for k in extraIndexKeys { indices.append(self.indexOfKey(k)); }
+        if extraIndexKeys.count > 0 { indices.sort(); }
         for i in indices { out.append(self.internIndex(i)); }
-        for i in fromShape { out.append(self.internIndex(i)); }
         match o.kind {
             .ArrayObject => out.append(self.names.length),
             .StringBox(_) => out.append(self.names.length),
@@ -418,12 +460,6 @@ extend VM {
             return .Ok(true);
         }
         if not self.heap.objects(rr).extensible { return .Ok(false); }
-        if let .ArrayObject = self.kindAt(rr) {
-            let i = self.indexOfKey(key);
-            if i >= 0 and i > self.heap.objects(rr).elements.count + 10000000 {
-                return .Err(self.makeError(.RangeError, "sparse arrays aren't supported yet"));
-            }
-        }
         self.defineOwn(rr, key, value, Attr.all);
         .Ok(true)
     }

@@ -50,6 +50,28 @@ extend VM {
         self.callValue(fnObj, self.global, [])
     }
 
+    /// `new Function(p1, ..., body)`: parses the pieces as one function
+    /// expression in the global scope.
+    mutating func functionConstructor(args: Array[Value]) -> Result[Value, Value] {
+        var params = "";
+        for i in 0..<(args.count - 1) {
+            if i > 0 { params.append(","); }
+            params.append(try self.toText(args(i)));
+        }
+        let body = if args.count > 0 { try self.toText(args(args.count - 1)) } else { "" };
+        let source = "(function (" + params + "\n) {\n" + body + "\n})";
+        // Anything that closes the function early leaves more than the
+        // one expression statement.
+        let program = match parseScript(source) {
+            .Ok(p) => p,
+            .Err(e) => return .Err(self.makeError(.SyntaxError, e.message))
+        };
+        if program.body.count != 1 { return .Err(self.makeError(.SyntaxError, "Invalid function body")); }
+        let f = try self.runScript(source, "Function");
+        self.defineReadOnly(f.asRef, "name", self.str("anonymous"));
+        .Ok(f)
+    }
+
     /// Runs frames until the one at depth `stop` returns.
     mutating func run(stop: Int64) -> Result[Value, Value] {
         while true {
@@ -176,7 +198,8 @@ extend VM {
         for _ in 0..<c.registers { self.stack.append(Value.undefined); }
         self.frames.append(Frame(
             code: code, pc: 0, base: base, env: e, funcEnv: e, args: args, callee: f,
-            newTarget: newTarget, isConstruct: isConstruct, returnTo: returnTo, handlers: []
+            newTarget: newTarget, isConstruct: isConstruct, returnTo: returnTo, handlers: [],
+            generator: Value.undefined
         ));
         self.depth = self.depth + 1;
         .Ok(())
@@ -284,12 +307,93 @@ extend VM {
         self.defineReadOnly(r, "length", Value.int(c.length));
         let name = self.str(c.name);
         self.defineReadOnly(r, "name", name);
-        if c.isConstructor and not c.isClassConstructor {
+        if c.isGenerator {
+            // Generator functions inherit from %GeneratorFunction.prototype%
+            // and own a prototype for their generator objects.
+            self.heap.objects(r).proto = self.intrinsics.generatorFunctionProto;
+            let proto = self.newObjectKind(self.intrinsics.generatorProto, .Ordinary);
+            self.defineOwn(r, self.names.prototype, proto, Attr.writable);
+        } else if c.isConstructor and not c.isClassConstructor {
             let proto = self.newObject();
             self.defineHidden(proto.asRef, self.names.constructor, f);
             self.defineOwn(r, self.names.prototype, proto, Attr.writable);
         }
         f
+    }
+
+    /// GeneratorStart: moves the top frame into a new generator object,
+    /// which becomes the call's result.
+    mutating func startGenerator(fi: Int64, stop: Int64) -> Result[Step, Value] {
+        let callee = self.frames(fi).callee;
+        var proto = try self.getV(callee, self.names.prototype);
+        if not proto.isObject { proto = self.intrinsics.generatorProto; }
+        let placeholder = GenData(frame: self.frames(fi), registers: [], state: GenState.suspendedStart, resumeReg: -1, raw: false);
+        let id = self.heap.allocGenerator(placeholder);
+        let gen = self.newObjectKind(proto, .Generator(id: id));
+        self.frames(fi).generator = gen;
+        self.suspendFrame(fi, id);
+        self.doReturn(gen, stop)
+    }
+
+    /// Saves frame `fi` (the top one) and its registers into generator `id`.
+    mutating func suspendFrame(fi: Int64, id: Int64) {
+        let f = self.frames(fi);
+        var regs: [Value] = [];
+        for i in f.base..<self.stack.count { regs.append(self.stack(i)); }
+        self.heap.generators(id).frame = f;
+        self.heap.generators(id).registers = regs;
+    }
+
+    /// next/throw/return on a generator: `mode` 0, 1 or 2.
+    mutating func resumeGenerator(gen: Value, value: Value, mode: Int64) -> Result[Value, Value] {
+        let id = match self.kindAt(gen.asRef) {
+            .Generator(x) => x,
+            _ => -1
+        };
+        let state = self.heap.generators(id).state;
+        if state == GenState.executing { return self.throwType("Generator is already running"); }
+        if state == GenState.completed or (state == GenState.suspendedStart and mode != 0) {
+            self.finishGenerator(id);
+            if mode == 1 { return .Err(value); }
+            return .Ok(self.iterResult(if mode == 2 { value } else { Value.undefined }, true));
+        }
+        if self.depth > 2000 { return .Err(self.makeError(.RangeError, "Maximum call stack size exceeded")); }
+        // Put the frame back on top of the stack.
+        var f = self.heap.generators(id).frame;
+        f.base = self.stack.count;
+        f.returnTo = -1;
+        let regs = self.heap.generators(id).registers;
+        for v in regs { self.stack.append(v); }
+        self.heap.generators(id).registers = [];
+        self.frames.append(f);
+        self.depth = self.depth + 1;
+        if state == GenState.suspendedYield {
+            let at = f.base + self.heap.generators(id).resumeReg;
+            self.stack(at) = value;
+            self.stack(at + 1) = Value.int(mode);
+        }
+        self.heap.generators(id).state = GenState.executing;
+        let result = self.run(self.frames.count);
+        let yielded = self.heap.generators(id).state == GenState.suspendedYield;
+        match result {
+            .Err(e) => {
+                self.finishGenerator(id);
+                .Err(e)
+            },
+            .Ok(v) => {
+                if yielded {
+                    if self.heap.generators(id).raw { return .Ok(v); }
+                    return .Ok(self.iterResult(v, false));
+                }
+                self.finishGenerator(id);
+                .Ok(self.iterResult(v, true))
+            }
+        }
+    }
+
+    mutating func finishGenerator(id: Int64) {
+        self.heap.generators(id).state = GenState.completed;
+        self.heap.generators(id).registers = [];
     }
 
     /// The home object of the function running in frame `fi`.

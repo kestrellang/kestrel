@@ -44,7 +44,7 @@ extend VM {
             match self.iteratorStep(it, next) {
                 .Ok(.Some(x)) => {
                     out.append(x);
-                    self.heap.objects(holder.asRef).elements.append(x);
+                    self.appendElement(holder.asRef, x);
                 },
                 .Ok(.None) => break,
                 .Err(e) => {

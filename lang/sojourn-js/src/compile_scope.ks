@@ -78,6 +78,10 @@ struct FnState {
     var isDerivedCtor: Bool
     /// The class whose constructor this is runs field initializers.
     var hasFields: Bool
+    /// Scripts only: the register holding the completion value (what
+    /// `eval` returns), or -1.
+    var completion: Int64
+    var isGenerator: Bool
 }
 
 /// The names a list of statements declares with `var` (looking into

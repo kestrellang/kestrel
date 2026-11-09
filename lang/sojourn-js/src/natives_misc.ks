@@ -60,7 +60,7 @@ extend VM {
                 let digits = try self.toIntegerOrInfinity(a0);
                 if digits < 0.0 or digits > 100.0 { return .Err(self.makeError(.RangeError, "toFixed() digits argument must be between 0 and 100")); }
                 if not x.isFinite or x.abs() >= 1000000000000000000000.0 { return .Ok(.Some(self.str(numberToString(x)))); }
-                self.str(toFixed(x, digits.toInt64() ?? 0))
+                self.str(toFixedExact(x, digits.toInt64() ?? 0))
             },
             .BooleanCtor => {
                 let b = self.toBoolean(a0);
@@ -225,13 +225,8 @@ extend VM {
                 }
                 Value.number(if inf { Float64.infinity } else if nan { Float64.nan } else { sum.sqrt() })
             },
-            .JSONStringify => {
-                let out = try self.jsonStringify(a0);
-                match out {
-                    .Some(u) => self.newString(u),
-                    .None => Value.undefined
-                }
-            },
+            .JSONStringify => try self.jsonStringifyNative(a0, a1, arg(args, 2)),
+            .JSONParse => try self.jsonParseNative(a0, a1),
             .ReflectOwnKeys => {
                 if not a0.isObject { return self.throwType("Reflect.ownKeys called on non-object"); }
                 var out: [Value] = [];
@@ -301,73 +296,11 @@ extend VM {
         .Ok(.Some(r))
     }
 
-    // ------------------------------------------------------------------
-    // JSON.stringify (no replacer or indentation yet)
-    // ------------------------------------------------------------------
-
-    mutating func jsonStringify(v: Value) -> Result[Optional[Units], Value] {
-        var value = v;
-        if value.isObject {
-            let toJSON = try self.getFrom(value, self.atom("toJSON"), value);
-            if self.isCallable(toJSON) {
-                let k = self.str("");
-                value = try self.callValue(toJSON, value, [k]);
-            }
-        }
-        if value.isObject {
-            match self.kindAt(value.asRef) {
-                .NumberBox(_) => value = Value.number(try self.toNumber(value)),
-                .StringBox(s) => value = s,
-                .BooleanBox(b) => value = Value.bool(b),
-                _ => {}
-            }
-        }
-        if value.isNull { return .Ok(.Some(unitsOf("null"))); }
-        if value.isBool { return .Ok(.Some(unitsOf(if value.asBool { "true" } else { "false" }))); }
-        if value.isNumber {
-            let x = value.asNumber;
-            return .Ok(.Some(unitsOf(if x.isFinite { numberToString(x) } else { "null" })));
-        }
-        if value.isString { return .Ok(.Some(jsonQuote(self.units(value)))); }
-        if value.isUndefined or value.isSymbol or self.isCallable(value) { return .Ok(.None); }
-        var out: Units = [];
-        if self.isArray(value) {
-            out.append(91);
-            let len = try self.lengthOf(value);
-            for i in 0..<len {
-                if i > 0 { out.append(44); }
-                let item = try self.getIndex(value, i);
-                match try self.jsonStringify(item) {
-                    .Some(u) => for x in u { out.append(x); },
-                    .None => for x in unitsOf("null") { out.append(x); }
-                }
-            }
-            out.append(93);
-            return .Ok(.Some(out));
-        }
-        out.append(123);
-        var first = true;
-        for k in self.ownKeys(value.asRef) {
-            if keyIsSymbol(k) { continue; }
-            if let .Some(p) = self.ownProperty(value.asRef, k) {
-                if p.attrs & Attr.enumerable == 0 { continue; }
-                let item = try self.getFrom(value, k, value);
-                if let .Some(u) = try self.jsonStringify(item) {
-                    if not first { out.append(44); }
-                    first = false;
-                    for x in jsonQuote(unitsOf(self.atomNames(k))) { out.append(x); }
-                    out.append(58);
-                    for x in u { out.append(x); }
-                }
-            }
-        }
-        out.append(125);
-        .Ok(.Some(out))
-    }
 }
 
 func jsonQuote(u: Units) -> Units {
     var out: Units = [34];
+    var i: Int64 = 0;
     for c in u {
         let x = Int64(from: c);
         if x == 34 { out.append(92); out.append(34); }
@@ -377,48 +310,38 @@ func jsonQuote(u: Units) -> Units {
         else if x == 9 { out.append(92); out.append(116); }
         else if x == 8 { out.append(92); out.append(98); }
         else if x == 12 { out.append(92); out.append(102); }
-        else if x < 32 {
-            for y in unitsOf("\\u00") { out.append(y); }
+        else if x < 32 or isLoneSurrogate(u, i) {
+            out.append(92);
+            out.append(117);
             let hex = unitsOf("0123456789abcdef");
-            out.append(hex(x >> 4));
+            out.append(hex((x >> 12) & 15));
+            out.append(hex((x >> 8) & 15));
+            out.append(hex((x >> 4) & 15));
             out.append(hex(x & 15));
         } else { out.append(c); }
+        i = i + 1;
     }
     out.append(34);
     out
 }
 
-/// Number.prototype.toFixed for |x| < 1e21.
-func toFixed(x: Float64, digits: Int64) -> String {
-    let negative = x < 0.0;
-    let a = if negative { 0.0 - x } else { x };
-    let scale = (10.0).powi(digits);
-    let scaled = (a * scale).round();
-    // The integer of `scaled`, as digits.
-    var ds = "";
-    var v = scaled;
-    if v < 1.0 { ds = "0"; }
-    var rev: [Char] = [];
-    while v >= 1.0 {
-        let q = (v / 10.0).floor();
-        let d = (v - q * 10.0).toInt64() ?? 0;
-        rev.append(Char(unchecked: UInt32(truncating: 48 + d)));
-        v = q;
+/// Whether the unit at `i` is a surrogate without its other half.
+func isLoneSurrogate(u: Units, i: Int64) -> Bool {
+    let x = Int64(from: u(i));
+    if x >= 0xD800 and x <= 0xDBFF {
+        if i + 1 < u.count {
+            let y = Int64(from: u(i + 1));
+            if y >= 0xDC00 and y <= 0xDFFF { return false; }
+        }
+        return true;
     }
-    var i = rev.count - 1;
-    while i >= 0 {
-        ds.append(char: rev(i));
-        i = i - 1;
+    if x >= 0xDC00 and x <= 0xDFFF {
+        if i > 0 {
+            let w = Int64(from: u(i - 1));
+            if w >= 0xD800 and w <= 0xDBFF { return false; }
+        }
+        return true;
     }
-    var chars: [Char] = [];
-    for c in ds.chars { chars.append(c); }
-    while chars.count <= digits { chars.insert('0', at: 0); }
-    var out = if negative and scaled != 0.0 { "-" } else { "" };
-    let intLen = chars.count - digits;
-    for j in 0..<intLen { out.append(char: chars(j)); }
-    if digits > 0 {
-        out.append(char: '.');
-        for j in intLen..<chars.count { out.append(char: chars(j)); }
-    }
-    out
+    false
 }
+
