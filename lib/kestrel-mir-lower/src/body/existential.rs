@@ -117,9 +117,7 @@ impl OssaBodyCtx<'_, '_> {
         };
         // The payload is the first arg; any others are the box's allocator.
         let (boxed, box_args) = (*entity, type_args.clone());
-        let Some(&raw) = box_args.first() else {
-            return None;
-        };
+        let &raw = box_args.first()?;
         if !matches!(
             self.ctx.module.ty_arena.get(raw),
             MirTy::RawExistential { .. }
