@@ -66,7 +66,11 @@ impl OssaBodyCtx<'_, '_> {
     /// Returns the scrutinee and whether it is an ADDRESS (place mode): a
     /// non-copyable ref result can't be copied out, so it is pinned as an
     /// address like a place-mode scrutinee and its view ends here.
-    fn lower_match_scrutinee(&mut self, scrutinee_expr: HirExprId) -> (ValueId, bool) {
+    fn lower_match_scrutinee(
+        &mut self,
+        scrutinee_expr: HirExprId,
+        has_guard: bool,
+    ) -> (ValueId, bool) {
         let expr = self.hir.exprs[scrutinee_expr].clone();
         if let HirExpr::Local(hir_local, _) = &expr
             && !self.is_var_local(hir_local)
@@ -86,15 +90,27 @@ impl OssaBodyCtx<'_, '_> {
         // better be the binding's LAST use, or the branch terminator
         // reports the binding E497 (bindings never cross blocks).
         if self.ref_results.contains(&val) {
-            // A non-copyable pointee cannot be copied out. A named ref
-            // binding matches through the view itself, like a borrowed
-            // parameter; a call result (`xs(1) is A`, an `any P` element)
-            // is pinned as an address so no view reaches the branches.
-            if !self.is_copy_type(self.body.value(val).ty) {
-                if self.ref_binding_vals.contains_key(&val) {
-                    return (val, false);
-                }
+            // A ref call result (`match xs(i)`, `xs(1) is A`, an `any P`
+            // element) is pinned as an address so no view reaches the
+            // branches, and the match reads it in place: only the payload
+            // fields an arm binds are copied, never the whole value. Copying
+            // it out first cloned the entire scrutinee (an `Instr` with a
+            // `String` case ran its clone shim on every `match code(pc)`).
+            //
+            // Not with a guard: a guard is user code that runs between the
+            // pin and later arms' reads, and can mutate the storage the
+            // address points into (`.T(s) if grow(arr)` reallocating `arr`),
+            // so such a match still copies the scrutinee out. A non-copyable
+            // pointee has no copy to fall back on and is always pinned.
+            let copyable = self.is_copy_type(self.body.value(val).ty);
+            if !self.ref_binding_vals.contains_key(&val) && (!copyable || !has_guard) {
                 return (self.pin_view_address(val), true);
+            }
+            // A named ref binding with a non-copyable pointee can't be
+            // copied out: it matches through the view itself, like a
+            // borrowed parameter.
+            if !copyable {
+                return (val, false);
             }
             let owned = self.emit_copy_value(val);
             self.end_ref_if_single_use(val);
@@ -247,7 +263,9 @@ impl OssaBodyCtx<'_, '_> {
                 self.lower_match_scrutinee_place(scrutinee_expr, mutating),
                 place_mode,
             ),
-            None => match self.lower_match_scrutinee(scrutinee_expr) {
+            None => match self
+                .lower_match_scrutinee(scrutinee_expr, arms.iter().any(|a| a.guard.is_some()))
+            {
                 (val, true) => (val, Some(false)),
                 (val, false) => (val, None),
             },
@@ -645,21 +663,13 @@ impl OssaBodyCtx<'_, '_> {
                     .iter()
                     .any(|(c, _)| matches!(c, Constructor::StringLiteral(_)))
                 {
-                    // String is Copyable — extract-copy is fine here (place
-                    // mode: through an intra-block view, see the bool path).
-                    // Place mode copies the projection out once, through an
-                    // intra-block view. Value mode instead borrows the CURRENT
-                    // scrutinee for each test (below): the branch threads the
-                    // scrutinee into its successors, so a value computed before
-                    // the chain is stale after the first test, and an owned
-                    // projection taken here would never be released.
-                    let place_test_val = place.then(|| {
-                        let view = self.emit_begin_borrow_addr(scrutinee, scrutinee_ty);
-                        let (proj, _) = self.apply_access_path(view, scrutinee_ty, path);
-                        let owned = self.emit_copy_value(proj);
-                        self.emit_end_borrow(view);
-                        owned
-                    });
+                    // Each test borrows the CURRENT scrutinee: the branch
+                    // threads the scrutinee into its successors, so a value
+                    // computed before the chain is stale after the first test,
+                    // and an owned copy taken up front is never released on
+                    // the failing edges (it leaked in place mode). Place mode
+                    // reads through a fresh intra-block view of the pinned
+                    // address instead of a borrow.
                     let test_mir_ty = lower_resolved_ty(self.ctx, ty);
                     let chain = TestChain {
                         cases,
@@ -673,8 +683,12 @@ impl OssaBodyCtx<'_, '_> {
                         let Constructor::StringLiteral(lit) = ctor else {
                             return None;
                         };
-                        if let Some(test_val) = place_test_val {
-                            return Some(this.emit_string_match_test(test_val, test_mir_ty, lit));
+                        if place {
+                            let view = this.emit_begin_borrow_addr(current, scrutinee_ty);
+                            let test_val = this.apply_access_path(view, scrutinee_ty, path).0;
+                            let cmp = this.emit_string_match_test(test_val, test_mir_ty, lit);
+                            this.emit_end_borrow(view);
+                            return Some(cmp);
                         }
                         let borrow = (this.body.value(current).ownership != Ownership::Guaranteed)
                             .then(|| this.emit_begin_borrow(current));
