@@ -1,0 +1,194 @@
+module js
+
+// The bytecode the compiler emits and the interpreter runs.
+//
+// It's register-based: each function has a fixed set of registers, and
+// instructions name the registers they read and write. Variables live in
+// environments (`Env`), addressed as (hops, slot): how many environments
+// up the chain, and which slot there. Names are only looked up at run
+// time for globals.
+
+@derive(Equatable)
+enum BinOp {
+    case Add
+    case Sub
+    case Mul
+    case Div
+    case Mod
+    case Exp
+    case Shl
+    case Shr
+    case UShr
+    case BitAnd
+    case BitOr
+    case BitXor
+    case Eq
+    case NotEq
+    case StrictEq
+    case StrictNotEq
+    case Lt
+    case Gt
+    case LtEq
+    case GtEq
+    case In
+    case InstanceOf
+}
+
+@derive(Equatable)
+enum UnOp {
+    case Neg
+    case Plus
+    case Not
+    case BitNot
+    case TypeOf
+    case ToNumeric
+    case Inc
+    case Dec
+    case ToPropertyKey
+    case ToStr
+    /// `ToObject`, throwing on null and undefined (for destructuring).
+    case RequireObject
+}
+
+/// Errors the bytecode itself raises.
+@derive(Equatable)
+enum ErrorKind {
+    case TypeError
+    case ReferenceError
+    case RangeError
+    case SyntaxError
+}
+
+enum Instr {
+    case Load(dst: Int64, value: Value)
+    /// An interned string literal.
+    case LoadString(dst: Int64, atom: Key)
+    case Move(dst: Int64, src: Int64)
+
+    // Variables
+    /// Reads a slot, throwing a ReferenceError if it's uninitialized.
+    case GetVar(dst: Int64, hops: Int64, slot: Int64, name: Key)
+    /// Assigns to an initialized `let` or `var`.
+    case SetVar(hops: Int64, slot: Int64, src: Int64, name: Key)
+    /// Initializes a declaration's slot (no TDZ check).
+    case InitVar(hops: Int64, slot: Int64, src: Int64)
+    case GetGlobal(dst: Int64, name: Key, forTypeof: Bool)
+    case SetGlobal(name: Key, src: Int64, strict: Bool)
+    /// Script-level `var`: a global property, left alone if it exists.
+    case DeclareGlobalVar(name: Key)
+    /// Script-level function: a global property set to `src`.
+    case DeclareGlobalFunction(name: Key, src: Int64)
+    /// Script-level `let`/`const`/`class`: a binding in the shared global
+    /// lexical scope, uninitialized until `InitGlobalLexical`.
+    case DeclareGlobalLexical(name: Key, isConst: Bool)
+    case InitGlobalLexical(name: Key, src: Int64)
+    case PushEnv(size: Int64)
+    case PopEnv
+    /// Replaces the innermost environment with a copy (a `for (let …)`
+    /// loop's per-iteration bindings).
+    case CopyEnv
+
+    // Operators
+    case Binary(op: BinOp, dst: Int64, a: Int64, b: Int64)
+    case Unary(op: UnOp, dst: Int64, src: Int64)
+    case Jump(target: Int64)
+    /// Jumps when the value's truthiness is `when`.
+    case JumpIf(cond: Int64, target: Int64, when: Bool)
+    case JumpIfNullish(src: Int64, target: Int64)
+    case JumpIfUndefined(src: Int64, target: Int64)
+    case JumpIfNotUndefined(src: Int64, target: Int64)
+
+    // Properties
+    /// `obj.key`, with inline cache `ic`.
+    case GetProp(dst: Int64, obj: Int64, key: Key, ic: Int64)
+    case SetProp(obj: Int64, key: Key, src: Int64, ic: Int64, strict: Bool)
+    /// `obj[key]`, where `key` is a register.
+    case GetElem(dst: Int64, obj: Int64, key: Int64)
+    case SetElem(obj: Int64, key: Int64, src: Int64, strict: Bool)
+    case DeleteElem(dst: Int64, obj: Int64, key: Int64, strict: Bool)
+    /// `super[key]` with `this` as the receiver.
+    case SuperGet(dst: Int64, key: Int64, this: Int64)
+    case SuperSet(key: Int64, src: Int64, this: Int64)
+    case NewObject(dst: Int64)
+    case NewArray(dst: Int64)
+    /// Appends `src` to an array literal; an empty value makes a hole.
+    case ArrayAppend(arr: Int64, src: Int64)
+    /// Appends everything `src` iterates.
+    case ArraySpread(arr: Int64, src: Int64)
+    /// Defines an own enumerable data property (object literals).
+    case DefineProp(obj: Int64, key: Int64, src: Int64)
+    /// Defines a method (non-enumerable when `enumerable` is false).
+    case DefineMethod(obj: Int64, key: Int64, fn: Int64, enumerable: Bool)
+    case DefineAccessor(obj: Int64, key: Int64, fn: Int64, isGetter: Bool, enumerable: Bool)
+    /// Copies `src`'s own enumerable properties into `dst`, skipping the
+    /// keys in registers `excluded ..< excluded + count`.
+    case CopyDataProps(dst: Int64, src: Int64, excluded: Int64, count: Int64)
+    case SetProto(obj: Int64, proto: Int64)
+
+    // Functions
+    /// Makes a closure of `code` over the current environment. `home` is
+    /// the register holding the method's home object, or -1.
+    case MakeClosure(dst: Int64, code: Int64, home: Int64)
+    /// `callee(args ..< args + argc)` with `this`.
+    case Call(dst: Int64, callee: Int64, this: Int64, args: Int64, argc: Int64)
+    /// A call whose arguments are the array in `args`.
+    case CallSpread(dst: Int64, callee: Int64, this: Int64, args: Int64)
+    case New(dst: Int64, callee: Int64, args: Int64)
+    /// `super(...)` with the arguments array in `args`. Binds `this` in
+    /// the slot (hops, slot).
+    case SuperCall(dst: Int64, args: Int64, hops: Int64, slot: Int64)
+    case Return(src: Int64)
+    case Throw(src: Int64)
+    case ThrowError(kind: ErrorKind, message: String)
+    case GetArg(dst: Int64, index: Int64)
+    /// The arguments from `from` on, as an array.
+    case GetRestArgs(dst: Int64, from: Int64)
+    case CreateArguments(dst: Int64)
+    case NewTarget(dst: Int64)
+    /// Sets up a class: `ctor` holds the constructor closure and
+    /// `superclass` the parent (or -1). Writes the prototype to `proto`.
+    case MakeClass(ctor: Int64, proto: Int64, superclass: Int64)
+    /// Stores the field initializer `fn` on class constructor `ctor`.
+    case SetClassFields(ctor: Int64, fn: Int64)
+    /// Runs a class's field initializers on `this` (an internal method
+    /// stored on the constructor).
+    case InitFields(this: Int64)
+
+    // Exceptions
+    /// Starts a try block: a throw jumps to `handler` with the exception
+    /// in `exception`.
+    case EnterTry(handler: Int64, exception: Int64)
+    case LeaveTry
+
+    // Iteration
+    case ForInPrepare(dst: Int64, obj: Int64)
+    /// Next for-in key into `dst`, or jumps to `done`.
+    case ForInNext(dst: Int64, iter: Int64, done: Int64)
+    /// `obj[Symbol.iterator]()`, into `iter`; the `next` method goes in
+    /// `iter + 1`.
+    case GetIterator(iter: Int64, obj: Int64)
+    /// Calls `next`; jumps to `done` when finished, otherwise writes the value.
+    case IteratorNext(dst: Int64, iter: Int64, done: Int64)
+    /// Calls the iterator's `return`, if any (leaving a loop early).
+    case IteratorClose(iter: Int64)
+    case Nop
+}
+
+/// A compiled function, script or class field initializer.
+struct Code {
+    var name: String
+    var instrs: [Instr]
+    var registers: Int64
+    /// Slots in the function's own environment.
+    var envSize: Int64
+    /// The `length` property: parameters before the first default or rest.
+    var length: Int64
+    var isArrow: Bool
+    var isStrict: Bool
+    /// Methods and arrows can't be constructed.
+    var isConstructor: Bool
+    var isClassConstructor: Bool
+    var isDerived: Bool
+    /// Where the function line came from, for error messages.
+    var sourceName: String
+}

@@ -4,6 +4,7 @@ module js
 //
 //   sojourn-js parse [--module] FILE      print FILE's syntax tree
 //   sojourn-js test262 DIR [--verbose]    run tc39/test262-parser-tests in DIR
+//   sojourn-js run [--strict] FILE...     run the files as one script
 
 import std.system.(Process)
 import std.files.(File, Path, Directory)
@@ -14,12 +15,48 @@ func main() -> Int64 {
     if args.count >= 3 and args(1) == "parse" {
         return runParse(args);
     }
+    if args.count >= 3 and args(1) == "run" {
+        return runFiles(args);
+    }
     if args.count >= 3 and args(1) == "test262" {
         let verbose = args.count >= 4 and args(3) == "--verbose";
         return runTest262(args(2), verbose);
     }
-    print("usage: sojourn-js parse [--module] FILE\n       sojourn-js test262 DIR [--verbose]\n");
+    print("usage: sojourn-js parse [--module] FILE\n       sojourn-js run [--strict] FILE...\n       sojourn-js test262 DIR [--verbose]\n");
     2
+}
+
+/// `run [--strict] FILE...`: runs the files as one script, in order (the
+/// test262 runner passes the harness files first).
+func runFiles(args: Array[String]) -> Int64 {
+    var source = "";
+    var name = "";
+    for i in 2..<args.count {
+        let path = args(i);
+        if path == "--strict" {
+            source = "\"use strict\";\n" + source;
+            continue;
+        }
+        match File.readText(Path(path)) {
+            .Ok(s) => {
+                source.append(s);
+                source.append("\n");
+            },
+            .Err(_) => {
+                print("can't read \(path)\n");
+                return 1;
+            }
+        }
+        name = path;
+    }
+    var vm = VM();
+    match vm.runScript(source, name) {
+        .Ok(_) => 0,
+        .Err(e) => {
+            print("Uncaught \(vm.errorText(e))\n");
+            1
+        }
+    }
 }
 
 func runParse(args: Array[String]) -> Int64 {
