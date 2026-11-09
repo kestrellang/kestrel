@@ -371,6 +371,33 @@ pub fn lower_resolved_ty_preserving(ctx: &mut LowerCtx, ty: &ResolvedTy) -> TyId
     }
 }
 
+/// `given` padded with the defaults of `entity`'s trailing defaulted type
+/// params, for a type the compiler names itself (`OwnedBox[payload]` for an
+/// indirect case, a closure's box): `OwnedBox[T, A = GlobalAllocator]` must
+/// still get its `A`. Stops at the first param without a default.
+pub fn with_default_type_args(
+    ctx: &mut LowerCtx,
+    entity: Entity,
+    mut given: Vec<TyId>,
+) -> Vec<TyId> {
+    let params = ctx
+        .world
+        .get::<kestrel_ast_builder::TypeParams>(entity)
+        .map(|tp| tp.0.clone())
+        .unwrap_or_default();
+    for &param in params.iter().skip(given.len()) {
+        if ctx
+            .world
+            .get::<kestrel_ast_builder::TypeAnnotation>(param)
+            .is_none()
+        {
+            break;
+        }
+        given.push(resolve_type_annotation(ctx, param));
+    }
+    given
+}
+
 // === Shared helpers ===
 
 /// Lower a named type: check for lang primitives, type parameters, and

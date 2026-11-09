@@ -874,6 +874,14 @@ fn expand_function(
                 // path `lang.drop_in_place` lowers to — so dropping array
                 // elements (e.g. the `(String, String)` pairs in `Headers`)
                 // flows through here.
+                //
+                // The Named and Tuple takes alias the address (`independent:
+                // false`, no memcpy): `%tmp` is consumed by the drop right
+                // here, and the address is dead from this point (it is what
+                // is being destroyed), so nothing reinitializes it while
+                // `%tmp` is live. The copy was the hot spot of every
+                // recursive drop (an indirect enum node's payload memcpy'd to
+                // the stack before each level).
                 InstKind::DestroyAddr { address, ty, .. } => {
                     let address = remap_value(*address, &value_remap);
                     let ty = *ty;
@@ -905,7 +913,7 @@ fn expand_function(
                                             result: tmp,
                                             address,
                                             ty,
-                                            independent: true,
+                                            independent: false,
                                         },
                                         span: span.clone(),
                                     });
@@ -934,7 +942,7 @@ fn expand_function(
                                         result: tmp,
                                         address,
                                         ty,
-                                        independent: true,
+                                        independent: false,
                                     },
                                     span: span.clone(),
                                 });

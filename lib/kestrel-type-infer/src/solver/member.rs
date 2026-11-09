@@ -2075,7 +2075,14 @@ pub(super) fn resolve_proto_param_via_conformance(
     let (source, ast_ty) = positive_conformances_to(ctx, recv, protocol)
         .into_iter()
         .next()?;
-    let type_args = kestrel_name_res::extract_ast_type_args(&ast_ty);
+    // Unwritten protocol params take their declared defaults first
+    // (`: Addable` is `: Addable[Self]`); only a param without one falls
+    // back to the implicit-positional mapping below.
+    let type_args = kestrel_name_res::conformance_args_with_defaults(
+        ctx.query_ctx,
+        protocol,
+        kestrel_name_res::extract_ast_type_args(&ast_ty),
+    );
 
     // Implicit-positional: empty args means "match struct params positionally".
     if type_args.is_empty() {

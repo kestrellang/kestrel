@@ -209,6 +209,11 @@ pub enum Op {
     /// unsized `ty`, else the clone thunk at `ty`
     /// (`MirModule::existential_clone_thunk`).
     CloneIntoVal(TyId),
+    /// `lang.is_bitwise[T]()`: `true` when copying a `T` is a plain byte copy
+    /// (no clone call, no move-only restriction). Takes a unit arg. Folded to
+    /// a constant at mono (`mono::fat`), once `T` and its copy behavior are
+    /// concrete; codegen never sees it.
+    IsBitwise(TyId),
 
     StrPtr,
     StrLen,
@@ -258,6 +263,7 @@ macro_rules! op_ty_variants {
             AlignOfVal,
             PtrWithMeta,
             CloneIntoVal,
+            IsBitwise,
         }
     };
 }

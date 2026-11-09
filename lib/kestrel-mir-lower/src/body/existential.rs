@@ -115,9 +115,9 @@ impl OssaBodyCtx<'_, '_> {
         let MirTy::Named { entity, type_args } = self.ctx.module.ty_arena.get(box_ty) else {
             return None;
         };
-        let (boxed, &[raw]) = (*entity, type_args.as_slice()) else {
-            return None;
-        };
+        // The payload is the first arg; any others are the box's allocator.
+        let (boxed, box_args) = (*entity, type_args.clone());
+        let &raw = box_args.first()?;
         if !matches!(
             self.ctx.module.ty_arena.get(raw),
             MirTy::RawExistential { .. }
@@ -127,7 +127,7 @@ impl OssaBodyCtx<'_, '_> {
         let peel = box_peel(self.ctx, boxed, true)?;
         self.ctx.register_name(peel);
         let view = self.emit_call_returning(
-            Callee::direct_with_args(peel, vec![raw], None),
+            Callee::direct_with_args(peel, box_args, None),
             vec![CallArg {
                 value: place,
                 convention: ParamConvention::MutBorrow,
@@ -190,7 +190,11 @@ impl OssaBodyCtx<'_, '_> {
         let bounds = bounds_of(self.ctx, raw);
         match conv.kind {
             ConversionKind::Box => {
-                let boxed_ty = self.ctx.module.ty_arena.named(boxed, vec![from_ty]);
+                // The payload swapped for the concrete type; the box's other
+                // args (its allocator) carry over.
+                let mut args = type_args.clone();
+                args[0] = from_ty;
+                let boxed_ty = self.ctx.module.ty_arena.named(boxed, args);
                 let Some(made) = self.emit_box_init(boxed_ty, value) else {
                     return value;
                 };

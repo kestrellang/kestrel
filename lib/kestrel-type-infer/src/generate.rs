@@ -1843,12 +1843,8 @@ fn gen_struct_init(
         if let Some(hir_ty) = explicit_type_args.get(i) {
             let explicit_tv = lower_hir_ty(ctx, hir_ty);
             ctx.equal(fresh_tv, explicit_tv, span.clone());
-        } else if let Some(default_ty) = qctx.query(LowerTypeAnnotation {
-            entity: param_entity,
-            root,
-        }) {
-            // Defer: apply only if this TyVar is still unconstrained after solving
-            ctx.type_param_defaults.push((fresh_tv, default_ty));
+        } else {
+            ctx.defer_type_param_default(fresh_tv, param_entity);
         }
     }
 
@@ -2884,6 +2880,25 @@ fn instantiate_entity_with_args(
     instantiate_entity_inner(ctx, entity, explicit_type_args, site_span)
 }
 
+/// `written` followed by an `Infer` slot for each later param that has a
+/// declared default, stopping at the first without one (defaults are
+/// trailing). `instantiate_entity_inner` registers the defaults.
+fn pad_defaulted_type_args(ctx: &InferCtx<'_>, params: &[Entity], written: &[HirTy]) -> Vec<HirTy> {
+    let span = hir_ty_span(&written[0]);
+    let mut args = written.to_vec();
+    for &param in params.iter().skip(written.len()) {
+        if ctx
+            .query_ctx
+            .get::<kestrel_ast_builder::TypeAnnotation>(param)
+            .is_none()
+        {
+            break;
+        }
+        args.push(HirTy::Infer(span.clone()));
+    }
+    args
+}
+
 fn instantiate_entity_inner(
     ctx: &mut InferCtx<'_>,
     entity: Entity,
@@ -2899,6 +2914,23 @@ fn instantiate_entity_inner(
         .get::<TypeParams>(entity)
         .map(|tp| tp.0.clone())
         .unwrap_or_default();
+
+    // A nominal type named with some args (`Array[Int64].make()`) leaves its
+    // trailing defaulted params to inference, falling back to the declared
+    // default when nothing pins them, as a constructor call does.
+    let written_len = explicit_type_args.len();
+    let padded;
+    let explicit_type_args = if written_len > 0
+        && written_len < type_param_entities.len()
+        && matches!(
+            qctx.get::<NodeKind>(entity),
+            Some(NodeKind::Struct | NodeKind::Enum)
+        ) {
+        padded = pad_defaulted_type_args(ctx, &type_param_entities, explicit_type_args);
+        padded.as_slice()
+    } else {
+        explicit_type_args
+    };
 
     // Validate explicit type arg arity
     if !explicit_type_args.is_empty() && explicit_type_args.len() != type_param_entities.len() {
@@ -2939,6 +2971,22 @@ fn instantiate_entity_inner(
     } else {
         type_param_entities.iter().map(|_| ctx.fresh()).collect()
     };
+    // The padded slots fall back to their declared defaults, and so does
+    // every param of a nominal named bare (`String.make()`).
+    let bare_nominal = written_len == 0
+        && matches!(
+            qctx.get::<NodeKind>(entity),
+            Some(NodeKind::Struct | NodeKind::Enum)
+        );
+    if written_len < explicit_type_args.len() || bare_nominal {
+        for (&tv, &param) in fresh_type_args
+            .iter()
+            .zip(&type_param_entities)
+            .skip(written_len)
+        {
+            ctx.defer_type_param_default(tv, param);
+        }
+    }
 
     // Build substitution map: type param entity → fresh TyVar.
     // Used to instantiate generic param/return types with fresh vars.
@@ -3010,7 +3058,10 @@ fn instantiate_entity_inner(
                 .unwrap_or_default();
             for &param in &target_type_params {
                 if !subs.iter().any(|(e, _)| *e == param) {
+                    // Unpinned, a defaulted param (`String`'s `A`) takes its
+                    // default, as it does for `String()`.
                     let fresh = ctx.fresh();
+                    ctx.defer_type_param_default(fresh, param);
                     subs.push((param, fresh));
                 }
             }
@@ -3390,7 +3441,7 @@ pub(crate) fn emit_formation_wellformedness(
 /// Copyable/Static wellformedness bounds against `rawany P` would only be
 /// cascades of it.
 fn is_invalid_existential_box(ctx: &InferCtx<'_>, entity: Entity, args: &[HirTy]) -> bool {
-    matches!(args, [HirTy::RawExistential { .. }])
+    matches!(args, [HirTy::RawExistential { .. }, ..])
         && ctx
             .query_ctx
             .query(kestrel_semantics::ExistentialBoxDefect {

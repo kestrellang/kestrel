@@ -368,9 +368,10 @@ fn lower_any_type(
         bindings,
         span: span.clone(),
     };
+    // The box's other params (its allocator) take their defaults.
     HirTy::Struct {
         entity: box_entity,
-        args: vec![raw],
+        args: fill_type_arg_defaults(ctx, root, box_entity, vec![raw]),
         span: span.clone(),
     }
 }
@@ -1627,6 +1628,8 @@ impl QueryFn for LowerCallableTypes {
 ///
 /// For `extend Box[lang.i64]`, returns `Some(vec![HirTy for i64])`.
 /// For `extend Box` (no type args), returns `Some(vec![])`.
+/// Written args are padded with the target's declared defaults
+/// (`extend Array[T]` lowers to `[T, GlobalAllocator]`).
 /// Returns None if the entity has no ExtensionTarget component.
 #[derive(Clone, PartialEq, Eq, Hash)]
 pub struct LowerExtensionTargetTypeArgs {
@@ -1663,11 +1666,11 @@ impl QueryFn for LowerExtensionTargetTypeArgs {
             _ => None,
         };
         if let Some(args) = sugar_args {
-            return Some(
-                args.into_iter()
-                    .map(|a| lower_ast_type(ctx, self.extension, self.root, a))
-                    .collect(),
-            );
+            let lowered = args
+                .into_iter()
+                .map(|a| lower_ast_type(ctx, self.extension, self.root, a))
+                .collect();
+            return Some(self.fill_defaults(ctx, lowered));
         }
         let AstType::Named { segments, .. } = &target.0 else {
             return Some(vec![]);
@@ -1679,7 +1682,7 @@ impl QueryFn for LowerExtensionTargetTypeArgs {
         };
 
         if last_seg.type_args.is_empty() {
-            return Some(vec![]);
+            return Some(self.bare_target_args(ctx));
         }
 
         // If the target's arity is known and the extension provides too many
@@ -1712,7 +1715,60 @@ impl QueryFn for LowerExtensionTargetTypeArgs {
                 }
             })
             .collect();
-        Some(args)
+        Some(self.fill_defaults(ctx, args))
+    }
+}
+
+impl LowerExtensionTargetTypeArgs {
+    /// Args for a bare target (`extend String`, `extend Dictionary`): its
+    /// defaulted params take their defaults, as when some args are written,
+    /// so `extend String` is `extend String[GlobalAllocator]` (Rust's rule).
+    /// The params before them stay open, as the target's own params.
+    /// Empty when nothing is defaulted: the extension covers every
+    /// instantiation (`extend Range`).
+    fn bare_target_args(&self, ctx: &QueryContext<'_>) -> Vec<HirTy> {
+        let Some(target) = ctx.query(ExtensionTargetEntity {
+            extension: self.extension,
+            root: self.root,
+        }) else {
+            return vec![];
+        };
+        let params = ctx
+            .get::<TypeParams>(target)
+            .map(|tp| tp.0.clone())
+            .unwrap_or_default();
+        let has_default = |&p: &Entity| {
+            ctx.query(LowerTypeAnnotation {
+                entity: p,
+                root: self.root,
+            })
+            .is_some()
+        };
+        let Some(first_default) = params.iter().position(has_default) else {
+            return vec![];
+        };
+        let Some(written) = ctx.get::<ExtensionTarget>(self.extension) else {
+            return vec![];
+        };
+        let span = ast_type_span(&written.0);
+        let open = params[..first_default]
+            .iter()
+            .map(|&p| HirTy::Param(p, span.clone()))
+            .collect();
+        fill_type_arg_defaults(ctx, self.root, target, open)
+    }
+
+    /// Pads written args with the target's trailing type-param defaults, so
+    /// `extend Array[T]` extends `Array[T, GlobalAllocator]` (Rust's rule):
+    /// an extension that names some args means the defaults for the rest.
+    fn fill_defaults(&self, ctx: &QueryContext<'_>, args: Vec<HirTy>) -> Vec<HirTy> {
+        let Some(target) = ctx.query(ExtensionTargetEntity {
+            extension: self.extension,
+            root: self.root,
+        }) else {
+            return args;
+        };
+        fill_type_arg_defaults(ctx, self.root, target, args)
     }
 }
 

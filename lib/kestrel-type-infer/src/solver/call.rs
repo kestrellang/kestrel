@@ -528,10 +528,7 @@ pub(super) fn emit_resolved_call(
         for &tp in &parent_tps {
             if !subs.iter().any(|(e, _)| *e == tp) {
                 let tv = ctx.fresh();
-                // Defer default: apply only if unconstrained after solving
-                if let Some(default_ty) = qctx.query(LowerTypeAnnotation { entity: tp, root }) {
-                    ctx.type_param_defaults.push((tv, default_ty));
-                }
+                ctx.defer_type_param_default(tv, tp);
                 subs.push((tp, tv));
             }
         }

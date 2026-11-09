@@ -4,14 +4,15 @@ module std.memory
 
 import std.result.(Optional)
 import std.memory.(Layout, RawPointer, Pointer)
-import std.ffi.(malloc, free, realloc, posixMemalign, memcpy)
+import std.ffi.(malloc, calloc, free, realloc, posixMemalign, memcpy, memset)
 import std.numeric.(Int64)
+import std.core.(Defaultable)
 
 /// Protocol for raw-memory allocators.
 ///
 /// `Allocator` is the indirection collections use so they can be parameterised
 /// over allocation strategy (e.g. `Array[T, A]`, `Buffer[T, A]`, custom
-/// arenas). All three methods are `mutating` so stateful allocators (arenas,
+/// arenas). Every method is `mutating` so stateful allocators (arenas,
 /// pools) can update their bookkeeping; stateless wrappers around `malloc`
 /// don't need to.
 ///
@@ -28,6 +29,11 @@ public protocol Allocator {
     /// Returns a pointer to a fresh region matching `layout`, or `.None`
     /// when allocation fails. Returned memory is uninitialised.
     mutating func allocate(layout: Layout) -> RawPointer?
+
+    /// Like `allocate`, but every byte of the returned region is zero.
+    /// The default allocates and then zeroes; an allocator that can get
+    /// zeroed memory more cheaply (`calloc`) overrides it.
+    mutating func allocateZeroed(layout: Layout) -> RawPointer?
 
     /// Releases memory previously returned by `allocate` / `reallocate`.
     /// `layout` must match the layout used to obtain the pointer.
@@ -54,7 +60,7 @@ public protocol Allocator {
 ///
 /// Stateless: the struct holds no fields. All bookkeeping lives in libc's
 /// heap. Cloning or copying the allocator has no effect on the heap state.
-public struct SystemAllocator: Allocator {
+public struct SystemAllocator: Allocator, Defaultable {
     /// @name Default
     /// Builds a stateless system allocator. No heap interaction occurs here.
     public init() {}
@@ -87,6 +93,24 @@ public struct SystemAllocator: Allocator {
                 .Some(ptr)
             }
         }
+    }
+
+    /// Zeroed storage from `calloc` when the alignment is natural, so a large
+    /// block's pages stay untouched until written. Over-aligned layouts
+    /// allocate and zero.
+    public mutating func allocateZeroed(layout: Layout) -> RawPointer? {
+        if layout.size < 0 or not layout.alignment.isPowerOfTwo {
+            return .None
+        };
+        if layout.alignment > Layout.of[RawPointer]().alignment {
+            let result = self.allocate(layout);
+            if let .Some(ptr) = result {
+                if layout.size > 0 { let _ = unsafe memset(ptr, 0, layout.size); }
+            }
+            return result
+        }
+        let ptr = unsafe calloc(1, layout.size);
+        if ptr.isNull { .None } else { .Some(ptr) }
     }
 
     /// Calls `free(ptr)`. The `layout` argument is ignored — kept for
@@ -132,9 +156,19 @@ public struct SystemAllocator: Allocator {
     }
 }
 
+extend Allocator {
+    /// Default `allocateZeroed`: `allocate`, then zero the bytes.
+    public mutating func allocateZeroed(layout: Layout) -> RawPointer? {
+        let result = self.allocate(layout);
+        if let .Some(ptr) = result {
+            if layout.size > 0 { let _ = unsafe memset(ptr, 0, layout.size); }
+        }
+        result
+    }
+}
+
 /// Project-wide default allocator, aliased to `SystemAllocator`. Override
 /// at the project level if a global custom allocator is needed.
 public type GlobalAllocator = SystemAllocator
 
-// Note: ArenaAllocator and PoolAllocator require Buffer (Phase 14)
-// They will be added after Buffer is implemented
+// `ArenaAllocator` lives in arena.ks.

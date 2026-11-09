@@ -4,77 +4,86 @@ module std.collections
 
 import std.core.(Bool, Equatable, Cloneable, Hashable, Hasher, Defaultable, Addable, fatalError)
 import std.text.(Formattable, Formatter, FormatOptions, String, StringBuilder)
-import std.numeric.(Int64, UInt64)
+import std.numeric.(Int64, UInt8, UInt64)
 import std.result.(Optional)
-import std.memory.(Layout, Pointer, RawPointer, SystemAllocator, CowBox)
+import std.memory.(Layout, Pointer, RawPointer, Allocator, GlobalAllocator, CowBox, swap)
 import std.iter.(Iterator, Iterable)
+import std.ffi.(memcpy, memset)
 import std.collections.(DefaultHasher, Array)
 
 // ============================================================================
-// BUCKET ENUM
+// TABLE LAYOUT
 // ============================================================================
+//
+// The table is SwissTable-shaped (the layout of Rust's `hashbrown`, with
+// its portable 8-byte groups): a heap block holds `cap` entry slots
+// followed by `cap + groupWidth` control bytes. The control byte is the
+// single source of truth for a slot's state:
+//
+// - `ctrlEmpty` (0xFF): never used; ends a probe chain.
+// - `ctrlDeleted` (0x80): tombstone left by a remove; probing skips it.
+// - `0..<0x80`: occupied; the byte is the top 7 bits of the key's hash.
+//
+// A probe loads 8 control bytes as one word and finds every slot whose
+// tag matches with a few bit operations, so it touches an entry only on
+// a tag match (1 in 128 for another key) and its branches don't depend
+// on which slot in the group holds the key. The last `groupWidth`
+// control bytes mirror the first ones, so a group load never wraps.
+// Groups probe triangularly (strides 8, 16, 24, ...), which visits every
+// group of a power-of-two table. Entry slots hold no tag or cached hash:
+// `Dictionary[UInt64, Int64]` spends 17 bytes per slot.
 
-/// One slot in the open-addressed hash table backing `Dictionary[K, V, H]`.
-///
-/// The three cases give the probe loop everything it needs to decide what
-/// to do at each step: keep probing, stop, or take the slot. Tombstones
-/// (`.Deleted`) preserve probe chains after a key is removed so later
-/// lookups for keys that originally collided still find their entries.
-/// The cached hash on `.Occupied` lets resizes rehash without re-running
-/// the user's `Hashable` implementation.
-///
-/// # Examples
-///
-/// ```
-/// // Internal — not constructed by users. The probe loop reads:
-/// match self.buckets.offset(by: i).read() {
-///     .Empty       => break,         // miss
-///     .Deleted     => continue,      // skip tombstone
-///         .Occupied(k, v, _) => ...;
-/// }
-/// ```
-///
-/// # Representation
-///
-/// Tagged enum. `.Occupied` carries the key, value, and 64-bit cached
-/// hash inline; `.Empty` and `.Deleted` are nullary tags.
-enum Bucket[K, V] {
-    /// Slot that has never held an entry; ends a probe chain on lookup.
-    case Empty
-
-    /// Tombstone left after a `remove`; probing skips past it but it
-    /// does not terminate a lookup.
-    case Deleted
-
-    /// Live entry: key, value, and the cached 64-bit hash of the key.
-    case Occupied(K, V, UInt64)
+/// A live slot's key and value. Only initialized where the slot's
+/// control byte is a tag (`< ctrlDeleted`).
+struct Entry[K, V] {
+    var key: K
+    var value: V
 }
 
-// ============================================================================
-// HELPER FUNCTIONS
-// ============================================================================
+/// Control byte of a never-used slot.
+let ctrlEmpty: UInt8 = 255
+/// Control byte of a tombstone.
+let ctrlDeleted: UInt8 = 128
+/// Control bytes loaded per probe step.
+let groupWidth: Int64 = 8
+/// `0x01` in every byte of a group word.
+let groupLowBits: UInt64 = 72340172838076673    // 0x0101010101010101
+/// `0x80` in every byte of a group word.
+let groupHighBits: UInt64 = 9259542123273814144  // 0x8080808080808080
 
-/// Is `bucket` a never-used slot (the end of a probe chain)?
-func bucketIsEmpty[K, V](bucket: Bucket[K, V]) -> Bool {
-    match bucket {
-        .Empty => true,
-        _ => false
-    }
+/// The control byte stored for an entry whose key hashes to `hash`: its
+/// top 7 bits. The low bits pick the home slot, so the two are independent.
+fileprivate func tagFor(hash: UInt64) -> UInt8 {
+    UInt8(truncating: hash >> 57)
+}
+
+/// High bit of each byte of `group` equal to `tag`. Can also flag a byte
+/// that differs from `tag` only in its lowest bit, which is another tag
+/// (never an empty or deleted slot), so the key comparison weeds it out.
+fileprivate func groupMatch(group: UInt64, tag: UInt8) -> UInt64 {
+    let cmp = group ^ (UInt64(from: tag).multiplyWrapping(groupLowBits));
+    cmp.subtractWrapping(groupLowBits) & cmp.bitwiseNot() & groupHighBits
+}
+
+/// High bit of each empty byte of `group`: `0xFF` is the only control
+/// byte with both of its top two bits set.
+fileprivate func groupMatchEmpty(group: UInt64) -> UInt64 {
+    group & (group << 1) & groupHighBits
+}
+
+/// High bit of each empty or deleted byte of `group`.
+fileprivate func groupMatchFree(group: UInt64) -> UInt64 {
+    group & groupHighBits
+}
+
+/// Byte position of the lowest flagged byte in a non-zero match word.
+fileprivate func lowestMatch(bits: UInt64) -> Int64 {
+    bits.trailingZeros >> 3
 }
 
 /// The home slot for `hash` in a table of `mask + 1` slots (a power of two).
 fileprivate func slotFor(hash: UInt64, mask: Int64) -> Int64 {
     Int64(truncating: hash & UInt64(truncating: mask))
-}
-
-/// Writes `entry` into the first `.Empty` slot on `hash`'s probe chain.
-/// Used while rebuilding a table, which has no tombstones and room to spare.
-fileprivate func placeEntry[K, V](buckets: Pointer[Bucket[K, V]], mask: Int64, consuming entry: Bucket[K, V], hash: UInt64) {
-    var slot = slotFor(hash, mask);
-    while not bucketIsEmpty(unsafe buckets.offset(by: slot).value) {
-        slot = (slot + 1) & mask
-    }
-    unsafe buckets.offset(by: slot).write(entry)
 }
 
 /// Returns the smallest power of two `>= n`, clamped up to a minimum of 8.
@@ -103,13 +112,13 @@ func nextPowerOfTwo(n: Int64) -> Int64 {
 // ============================================================================
 
 /// Single-pass forward iterator over the `(key, value)` entries of a
-/// `Dictionary[K, V, H]`.
+/// `Dictionary[K, V, H, A]`.
 ///
-/// Produced by `Dictionary.iter()`. Walks the bucket array once, skipping
-/// `.Empty` and `.Deleted` slots, and yields each occupied entry as a
-/// tuple. Iteration order matches bucket layout, which depends on the
-/// hash and probe sequence — treat it as unspecified. For key- or
-/// value-only views see `KeysIterator` and `ValuesIterator`.
+/// Produced by `Dictionary.iter()`. Walks the slots once, skipping empty
+/// and deleted ones, and yields each live entry as a tuple. Iteration
+/// order matches slot layout, which depends on the hash and probe
+/// sequence — treat it as unspecified. For key- or value-only views see
+/// `KeysIterator` and `ValuesIterator`.
 ///
 /// # Examples
 ///
@@ -123,44 +132,36 @@ func nextPowerOfTwo(n: Int64) -> Int64 {
 ///
 /// # Representation
 ///
-/// A share of the dictionary's storage, plus the bucket pointer, total
-/// slots and current scan position.
+/// A share of the dictionary's storage, plus the current scan position.
 ///
 /// # Memory Model
 ///
 /// Holds a share of the dictionary's storage, like `ArrayIterator`. The
-/// share keeps the buckets alive and marks them shared, so the iterator
+/// share keeps the table alive and marks it shared, so the iterator
 /// sees the dictionary as it was when `iter()` was called: inserting into
 /// or dropping the dictionary while iterating copies or releases the
 /// dictionary's own table, never the one being read.
-public struct DictionaryIterator[K, V]: Iterator {
+public struct DictionaryIterator[K, V, A = GlobalAllocator]: Iterator where A: Allocator {
     /// Element type yielded by `next()` — a `(key, value)` tuple.
     type Item = (K, V)
 
-    /// Keeps `buckets` alive for the iterator's lifetime.
-    private var storage: CowBox[DictionaryStorage[K, V]]
-    /// The shared bucket array. Never written while the share is held.
-    private var buckets: Pointer[Bucket[K, V]]
-    /// Total number of slots in the bucket array.
-    private var capacity: Int64
+    /// Keeps the table alive for the iterator's lifetime. Never written
+    /// while the share is held.
+    private var storage: CowBox[DictionaryStorage[K, V, A]]
     /// Current scan position; advances every `next()` call.
     private var index: Int64
 
     /// @name From Storage
-    /// Iterates `storage`'s buckets, holding the share until dropped.
+    /// Iterates `storage`'s slots, holding the share until dropped.
     /// Use `Dictionary.iter()`, `keys` or `values` to get one.
-    fileprivate init(storage storage: CowBox[DictionaryStorage[K, V]]) {
-        self.buckets = storage.value.buckets;
-        self.capacity = storage.value.cap;
+    fileprivate init(storage storage: CowBox[DictionaryStorage[K, V, A]]) {
         self.storage = storage;
         self.index = 0;
     }
 
-    /// Advances the scan to the next occupied slot and returns its
-    /// entry, or `None` when no more remain.
-    ///
-    /// Skips `.Empty` and `.Deleted` slots silently. Once `None` is
-    /// returned the iterator stays exhausted.
+    /// Advances the scan to the next live slot and returns its entry, or
+    /// `None` when no more remain. Once `None` is returned the iterator
+    /// stays exhausted.
     ///
     /// # Examples
     ///
@@ -170,12 +171,12 @@ public struct DictionaryIterator[K, V]: Iterator {
     /// it.next();  // None
     /// ```
     public mutating func next() -> (K, V)? {
-        while self.index < self.capacity {
-            let bucket = unsafe self.buckets.offset(by: self.index).read();
+        let s = &self.storage.value;
+        while self.index < s.cap {
+            let slot = self.index;
             self.index = self.index + 1;
-            match bucket {
-                .Occupied(key, value, _) => return .Some((key, value)),
-                _ => {}
+            if let .Some(e) = s.entryAt(slot) {
+                return .Some((e.key, e.value))
             }
         }
         .None
@@ -186,117 +187,197 @@ public struct DictionaryIterator[K, V]: Iterator {
 // DICTIONARY STORAGE (Internal)
 // ============================================================================
 
-/// Internal `(buckets, len, cap)` storage cell shared by
-/// `Dictionary[K, V, H]` instances.
+/// Internal storage cell shared by `Dictionary[K, V, H, A]` instances: one
+/// heap block of `cap` entry slots followed by `cap` control bytes (see
+/// TABLE LAYOUT above).
 ///
-/// Wrapped in an `RcBox` by `Dictionary` so copying a dictionary just
+/// Wrapped in a `CowBox` by `Dictionary` so copying a dictionary just
 /// bumps a refcount; mutations call `makeUnique()` first, which
-/// deep-copies via `clone()` here. The bucket array always has
-/// power-of-two `cap` (or zero), maintained by `nextPowerOfTwo`.
-///
-/// # Examples
-///
-/// ```
-/// // Not used directly. Created by Dictionary's initializers.
-/// let s = DictionaryStorage(buckets: ptr, len: 0, cap: 8);
-/// ```
+/// deep-copies via `clone()` here. `cap` is always a power of two, or
+/// zero with no allocation.
 ///
 /// # Representation
 ///
-/// Three fields: heap pointer to the bucket array, count of live
-/// entries (`len`), and total slots (`cap`). `cap == 0` indicates a
-/// null pointer with no allocation.
+/// Pointers to the entry slots and control bytes (both into the same
+/// block), the live count, the tombstone count, and the slot count.
 ///
 /// # Memory Model
 ///
-/// Owns the bucket buffer; `deinit` deallocates it. Used as the value
-/// inside an `RcBox`, providing the refcount that powers COW on the
-/// dictionary level.
-struct DictionaryStorage[K, V]: Cloneable {
-    /// Heap pointer to the bucket array; null when `cap == 0`.
-    var buckets: Pointer[Bucket[K, V]]
-    /// Number of `.Occupied` entries (excludes `.Empty` and `.Deleted`).
+/// Owns the block; `deinit` drops every live entry and frees it. The
+/// key/value hashing lives in `Dictionary`, which knows the hasher.
+struct DictionaryStorage[K, V, A]: Cloneable where A: Allocator {
+    /// Entry slots; null when `cap == 0`. Initialized only where `ctrl`
+    /// holds a tag.
+    var entries: Pointer[Entry[K, V]]
+    /// One control byte per slot, then `groupWidth` bytes mirroring the
+    /// first ones; right after the entries in the block.
+    var ctrl: Pointer[UInt8]
+    /// Number of live entries.
     var len: Int64
-    /// Number of `.Deleted` tombstones. `len + deleted` is what fills
-    /// the table, so it's what the load-factor check counts.
+    /// Number of tombstones. `len + deleted` is what fills the table, so
+    /// it's what the load-factor check counts.
     var deleted: Int64
-    /// Total bucket count; always a power of two or zero.
+    /// Total slot count; always a power of two or zero.
     var cap: Int64
+    /// Where the block came from and goes back to; a handle, copied with
+    /// the storage (see `ArrayStorage.allocator`).
+    var allocator: A
 
-    /// @name From Fields
-    /// Constructs a storage cell from raw fields.
-    ///
-    /// Internal — callers must guarantee `cap` is zero or a power of
-    /// two and that `buckets` covers `cap` initialized slots.
-    init(buckets buckets: Pointer[Bucket[K, V]], len len: Int64, cap cap: Int64, deleted deleted: Int64 = 0) {
-        self.buckets = buckets;
-        self.len = len;
-        self.deleted = deleted;
-        self.cap = cap;
+    /// @name Empty
+    /// Storage with no allocation (`cap == 0`).
+    init(allocator allocator: A) {
+        self.entries = Pointer[Entry[K, V]].nullPointer();
+        self.ctrl = Pointer[UInt8].nullPointer();
+        self.len = 0;
+        self.deleted = 0;
+        self.cap = 0;
+        self.allocator = allocator;
     }
 
-    /// Deep-copies the storage into a fresh allocation.
-    ///
-    /// Allocates a new bucket array of the same `cap` and copies every
-    /// slot — including `.Empty` and `.Deleted` — so the copy preserves
-    /// existing probe chains. Empty storage clones to empty storage
-    /// without allocating. Panics on allocation failure. This is the
-    /// slow half of COW, fired by `Dictionary.makeUnique()` when
-    /// storage is shared.
-    func clone() -> DictionaryStorage[K, V] {
-        if self.cap == 0 {
-            return DictionaryStorage(
-                buckets: Pointer[Bucket[K, V]].nullPointer(),
-                len: 0,
-                cap: 0
-            )
-        }
-        let layout = Layout.array[Bucket[K, V]](self.cap);
-        var allocator = SystemAllocator();
-        let result = allocator.allocate(layout);
-        if let .Some(rawPtr) = result {
-            let newBuckets = rawPtr.cast[Bucket[K, V]]();
-            // Copy buckets
-            for i in 0..<self.cap {
-                unsafe newBuckets.offset(by: i).write(self.buckets.offset(by: i).read());
-            }
-            DictionaryStorage(
-                buckets: newBuckets,
-                len: self.len,
-                cap: self.cap,
-                deleted: self.deleted
-            )
+    /// @name With Capacity
+    /// A fresh block of `cap` empty slots. `cap` must be a power of two
+    /// (zero gives the unallocated storage). Panics on allocation failure.
+    init(capacity cap: Int64, allocator allocator: A) {
+        self.init(allocator: allocator);
+        if cap == 0 { return; }
+        let (layout, ctrlOffset) = DictionaryStorage[K, V, A].blockLayout(cap);
+        var allocator = self.allocator;
+        if let .Some(raw) = allocator.allocate(layout) {
+            self.entries = raw.cast[Entry[K, V]]();
+            self.ctrl = raw.offset(by: ctrlOffset).cast[UInt8]();
+            self.cap = cap;
+            let _ = unsafe memset(self.ctrl.asRaw(), Int64(from: ctrlEmpty), cap + groupWidth);
         } else {
-            fatalError("DictionaryStorage clone allocation failed")
+            fatalError("Dictionary allocation failed")
         }
     }
 
-    /// Drops every bucket payload, then frees the bucket array.
-    ///
-    /// Runs when the last `RcBox` reference to this storage drops (COW
-    /// guarantees the buffer is uniquely owned at that point, so each
-    /// payload is dropped exactly once — no double-free). Skips
-    /// everything when `cap == 0` (no buffer was ever allocated).
-    ///
-    /// The `0..<cap` loop runs `Bucket`'s destructor in place on every
-    /// slot — open addressing scatters live entries across the whole
-    /// buffer, and every slot is initialized (to `.Empty` at minimum),
-    /// so all `cap` slots must be visited, not just `len`. `dropInPlace`
-    /// is a no-op for `.Empty`/`.Deleted` and drops the `K`/`V` payload
-    /// of each `.Occupied` slot. Skipping these destructors (the previous
-    /// behavior) leaked the owned heap of every non-trivial key and value,
-    /// e.g. the `String`s inside a `Dictionary[String, String]`.
-    deinit {
-        if self.cap > 0 {
-            var i: Int64 = 0;
-            while i < self.cap {
-                unsafe self.buckets.offset(by: i).dropInPlace();
-                i = i + 1
-            };
-            let layout = Layout.array[Bucket[K, V]](self.cap);
-            var allocator = SystemAllocator();
-            unsafe allocator.deallocate(self.buckets.asRaw(), layout)
+    /// The block layout for `cap` slots, and the byte offset of the
+    /// control bytes within it.
+    static func blockLayout(cap: Int64) -> (Layout, Int64) {
+        Layout.array[Entry[K, V]](cap).merge(with: Layout.array[UInt8](cap + groupWidth))
+    }
+
+    /// The `groupWidth` control bytes starting at slot `pos`, as one
+    /// little-endian word (byte `j` is slot `pos + j`, wrapping).
+    func loadGroup(pos: Int64) -> UInt64 {
+        unsafe self.ctrl.offset(by: pos).asRaw().cast[UInt64]().read()
+    }
+
+    /// Sets slot `i`'s control byte, and its mirror when `i` is one of
+    /// the first `groupWidth` slots.
+    mutating func setCtrl(i: Int64, consuming c: UInt8) {
+        unsafe self.ctrl.offset(by: i).write(c);
+        let mirror = ((i - groupWidth) & (self.cap - 1)) + groupWidth;
+        unsafe self.ctrl.offset(by: mirror).write(c)
+    }
+
+    /// The first empty or deleted slot on `hash`'s probe chain, or `-1`
+    /// when the chain covers the table without one.
+    func findFree(hash: UInt64) -> Int64 {
+        let mask = self.cap - 1;
+        var pos = slotFor(hash, mask);
+        var stride: Int64 = 0;
+        while stride < self.cap {
+            let free = groupMatchFree(self.loadGroup(pos));
+            if free != 0 { return (pos + lowestMatch(free)) & mask; }
+            stride = stride + groupWidth;
+            pos = (pos + stride) & mask
+        };
+        -1
+    }
+
+    /// `true` when slot `i` holds a live entry.
+    func isFull(i: Int64) -> Bool {
+        unsafe self.ctrl.offset(by: i).read() < ctrlDeleted
+    }
+
+    /// Lends slot `i`'s entry, or `.None` for an empty or deleted slot.
+    /// `i` must be in `0..<cap`.
+    func entryAt(i: Int64) -> Optional[&Entry[K, V]] {
+        if not self.isFull(i) { return .None; }
+        let entry = unsafe &self.entries.offset(by: i).value;
+        .Some(entry)
+    }
+
+    /// Marks slot `i` live with `tag` and moves `entry` in. The slot must
+    /// not hold a live entry; a reused tombstone is uncounted here.
+    mutating func fill(i: Int64, tag tag: UInt8, consuming entry: Entry[K, V]) {
+        if unsafe self.ctrl.offset(by: i).read() == ctrlDeleted {
+            self.deleted = self.deleted - 1
         }
+        self.setCtrl(i, tag);
+        unsafe self.entries.offset(by: i).write(entry);
+        self.len = self.len + 1
+    }
+
+    /// Moves the live entry out of slot `i`, leaving a tombstone.
+    mutating func vacate(i: Int64) -> Entry[K, V] {
+        self.setCtrl(i, ctrlDeleted);
+        self.len = self.len - 1;
+        self.deleted = self.deleted + 1;
+        unsafe self.entries.offset(by: i).take()
+    }
+
+    /// Writes `entry` into the first empty slot on `hash`'s probe chain.
+    /// Used while rebuilding a table, which has no tombstones and room
+    /// to spare.
+    mutating func place(consuming entry: Entry[K, V], hash: UInt64) {
+        let slot = self.findFree(hash);
+        self.fill(slot, tag: tagFor(hash), entry)
+    }
+
+    /// Drops every live entry and marks every slot empty, keeping the
+    /// block.
+    mutating func removeAllEntries() {
+        for i in 0..<self.cap {
+            if self.isFull(i) { unsafe self.entries.offset(by: i).dropInPlace(); }
+        }
+        if self.cap > 0 { let _ = unsafe memset(self.ctrl.asRaw(), Int64(from: ctrlEmpty), self.cap + groupWidth); }
+        self.len = 0;
+        self.deleted = 0
+    }
+
+    /// Deep-copies the storage into a fresh block.
+    ///
+    /// Copies the control bytes and every live entry slot-for-slot, so
+    /// the copy keeps existing probe chains and tombstones. Empty storage
+    /// clones to empty storage without allocating. This is the slow half
+    /// of COW, fired by `Dictionary.makeUnique()` when storage is shared.
+    func clone() -> DictionaryStorage[K, V, A] {
+        var copy = DictionaryStorage[K, V, A](capacity: self.cap, allocator: self.allocator);
+        if self.cap == 0 { return copy; }
+        let _ = unsafe memcpy(copy.ctrl.asRaw(), self.ctrl.asRaw(), self.cap + groupWidth);
+        // Byte-copied entries copy as one block, empty slots included; the
+        // rest clone slot by slot.
+        if Bool(boolLiteral: lang.is_bitwise[Entry[K, V]]()) {
+            let _ = unsafe memcpy(copy.entries.asRaw(), self.entries.asRaw(), Layout.array[Entry[K, V]](self.cap).size);
+        } else {
+            for i in 0..<self.cap {
+                if self.isFull(i) {
+                    unsafe copy.entries.offset(by: i).write(self.entries.offset(by: i).read());
+                }
+            }
+        }
+        copy.len = self.len;
+        copy.deleted = self.deleted;
+        copy
+    }
+
+    /// Drops every live entry, then frees the block.
+    ///
+    /// Runs when the last reference to this storage drops (COW
+    /// guarantees the block is uniquely owned then, so each entry is
+    /// dropped exactly once). Open addressing scatters live entries
+    /// across the whole table, so every slot's control byte is checked.
+    deinit {
+        if self.cap == 0 { return; }
+        for i in 0..<self.cap {
+            if self.isFull(i) { unsafe self.entries.offset(by: i).dropInPlace(); }
+        }
+        let (layout, _) = DictionaryStorage[K, V, A].blockLayout(self.cap);
+        var allocator = self.allocator;
+        unsafe allocator.deallocate(self.entries.asRaw(), layout)
     }
 }
 
@@ -332,8 +413,9 @@ struct DictionaryStorage[K, V]: Cloneable {
 ///
 /// # Hashing
 ///
-/// The hash for each key is cached in its bucket so resizes don't
-/// recompute it. The default hasher, `DefaultHasher`, is SipHash-1-3 with
+/// Each slot's control byte keeps 7 bits of its key's hash, so a probe
+/// compares keys only on a tag match. Resizes rehash the keys. The
+/// default hasher, `DefaultHasher`, is SipHash-1-3 with
 /// a random per-process key, so iteration order differs between runs. For
 /// trusted keys, `Dictionary[K, V, FastHasher]` is faster and has the same
 /// order on every run.
@@ -347,43 +429,47 @@ struct DictionaryStorage[K, V]: Cloneable {
 ///
 /// # Representation
 ///
-/// One field: a `CowBox[DictionaryStorage[K, V]]` holding
-/// `(buckets, len, cap)` over a heap bucket array.
+/// One field: a `CowBox[DictionaryStorage[K, V, A]]` over one heap block
+/// of entry slots and control bytes (see TABLE LAYOUT).
 ///
 /// # Memory Model
 ///
 /// Reference-counted storage with copy-on-write *value* semantics.
-/// Copying a `Dictionary` is O(1) and shares the bucket array; the
+/// Copying a `Dictionary` is O(1) and shares the table; the
 /// next mutation on a shared dictionary triggers `makeUnique()`,
 /// which deep-clones via `DictionaryStorage.clone()` so the mutation
 /// is invisible to other copies.
 ///
 /// # Guarantees
 ///
-/// - Every key satisfies `K: Hashable`. The cached hash is computed once
-///   per insert and reused on resize.
+/// - Every key satisfies `K: Hashable`. A lookup or insert hashes the
+///   key once; a resize hashes every live key again.
 /// - `count <= capacity * 3 / 4` after every mutation (the resize
 ///   threshold).
-/// - Removing a key leaves a `.Deleted` tombstone; lookups still
+/// - Removing a key leaves a tombstone; lookups still
 ///   work but tombstones reduce effective capacity until the next
 ///   resize.
 /// - Iteration order is **not** specified.
-public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: Hashable, H: Hasher, H: Defaultable {
+public struct Dictionary[K, V, H = DefaultHasher, A = GlobalAllocator]: Iterable, Cloneable where K: Hashable, H: Hasher, H: Defaultable, A: Allocator {
     /// `Iterable` element type — a `(key, value)` tuple.
     type Item = (K, V)
     /// Concrete iterator type returned by `iter()`.
-    type TargetIterator = DictionaryIterator[K, V]
+    type TargetIterator = DictionaryIterator[K, V, A]
 
     /// COW storage — `CowBox` handles the reference counting and
     /// clone-on-write barrier.
-    private var storage: CowBox[DictionaryStorage[K, V]]
+    private var storage: CowBox[DictionaryStorage[K, V, A]]
 
-    /// Returns the bucket-array pointer from storage. Internal helper.
-    private func buckets() -> Pointer[Bucket[K, V]] { self.storage.value.buckets }
     /// Returns the live-entry count from storage. Internal helper.
     private func len() -> Int64 { self.storage.value.len }
-    /// Returns the total bucket capacity from storage. Internal helper.
+    /// Returns the total slot count from storage. Internal helper.
     private func cap() -> Int64 { self.storage.value.cap }
+
+    /// Lends slot `slot`'s entry, or `.None` for an empty or deleted slot.
+    /// `slot` must be in `0..<cap()`. The slot-wise scans below use it.
+    fileprivate func entryAt(slot: Int64) -> Optional[&Entry[K, V]] {
+        self.storage.value.entryAt(slot)
+    }
 
     /// COW write barrier — ensures the storage is uniquely owned.
     private mutating func makeUnique() {
@@ -392,7 +478,7 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
 
     /// @name From Storage
     /// Wraps an existing storage box in a new `Dictionary`.
-    private init(storage storage: CowBox[DictionaryStorage[K, V]]) {
+    private init(storage storage: CowBox[DictionaryStorage[K, V, A]]) {
         self.storage = storage;
     }
 
@@ -400,11 +486,1460 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
     // CONSTRUCTORS
     // ========================================================================
 
+    /// @name With Allocator
+    /// An empty dictionary whose table will come from `allocator`. Nothing
+    /// is allocated until the first insert.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// var arena = ArenaAllocator();
+    /// var d = Dictionary[String, Int64, DefaultHasher, ArenaAllocator](allocator: arena);
+    /// d.insert("a", 1);  // allocated from the arena
+    /// ```
+    public init(allocator allocator: A) {
+        self.storage = CowBox(DictionaryStorage[K, V, A](allocator: allocator));
+    }
+
+    /// @name With Capacity And Allocator
+    /// An empty dictionary with room for at least `capacity` entries before
+    /// growing, allocated from `allocator`.
+    public init(capacity capacity: Int64, allocator allocator: A) {
+        self.storage = CowBox(DictionaryStorage[K, V, A](capacity: nextPowerOfTwo(capacity), allocator: allocator));
+    }
+
+    /// The allocator this dictionary's table comes from.
+    public var allocator: A { self.storage.value.allocator }
+
+    // ========================================================================
+    // HASHING (Internal)
+    // ========================================================================
+
+    /// Computes the 64-bit hash for `key` using a fresh `H` instance.
+    ///
+    /// Calls `key.hash(into:)` then `hasher.finish()`. The low bits pick
+    /// the home slot and the top 7 are the slot's control tag.
+    private func hashKey(key: K) -> UInt64 {
+        var hasher = H();
+        key.hash(into: hasher);
+        hasher.finish()
+    }
+
+    // ========================================================================
+    // PROPERTIES
+    // ========================================================================
+
+    /// Number of live entries. Read-only; O(1).
+    ///
+    /// Excludes tombstones — `count` only reflects what
+    /// `iter()`/`contains(...)` would see.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// ["a": 1, "b": 2].count;  // 2
+    /// [:].count;               // 0
+    /// ```
+    public var count: Int64 { get { self.len() } }
+
+    /// Total slots in the table — always `>= count`. Read-only.
+    ///
+    /// Resizes (doubling) trigger when `count` reaches 75% of
+    /// `capacity`. Tombstones count against the threshold even though
+    /// they don't count toward `count`. The actual value after
+    /// `init(capacity:)` rounds up to the next power of two.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let d = Dictionary[String, Int64](capacity: 100);
+    /// d.capacity;  // 128
+    /// ```
+    public var capacity: Int64 { get { self.cap() } }
+
+    /// `true` when the dictionary holds no live entries; equivalent to
+    /// `count == 0`.
+    ///
+    /// Reads more naturally than the comparison.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// [:].isEmpty;           // true
+    /// ["a": 1].isEmpty;      // false
+    /// ```
+    public var isEmpty: Bool { get { self.len() == 0 } }
+
+    /// Lazy view of the dictionary's keys, iterable in unspecified
+    /// order.
+    ///
+    /// Constructing the view is O(1) — it holds a share of the storage
+    /// and skips empty/deleted slots during iteration. Like `iter()`,
+    /// it sees the keys as they were when the view was made.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let dict = ["a": 1, "b": 2, "c": 3];
+    /// for key in dict.keys { print(key) }
+    /// let keyArray = Array(from: dict.keys);
+    /// ```
+    public var keys: KeysView[K, V, A] { get { KeysView(storage: self.storage.clone()) } }
+
+    /// Lazy view of the dictionary's values, iterable in unspecified
+    /// order.
+    ///
+    /// Same iteration order as `keys` — the two views walk the
+    /// slots in lockstep, so `zip(dict.keys, dict.values)` yields
+    /// pairs equivalent to `dict.iter()`. Holds a share of the
+    /// storage, like `keys`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let dict = ["a": 1, "b": 2, "c": 3];
+    /// for value in dict.values { print(value) }
+    /// let sum = dict.values.iter().sum();  // 6
+    /// ```
+    public var values: ValuesView[K, V, A] { get { ValuesView(storage: self.storage.clone()) } }
+
+    // ========================================================================
+    // SUBSCRIPTS
+    // ========================================================================
+
+    /// @name Lookup
+    /// The value stored for `key`, in place, or `.None` when absent.
+    ///
+    /// Reads lend `Optional[&V]` (a binding copies it out); a `&mutating`
+    /// payload binder updates the stored value in place with one lookup.
+    /// The place never inserts or removes: use `insert(key, value)`,
+    /// `remove(key)`, or `dict(key, default: v)` to insert when missing.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// var dict = ["a": 1, "b": 2];
+    /// dict("a");           // Some(1)
+    /// dict("z");           // None
+    /// if let .Some(&mutating v) = dict("a") { v += 10; }  // "a": 11
+    /// ```
+    public subscript(key: K)? -> V {
+        ref {
+            let index = self.probe(key, self.hashKey(key));
+            if index < 0 { return null; }
+            self.valueAt(index)
+        }
+        mutating ref {
+            self.makeUnique();
+            let index = self.probe(key, self.hashKey(key));
+            if index < 0 { return null; }
+            .Some(self.mutatingValueAt(index))
+        }
+    }
+
+    /// @name With Default
+    /// The value for `key`, or `defaultValue` when absent.
+    ///
+    /// Reading never stores the default. Writing inserts `defaultValue`
+    /// first when the key is missing, then updates the stored value in
+    /// place, so `counts(word, default: 0) += 1` is one lookup.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// var dict = ["a": 1];
+    /// dict("z", default: 0);       // 0, nothing stored
+    /// dict("z", default: 0) += 5;  // inserts "z": 5
+    /// ```
+    public subscript(key: K, default defaultValue: V) -> V {
+        get {
+            match self(key) {
+                .Some(v) => v,
+                .None => defaultValue
+            }
+        }
+        mutating ref {
+            self.makeUnique();
+            let hashValue = self.hashKey(key);
+            let found = self.probe(key, hashValue);
+            if found >= 0 { return self.mutatingValueAt(found); }
+            self.mutatingValueAt(self.insertNew(key, defaultValue, hashValue, -found - 1))
+        }
+    }
+
+    /// @name Unwrap
+    /// The value for `key`, in place, panicking when the key is absent.
+    ///
+    /// Use when absence is a bug. Reads lend `&V` and writes update the
+    /// stored value in place; assigning to a missing key panics too, so
+    /// insert with `insert(key, value)` or `dict(key, default: v)`.
+    ///
+    /// # Errors
+    ///
+    /// Panics with `"Dictionary subscript(unwrap:): key not found"` when
+    /// the key is absent.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// var dict = ["a": 1, "b": 2];
+    /// dict(unwrap: "a");       // 1
+    /// dict(unwrap: "a") += 1;  // "a": 2
+    /// dict(unwrap: "z");       // PANIC: key not found
+    /// ```
+    public subscript(unwrap key: K) -> V {
+        ref {
+            let index = self.probe(key, self.hashKey(key));
+            if index < 0 { fatalError("Dictionary subscript(unwrap:): key not found") }
+            self.valueRefAt(index)
+        }
+        mutating ref {
+            self.makeUnique();
+            let index = self.probe(key, self.hashKey(key));
+            if index < 0 { fatalError("Dictionary subscript(unwrap:): key not found") }
+            self.mutatingValueAt(index)
+        }
+    }
+
+    /// Number of slots, for slot-wise key scans (`Set`).
+    internal var slotCount: Int64 { self.cap() }
+
+    /// Lends the key in slot `slot`, or `.None` for an empty or deleted
+    /// slot, or one out of range.
+    internal func keyAt(consuming slot: Int64) -> Optional[&K] {
+        if slot < 0 or slot >= self.cap() or not self.storage.value.isFull(slot) { return .None; }
+        let entry = unsafe &self.entrySlot(slot).value;
+        .Some(entry.key)
+    }
+
+    /// Pointer to entry slot `index`. References returned through it
+    /// are `Pointer`-derived, so they can outlive the lookup that found
+    /// the slot.
+    private func entrySlot(index: Int64) -> Pointer[Entry[K, V]] {
+        self.storage.value.entries.offset(by: index)
+    }
+
+    /// Lends the value of the live slot at `index`.
+    private func valueAt(consuming index: Int64) -> Optional[&V] {
+        if not self.storage.value.isFull(index) { return .None; }
+        let entry = unsafe &self.entrySlot(index).value;
+        .Some(entry.value)
+    }
+
+    /// Lends the value of the live slot at `index`.
+    private func valueRefAt(consuming index: Int64) -> &V {
+        if not self.storage.value.isFull(index) { fatalError("Dictionary: slot is not occupied") }
+        let entry = unsafe &self.entrySlot(index).value;
+        entry.value
+    }
+
+    /// Lends the value of the live slot at `index` mutably. The caller
+    /// makes the storage unique first.
+    private func mutatingValueAt(consuming index: Int64) -> &mutating V {
+        let entry = unsafe &mutating self.entrySlot(index).mutatingValue;
+        entry.value
+    }
+
+    // ========================================================================
+    // INTERNAL LOOKUP
+    // ========================================================================
+
+    /// Locates the slot storing `key`, or `None` if absent.
+    private func findEntry(key: K) -> Int64? {
+        if self.cap() == 0 { return .None; }
+        let found = self.probe(key, self.hashKey(key));
+        if found >= 0 { .Some(found) } else { .None }
+    }
+
+    /// Walks `key`'s probe chain (`hashValue` is its hash). Returns the
+    /// key's slot when present. When absent, returns `-(slot + 1)` for
+    /// the slot an insert should use: the first empty or deleted slot on
+    /// the chain. Returns `-1` for an unallocated table, and
+    /// `-(cap + 1)` when the chain covers the whole table without a free
+    /// slot (only possible when it's full).
+    ///
+    /// Always inlined: it is the hot loop of every lookup, and inlining
+    /// lets the caller keep the result in a register.
+    @inline(.Always)
+    private func probe(key: K, hashValue: UInt64) -> Int64 {
+        let s = &self.storage.value;
+        if s.cap == 0 { return -1; }
+        let mask = s.cap - 1;
+        let tag = tagFor(hashValue);
+        var pos = slotFor(hashValue, mask);
+        var stride: Int64 = 0;
+        var insertAt: Int64 = -1;
+        // Home slot first, by itself: its entry address doesn't depend on
+        // the control load, so the CPU can fetch both at once when it
+        // predicts the hit. In a large table that saves a cache miss.
+        if unsafe s.ctrl.offset(by: pos).read() == tag {
+            if unsafe s.entries.offset(by: pos).value.key.isEqual(to: key) { return pos; }
+        }
+        while stride < s.cap {
+            let group = s.loadGroup(pos);
+            var hits = groupMatch(group, tag);
+            while hits != 0 {
+                let index = (pos + lowestMatch(hits)) & mask;
+                if unsafe s.entries.offset(by: index).value.key.isEqual(to: key) { return index; }
+                hits = hits & hits.subtractWrapping(1)
+            };
+            let free = groupMatchFree(group);
+            if insertAt < 0 and free != 0 { insertAt = (pos + lowestMatch(free)) & mask }
+            // An empty slot ends the chain: the key was never placed past it.
+            if groupMatchEmpty(group) != 0 { return -insertAt - 1 }
+            stride = stride + groupWidth;
+            pos = (pos + stride) & mask
+        };
+        -(if insertAt >= 0 { insertAt } else { s.cap }) - 1
+    }
+
+    /// Inserts a key known to be absent and returns its slot. `slot` is
+    /// what `probe` offered (`-probe - 1`); it is discarded when the table
+    /// needs to grow first. The storage must be unique.
+    private mutating func insertNew(key: K, value: V, hashValue: UInt64, slot: Int64) -> Int64 {
+        var target = slot;
+        if self.needsGrowth() {
+            self.grow();
+            target = -self.probe(key, hashValue) - 1
+        }
+        let s = &mutating self.storage.value;
+        s.fill(target, tag: tagFor(hashValue), Entry(key: key, value: value));
+        target
+    }
+
+    // ========================================================================
+    // CAPACITY MANAGEMENT (Internal)
+    // ========================================================================
+
+    /// `true` when one more insert needs the table rebuilt first: live
+    /// entries plus tombstones would reach 75% of capacity (or there is
+    /// no table yet).
+    ///
+    /// Tombstones count toward the load: without that, a table under
+    /// insert/remove churn fills with them, runs out of empty slots, and
+    /// every miss probes the whole table.
+    private func needsGrowth() -> Bool {
+        let s = &self.storage.value;
+        s.cap == 0 or s.len + s.deleted >= s.cap * 3 / 4
+    }
+
+    /// Rebuilds a table that `needsGrowth`. It doubles capacity when live
+    /// entries alone fill half the threshold, and otherwise rehashes at
+    /// the same size, which just clears the tombstones. Either way at
+    /// least `cap * 3 / 8` more inserts fit before the next rebuild, so
+    /// the cost stays amortized O(1).
+    private mutating func grow() {
+        let myCap = self.cap();
+        if myCap == 0 {
+            self.resizeToCapacity(8);
+            return
+        }
+        if self.len() * 2 >= myCap * 3 / 4 {
+            self.resizeToCapacity(myCap * 2)
+        } else {
+            self.resizeToCapacity(myCap)
+        }
+    }
+
+    /// Rebuilds the table at the exact `newCap` capacity, rehashing every
+    /// live key and dropping the tombstones.
+    ///
+    /// Used by `grow`, `reserveCapacity` and `shrinkToFit`. The caller
+    /// must ensure `newCap` is large enough to hold the current `count`
+    /// without exceeding the load factor; this routine itself does
+    /// not check. Panics on allocation failure.
+    private mutating func resizeToCapacity(newCap: Int64) {
+        var fresh = DictionaryStorage[K, V, A](capacity: newCap, allocator: self.storage.value.allocator);
+
+        if not self.storage.isUnique {
+            // Shared (another copy or an iterator holds it): copy the live
+            // entries straight into the new table. Writing through
+            // `value` would fork the whole old table first, only to
+            // rebuild it.
+            let old = &self.storage.value;
+            for i in 0..<old.cap {
+                if let .Some(e) = old.entryAt(i) {
+                    fresh.place(Entry(key: e.key, value: e.value), self.hashKey(e.key))
+                }
+            }
+            self.storage = CowBox(fresh);
+            return
+        }
+
+        // Unique: swap the new table in, then move every live entry
+        // across. The old table ends with no live slots, so dropping it
+        // only frees its block.
+        swap(self.storage.value, fresh);
+        for i in 0..<fresh.cap {
+            if fresh.isFull(i) {
+                let entry = fresh.vacate(i);
+                let hashValue = self.hashKey(entry.key);
+                self.storage.value.place(entry, hashValue)
+            }
+        }
+    }
+
+    // ========================================================================
+    // KEY LOOKUP
+
+    // ========================================================================
+
+    /// `true` if `key` is present in the dictionary.
+    ///
+    /// Wraps `findEntry`. For value-based search use the `V: Equatable`
+    /// extension's `containsValue(value:)`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// ["a": 1, "b": 2].contains("a");  // true
+    /// ["a": 1, "b": 2].contains("z");  // false
+    /// ```
+    public func contains(key: K) -> Bool {
+        self.findEntry(key).isSome
+    }
+
+    // ========================================================================
+    // MUTATING OPERATIONS
+    // ========================================================================
+
+    /// Inserts `(key, value)`, replacing any existing entry for `key`,
+    /// and returns the old value (or `None`) on update.
+    ///
+    /// Triggers `ensureCapacity()` and may resize before the insert
+    /// lands. The cached hash is computed once here. To update a value in
+    /// place use `if let .Some(&mutating v) = dict(key)` or
+    /// `dict(key, default: v) += …`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// var dict = ["a": 1];
+    /// dict.insert("b", 2);  // None;     dict = ["a": 1, "b": 2]
+    /// dict.insert("a", 9);  // Some(1);  dict = ["a": 9, "b": 2]
+    /// ```
+    public mutating func insert(key: K, value: V) -> V? {
+        self.makeUnique();
+        let hashValue = self.hashKey(key);
+        let found = self.probe(key, hashValue);
+        if found >= 0 {
+            // Move the old entry out: `write` overwrites without dropping.
+            let s = &mutating self.storage.value;
+            let old = unsafe s.entries.offset(by: found).take();
+            unsafe s.entries.offset(by: found).write(Entry(key: key, value: value));
+            return .Some(old.value)
+        }
+        let _ = self.insertNew(key, value, hashValue, -found - 1);
+        .None
+    }
+
+    /// Removes `key` and returns its value, or `None` if absent.
+    ///
+    /// Leaves a tombstone in the key's slot so existing
+    /// probe chains stay intact. Tombstones are reclaimed by the next
+    /// resize. Triggers COW only when an entry is actually removed.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// var dict = ["a": 1, "b": 2];
+    /// dict.remove("a");  // Some(1); dict = ["b": 2]
+    /// dict.remove("z");  // None;    dict unchanged
+    /// ```
+    public mutating func remove(key: K) -> V? {
+        let maybeIndex = self.findEntry(key);
+
+        if let .Some(index) = maybeIndex {
+            self.makeUnique();
+            return .Some(self.storage.value.vacate(index).value)
+        }
+
+        .None
+    }
+
+    /// Removes `key` and returns the *stored* `(key, value)` pair, or
+    /// `None` if absent.
+    ///
+    /// Like `remove(...)`, but also hands back the stored key — useful
+    /// when key equality is coarser than identity (the stored key may
+    /// differ from the probe). Same tombstone/COW behaviour as
+    /// `remove(...)`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// var dict = ["a": 1, "b": 2];
+    /// dict.removeEntry("a");  // Some(("a", 1)); dict = ["b": 2]
+    /// dict.removeEntry("z");  // None;           dict unchanged
+    /// ```
+    public mutating func removeEntry(key: K) -> (K, V)? {
+        let maybeIndex = self.findEntry(key);
+
+        if let .Some(index) = maybeIndex {
+            self.makeUnique();
+            let entry = self.storage.value.vacate(index);
+            return .Some((entry.key, entry.value))
+        }
+
+        .None
+    }
+
+    /// Removes every entry, leaving the table allocated and every slot
+    /// empty.
+    ///
+    /// O(capacity). The buffer is kept so subsequent inserts don't
+    /// reallocate; follow with `shrinkToFit()` to release it.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// var dict = ["a": 1, "b": 2];
+    /// dict.clear();    // dict = [:]
+    /// dict.capacity;   // unchanged
+    /// ```
+    public mutating func clear() {
+        self.storage.value.removeAllEntries()
+    }
+
+    /// Merges every entry of `other` into `self`, calling `combine`
+    /// to resolve key collisions.
+    ///
+    /// `combine(existing, incoming)` is invoked exactly once per
+    /// collision — pick one, return both summed, or use `(_, new)` for
+    /// last-write-wins. New keys are inserted directly. For a
+    /// non-mutating variant use `merging(...)`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// var a = ["x": 1, "y": 2];
+    /// let b = ["y": 20, "z": 30];
+    /// a.merge(b) { (old, new) in old + new };
+    /// // a == ["x": 1, "y": 22, "z": 30]
+    /// ```
+    public mutating func merge(other: Dictionary[K, V, H, A], uniquingKeysWith combine: (V, V) -> V) {
+        var otherIter = other.iter();
+        while let .Some(pair) = otherIter.next() {
+            let maybeExisting = self(pair.0);
+            match maybeExisting {
+                .Some(existing) => {
+                     self.insert( pair.0, combine(existing, pair.1));
+                },
+                .None => {
+                     self.insert( pair.0, pair.1);
+                }
+            }
+        }
+    }
+
+    /// Merges every `(key, value)` pair from an arbitrary iterable into
+    /// `self`, calling `combine` on collisions.
+    ///
+    /// Same semantics as `merge(...)` but accepts any iterable of
+    /// pairs — useful for arrays of tuples, generator output, or
+    /// streamed sources.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// var dict = ["a": 1];
+    /// dict.merge(from: [("b", 2), ("c", 3)]) { (_, new) in new };
+    /// // dict == ["a": 1, "b": 2, "c": 3]
+    /// ```
+    public mutating func merge[I](from pairs: I, uniquingKeysWith combine: (V, V) -> V)
+        where I: Iterable, I: not Static, I.Item = (K, V)
+    {
+        var iter = pairs.iter();
+        while let .Some(pair) = iter.next() {
+            let maybeExisting = self(pair.0);
+            match maybeExisting {
+                .Some(existing) => {
+                     self.insert( pair.0, combine(existing, pair.1));
+                },
+                .None => {
+                     self.insert( pair.0, pair.1);
+                }
+            }
+        }
+    }
+
+    /// Keeps only entries for which `predicate(key, value)` is true.
+    ///
+    /// One pass over the slots, dropping entries in place. Each removal
+    /// leaves a tombstone — call `shrinkToFit()`
+    /// afterwards if you've removed a large fraction. The mirror is
+    /// `removeAll(where:)`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// var dict = ["a": 1, "b": 2, "c": 3];
+    /// dict.retain { (k, v) in v > 1 };  // ["b": 2, "c": 3]
+    /// ```
+    public mutating func retain(where predicate: (K, V) -> Bool) {
+        self.makeUnique();
+        for i in 0..<self.cap() {
+            let doomed = match self.entryAt(i) {
+                .Some(e) => not predicate(e.key, e.value),
+                .None => false,
+            };
+            // Tombstone the slot in place: no second lookup per key.
+            if doomed { let _ = self.storage.value.vacate(i); }
+        }
+    }
+
+    /// Removes every entry for which `predicate(key, value)` is true.
+    ///
+    /// Inverse of `retain(where:)`; implemented as `retain` over
+    /// the negated predicate. Same tombstone caveat applies — consider
+    /// `shrinkToFit()` after large removals.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// var dict = ["a": 1, "b": 2, "c": 3];
+    /// dict.removeAll { (k, v) in v < 2 };  // ["b": 2, "c": 3]
+    /// ```
+    public mutating func removeAll(consuming where predicate: (K, V) -> Bool) {
+        self.retain(where: { (k, v) in not predicate(k, v) })
+    }
+
+    /// Grows the table so at least `minimumCapacity` entries
+    /// fit without resizing.
+    ///
+    /// No-op when current capacity already suffices. The actual new
+    /// capacity rounds up to the next power of two and accounts for
+    /// the 75% load factor (so target = `nextPowerOfTwo(min * 4 / 3)`).
+    /// The opposite operation is `shrinkToFit()`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// var dict = Dictionary[String, Int64]();
+    /// dict.reserveCapacity(1000);
+    /// // No reallocations for the first ~750 inserts.
+    /// ```
+    public mutating func reserveCapacity(minimumCapacity: Int64) {
+        if minimumCapacity <= self.capacity {
+            return
+        }
+        // Calculate target capacity (accounting for load factor)
+        let targetCap = nextPowerOfTwo(minimumCapacity * 4 / 3);
+        self.resizeToCapacity(targetCap)
+    }
+
+    /// Reduces capacity to the smallest power of two that still
+    /// satisfies the load factor for the current `count`.
+    ///
+    /// Frees excess memory and reclaims tombstone space (the resize
+    /// rebuilds the table without them). Empty dictionaries fall
+    /// through to `clear()`. No-op when the table is already at the
+    /// minimum acceptable capacity.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// var dict = Dictionary[String, Int64](capacity: 1000);
+    /// dict("a") = 1;
+    /// dict.shrinkToFit();  // capacity drops from 1024 to 8
+    /// ```
+    public mutating func shrinkToFit() {
+        let currentCount = self.count;
+        if currentCount == 0 {
+            self.clear();
+            return
+        }
+
+        let targetCap = nextPowerOfTwo(currentCount * 4 / 3);
+        if targetCap < self.capacity {
+            self.resizeToCapacity(targetCap)
+        }
+    }
+
+    // ========================================================================
+    // ITERATION
+    // ========================================================================
+
+    /// Returns a `DictionaryIterator[K, V, A]` over the live entries.
+    ///
+    /// Order is unspecified and may change between mutations. The
+    /// iterator holds a share of the storage, so it sees the entries as
+    /// they were when `iter()` was called; mutating the dictionary while
+    /// iterating copies the table first. For key- or value-only
+    /// iteration, use `keys.iter()` / `values.iter()`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// for (k, v) in dict.iter() { ... }
+    /// let entries = Array(from: dict);
+    /// ```
+    public func iter() -> DictionaryIterator[K, V, A] {
+        DictionaryIterator(storage: self.storage.clone())
+    }
+
+
+    // ========================================================================
+    // SEARCHING AND PREDICATES
+    // ========================================================================
+
+    /// `true` if any entry satisfies `predicate(key, value)`.
+    ///
+    /// Linear scan; short-circuits on the first match. `false` for
+    /// empty dictionaries. The aliased shape `any(satisfy:)` exists
+    /// for symmetry with `Array`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// ["a": 1, "b": 5].contains { (k, v) in v > 3 };  // true
+    /// ["a": 1, "b": 2].contains { (k, v) in v > 3 };  // false
+    /// ```
+    public func contains(where predicate: (K, V) -> Bool) -> Bool {
+
+        for i in 0..<self.capacity {
+            if let .Some(e) = self.entryAt(i) {
+                let key = e.key;
+                let value = e.value;
+                if predicate(key, value) {
+                    return true
+                }
+            }
+        }
+        false
+    }
+
+    /// Lends *some* entry matching `predicate(key, value)`, or `None`.
+    ///
+    /// "First" is determined by bucket order, which is hash-dependent
+    /// and unspecified — treat the result as arbitrary among matching
+    /// entries. Short-circuits on the first match.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let dict = ["a": 1, "b": 5, "c": 3];
+    /// dict.first { (k, v) in v > 2 };  // Some entry with v > 2
+    /// dict.first { (k, v) in v > 99 }; // None
+    /// ```
+    public func first(where predicate: (K, V) -> Bool) -> Optional[(&K, &V)] {
+        for i in 0..<self.capacity {
+            if not self.storage.value.isFull(i) { continue }
+            let e = unsafe &self.entrySlot(i).value;
+            if predicate(e.key, e.value) {
+                let key = &e.key;
+                let value = &e.value;
+                let entry: (&K, &V) = (key, value);
+                return .Some(entry)
+            }
+        }
+        .None
+    }
+
+    /// `true` when every entry satisfies `predicate(key, value)`
+    /// (vacuously true for empty).
+    ///
+    /// Short-circuits on the first failure. Dual of `any(where:)`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// ["a": 2, "b": 4].all { (k, v) in v % 2 == 0 };  // true
+    /// ["a": 1, "b": 2].all { (k, v) in v % 2 == 0 };  // false
+    /// [:].all { (k, v) in false };                    // true (vacuous)
+    /// ```
+    public func all(where predicate: (K, V) -> Bool) -> Bool {
+
+        for i in 0..<self.capacity {
+            if let .Some(e) = self.entryAt(i) {
+                let key = e.key;
+                let value = e.value;
+                if not predicate(key, value) {
+                    return false
+                }
+            }
+        }
+        true
+    }
+
+    /// `true` when at least one entry satisfies `predicate(key, value)`.
+    ///
+    /// Alias for `contains(where:)` — the two names exist so
+    /// predicate-style code reads naturally regardless of context.
+    /// Short-circuits on the first match.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// ["a": 1, "b": 5].any { (k, v) in v > 3 };  // true
+    /// [:].any { (k, v) in true };                // false (empty)
+    /// ```
+    public func any(where predicate: (K, V) -> Bool) -> Bool {
+        self.contains(where: predicate)
+    }
+
+    /// Returns the number of entries for which
+    /// `predicate(key, value)` is true.
+    ///
+    /// Linear scan, no short-circuit. For just a presence check use
+    /// `any(where:)`; for a yes/no on every entry,
+    /// `all(where:)`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// ["a": 1, "b": 2, "c": 3].countItems { (k, v) in v > 1 };  // 2
+    /// [:].countItems { (k, v) in true };                        // 0
+    /// ```
+    public func countItems(where predicate: (K, V) -> Bool) -> Int64 {
+        var result: Int64 = 0;
+
+        for i in 0..<self.capacity {
+            if let .Some(e) = self.entryAt(i) {
+                let key = e.key;
+                let value = e.value;
+                if predicate(key, value) {
+                    result = result + 1;
+                }
+            }
+        }
+        result
+    }
+
+    // ========================================================================
+    // TRANSFORMATIONS
+    // ========================================================================
+
+    /// Returns a new dictionary with each value run through `transform`,
+    /// keys unchanged.
+    ///
+    /// Pre-sized to `self.capacity` so the first build avoids
+    /// resizing. The result's value type can change (`V → U`); for a
+    /// version that drops `None` results see `compactMapValues(...)`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let dict = ["a": 1, "b": 2];
+    /// let doubled = dict.mapValues { (v) in v * 2 };
+    /// // ["a": 2, "b": 4]
+    /// ```
+    public func mapValues[U](transform: (V) -> U) -> Dictionary[K, U, H] {
+        var result = Dictionary[K, U, H](capacity: self.capacity);
+
+        for i in 0..<self.capacity {
+            if let .Some(e) = self.entryAt(i) {
+                let key = e.key;
+                let value = e.value;
+                 result.insert( key, transform(value));
+            }
+        }
+        result
+    }
+
+    /// Returns a new dictionary with each value run through `transform`;
+    /// entries whose `transform(value)` is `None` are dropped.
+    ///
+    /// Useful for parse-or-skip patterns. The result is unsized at
+    /// construction (since the final count isn't known until the
+    /// pass completes); for fixed transforms that always succeed,
+    /// `mapValues(...)` avoids the allocation policy difference.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let dict = ["a": "1", "b": "two", "c": "3"];
+    /// let parsed = dict.compactMapValues { (s) in Int64.parse(s) };
+    /// // ["a": 1, "c": 3] — "two" failed to parse
+    /// ```
+    public func compactMapValues[U](transform: (V) -> U?) -> Dictionary[K, U, H] {
+        var result = Dictionary[K, U, H]();
+
+        for i in 0..<self.capacity {
+            if let .Some(e) = self.entryAt(i) {
+                let key = e.key;
+                let value = e.value;
+                if let .Some(transformed) = transform(value) {
+                     result.insert( key, transformed);
+                }
+            }
+        }
+        result
+    }
+
+    /// Returns a new dictionary containing only entries for which
+    /// `predicate(key, value)` is true.
+    ///
+    /// Non-mutating mirror of `retain(where:)`. Allocates a fresh
+    /// dictionary; for in-place filtering use `retain` or
+    /// `removeAll(where:)`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let dict = ["a": 1, "b": 2, "c": 3];
+    /// let big = dict.filter { (k, v) in v > 1 };  // ["b": 2, "c": 3]
+    /// ```
+    public func filter(where predicate: (K, V) -> Bool) -> Dictionary[K, V, H, A] {
+        var result = Dictionary[K, V, H, A](allocator: self.allocator);
+
+        for i in 0..<self.capacity {
+            if let .Some(e) = self.entryAt(i) {
+                let key = e.key;
+                let value = e.value;
+                if predicate(key, value) {
+                     result.insert( key, value);
+                }
+            }
+        }
+        result
+    }
+
+    /// Returns a new dictionary that is `self` merged with `other`,
+    /// resolving collisions via `combine`.
+    ///
+    /// Non-mutating mirror of `merge(...)`. Internally clones via COW
+    /// (cheap until the next mutation) and merges into the copy.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let a = ["x": 1, "y": 2];
+    /// let b = ["y": 20, "z": 30];
+    /// let merged = a.merging(b) { (_, new) in new };
+    /// // merged == ["x": 1, "y": 20, "z": 30]
+    /// // a is unchanged
+    /// ```
+    public func merging(other: Dictionary[K, V, H, A], uniquingKeysWith combine: (V, V) -> V)
+        -> Dictionary[K, V, H, A]
+    {
+        var result = self.clone();
+        result.merge( other, uniquingKeysWith: combine);
+        result
+    }
+
+    // ========================================================================
+    // PROTOCOL CONFORMANCES
+    // ========================================================================
+
+    /// Returns a `Dictionary` sharing the same storage; the deep copy
+    /// is deferred until either side mutates.
+    ///
+    /// O(1) — just bumps the storage `RcBox`'s refcount. The first
+    /// mutation on either side triggers `makeUnique()`, which
+    /// deep-clones via `DictionaryStorage.clone()`. For an immediate
+    /// deep copy use `deepClone()` (defined in the unconditional
+    /// extension below).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let a: [String: Int64] = ["x": 1];
+    /// var b = a.clone();  // O(1), shares storage
+    /// b("y") = 2;         // b deep-copies here; a is unchanged
+    /// ```
+    public func clone() -> Dictionary[K, V, H, A] {
+        Dictionary(storage: self.storage.clone())
+    }
+}
+
+// ============================================================================
+// CONDITIONAL EXTENSIONS
+// ============================================================================
+
+/// `Equatable` conformance for dictionaries whose values are themselves
+/// `Equatable`.
+/// `Hashable` conformance — order-independent over entries, so two
+/// dictionaries with the same `(key, value)` pairs hash equal
+/// regardless of insertion order.
+extend Dictionary[K, V, H, A]: Hashable where K: Hashable, V: Hashable, H: Hasher, H: Defaultable {
+
+    /// Order-independent hash: hashes each `(key, value)` entry with a
+    /// fresh hasher (key then value) and combines the per-entry digests
+    /// with a commutative (wrapping) sum, then feeds the count and the
+    /// combined sum into `hasher`.
+    ///
+    /// Consistent with `Equatable`: equal dictionaries produce equal
+    /// hashes.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// var h = DefaultHasher();
+    /// ["a": 1, "b": 2].hash(into: h);  // same digest as ["b": 2, "a": 1]
+    /// ```
+    public func hash[H2](mutating into hasher: H2) where H2: Hasher {
+        var combined: UInt64 = 0;
+        var entries = self.iter();
+        while let .Some(pair) = entries.next() {
+            var entryHasher = H();
+            pair.0.hash(into: entryHasher);
+            pair.1.hash(into: entryHasher);
+            // Wrapping addition is a safe commutative combiner.
+            combined = combined.addWrapping(entryHasher.finish());
+        }
+        self.count.hash(into: hasher);
+        combined.hash(into: hasher);
+    }
+}
+
+extend Dictionary[K, V, H, A]: Equatable where K: Hashable, V: Equatable, H: Hasher, H: Defaultable {
+    /// Order-independent equality: dictionaries are equal iff they have
+    /// the same `count` and every key in `self` is present in `other`
+    /// with an equal value.
+    ///
+    /// Short-circuits on the first mismatch. Insertion order does not
+    /// matter — only the multiset of `(key, value)` pairs does.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// ["a": 1, "b": 2].isEqual(to: ["b": 2, "a": 1]);  // true
+    /// ["a": 1].isEqual(to: ["a": 2]);                  // false
+    /// ["a": 1].isEqual(to: [:]);                       // false
+    /// ```
+    public func isEqual(to other: Dictionary[K, V, H, A]) -> Bool {
+        let selfCount = self.count;
+        let otherCount = other.count;
+        if selfCount != otherCount {
+            return false
+        }
+
+        // Check all entries in self exist in other with same value
+        for i in 0..<self.capacity {
+            if let .Some(e) = self.entryAt(i) {
+                let key = e.key;
+                let value = e.value;
+                let otherValue = other(key);
+                if let .Some(v) = otherValue {
+                    if not value.isEqual(to: v) {
+                        return false
+                    }
+                } else {
+                    return false
+                }
+            }
+        }
+        true
+    }
+}
+
+/// Value-based search operations available when `V: Equatable`.
+extend Dictionary[K, V, H, A] where K: Hashable, V: Equatable, H: Hasher, H: Defaultable {
+
+    /// `true` if any entry's value equals `value`.
+    ///
+    /// O(capacity) — every bucket is inspected because the dictionary
+    /// is keyed on `K`, not `V`. For `O(1)` checks against a small
+    /// set of values, build a `Set[V]` instead.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// ["a": 1, "b": 2].containsValue(2);  // true
+    /// ["a": 1, "b": 2].containsValue(5);  // false
+    /// ```
+    public func containsValue(value: V) -> Bool {
+
+        for i in 0..<self.capacity {
+            if let .Some(e) = self.entryAt(i) {
+                let v = e.value;
+                if v.isEqual(to: value) {
+                    return true
+                }
+            }
+        }
+        false
+    }
+
+    /// Returns *some* key mapping to `value`, or `None`.
+    ///
+    /// O(capacity); short-circuits on the first match. "First" is
+    /// determined by bucket order and is unspecified — for an
+    /// exhaustive list use `allKeys(of:)`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// ["a": 1, "b": 2].firstKey(of: 2);  // Some("b")
+    /// ["a": 1, "b": 2].firstKey(of: 5);  // None
+    /// ```
+    public func firstKey(of value: V) -> K? {
+
+        for i in 0..<self.capacity {
+            if let .Some(e) = self.entryAt(i) {
+                let k = e.key;
+                let v = e.value;
+                if v.isEqual(to: value) {
+                    return .Some(k)
+                }
+            }
+        }
+        .None
+    }
+
+    /// Returns every key whose value equals `value`.
+    ///
+    /// O(capacity), allocates an `Array[K]`. Result order matches
+    /// bucket layout and is therefore unspecified. Empty array if no
+    /// matches.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// ["a": 1, "b": 2, "c": 1].allKeys(of: 1);  // ["a", "c"]  — order unspecified
+    /// ["a": 1].allKeys(of: 99);                  // []
+    /// ```
+    public func allKeys(of value: V) -> Array[K] {
+        var result = Array[K]();
+
+        for i in 0..<self.capacity {
+            if let .Some(e) = self.entryAt(i) {
+                let k = e.key;
+                let v = e.value;
+                if v.isEqual(to: value) {
+                    result.append(k);
+                }
+            }
+        }
+        result
+    }
+}
+
+/// `Formattable` conformance — renders a dictionary as
+/// `"{k1: v1, k2: v2}"` when both `K` and `V` are `Formattable`.
+///
+/// Drives string interpolation. Empty dictionaries render as `"{}"`.
+/// Entry order in the output reflects bucket order and is unspecified.
+extend Dictionary[K, V, H, A]: Formattable where K: Hashable, K: Formattable, V: Formattable, H: Hasher, H: Defaultable {
+    /// Renders the dictionary as `"{" + entries.joined(", ") + "}"`,
+    /// passing `options` to each key and value's `format`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// ["a": 1, "b": 2].format();  // "{a: 1, b: 2}"  — order unspecified
+    /// Dictionary[String, Int64]().format();  // "{}"
+    /// "\(["a": 1, "b": 2])";      // "{a: 1, b: 2}"  via interpolation
+    /// ```
+    public func format(mutating into writer: some Formatter, options: FormatOptions = FormatOptions.default()) {
+        writer.append(char: '{');
+        var first = true;
+
+        for i in 0..<self.capacity {
+            if let .Some(e) = self.entryAt(i) {
+                let key = e.key;
+                let value = e.value;
+                if first {
+                    first = false
+                } else {
+                    writer.append(", ")
+                }
+                key.format(into: writer, options);
+                writer.append(": ");
+                value.format(into: writer, options)
+            }
+        }
+        writer.append(char: '}')
+    }
+}
+
+/// Eager-copy variant of `clone()` for callers that don't want to
+/// inherit the COW share with the source.
+extend Dictionary[K, V, H, A] where K: Hashable, H: Hasher, H: Defaultable {
+
+    /// Returns a fully-detached copy of the dictionary, with no shared
+    /// storage.
+    ///
+    /// Walks every bucket and re-inserts the live entries into a
+    /// freshly-sized table. Use over `clone()` when you specifically
+    /// want to avoid the lazy COW share — for example, before passing
+    /// the copy to another thread or system that might race with
+    /// further mutations.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let a = ["x": [1, 2, 3]];
+    /// let b = a.deepClone();  // fully independent copy
+    /// ```
+    public func deepClone() -> Dictionary[K, V, H, A] {
+        var result = Dictionary[K, V, H, A](capacity: self.capacity, allocator: self.allocator);
+
+        for i in 0..<self.capacity {
+            if let .Some(e) = self.entryAt(i) {
+                let key = e.key;
+                let value = e.value;
+                 result.insert( key, value);
+            }
+        }
+        result
+    }
+}
+
+/// Aggregation available when the value type forms an `Addable`
+/// monoid (`V + V = V` with a `Defaultable` zero).
+extend Dictionary[K, V, H, A] where K: Hashable, V: Addable, V.Output = V, V: Defaultable, H: Hasher, H: Defaultable {
+
+    /// Returns the sum of every value, starting from `V()` (the
+    /// default-constructed zero).
+    ///
+    /// Empty dictionaries return `V()` — for `Int64` that's `0`, for
+    /// `String` that's `""`, etc. Linear in `count`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// ["a": 1, "b": 2, "c": 3].sumValues();  // 6
+    /// [:].sumValues();                        // 0 — V's default
+    /// ```
+    public func sumValues() -> V {
+        var result = V();
+
+        for i in 0..<self.capacity {
+            if let .Some(e) = self.entryAt(i) {
+                let value = e.value;
+                result = result + value;
+            }
+        }
+        result
+    }
+}
+
+
+// ============================================================================
+// KEYS VIEW
+// ============================================================================
+
+/// Single-pass iterator yielding only the keys of a dictionary.
+///
+/// Wraps a `DictionaryIterator[K, V, A]` and discards the value half of
+/// each entry. Order matches the underlying entry iteration and is
+/// unspecified.
+///
+/// # Examples
+///
+/// ```
+/// var it = ["a": 1, "b": 2].keys.iter();
+/// it.next();  // Some("a")  — order unspecified
+/// it.next();  // Some("b")
+/// it.next();  // None
+/// ```
+///
+/// # Representation
+///
+/// Wraps a `DictionaryIterator[K, V, A]`.
+///
+/// # Memory Model
+///
+/// Value type. Aliases dictionary storage; do not retain across
+/// mutations.
+public struct KeysIterator[K, V, A = GlobalAllocator]: Iterator where K: Hashable, A: Allocator {
+    /// Element type yielded by `next()` — `K`.
+    type Item = K
+
+    /// The underlying entry iterator; only `pair.0` is read.
+    private var dictIter: DictionaryIterator[K, V, A]
+
+    /// @name From Dict
+    /// Wraps a `DictionaryIterator` to yield only its keys.
+    ///
+    /// Prefer `KeysView.iter()` over calling this directly.
+    public init(dictIter dictIter: DictionaryIterator[K, V, A]) {
+        self.dictIter = dictIter;
+    }
+
+    /// Returns the next key, or `None` when the underlying iterator
+    /// is exhausted.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// var it = ["a": 1].keys.iter();
+    /// it.next();  // Some("a")
+    /// it.next();  // None
+    /// ```
+    public mutating func next() -> K? {
+        let maybePair = self.dictIter.next();
+        if let .Some(pair) = maybePair {
+            .Some(pair.0)
+        } else {
+            .None
+        }
+    }
+}
+
+/// Lazy `Iterable` view over the keys of a dictionary.
+///
+/// Returned by `Dictionary.keys`. Constructing the view is O(1) — it
+/// stores the bucket pointer and capacity. The view is invalidated by
+/// any mutation that may reallocate.
+///
+/// # Examples
+///
+/// ```
+/// let dict = ["a": 1, "b": 2];
+/// for k in dict.keys { print(k) }
+/// let arr = Array(from: dict.keys);
+/// ```
+///
+/// # Representation
+///
+/// A share of the source dictionary's storage.
+///
+/// # Memory Model
+///
+/// Holds a share of the storage (one refcount), so the view stays valid
+/// after the dictionary changes or is dropped, and sees it unchanged.
+public struct KeysView[K, V, A = GlobalAllocator]: Iterable where K: Hashable, A: Allocator {
+    /// `Iterable` element type — `K`.
+    type Item = K
+    /// Concrete iterator type returned by `iter()`.
+    type TargetIterator = KeysIterator[K, V, A]
+
+    /// A share of the source dictionary's storage.
+    private var storage: CowBox[DictionaryStorage[K, V, A]]
+
+    /// @name From Storage
+    /// Internal — constructs a view over a share of `storage`.
+    /// Use `Dictionary.keys` to obtain a view.
+    fileprivate init(storage storage: CowBox[DictionaryStorage[K, V, A]]) {
+        self.storage = storage;
+    }
+
+    /// Returns a fresh `KeysIterator[K, V, A]` over the view.
+    ///
+    /// Each call returns a new iterator starting at the beginning of
+    /// the bucket array.
+    public func iter() -> KeysIterator[K, V, A] {
+        KeysIterator(dictIter: DictionaryIterator(storage: self.storage.clone()))
+    }
+}
+
+// ============================================================================
+// VALUES VIEW
+// ============================================================================
+
+/// Single-pass iterator yielding only the values of a dictionary.
+///
+/// Wraps a `DictionaryIterator[K, V, A]` and discards the key half of
+/// each entry. Order matches the underlying entry iteration and is
+/// unspecified.
+///
+/// # Examples
+///
+/// ```
+/// var it = ["a": 1, "b": 2].values.iter();
+/// it.next();  // Some(1)  — order unspecified
+/// it.next();  // Some(2)
+/// it.next();  // None
+/// ```
+///
+/// # Representation
+///
+/// Wraps a `DictionaryIterator[K, V, A]`.
+///
+/// # Memory Model
+///
+/// Value type. Aliases dictionary storage; do not retain across
+/// mutations.
+public struct ValuesIterator[K, V, A = GlobalAllocator]: Iterator where K: Hashable, A: Allocator {
+    /// Element type yielded by `next()` — `V`.
+    type Item = V
+
+    /// The underlying entry iterator; only `pair.1` is read.
+    private var dictIter: DictionaryIterator[K, V, A]
+
+    /// @name From Dict
+    /// Wraps a `DictionaryIterator` to yield only its values.
+    ///
+    /// Prefer `ValuesView.iter()` over calling this directly.
+    public init(dictIter dictIter: DictionaryIterator[K, V, A]) {
+        self.dictIter = dictIter;
+    }
+
+    /// Returns the next value, or `None` when the underlying iterator
+    /// is exhausted.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// var it = ["a": 1].values.iter();
+    /// it.next();  // Some(1)
+    /// it.next();  // None
+    /// ```
+    public mutating func next() -> V? {
+        let maybePair = self.dictIter.next();
+        if let .Some(pair) = maybePair {
+            .Some(pair.1)
+        } else {
+            .None
+        }
+    }
+}
+
+/// Lazy `Iterable` view over the values of a dictionary.
+///
+/// Returned by `Dictionary.values`. Constructing the view is O(1) —
+/// it stores the bucket pointer and capacity. The view is invalidated
+/// by any mutation that may reallocate.
+///
+/// # Examples
+///
+/// ```
+/// let dict = ["a": 1, "b": 2];
+/// for v in dict.values { print(v) }
+/// let sum = dict.values.iter().sum();
+/// ```
+///
+/// # Representation
+///
+/// A share of the source dictionary's storage.
+///
+/// # Memory Model
+///
+/// Holds a share of the storage (one refcount), so the view stays valid
+/// after the dictionary changes or is dropped, and sees it unchanged.
+public struct ValuesView[K, V, A = GlobalAllocator]: Iterable where K: Hashable, A: Allocator {
+    /// `Iterable` element type — `V`.
+    type Item = V
+    /// Concrete iterator type returned by `iter()`.
+    type TargetIterator = ValuesIterator[K, V, A]
+
+    /// A share of the source dictionary's storage.
+    private var storage: CowBox[DictionaryStorage[K, V, A]]
+
+    /// @name From Storage
+    /// Internal — constructs a view over a share of `storage`.
+    /// Use `Dictionary.values` to obtain a view.
+    fileprivate init(storage storage: CowBox[DictionaryStorage[K, V, A]]) {
+        self.storage = storage;
+    }
+
+    /// Returns a fresh `ValuesIterator[K, V, A]` over the view.
+    ///
+    /// Each call returns a new iterator starting at the beginning of
+    /// the bucket array.
+    public func iter() -> ValuesIterator[K, V, A] {
+        ValuesIterator(dictIter: DictionaryIterator(storage: self.storage.clone()))
+    }
+}
+
+
+// ============================================================================
+// LITERAL CONFORMANCE
+// ============================================================================
+
+/// `_ExpressibleByDictionaryLiteral` / `ExpressibleByDictionaryLiteral`
+/// / `Defaultable` conformances — what makes the `["a": 1, "b": 2]`
+/// literal syntax work for `Dictionary[K, V, H, A]`.
+// Constructors that make their own allocator.
+extend Dictionary[K, V, H, A] where A: Defaultable {
     /// @name Empty
     /// Creates an empty dictionary with no allocation.
     ///
     /// Capacity starts at zero; the first insert allocates the smallest
-    /// bucket array (currently 8 slots). For pre-sized creation use
+    /// table (currently 8 slots). For pre-sized creation use
     /// `init(capacity:)`.
     ///
     /// # Examples
@@ -415,11 +1950,7 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
     /// d.capacity;  // 0
     /// ```
     public init() {
-        self.storage = CowBox(DictionaryStorage(
-            buckets: Pointer[Bucket[K, V]].nullPointer(),
-            len: 0,
-            cap: 0
-        ));
+        self.init(allocator: A())
     }
 
     /// @name With Capacity
@@ -438,32 +1969,7 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
     /// d.count;      // 0
     /// ```
     public init(capacity capacity: Int64) {
-        let actualCap = nextPowerOfTwo(capacity);
-        if actualCap > 0 {
-            let layout = Layout.array[Bucket[K, V]](actualCap);
-            var allocator = SystemAllocator();
-            let result = allocator.allocate(layout);
-            if let .Some(rawPtr) = result {
-                let newBuckets = rawPtr.cast[Bucket[K, V]]();
-                // Initialize all buckets as empty
-                for i in 0..<actualCap {
-                    unsafe newBuckets.offset(by: i).write(.Empty);
-                }
-                self.storage = CowBox(DictionaryStorage(
-                    buckets: newBuckets,
-                    len: 0,
-                    cap: actualCap
-                ))
-            } else {
-                fatalError("Dictionary allocation failed")
-            }
-        } else {
-            self.storage = CowBox(DictionaryStorage(
-                buckets: Pointer[Bucket[K, V]].nullPointer(),
-                len: 0,
-                cap: 0
-            ))
-        }
+        self.init(capacity: capacity, allocator: A())
     }
 
     /// @name From Pairs
@@ -564,1572 +2070,9 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
              self.insert( pair.0, pair.1);
         }
     }
-
-    // ========================================================================
-    // HASHING (Internal)
-    // ========================================================================
-
-    /// Computes the 64-bit hash for `key` using a fresh `H` instance.
-    ///
-    /// Calls `key.hash(into:)` then `hasher.finish()`. Result is cached
-    /// in `.Occupied` buckets so resizes don't recompute it.
-    private func hashKey(key: K) -> UInt64 {
-        var hasher = H();
-        key.hash(into: hasher);
-        hasher.finish()
-    }
-
-    // ========================================================================
-    // PROPERTIES
-    // ========================================================================
-
-    /// Number of live (`.Occupied`) entries. Read-only; O(1).
-    ///
-    /// Excludes tombstones — `count` only reflects what
-    /// `iter()`/`contains(...)` would see.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// ["a": 1, "b": 2].count;  // 2
-    /// [:].count;               // 0
-    /// ```
-    public var count: Int64 { get { self.len() } }
-
-    /// Total slots in the bucket array — always `>= count`. Read-only.
-    ///
-    /// Resizes (doubling) trigger when `count` reaches 75% of
-    /// `capacity`. Tombstones count against the threshold even though
-    /// they don't count toward `count`. The actual value after
-    /// `init(capacity:)` rounds up to the next power of two.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// let d = Dictionary[String, Int64](capacity: 100);
-    /// d.capacity;  // 128
-    /// ```
-    public var capacity: Int64 { get { self.cap() } }
-
-    /// `true` when the dictionary holds no live entries; equivalent to
-    /// `count == 0`.
-    ///
-    /// Reads more naturally than the comparison.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// [:].isEmpty;           // true
-    /// ["a": 1].isEmpty;      // false
-    /// ```
-    public var isEmpty: Bool { get { self.len() == 0 } }
-
-    /// Lazy view of the dictionary's keys, iterable in unspecified
-    /// order.
-    ///
-    /// Constructing the view is O(1) — it holds a share of the storage
-    /// and skips empty/deleted slots during iteration. Like `iter()`,
-    /// it sees the keys as they were when the view was made.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// let dict = ["a": 1, "b": 2, "c": 3];
-    /// for key in dict.keys { print(key) }
-    /// let keyArray = Array(from: dict.keys);
-    /// ```
-    public var keys: KeysView[K, V] { get { KeysView(storage: self.storage.clone()) } }
-
-    /// Lazy view of the dictionary's values, iterable in unspecified
-    /// order.
-    ///
-    /// Same iteration order as `keys` — the two views walk the
-    /// buckets in lockstep, so `zip(dict.keys, dict.values)` yields
-    /// pairs equivalent to `dict.iter()`. Holds a share of the
-    /// storage, like `keys`.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// let dict = ["a": 1, "b": 2, "c": 3];
-    /// for value in dict.values { print(value) }
-    /// let sum = dict.values.iter().sum();  // 6
-    /// ```
-    public var values: ValuesView[K, V] { get { ValuesView(storage: self.storage.clone()) } }
-
-    // ========================================================================
-    // SUBSCRIPTS
-    // ========================================================================
-
-    /// @name Lookup
-    /// The value stored for `key`, in place, or `.None` when absent.
-    ///
-    /// Reads lend `Optional[&V]` (a binding copies it out); a `&mutating`
-    /// payload binder updates the stored value in place with one lookup.
-    /// The place never inserts or removes: use `insert(key, value)`,
-    /// `remove(key)`, or `dict(key, default: v)` to insert when missing.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// var dict = ["a": 1, "b": 2];
-    /// dict("a");           // Some(1)
-    /// dict("z");           // None
-    /// if let .Some(&mutating v) = dict("a") { v += 10; }  // "a": 11
-    /// ```
-    public subscript(key: K)? -> V {
-        ref {
-            let index = self.findEntry(key) ?? -1;
-            if index < 0 { return null; }
-            self.valueAt(index)
-        }
-        mutating ref {
-            self.makeUnique();
-            let index = self.findEntry(key) ?? -1;
-            if index < 0 { return null; }
-            .Some(self.mutatingValueAt(index))
-        }
-    }
-
-    /// @name With Default
-    /// The value for `key`, or `defaultValue` when absent.
-    ///
-    /// Reading never stores the default. Writing inserts `defaultValue`
-    /// first when the key is missing, then updates the stored value in
-    /// place, so `counts(word, default: 0) += 1` is one lookup.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// var dict = ["a": 1];
-    /// dict("z", default: 0);       // 0, nothing stored
-    /// dict("z", default: 0) += 5;  // inserts "z": 5
-    /// ```
-    public subscript(key: K, default defaultValue: V) -> V {
-        get {
-            match self(key) {
-                .Some(v) => v,
-                .None => defaultValue
-            }
-        }
-        mutating ref {
-            if let .None = self.findEntry(key) { self.insert(key, defaultValue); }
-            self.makeUnique();
-            self.mutatingValueAt(self.findEntry(key) ?? -1)
-        }
-    }
-
-    /// @name Unwrap
-    /// The value for `key`, in place, panicking when the key is absent.
-    ///
-    /// Use when absence is a bug. Reads lend `&V` and writes update the
-    /// stored value in place; assigning to a missing key panics too, so
-    /// insert with `insert(key, value)` or `dict(key, default: v)`.
-    ///
-    /// # Errors
-    ///
-    /// Panics with `"Dictionary subscript(unwrap:): key not found"` when
-    /// the key is absent.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// var dict = ["a": 1, "b": 2];
-    /// dict(unwrap: "a");       // 1
-    /// dict(unwrap: "a") += 1;  // "a": 2
-    /// dict(unwrap: "z");       // PANIC: key not found
-    /// ```
-    public subscript(unwrap key: K) -> V {
-        ref {
-            let index = self.findEntry(key) ?? -1;
-            if index < 0 { fatalError("Dictionary subscript(unwrap:): key not found") }
-            self.valueRefAt(index)
-        }
-        mutating ref {
-            self.makeUnique();
-            let index = self.findEntry(key) ?? -1;
-            if index < 0 { fatalError("Dictionary subscript(unwrap:): key not found") }
-            self.mutatingValueAt(index)
-        }
-    }
-
-    /// Number of bucket slots, for slot-wise key scans (`Set`).
-    internal var slotCount: Int64 { self.cap() }
-
-    /// Lends the key in bucket `slot`, or `.None` for an empty or deleted
-    /// slot, or one out of range.
-    internal func keyAt(consuming slot: Int64) -> Optional[&K] {
-        if slot < 0 or slot >= self.cap() { return .None; }
-        let bucket = unsafe &self.buckets().offset(by: slot).value;
-        if let .Occupied(&key, _, _) = bucket { return .Some(key); }
-        .None
-    }
-
-    /// Lends the value of the occupied bucket at `index`.
-    private func valueAt(consuming index: Int64) -> Optional[&V] {
-        let bucket = unsafe &self.buckets().offset(by: index).value;
-        match bucket {
-            .Occupied(_, &v, _) => .Some(v),
-            _ => .None,
-        }
-    }
-
-    /// Lends the value of the occupied bucket at `index`.
-    private func valueRefAt(consuming index: Int64) -> &V {
-        let bucket = unsafe &self.buckets().offset(by: index).value;
-        if let .Occupied(_, &v, _) = bucket { return v; }
-        fatalError("Dictionary: bucket is not occupied")
-    }
-
-    /// Lends the value of the occupied bucket at `index` mutably. The
-    /// caller makes the storage unique first.
-    private func mutatingValueAt(consuming index: Int64) -> &mutating V {
-        let bucket = unsafe &mutating self.buckets().offset(by: index).mutatingValue;
-        if let .Occupied(_, &mutating v, _) = bucket { return v; }
-        fatalError("Dictionary: bucket is not occupied")
-    }
-
-    // ========================================================================
-    // INTERNAL LOOKUP
-    // ========================================================================
-
-    /// Locates the bucket index storing `key`, or `None` if absent.
-    ///
-    /// Probes linearly from the hash-anchored start slot, skipping
-    /// `.Deleted` tombstones and stopping at the first `.Empty` slot
-    /// (which terminates a chain). Returns `None` after a full
-    /// wrap-around without finding the key.
-    private func findEntry(key: K) -> Int64? {
-        let myCap = self.cap();
-        if myCap == 0 {
-            return .None
-        }
-
-        let hashValue: UInt64 = self.hashKey(key);
-        // `cap` is a power of two, so `& mask` is the modulo.
-        let mask = myCap - 1;
-        var index = slotFor(hashValue, mask);
-        let myBuckets = self.buckets();
-        var i: Int64 = 0;
-
-        while i < myCap {
-            // Borrow the bucket: a `read()` copy retains and releases the
-            // key and value at every probe step.
-            let bucket = unsafe &myBuckets.offset(by: index).value;
-            match bucket {
-                .Empty => return .None,
-                .Occupied(&k, _, &h) => {
-                    // The cached hash rules out most keys without `isEqual`.
-                    if h == hashValue and k.isEqual(to: key) {
-                        return .Some(index)
-                    }
-                },
-                .Deleted => {}
-            }
-            // Linear probing
-            index = (index + 1) & mask;
-            i = i + 1
-        }
-        .None
-    }
-
-    /// Returns the index of the first non-`.Occupied` slot reachable
-    /// from `hashValue`'s anchor.
-    ///
-    /// Used by `insert` after `findEntry` has confirmed the key is
-    /// new. Reuses tombstones, which keeps the bucket array compact
-    /// after many removes followed by inserts.
-    private func findEmptySlot(hashValue: UInt64) -> Int64? {
-        let myCap = self.cap();
-        if myCap == 0 {
-            return .None
-        }
-
-        let mask = myCap - 1;
-        var index = slotFor(hashValue, mask);
-        let myBuckets = self.buckets();
-        var i: Int64 = 0;
-
-        while i < myCap {
-            let bucket = unsafe &myBuckets.offset(by: index).value;
-            match bucket {
-                .Occupied(_, _, _) => {},
-                _ => return .Some(index)
-            }
-            // Linear probing
-            index = (index + 1) & mask;
-            i = i + 1
-        }
-        .None
-    }
-
-    // ========================================================================
-    // CAPACITY MANAGEMENT (Internal)
-    // ========================================================================
-
-    /// Rebuilds the table when live entries plus tombstones reach 75% of
-    /// capacity (or capacity is zero).
-    ///
-    /// Called by `insert` before placing a new entry. Tombstones count
-    /// toward the load: without that, a table under insert/remove churn
-    /// fills with them, runs out of `.Empty` slots, and every miss probes
-    /// the whole table. The rebuild doubles capacity when live entries
-    /// alone fill half the threshold, and otherwise rehashes at the same
-    /// size, which just clears the tombstones. Either way at least
-    /// `cap * 3 / 8` more inserts fit before the next rebuild, so the
-    /// cost stays amortized O(1).
-    private mutating func ensureCapacity() {
-        let myCap = self.cap();
-        if myCap == 0 {
-            self.resize();
-            return
-        }
-        let myLen = self.len();
-        let threshold = myCap * 3 / 4;
-        if myLen + self.storage.value.deleted < threshold {
-            return
-        }
-        if myLen * 2 >= threshold {
-            self.resize()
-        } else {
-            self.resizeToCapacity(myCap)
-        }
-    }
-
-    /// Doubles the bucket array (or jumps from 0 to 8) and rehashes
-    /// every live entry.
-    ///
-    /// Tombstones are dropped during the rebuild, so resizes also
-    /// reclaim space wasted by previous removes. Triggers COW.
-    /// Panics on allocation failure.
-    private mutating func resize() {
-        let oldCap = self.cap();
-        self.resizeToCapacity(if oldCap == 0 { 8 } else { oldCap * 2 })
-    }
-
-    /// Rebuilds the bucket array at the exact `newCap` capacity.
-    ///
-    /// Used by `resize`, `reserveCapacity` and `shrinkToFit`. The caller
-    /// must ensure `newCap` is large enough to hold the current `count`
-    /// without exceeding the load factor; this routine itself does
-    /// not check. Triggers COW. Panics on allocation failure.
-    private mutating func resizeToCapacity(newCap: Int64) {
-        let layout = Layout.array[Bucket[K, V]](newCap);
-        var allocator = SystemAllocator();
-        let result = allocator.allocate(layout);
-        var newBuckets = Pointer[Bucket[K, V]].nullPointer();
-        if let .Some(rawPtr) = result {
-            newBuckets = rawPtr.cast[Bucket[K, V]]()
-        } else {
-            fatalError("Dictionary resize failed")
-        }
-        for i in 0..<newCap {
-            unsafe newBuckets.offset(by: i).write(.Empty);
-        }
-        let mask = newCap - 1;
-
-        if not self.storage.isUnique {
-            // Shared (another copy or an iterator holds it): copy the live
-            // entries straight into the new table. Writing through
-            // `value` would fork the whole old table first, only to
-            // rebuild it.
-            let old = &self.storage.value;
-            let liveCount = old.len;
-            for i in 0..<old.cap {
-                if let .Occupied(key, value, hashValue) = unsafe old.buckets.offset(by: i).read() {
-                    placeEntry(newBuckets, mask, .Occupied(key, value, hashValue), hashValue)
-                }
-            }
-            self.storage = CowBox(DictionaryStorage(buckets: newBuckets, len: liveCount, cap: newCap));
-            return
-        }
-
-        // Unique: move every live entry into the new table. The old
-        // buckets are left moved-out, so freeing them drops nothing.
-        let s = &mutating self.storage.value;
-        for i in 0..<s.cap {
-            if let .Occupied(key, value, hashValue) = unsafe s.buckets.offset(by: i).take() {
-                placeEntry(newBuckets, mask, .Occupied(key, value, hashValue), hashValue)
-            }
-        }
-        if s.cap > 0 {
-            unsafe allocator.deallocate(s.buckets.asRaw(), Layout.array[Bucket[K, V]](s.cap))
-        }
-        s.buckets = newBuckets;
-        s.cap = newCap;
-        s.deleted = 0
-    }
-
-    // ========================================================================
-    // KEY LOOKUP
-    // ========================================================================
-
-    /// `true` if `key` is present in the dictionary.
-    ///
-    /// Wraps `findEntry`. For value-based search use the `V: Equatable`
-    /// extension's `containsValue(value:)`.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// ["a": 1, "b": 2].contains("a");  // true
-    /// ["a": 1, "b": 2].contains("z");  // false
-    /// ```
-    public func contains(key: K) -> Bool {
-        self.findEntry(key).isSome
-    }
-
-    // ========================================================================
-    // MUTATING OPERATIONS
-    // ========================================================================
-
-    /// Inserts `(key, value)`, replacing any existing entry for `key`,
-    /// and returns the old value (or `None`) on update.
-    ///
-    /// Triggers `ensureCapacity()` and may resize before the insert
-    /// lands. The cached hash is computed once here. To update a value in
-    /// place use `if let .Some(&mutating v) = dict(key)` or
-    /// `dict(key, default: v) += …`.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// var dict = ["a": 1];
-    /// dict.insert("b", 2);  // None;     dict = ["a": 1, "b": 2]
-    /// dict.insert("a", 9);  // Some(1);  dict = ["a": 9, "b": 2]
-    /// ```
-    public mutating func insert(key: K, value: V) -> V? {
-        let hashValue = self.hashKey(key);
-        // Check if key already exists
-        let maybeIndex = self.findEntry(key);
-        if let .Some(index) = maybeIndex {
-            self.makeUnique();
-            let myBuckets = self.buckets();
-            // Move the old entry out: `write` overwrites without dropping,
-            // so a `read()` copy here leaked the replaced key and value.
-            let oldBucket = unsafe myBuckets.offset(by: index).take();
-            let oldValue: V? = match oldBucket {
-                .Occupied(_, v, _) => .Some(v),
-                _ => .None
-            };
-            unsafe myBuckets.offset(by: index).write(.Occupied(key, value, hashValue));
-            return oldValue
-        }
-
-        // Need to insert - ensure capacity first
-        self.ensureCapacity();
-        self.makeUnique();
-
-        // Find empty slot
-        let maybeSlot = self.findEmptySlot(hashValue);
-        if let .Some(slotIndex) = maybeSlot {
-            let s = &mutating self.storage.value;
-            // The slot is `.Empty` or a reused `.Deleted` tombstone.
-            if not bucketIsEmpty(unsafe s.buckets.offset(by: slotIndex).value) {
-                s.deleted = s.deleted - 1
-            }
-            unsafe s.buckets.offset(by: slotIndex).write(.Occupied(key, value, hashValue));
-            s.len = s.len + 1
-        } else {
-            fatalError("Dictionary insert failed - no empty slot")
-        }
-
-        .None
-    }
-
-    /// Removes `key` and returns its value, or `None` if absent.
-    ///
-    /// Replaces the bucket with a `.Deleted` tombstone so existing
-    /// probe chains stay intact. Tombstones are reclaimed by the next
-    /// resize. Triggers COW only when an entry is actually removed.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// var dict = ["a": 1, "b": 2];
-    /// dict.remove("a");  // Some(1); dict = ["b": 2]
-    /// dict.remove("z");  // None;    dict unchanged
-    /// ```
-    public mutating func remove(key: K) -> V? {
-        let maybeIndex = self.findEntry(key);
-
-        if let .Some(index) = maybeIndex {
-            self.makeUnique();
-            let s = &mutating self.storage.value;
-            // Moved out (not `read()`): the tombstone write drops nothing.
-            let bucket = unsafe s.buckets.offset(by: index).take();
-            // Mark as deleted (tombstone)
-            unsafe s.buckets.offset(by: index).write(.Deleted);
-            s.len = s.len - 1;
-            s.deleted = s.deleted + 1;
-            return match bucket {
-                .Occupied(_, v, _) => .Some(v),
-                _ => .None
-            }
-        }
-
-        .None
-    }
-
-    /// Removes `key` and returns the *stored* `(key, value)` pair, or
-    /// `None` if absent.
-    ///
-    /// Like `remove(...)`, but also hands back the stored key — useful
-    /// when key equality is coarser than identity (the stored key may
-    /// differ from the probe). Same tombstone/COW behaviour as
-    /// `remove(...)`.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// var dict = ["a": 1, "b": 2];
-    /// dict.removeEntry("a");  // Some(("a", 1)); dict = ["b": 2]
-    /// dict.removeEntry("z");  // None;           dict unchanged
-    /// ```
-    public mutating func removeEntry(key: K) -> (K, V)? {
-        let maybeIndex = self.findEntry(key);
-
-        if let .Some(index) = maybeIndex {
-            self.makeUnique();
-            let s = &mutating self.storage.value;
-            // Moved out (not `read()`): the tombstone write drops nothing.
-            let bucket = unsafe s.buckets.offset(by: index).take();
-            // Mark as deleted (tombstone)
-            unsafe s.buckets.offset(by: index).write(.Deleted);
-            s.len = s.len - 1;
-            s.deleted = s.deleted + 1;
-            return match bucket {
-                .Occupied(k, v, _) => .Some((k, v)),
-                _ => .None
-            }
-        }
-
-        .None
-    }
-
-    /// Removes every entry, leaving the bucket array allocated and
-    /// reset to all-`.Empty`.
-    ///
-    /// O(capacity). The buffer is kept so subsequent inserts don't
-    /// reallocate; follow with `shrinkToFit()` to release it.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// var dict = ["a": 1, "b": 2];
-    /// dict.clear();    // dict = [:]
-    /// dict.capacity;   // unchanged
-    /// ```
-    public mutating func clear() {
-        let s = &mutating self.storage.value;
-        // `assign` drops the entry it replaces; `write` leaked them.
-        for i in 0..<s.cap {
-            unsafe s.buckets.offset(by: i).assign(.Empty);
-        }
-        s.len = 0;
-        s.deleted = 0
-    }
-
-    /// Merges every entry of `other` into `self`, calling `combine`
-    /// to resolve key collisions.
-    ///
-    /// `combine(existing, incoming)` is invoked exactly once per
-    /// collision — pick one, return both summed, or use `(_, new)` for
-    /// last-write-wins. New keys are inserted directly. For a
-    /// non-mutating variant use `merging(...)`.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// var a = ["x": 1, "y": 2];
-    /// let b = ["y": 20, "z": 30];
-    /// a.merge(b) { (old, new) in old + new };
-    /// // a == ["x": 1, "y": 22, "z": 30]
-    /// ```
-    public mutating func merge(other: Dictionary[K, V, H], uniquingKeysWith combine: (V, V) -> V) {
-        var otherIter = other.iter();
-        while let .Some(pair) = otherIter.next() {
-            let maybeExisting = self(pair.0);
-            match maybeExisting {
-                .Some(existing) => {
-                     self.insert( pair.0, combine(existing, pair.1));
-                },
-                .None => {
-                     self.insert( pair.0, pair.1);
-                }
-            }
-        }
-    }
-
-    /// Merges every `(key, value)` pair from an arbitrary iterable into
-    /// `self`, calling `combine` on collisions.
-    ///
-    /// Same semantics as `merge(...)` but accepts any iterable of
-    /// pairs — useful for arrays of tuples, generator output, or
-    /// streamed sources.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// var dict = ["a": 1];
-    /// dict.merge(from: [("b", 2), ("c", 3)]) { (_, new) in new };
-    /// // dict == ["a": 1, "b": 2, "c": 3]
-    /// ```
-    public mutating func merge[I](from pairs: I, uniquingKeysWith combine: (V, V) -> V)
-        where I: Iterable, I: not Static, I.Item = (K, V)
-    {
-        var iter = pairs.iter();
-        while let .Some(pair) = iter.next() {
-            let maybeExisting = self(pair.0);
-            match maybeExisting {
-                .Some(existing) => {
-                     self.insert( pair.0, combine(existing, pair.1));
-                },
-                .None => {
-                     self.insert( pair.0, pair.1);
-                }
-            }
-        }
-    }
-
-    /// Keeps only entries for which `predicate(key, value)` is true.
-    ///
-    /// Two-pass implementation: collects keys to remove, then deletes
-    /// them. Each removal leaves a tombstone — call `shrinkToFit()`
-    /// afterwards if you've removed a large fraction. The mirror is
-    /// `removeAll(where:)`.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// var dict = ["a": 1, "b": 2, "c": 3];
-    /// dict.retain { (k, v) in v > 1 };  // ["b": 2, "c": 3]
-    /// ```
-    public mutating func retain(where predicate: (K, V) -> Bool) {
-        self.makeUnique();
-        let myCap = self.cap();
-        let myBuckets = self.buckets();
-        var keysToRemove = Array[K]();
-
-        for i in 0..<myCap {
-            let bucket = unsafe myBuckets.offset(by: i).read();
-            match bucket {
-                .Occupied(key, value, _) => {
-                    if not predicate(key, value) {
-                        keysToRemove.append(key);
-                    }
-                },
-                _ => {}
-            }
-        }
-
-        var removeIter = keysToRemove.iter();
-        while let .Some(key) = removeIter.next() {
-             self.remove( key);
-        }
-    }
-
-    /// Removes every entry for which `predicate(key, value)` is true.
-    ///
-    /// Inverse of `retain(where:)`; implemented as `retain` over
-    /// the negated predicate. Same tombstone caveat applies — consider
-    /// `shrinkToFit()` after large removals.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// var dict = ["a": 1, "b": 2, "c": 3];
-    /// dict.removeAll { (k, v) in v < 2 };  // ["b": 2, "c": 3]
-    /// ```
-    public mutating func removeAll(consuming where predicate: (K, V) -> Bool) {
-        self.retain(where: { (k, v) in not predicate(k, v) })
-    }
-
-    /// Grows the bucket array so at least `minimumCapacity` entries
-    /// fit without resizing.
-    ///
-    /// No-op when current capacity already suffices. The actual new
-    /// capacity rounds up to the next power of two and accounts for
-    /// the 75% load factor (so target = `nextPowerOfTwo(min * 4 / 3)`).
-    /// The opposite operation is `shrinkToFit()`.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// var dict = Dictionary[String, Int64]();
-    /// dict.reserveCapacity(1000);
-    /// // No reallocations for the first ~750 inserts.
-    /// ```
-    public mutating func reserveCapacity(minimumCapacity: Int64) {
-        if minimumCapacity <= self.capacity {
-            return
-        }
-        // Calculate target capacity (accounting for load factor)
-        let targetCap = nextPowerOfTwo(minimumCapacity * 4 / 3);
-        self.resizeToCapacity(targetCap)
-    }
-
-    /// Reduces capacity to the smallest power of two that still
-    /// satisfies the load factor for the current `count`.
-    ///
-    /// Frees excess memory and reclaims tombstone space (the resize
-    /// rebuilds the table without them). Empty dictionaries fall
-    /// through to `clear()`. No-op when the table is already at the
-    /// minimum acceptable capacity.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// var dict = Dictionary[String, Int64](capacity: 1000);
-    /// dict("a") = 1;
-    /// dict.shrinkToFit();  // capacity drops from 1024 to 8
-    /// ```
-    public mutating func shrinkToFit() {
-        let currentCount = self.count;
-        if currentCount == 0 {
-            self.clear();
-            return
-        }
-
-        let targetCap = nextPowerOfTwo(currentCount * 4 / 3);
-        if targetCap < self.capacity {
-            self.resizeToCapacity(targetCap)
-        }
-    }
-
-    // ========================================================================
-    // ITERATION
-    // ========================================================================
-
-    /// Returns a `DictionaryIterator[K, V]` over the live entries.
-    ///
-    /// Order is unspecified and may change between mutations. The
-    /// iterator holds a share of the storage, so it sees the entries as
-    /// they were when `iter()` was called; mutating the dictionary while
-    /// iterating copies the table first. For key- or value-only
-    /// iteration, use `keys.iter()` / `values.iter()`.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// for (k, v) in dict.iter() { ... }
-    /// let entries = Array(from: dict);
-    /// ```
-    public func iter() -> DictionaryIterator[K, V] {
-        DictionaryIterator(storage: self.storage.clone())
-    }
-
-    /// The bucket pointer, for the extensions below that scan buckets.
-    fileprivate func getBuckets() -> Pointer[Bucket[K, V]] { self.buckets() }
-
-    // ========================================================================
-    // SEARCHING AND PREDICATES
-    // ========================================================================
-
-    /// `true` if any entry satisfies `predicate(key, value)`.
-    ///
-    /// Linear scan; short-circuits on the first match. `false` for
-    /// empty dictionaries. The aliased shape `any(satisfy:)` exists
-    /// for symmetry with `Array`.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// ["a": 1, "b": 5].contains { (k, v) in v > 3 };  // true
-    /// ["a": 1, "b": 2].contains { (k, v) in v > 3 };  // false
-    /// ```
-    public func contains(where predicate: (K, V) -> Bool) -> Bool {
-        let myCap = self.cap();
-        let myBuckets = self.buckets();
-
-        for i in 0..<myCap {
-            let bucket = unsafe myBuckets.offset(by: i).read();
-            match bucket {
-                .Occupied(key, value, _) => {
-                    if predicate(key, value) {
-                        return true
-                    }
-                },
-                _ => {}
-            }
-        }
-        false
-    }
-
-    /// Lends *some* entry matching `predicate(key, value)`, or `None`.
-    ///
-    /// "First" is determined by bucket order, which is hash-dependent
-    /// and unspecified — treat the result as arbitrary among matching
-    /// entries. Short-circuits on the first match.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// let dict = ["a": 1, "b": 5, "c": 3];
-    /// dict.first { (k, v) in v > 2 };  // Some entry with v > 2
-    /// dict.first { (k, v) in v > 99 }; // None
-    /// ```
-    public func first(where predicate: (K, V) -> Bool) -> Optional[(&K, &V)] {
-        for i in 0..<self.cap() {
-            let bucket = unsafe &self.buckets().offset(by: i).value;
-            if let .Occupied(&key, &value, _) = bucket {
-                if predicate(key, value) {
-                    let entry: (&K, &V) = (key, value);
-                    return .Some(entry)
-                }
-            }
-        }
-        .None
-    }
-
-    /// `true` when every entry satisfies `predicate(key, value)`
-    /// (vacuously true for empty).
-    ///
-    /// Short-circuits on the first failure. Dual of `any(where:)`.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// ["a": 2, "b": 4].all { (k, v) in v % 2 == 0 };  // true
-    /// ["a": 1, "b": 2].all { (k, v) in v % 2 == 0 };  // false
-    /// [:].all { (k, v) in false };                    // true (vacuous)
-    /// ```
-    public func all(where predicate: (K, V) -> Bool) -> Bool {
-        let myCap = self.cap();
-        let myBuckets = self.buckets();
-
-        for i in 0..<myCap {
-            let bucket = unsafe myBuckets.offset(by: i).read();
-            match bucket {
-                .Occupied(key, value, _) => {
-                    if not predicate(key, value) {
-                        return false
-                    }
-                },
-                _ => {}
-            }
-        }
-        true
-    }
-
-    /// `true` when at least one entry satisfies `predicate(key, value)`.
-    ///
-    /// Alias for `contains(where:)` — the two names exist so
-    /// predicate-style code reads naturally regardless of context.
-    /// Short-circuits on the first match.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// ["a": 1, "b": 5].any { (k, v) in v > 3 };  // true
-    /// [:].any { (k, v) in true };                // false (empty)
-    /// ```
-    public func any(where predicate: (K, V) -> Bool) -> Bool {
-        self.contains(where: predicate)
-    }
-
-    /// Returns the number of entries for which
-    /// `predicate(key, value)` is true.
-    ///
-    /// Linear scan, no short-circuit. For just a presence check use
-    /// `any(where:)`; for a yes/no on every entry,
-    /// `all(where:)`.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// ["a": 1, "b": 2, "c": 3].countItems { (k, v) in v > 1 };  // 2
-    /// [:].countItems { (k, v) in true };                        // 0
-    /// ```
-    public func countItems(where predicate: (K, V) -> Bool) -> Int64 {
-        var result: Int64 = 0;
-        let myCap = self.cap();
-        let myBuckets = self.buckets();
-
-        for i in 0..<myCap {
-            let bucket = unsafe myBuckets.offset(by: i).read();
-            match bucket {
-                .Occupied(key, value, _) => {
-                    if predicate(key, value) {
-                        result = result + 1;
-                    }
-                },
-                _ => {}
-            }
-        }
-        result
-    }
-
-    // ========================================================================
-    // TRANSFORMATIONS
-    // ========================================================================
-
-    /// Returns a new dictionary with each value run through `transform`,
-    /// keys unchanged.
-    ///
-    /// Pre-sized to `self.capacity` so the first build avoids
-    /// resizing. The result's value type can change (`V → U`); for a
-    /// version that drops `None` results see `compactMapValues(...)`.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// let dict = ["a": 1, "b": 2];
-    /// let doubled = dict.mapValues { (v) in v * 2 };
-    /// // ["a": 2, "b": 4]
-    /// ```
-    public func mapValues[U](transform: (V) -> U) -> Dictionary[K, U, H] {
-        var result = Dictionary[K, U, H](capacity: self.capacity);
-        let myCap = self.cap();
-        let myBuckets = self.buckets();
-
-        for i in 0..<myCap {
-            let bucket = unsafe myBuckets.offset(by: i).read();
-            match bucket {
-                .Occupied(key, value, _) => {
-                     result.insert( key, transform(value));
-                },
-                _ => {}
-            }
-        }
-        result
-    }
-
-    /// Returns a new dictionary with each value run through `transform`;
-    /// entries whose `transform(value)` is `None` are dropped.
-    ///
-    /// Useful for parse-or-skip patterns. The result is unsized at
-    /// construction (since the final count isn't known until the
-    /// pass completes); for fixed transforms that always succeed,
-    /// `mapValues(...)` avoids the allocation policy difference.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// let dict = ["a": "1", "b": "two", "c": "3"];
-    /// let parsed = dict.compactMapValues { (s) in Int64.parse(s) };
-    /// // ["a": 1, "c": 3] — "two" failed to parse
-    /// ```
-    public func compactMapValues[U](transform: (V) -> U?) -> Dictionary[K, U, H] {
-        var result = Dictionary[K, U, H]();
-        let myCap = self.cap();
-        let myBuckets = self.buckets();
-
-        for i in 0..<myCap {
-            let bucket = unsafe myBuckets.offset(by: i).read();
-            match bucket {
-                .Occupied(key, value, _) => {
-                    if let .Some(transformed) = transform(value) {
-                         result.insert( key, transformed);
-                    }
-                },
-                _ => {}
-            }
-        }
-        result
-    }
-
-    /// Returns a new dictionary containing only entries for which
-    /// `predicate(key, value)` is true.
-    ///
-    /// Non-mutating mirror of `retain(where:)`. Allocates a fresh
-    /// dictionary; for in-place filtering use `retain` or
-    /// `removeAll(where:)`.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// let dict = ["a": 1, "b": 2, "c": 3];
-    /// let big = dict.filter { (k, v) in v > 1 };  // ["b": 2, "c": 3]
-    /// ```
-    public func filter(where predicate: (K, V) -> Bool) -> Dictionary[K, V, H] {
-        var result = Dictionary[K, V, H]();
-        let myCap = self.cap();
-        let myBuckets = self.buckets();
-
-        for i in 0..<myCap {
-            let bucket = unsafe myBuckets.offset(by: i).read();
-            match bucket {
-                .Occupied(key, value, _) => {
-                    if predicate(key, value) {
-                         result.insert( key, value);
-                    }
-                },
-                _ => {}
-            }
-        }
-        result
-    }
-
-    /// Returns a new dictionary that is `self` merged with `other`,
-    /// resolving collisions via `combine`.
-    ///
-    /// Non-mutating mirror of `merge(...)`. Internally clones via COW
-    /// (cheap until the next mutation) and merges into the copy.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// let a = ["x": 1, "y": 2];
-    /// let b = ["y": 20, "z": 30];
-    /// let merged = a.merging(b) { (_, new) in new };
-    /// // merged == ["x": 1, "y": 20, "z": 30]
-    /// // a is unchanged
-    /// ```
-    public func merging(other: Dictionary[K, V, H], uniquingKeysWith combine: (V, V) -> V)
-        -> Dictionary[K, V, H]
-    {
-        var result = self.clone();
-        result.merge( other, uniquingKeysWith: combine);
-        result
-    }
-
-    // ========================================================================
-    // PROTOCOL CONFORMANCES
-    // ========================================================================
-
-    /// Returns a `Dictionary` sharing the same storage; the deep copy
-    /// is deferred until either side mutates.
-    ///
-    /// O(1) — just bumps the storage `RcBox`'s refcount. The first
-    /// mutation on either side triggers `makeUnique()`, which
-    /// deep-clones via `DictionaryStorage.clone()`. For an immediate
-    /// deep copy use `deepClone()` (defined in the unconditional
-    /// extension below).
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// let a: [String: Int64] = ["x": 1];
-    /// var b = a.clone();  // O(1), shares storage
-    /// b("y") = 2;         // b deep-copies here; a is unchanged
-    /// ```
-    public func clone() -> Dictionary[K, V, H] {
-        Dictionary(storage: self.storage.clone())
-    }
 }
 
-// ============================================================================
-// CONDITIONAL EXTENSIONS
-// ============================================================================
-
-/// `Equatable` conformance for dictionaries whose values are themselves
-/// `Equatable`.
-/// `Hashable` conformance — order-independent over entries, so two
-/// dictionaries with the same `(key, value)` pairs hash equal
-/// regardless of insertion order.
-extend Dictionary[K, V, H]: Hashable where K: Hashable, V: Hashable, H: Hasher, H: Defaultable {
-
-    /// Order-independent hash: hashes each `(key, value)` entry with a
-    /// fresh hasher (key then value) and combines the per-entry digests
-    /// with a commutative (wrapping) sum, then feeds the count and the
-    /// combined sum into `hasher`.
-    ///
-    /// Consistent with `Equatable`: equal dictionaries produce equal
-    /// hashes.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// var h = DefaultHasher();
-    /// ["a": 1, "b": 2].hash(into: h);  // same digest as ["b": 2, "a": 1]
-    /// ```
-    public func hash[H2](mutating into hasher: H2) where H2: Hasher {
-        var combined: UInt64 = 0;
-        var entries = self.iter();
-        while let .Some(pair) = entries.next() {
-            var entryHasher = H();
-            pair.0.hash(into: entryHasher);
-            pair.1.hash(into: entryHasher);
-            // Wrapping addition is a safe commutative combiner.
-            combined = combined.addWrapping(entryHasher.finish());
-        }
-        self.count.hash(into: hasher);
-        combined.hash(into: hasher);
-    }
-}
-
-extend Dictionary[K, V, H]: Equatable where K: Hashable, V: Equatable, H: Hasher, H: Defaultable {
-    /// Order-independent equality: dictionaries are equal iff they have
-    /// the same `count` and every key in `self` is present in `other`
-    /// with an equal value.
-    ///
-    /// Short-circuits on the first mismatch. Insertion order does not
-    /// matter — only the multiset of `(key, value)` pairs does.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// ["a": 1, "b": 2].isEqual(to: ["b": 2, "a": 1]);  // true
-    /// ["a": 1].isEqual(to: ["a": 2]);                  // false
-    /// ["a": 1].isEqual(to: [:]);                       // false
-    /// ```
-    public func isEqual(to other: Dictionary[K, V, H]) -> Bool {
-        let selfCount = self.count;
-        let otherCount = other.count;
-        if selfCount != otherCount {
-            return false
-        }
-
-        // Check all entries in self exist in other with same value
-        let selfCap = self.capacity;
-        let selfBuckets = self.getBuckets();
-        for i in 0..<selfCap {
-            let bucket = unsafe selfBuckets.offset(by: i).read();
-            match bucket {
-                .Occupied(key, value, _) => {
-                    let otherValue = other(key);
-                    if let .Some(v) = otherValue {
-                        if not value.isEqual(to: v) {
-                            return false
-                        }
-                    } else {
-                        return false
-                    }
-                },
-                _ => {}
-            }
-        }
-        true
-    }
-}
-
-/// Value-based search operations available when `V: Equatable`.
-extend Dictionary[K, V, H] where K: Hashable, V: Equatable, H: Hasher, H: Defaultable {
-
-    /// `true` if any entry's value equals `value`.
-    ///
-    /// O(capacity) — every bucket is inspected because the dictionary
-    /// is keyed on `K`, not `V`. For `O(1)` checks against a small
-    /// set of values, build a `Set[V]` instead.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// ["a": 1, "b": 2].containsValue(2);  // true
-    /// ["a": 1, "b": 2].containsValue(5);  // false
-    /// ```
-    public func containsValue(value: V) -> Bool {
-        let myCap = self.capacity;
-        let myBuckets = self.getBuckets();
-
-        for i in 0..<myCap {
-            let bucket = unsafe myBuckets.offset(by: i).read();
-            match bucket {
-                .Occupied(_, v, _) => {
-                    if v.isEqual(to: value) {
-                        return true
-                    }
-                },
-                _ => {}
-            }
-        }
-        false
-    }
-
-    /// Returns *some* key mapping to `value`, or `None`.
-    ///
-    /// O(capacity); short-circuits on the first match. "First" is
-    /// determined by bucket order and is unspecified — for an
-    /// exhaustive list use `allKeys(of:)`.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// ["a": 1, "b": 2].firstKey(of: 2);  // Some("b")
-    /// ["a": 1, "b": 2].firstKey(of: 5);  // None
-    /// ```
-    public func firstKey(of value: V) -> K? {
-        let myCap = self.capacity;
-        let myBuckets = self.getBuckets();
-
-        for i in 0..<myCap {
-            let bucket = unsafe myBuckets.offset(by: i).read();
-            match bucket {
-                .Occupied(k, v, _) => {
-                    if v.isEqual(to: value) {
-                        return .Some(k)
-                    }
-                },
-                _ => {}
-            }
-        }
-        .None
-    }
-
-    /// Returns every key whose value equals `value`.
-    ///
-    /// O(capacity), allocates an `Array[K]`. Result order matches
-    /// bucket layout and is therefore unspecified. Empty array if no
-    /// matches.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// ["a": 1, "b": 2, "c": 1].allKeys(of: 1);  // ["a", "c"]  — order unspecified
-    /// ["a": 1].allKeys(of: 99);                  // []
-    /// ```
-    public func allKeys(of value: V) -> Array[K] {
-        var result = Array[K]();
-        let myCap = self.capacity;
-        let myBuckets = self.getBuckets();
-
-        for i in 0..<myCap {
-            let bucket = unsafe myBuckets.offset(by: i).read();
-            match bucket {
-                .Occupied(k, v, _) => {
-                    if v.isEqual(to: value) {
-                        result.append(k);
-                    }
-                },
-                _ => {}
-            }
-        }
-        result
-    }
-}
-
-/// `Formattable` conformance — renders a dictionary as
-/// `"{k1: v1, k2: v2}"` when both `K` and `V` are `Formattable`.
-///
-/// Drives string interpolation. Empty dictionaries render as `"{}"`.
-/// Entry order in the output reflects bucket order and is unspecified.
-extend Dictionary[K, V, H]: Formattable where K: Hashable, K: Formattable, V: Formattable, H: Hasher, H: Defaultable {
-    /// Renders the dictionary as `"{" + entries.joined(", ") + "}"`,
-    /// passing `options` to each key and value's `format`.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// ["a": 1, "b": 2].format();  // "{a: 1, b: 2}"  — order unspecified
-    /// Dictionary[String, Int64]().format();  // "{}"
-    /// "\(["a": 1, "b": 2])";      // "{a: 1, b: 2}"  via interpolation
-    /// ```
-    public func format(mutating into writer: some Formatter, options: FormatOptions = FormatOptions.default()) {
-        writer.append(char: '{');
-        var first = true;
-        let myCap = self.capacity;
-        let myBuckets = self.getBuckets();
-
-        for i in 0..<myCap {
-            let bucket = unsafe myBuckets.offset(by: i).read();
-            match bucket {
-                .Occupied(key, value, _) => {
-                    if first {
-                        first = false
-                    } else {
-                        writer.append(", ")
-                    }
-                    key.format(into: writer, options);
-                    writer.append(": ");
-                    value.format(into: writer, options)
-                },
-                _ => {}
-            }
-        }
-        writer.append(char: '}')
-    }
-}
-
-/// Eager-copy variant of `clone()` for callers that don't want to
-/// inherit the COW share with the source.
-extend Dictionary[K, V, H] where K: Hashable, H: Hasher, H: Defaultable {
-
-    /// Returns a fully-detached copy of the dictionary, with no shared
-    /// storage.
-    ///
-    /// Walks every bucket and re-inserts the live entries into a
-    /// freshly-sized table. Use over `clone()` when you specifically
-    /// want to avoid the lazy COW share — for example, before passing
-    /// the copy to another thread or system that might race with
-    /// further mutations.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// let a = ["x": [1, 2, 3]];
-    /// let b = a.deepClone();  // fully independent copy
-    /// ```
-    public func deepClone() -> Dictionary[K, V, H] {
-        var result = Dictionary[K, V, H](capacity: self.capacity);
-        let myCap = self.capacity;
-        let myBuckets = self.getBuckets();
-
-        for i in 0..<myCap {
-            let bucket = unsafe myBuckets.offset(by: i).read();
-            match bucket {
-                .Occupied(key, value, _) => {
-                     result.insert( key, value);
-                },
-                _ => {}
-            }
-        }
-        result
-    }
-}
-
-/// Aggregation available when the value type forms an `Addable`
-/// monoid (`V + V = V` with a `Defaultable` zero).
-extend Dictionary[K, V, H] where K: Hashable, V: Addable, V.Output = V, V: Defaultable, H: Hasher, H: Defaultable {
-
-    /// Returns the sum of every value, starting from `V()` (the
-    /// default-constructed zero).
-    ///
-    /// Empty dictionaries return `V()` — for `Int64` that's `0`, for
-    /// `String` that's `""`, etc. Linear in `count`.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// ["a": 1, "b": 2, "c": 3].sumValues();  // 6
-    /// [:].sumValues();                        // 0 — V's default
-    /// ```
-    public func sumValues() -> V {
-        var result = V();
-        let myCap = self.capacity;
-        let myBuckets = self.getBuckets();
-
-        for i in 0..<myCap {
-            let bucket = unsafe myBuckets.offset(by: i).read();
-            match bucket {
-                .Occupied(_, value, _) => {
-                    result = result + value;
-                },
-                _ => {}
-            }
-        }
-        result
-    }
-}
-
-
-// ============================================================================
-// KEYS VIEW
-// ============================================================================
-
-/// Single-pass iterator yielding only the keys of a dictionary.
-///
-/// Wraps a `DictionaryIterator[K, V]` and discards the value half of
-/// each entry. Order matches the underlying entry iteration and is
-/// unspecified.
-///
-/// # Examples
-///
-/// ```
-/// var it = ["a": 1, "b": 2].keys.iter();
-/// it.next();  // Some("a")  — order unspecified
-/// it.next();  // Some("b")
-/// it.next();  // None
-/// ```
-///
-/// # Representation
-///
-/// Wraps a `DictionaryIterator[K, V]`.
-///
-/// # Memory Model
-///
-/// Value type. Aliases dictionary storage; do not retain across
-/// mutations.
-public struct KeysIterator[K, V]: Iterator where K: Hashable {
-    /// Element type yielded by `next()` — `K`.
-    type Item = K
-
-    /// The underlying entry iterator; only `pair.0` is read.
-    private var dictIter: DictionaryIterator[K, V]
-
-    /// @name From Dict
-    /// Wraps a `DictionaryIterator` to yield only its keys.
-    ///
-    /// Prefer `KeysView.iter()` over calling this directly.
-    public init(dictIter dictIter: DictionaryIterator[K, V]) {
-        self.dictIter = dictIter;
-    }
-
-    /// Returns the next key, or `None` when the underlying iterator
-    /// is exhausted.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// var it = ["a": 1].keys.iter();
-    /// it.next();  // Some("a")
-    /// it.next();  // None
-    /// ```
-    public mutating func next() -> K? {
-        let maybePair = self.dictIter.next();
-        if let .Some(pair) = maybePair {
-            .Some(pair.0)
-        } else {
-            .None
-        }
-    }
-}
-
-/// Lazy `Iterable` view over the keys of a dictionary.
-///
-/// Returned by `Dictionary.keys`. Constructing the view is O(1) — it
-/// stores the bucket pointer and capacity. The view is invalidated by
-/// any mutation that may reallocate.
-///
-/// # Examples
-///
-/// ```
-/// let dict = ["a": 1, "b": 2];
-/// for k in dict.keys { print(k) }
-/// let arr = Array(from: dict.keys);
-/// ```
-///
-/// # Representation
-///
-/// A share of the source dictionary's storage.
-///
-/// # Memory Model
-///
-/// Holds a share of the storage (one refcount), so the view stays valid
-/// after the dictionary changes or is dropped, and sees it unchanged.
-public struct KeysView[K, V]: Iterable where K: Hashable {
-    /// `Iterable` element type — `K`.
-    type Item = K
-    /// Concrete iterator type returned by `iter()`.
-    type TargetIterator = KeysIterator[K, V]
-
-    /// A share of the source dictionary's storage.
-    private var storage: CowBox[DictionaryStorage[K, V]]
-
-    /// @name From Storage
-    /// Internal — constructs a view over a share of `storage`.
-    /// Use `Dictionary.keys` to obtain a view.
-    fileprivate init(storage storage: CowBox[DictionaryStorage[K, V]]) {
-        self.storage = storage;
-    }
-
-    /// Returns a fresh `KeysIterator[K, V]` over the view.
-    ///
-    /// Each call returns a new iterator starting at the beginning of
-    /// the bucket array.
-    public func iter() -> KeysIterator[K, V] {
-        KeysIterator(dictIter: DictionaryIterator(storage: self.storage.clone()))
-    }
-}
-
-// ============================================================================
-// VALUES VIEW
-// ============================================================================
-
-/// Single-pass iterator yielding only the values of a dictionary.
-///
-/// Wraps a `DictionaryIterator[K, V]` and discards the key half of
-/// each entry. Order matches the underlying entry iteration and is
-/// unspecified.
-///
-/// # Examples
-///
-/// ```
-/// var it = ["a": 1, "b": 2].values.iter();
-/// it.next();  // Some(1)  — order unspecified
-/// it.next();  // Some(2)
-/// it.next();  // None
-/// ```
-///
-/// # Representation
-///
-/// Wraps a `DictionaryIterator[K, V]`.
-///
-/// # Memory Model
-///
-/// Value type. Aliases dictionary storage; do not retain across
-/// mutations.
-public struct ValuesIterator[K, V]: Iterator where K: Hashable {
-    /// Element type yielded by `next()` — `V`.
-    type Item = V
-
-    /// The underlying entry iterator; only `pair.1` is read.
-    private var dictIter: DictionaryIterator[K, V]
-
-    /// @name From Dict
-    /// Wraps a `DictionaryIterator` to yield only its values.
-    ///
-    /// Prefer `ValuesView.iter()` over calling this directly.
-    public init(dictIter dictIter: DictionaryIterator[K, V]) {
-        self.dictIter = dictIter;
-    }
-
-    /// Returns the next value, or `None` when the underlying iterator
-    /// is exhausted.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// var it = ["a": 1].values.iter();
-    /// it.next();  // Some(1)
-    /// it.next();  // None
-    /// ```
-    public mutating func next() -> V? {
-        let maybePair = self.dictIter.next();
-        if let .Some(pair) = maybePair {
-            .Some(pair.1)
-        } else {
-            .None
-        }
-    }
-}
-
-/// Lazy `Iterable` view over the values of a dictionary.
-///
-/// Returned by `Dictionary.values`. Constructing the view is O(1) —
-/// it stores the bucket pointer and capacity. The view is invalidated
-/// by any mutation that may reallocate.
-///
-/// # Examples
-///
-/// ```
-/// let dict = ["a": 1, "b": 2];
-/// for v in dict.values { print(v) }
-/// let sum = dict.values.iter().sum();
-/// ```
-///
-/// # Representation
-///
-/// A share of the source dictionary's storage.
-///
-/// # Memory Model
-///
-/// Holds a share of the storage (one refcount), so the view stays valid
-/// after the dictionary changes or is dropped, and sees it unchanged.
-public struct ValuesView[K, V]: Iterable where K: Hashable {
-    /// `Iterable` element type — `V`.
-    type Item = V
-    /// Concrete iterator type returned by `iter()`.
-    type TargetIterator = ValuesIterator[K, V]
-
-    /// A share of the source dictionary's storage.
-    private var storage: CowBox[DictionaryStorage[K, V]]
-
-    /// @name From Storage
-    /// Internal — constructs a view over a share of `storage`.
-    /// Use `Dictionary.values` to obtain a view.
-    fileprivate init(storage storage: CowBox[DictionaryStorage[K, V]]) {
-        self.storage = storage;
-    }
-
-    /// Returns a fresh `ValuesIterator[K, V]` over the view.
-    ///
-    /// Each call returns a new iterator starting at the beginning of
-    /// the bucket array.
-    public func iter() -> ValuesIterator[K, V] {
-        ValuesIterator(dictIter: DictionaryIterator(storage: self.storage.clone()))
-    }
-}
-
-
-// ============================================================================
-// LITERAL CONFORMANCE
-// ============================================================================
-
-/// `_ExpressibleByDictionaryLiteral` / `ExpressibleByDictionaryLiteral`
-/// / `Defaultable` conformances — what makes the `["a": 1, "b": 2]`
-/// literal syntax work for `Dictionary[K, V, H]`.
-extend Dictionary[K, V, H]: std.core._ExpressibleByDictionaryLiteral, std.core.ExpressibleByDictionaryLiteral, std.core.Defaultable where K: Hashable, H: Hasher, H: Defaultable {
+extend Dictionary[K, V, H, A]: std.core._ExpressibleByDictionaryLiteral, std.core.ExpressibleByDictionaryLiteral, std.core.Defaultable where K: Hashable, H: Hasher, H: Defaultable, A: Defaultable {
     /// Key type for the literal protocol — matches `K`.
     type Key = K
     /// Value type for the literal protocol — matches `V`.

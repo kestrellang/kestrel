@@ -1,11 +1,11 @@
-// RcBox[T] - reference-counted box for COW (copy-on-write) semantics
+// RcBox[T, A] - reference-counted box for COW (copy-on-write) semantics
 
 module std.memory
 
-import std.core.(Bool, Cloneable, Copyable, fatalError, Indirection, MutableIndirection, Sized, Static)
+import std.core.(Defaultable, Bool, Cloneable, Copyable, fatalError, Indirection, MutableIndirection, Sized, Static)
 import std.numeric.(Int64)
 import std.result.(Optional)
-import std.memory.(Layout, Pointer, RawPointer, Allocator, SystemAllocator, SharedBox)
+import std.memory.(Layout, Pointer, RawPointer, Allocator, GlobalAllocator, SharedBox)
 
 // Storage block backing an RcBox: the refcount lives next to the value,
 // in a single allocation, so clones bump a counter rather than copying T.
@@ -44,8 +44,9 @@ struct RcBoxStorage[T]: not Copyable where T: not Copyable, T: not Sized, T: not
 ///
 /// # Representation
 ///
-/// One `Pointer[RcBoxStorage[T]]`. The pointed-to block holds an `Int64`
-/// refcount followed by the `T` value, allocated via `SystemAllocator`.
+/// A `Pointer[RcBoxStorage[T]]` plus the allocator `A` (no bytes for a
+/// stateless one). The pointed-to block holds an `Int64` refcount followed
+/// by the `T` value, allocated from that `A`.
 ///
 /// # Memory Model
 ///
@@ -69,26 +70,29 @@ struct RcBoxStorage[T]: not Copyable where T: not Copyable, T: not Sized, T: not
 /// `RcBox[<raw any P>]` by default. Members that move a `T` say
 /// `where T: Sized`; everything else works on any payload. `T: not Static`
 /// for the same reason: a raw existential is only `Static` when its
-/// protocol is, so `RcBox[T]` is `Static` exactly when `T` is.
+/// protocol is, so `RcBox[T, A]` is `Static` exactly when `T` is.
 @builtin(.SharedBox)
-public struct RcBox[T]: Cloneable where T: not Copyable, T: not Sized, T: not Static {
+public struct RcBox[T, A = GlobalAllocator]: Cloneable where T: not Copyable, T: not Sized, T: not Static, A: Allocator, A: Copyable {
     // `fileprivate` (not `private`) so the same-file extensions can reach it:
     // the conditional `deepClone` (a conditional member can't sit in
     // the struct body) and `extend RcBox: SharedBox`, which compares storage
     // addresses for `isIdentical(to:)`.
     fileprivate var ptr: Pointer[RcBoxStorage[T]]
+    // Frees the block at the last release; every clone carries a copy. A
+    // stateless allocator adds no bytes, so the box stays one word.
+    fileprivate var allocator: A
 
-    /// @name From Value
-    /// Allocates fresh storage holding `value` with refcount 1. Panics if
-    /// the underlying `SystemAllocator` returns `.None`.
+    /// @name Value and Allocator
+    /// Allocates storage from `allocator` holding `value` with refcount 1.
     ///
     /// # Errors
     ///
     /// Panics with `"RcBox allocation failed"` on allocation failure.
-    public init(consuming value: T) where T: Sized {
+    public init(consuming value: T, allocator allocator: A) where T: Sized {
         let layout: Layout = Layout.of[RcBoxStorage[T]]();
-        var allocator: SystemAllocator = SystemAllocator();
-        let result: RawPointer? = allocator.allocate(layout);
+        var alloc = allocator;
+        let result: RawPointer? = alloc.allocate(layout);
+        self.allocator = alloc;
         if let .Some(rawPtr) = result {
             self.ptr = rawPtr.cast[RcBoxStorage[T]]();
             unsafe self.ptr.write(RcBoxStorage(refCount: 1, value: value));
@@ -99,8 +103,9 @@ public struct RcBox[T]: Cloneable where T: not Copyable, T: not Sized, T: not St
 
     // Used by clone() and fork(): adopts an existing storage block
     // (already refcount-bumped, or fresh with count 1) without allocating.
-    fileprivate init(inner inner: Pointer[RcBoxStorage[T]]) {
+    fileprivate init(inner inner: Pointer[RcBoxStorage[T]], allocator allocator: A) {
         self.ptr = inner;
+        self.allocator = allocator;
     }
 
     /// Returns a pointer to the wrapped value on the heap. The pointer
@@ -158,11 +163,11 @@ public struct RcBox[T]: Cloneable where T: not Copyable, T: not Sized, T: not St
     /// Bumps the refcount and returns a second `RcBox` pointing at the
     /// same storage. The receiver and the returned box now both reference
     /// the value; the next mutation should test `isUnique`.
-    public func clone() -> RcBox[T] {
+    public func clone() -> RcBox[T, A] {
         let rcPtr = self.ptr.asRaw().cast[Int64]();
         let count = unsafe rcPtr.read();
         unsafe rcPtr.write(count + 1);
-        RcBox(inner: self.ptr)
+        RcBox(inner: self.ptr, allocator: self.allocator)
     }
 
     // Drop one reference; deallocate storage when the count hits zero.
@@ -177,7 +182,7 @@ public struct RcBox[T]: Cloneable where T: not Copyable, T: not Sized, T: not St
             // Measured from the block itself so an unsized payload works too.
             let layout = unsafe Layout.ofValue(at: self.ptr);
             unsafe self.valuePtr().dropInPlace();
-            var allocator = SystemAllocator();
+            var allocator = self.allocator;
             unsafe allocator.deallocate(self.ptr.asRaw(), layout)
         } else {
             unsafe rcPtr.write(newCount)
@@ -192,13 +197,13 @@ public struct RcBox[T]: Cloneable where T: not Copyable, T: not Sized, T: not St
 
 // Copies the payload out of storage, so it needs `T: Copyable` and cannot
 // sit in the struct body, which is relaxed to `T: not Copyable`.
-extend RcBox[T] where T: Copyable {
+extend RcBox[T, A] where T: Copyable {
     /// Allocates fresh storage with a copy of the value. Used by COW
     /// types when `isUnique` is `false` — splits off a private
     /// copy so the caller can mutate without affecting other clones.
-    public func deepClone() -> RcBox[T] {
+    public func deepClone() -> RcBox[T, A] {
         let copy: T = unsafe self.valuePtr().value;
-        RcBox(copy)
+        RcBox(copy, allocator: self.allocator)
     }
 }
 
@@ -206,14 +211,14 @@ extend RcBox[T] where T: Copyable {
 // refcount 1. Works for an unsized payload (`any P` with `P: Cloneable`): the
 // block is measured from this one and the payload clones through its
 // function table (`lang.clone_val_into`).
-extend RcBox[T] where T: Cloneable {
-    public func fork() -> RcBox[T] {
+extend RcBox[T, A] where T: Cloneable {
+    public func fork() -> RcBox[T, A] {
         let layout = unsafe Layout.ofValue(at: self.ptr);
-        var allocator = SystemAllocator();
+        var allocator = self.allocator;
         let result: RawPointer? = allocator.allocate(layout);
         if let .Some(raw) = result {
             unsafe raw.cast[Int64]().write(1);
-            let fresh: RcBox[T] = RcBox(inner: raw.cast[RcBoxStorage[T]]().withMetadata(of: self.ptr));
+            let fresh: RcBox[T, A] = RcBox(inner: raw.cast[RcBoxStorage[T]]().withMetadata(of: self.ptr), allocator: allocator);
             unsafe lang.clone_val_into(self.valuePtr().raw, fresh.valuePtr().raw);
             return fresh
         }
@@ -224,7 +229,7 @@ extend RcBox[T] where T: Cloneable {
 // Transparent member access: `rc.field` reaches the boxed value through
 // `value`, a view into the shared storage, never a copy. The wrapper still
 // wins name clashes (`rc.clone()` is RcBox.clone, the peel is lazy).
-extend RcBox[T]: MutableIndirection {
+extend RcBox[T, A]: MutableIndirection {
     type Target = T
 }
 
@@ -233,7 +238,20 @@ extend RcBox[T]: MutableIndirection {
 // `deinit` on the struct, `Target`/`value` on the `MutableIndirection`
 // extension above — `Target` is inherited through that conformance and must
 // NOT be redeclared here. Only the two genuinely new operations live below.
-extend RcBox[T]: SharedBox {
+extend RcBox[T, A] where A: Defaultable {
+    /// @name From Value
+    /// Allocates fresh storage from a default-made `A` holding `value` with
+    /// refcount 1.
+    ///
+    /// # Errors
+    ///
+    /// Panics with `"RcBox allocation failed"` on allocation failure.
+    public init(consuming value: T) where T: Sized {
+        self.init(value, allocator: A())
+    }
+}
+
+extend RcBox[T, A]: SharedBox where A: Defaultable {
     /// Mutable access to the value through a *shared* handle: non-`mutating`
     /// receiver, no copy-on-write barrier, every clone observes the write.
     /// This is `value`'s `mutating ref` on a shared handle: the
@@ -259,7 +277,7 @@ extend RcBox[T]: SharedBox {
     /// storage addresses, the same way `Pointer.isEqual(to:)` does — payload
     /// equality is irrelevant, two independently allocated boxes holding equal
     /// values are never identical.
-    public func isIdentical(to other: RcBox[T]) -> Bool {
+    public func isIdentical(to other: RcBox[T, A]) -> Bool {
         self.ptr.address == other.ptr.address
     }
 }

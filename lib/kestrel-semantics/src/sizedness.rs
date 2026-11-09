@@ -482,7 +482,8 @@ impl ByValueWalk<'_, '_> {
 /// Why a type cannot be the `B` of `any[B] P` (existentials design §3).
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum BoxDefect {
-    /// Not exactly one type parameter.
+    /// Not exactly one type parameter without a default (the payload; a
+    /// defaulted one after it, like an allocator, is fine).
     ParamCount,
     /// The one type parameter is not declared `not Sized`.
     ParamNotRelaxed,
@@ -509,9 +510,13 @@ impl QueryFn for ExistentialBoxDefect {
             .get::<TypeParams>(self.entity)
             .map(|tp| tp.0.clone())
             .unwrap_or_default();
-        let [param] = params.as_slice() else {
+        let defaulted = |p: &Entity| ctx.get::<kestrel_ast_builder::TypeAnnotation>(*p).is_some();
+        let [param, rest @ ..] = params.as_slice() else {
             return Some(BoxDefect::ParamCount);
         };
+        if defaulted(param) || !rest.iter().all(defaulted) {
+            return Some(BoxDefect::ParamCount);
+        }
         let relaxed = ctx.query(TypeParamSizeRequirement {
             param: *param,
             context: self.entity,

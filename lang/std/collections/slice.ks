@@ -221,7 +221,7 @@ extend Slice[T] {
     public func drop(last count: Int64) -> &Slice[T] { self(..<(self.count - count)) }
 }
 
-extend Array[T] {
+extend Array[T, A] {
     /// See `Slice.prefix(count:)`.
     public func prefix(count: Int64) -> &Slice[T] { self(..<count) }
 

@@ -653,6 +653,20 @@ impl<'a> InferCtx<'a> {
         TyVar(idx)
     }
 
+    /// Give `tv` type param `param`'s declared default (`A = GlobalAllocator`)
+    /// if nothing pins it by the end of solving. No-op without a default.
+    pub(crate) fn defer_type_param_default(&mut self, tv: TyVar, param: Entity) {
+        if let Some(default_ty) = self
+            .query_ctx
+            .query(kestrel_hir_lower::LowerTypeAnnotation {
+                entity: param,
+                root: self.root,
+            })
+        {
+            self.type_param_defaults.push((tv, default_ty));
+        }
+    }
+
     /// Allocate a fresh type variable with a literal marker.
     pub fn fresh_literal(&mut self, kind: LiteralKind) -> TyVar {
         let idx = self.types.len() as u32;

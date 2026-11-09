@@ -279,7 +279,23 @@ pub fn monomorphize(
 
     // Two-word (data, table) pointers: rewrite the ops that meet one now
     // that every type is concrete.
-    fat::legalize(&mut mono_module, &func_id_map, existential_clone_thunk);
+    let clone_shims: std::collections::HashSet<_> = functions
+        .values()
+        .filter(|f| {
+            matches!(
+                f.kind,
+                crate::item::function::FunctionKind::CloneShim { .. }
+            )
+        })
+        .map(|f| f.entity)
+        .collect();
+    fat::legalize(
+        &mut mono_module,
+        &func_id_map,
+        existential_clone_thunk,
+        cloneable_protocol,
+        &clone_shims,
+    );
 
     Ok(mono_module)
 }
@@ -1302,7 +1318,7 @@ impl CopyLayer for MonoCopyLayer<'_> {
 /// looked up in the mono maps (their `copy` is correct, or being refined this
 /// round); primitives/pointers/functions are bit-copyable; tuples use the
 /// canonical fold (move-only dominates, else Clone if any element clones).
-fn concrete_copy(
+pub(super) fn concrete_copy(
     arena: &TyArena,
     ty: TyId,
     mono_structs: &IndexMap<MonoTypeKey, MonoStruct>,

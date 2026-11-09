@@ -15,6 +15,7 @@
 //!   table, so its payload is `count × size(T)` at `align(T)`;
 //! - `destroy_addr` of an unsized pointee calls the table's drop thunk (a
 //!   `lang.slice[T]` pointee is a view and drops nothing);
+//! - `IsBitwise` folds to a constant from the post-mono copy behavior;
 //! - `CloneIntoVal` calls the table's clone word for an unsized pointee and
 //!   the clone thunk at the type for a sized one.
 //!
@@ -26,7 +27,7 @@ use crate::callee::Callee;
 use crate::immediate::{Immediate, ImmediateKind};
 use crate::inst::{CallArg, InstKind, Instruction};
 use crate::item::Layout;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use kestrel_hecs::Entity;
 
@@ -40,6 +41,8 @@ pub fn legalize(
     module: &mut MonoModule,
     func_ids: &HashMap<InstantiationKey, MonoFuncId>,
     clone_thunk: Option<Entity>,
+    cloneable_protocol: Option<Entity>,
+    clone_shims: &HashSet<Entity>,
 ) {
     for i in 0..module.functions.len() {
         let Some(mut body) = module.functions[i].body.take() else {
@@ -50,6 +53,8 @@ pub fn legalize(
             body: &mut body,
             func_ids,
             clone_thunk,
+            cloneable_protocol,
+            clone_shims,
         };
         cx.run();
         module.functions[i].body = Some(body);
@@ -61,6 +66,9 @@ struct Legalize<'a> {
     body: &'a mut crate::body::OssaBody,
     func_ids: &'a HashMap<InstantiationKey, MonoFuncId>,
     clone_thunk: Option<Entity>,
+    cloneable_protocol: Option<Entity>,
+    /// The synthesized memberwise `__clone$T` functions (`FunctionKind::CloneShim`).
+    clone_shims: &'a HashSet<Entity>,
 }
 
 impl Legalize<'_> {
@@ -73,6 +81,53 @@ impl Legalize<'_> {
             }
             self.body.blocks[b].insts = out;
         }
+    }
+
+    /// Is a copy of `ty` exactly a copy of its bytes? A nominal whose copy
+    /// goes through a synthesized memberwise clone (any struct with a nominal
+    /// field gets one) is, when every field is; a user `clone()` never is.
+    fn is_bitwise(&self, ty: TyId) -> bool {
+        let m = &*self.module;
+        match m.ty_arena.get(ty) {
+            MirTy::Tuple(elems) => elems.clone().into_iter().all(|e| self.is_bitwise(e)),
+            MirTy::Named { entity, type_args } => {
+                let key = (*entity, type_args.clone());
+                let (info, fields): (_, Vec<TyId>) = if let Some(s) = m.structs.get(&key) {
+                    (&s.type_info, s.fields.iter().map(|f| f.ty).collect())
+                } else if let Some(e) = m.enums.get(&key) {
+                    let payload = e
+                        .cases
+                        .iter()
+                        .flat_map(|c| c.payload_fields.iter().map(|f| f.ty));
+                    (&e.type_info, payload.collect())
+                } else {
+                    return self.copy_of(ty) == crate::CopyBehavior::Bitwise;
+                };
+                match info.copy {
+                    crate::CopyBehavior::Bitwise => true,
+                    crate::CopyBehavior::Clone(_)
+                        if info
+                            .clone_impl
+                            .is_some_and(|f| self.clone_shims.contains(&f)) =>
+                    {
+                        fields.into_iter().all(|f| self.is_bitwise(f))
+                    },
+                    _ => false,
+                }
+            },
+            _ => self.copy_of(ty) == crate::CopyBehavior::Bitwise,
+        }
+    }
+
+    /// The post-mono copy behavior of `ty` (mono's own classifier).
+    fn copy_of(&self, ty: TyId) -> crate::CopyBehavior {
+        super::concrete_copy(
+            &self.module.ty_arena,
+            ty,
+            &self.module.structs,
+            &self.module.enums,
+            self.cloneable_protocol,
+        )
     }
 
     fn ty_of(&self, v: ValueId) -> TyId {
@@ -202,6 +257,14 @@ impl Legalize<'_> {
             } => {
                 let size = matches!(op, Op::SizeOfVal(_));
                 self.size_or_align(out, result, ty, arg, size);
+            },
+            InstKind::Op1 {
+                result,
+                op: Op::IsBitwise(ty),
+                ..
+            } => {
+                let value = Immediate::bool(self.is_bitwise(ty));
+                out.push(Instruction::new(InstKind::Literal { result, value }));
             },
             InstKind::Op2 {
                 result,

@@ -37,9 +37,7 @@ use kestrel_ast_builder::{
 };
 use kestrel_hecs::{Entity, QueryContext};
 use kestrel_hir::Builtin;
-use kestrel_name_res::{
-    ConformingProtocols, ResolveBuiltin, ResolveTypePath, TypeResolution, extensions::ExtensionsFor,
-};
+use kestrel_name_res::{ConformingProtocols, ResolveBuiltin, extensions::ExtensionsFor};
 use kestrel_type_infer::result::ResolvedTy;
 
 use super::split;
@@ -823,11 +821,6 @@ pub(crate) fn collect_fields(query: &QueryContext<'_>, entity: Entity) -> Vec<En
 }
 
 /// Resolve an enum case parameter type, substituting the enum's type args.
-///
-/// Builds a name→type map from the enum's TypeParams + the concrete type args,
-/// then looks up each case param's AstType. If the param type is a simple
-/// named reference to a type parameter, substitutes it. Otherwise falls back
-/// to the raw AstType resolution.
 fn resolve_case_param_type(
     query: &QueryContext<'_>,
     root: Entity,
@@ -835,7 +828,7 @@ fn resolve_case_param_type(
     type_args: &[ResolvedTy],
     param: &kestrel_ast_builder::AstParam,
 ) -> ResolvedTy {
-    let subs = build_type_param_subs(query, enum_entity, type_args);
+    let subs = TypeParamSubs::of(query, enum_entity, type_args);
     resolve_ast_type_with_subs(query, root, param.ty.as_ref(), &subs, enum_entity)
 }
 
@@ -847,7 +840,7 @@ fn resolve_field_type(
     parent_entity: Entity,
     type_args: &[ResolvedTy],
 ) -> ResolvedTy {
-    let subs = build_type_param_subs(query, parent_entity, type_args);
+    let subs = TypeParamSubs::of(query, parent_entity, type_args);
     let ast_ty = query.get::<TypeAnnotation>(field_entity).map(|ta| &ta.0);
     resolve_ast_type_with_subs(query, root, ast_ty, &subs, parent_entity)
 }
@@ -877,10 +870,9 @@ pub(crate) fn array_element_ty(
     };
     // The binding's `T` may name either the target type's own param or the
     // conforming extension's binder; both align positionally with the
-    // scrutinee's args, so include both (resolve_ast_type_with_subs matches by
-    // name, so duplicate names are harmless).
-    let mut subs = build_type_param_subs(query, *entity, args);
-    subs.extend(build_type_param_subs(query, owner, args));
+    // scrutinee's args, so include both.
+    let mut subs = TypeParamSubs::of(query, *entity, args);
+    subs.extend(TypeParamSubs::of(query, owner, args));
     resolve_ast_type_with_subs(query, root, Some(&ast_ty), &subs, owner)
 }
 
@@ -914,98 +906,52 @@ fn find_type_alias_named(query: &QueryContext<'_>, parent: Entity, name: &str) -
     })
 }
 
-/// Build a mapping from type parameter names to their concrete types.
+/// Type params paired with the concrete args that replace them.
 ///
-/// Given `enum Optional[T]` with args `[Int]`, returns `{"T" → Int}`.
-fn build_type_param_subs(
-    query: &QueryContext<'_>,
-    parent_entity: Entity,
-    type_args: &[ResolvedTy],
-) -> Vec<(String, ResolvedTy)> {
-    let Some(type_params) = query.get::<TypeParams>(parent_entity) else {
-        return vec![];
-    };
-    type_params
-        .0
-        .iter()
-        .zip(type_args.iter())
-        .filter_map(|(&param_entity, arg_ty)| {
-            let name = query.get::<Name>(param_entity)?.0.clone();
-            Some((name, arg_ty.clone()))
-        })
-        .collect()
+/// Given `enum Optional[T]` with args `[Int]`, holds `T → Int`.
+struct TypeParamSubs {
+    params: Vec<Entity>,
+    args: Vec<ResolvedTy>,
 }
 
-/// Resolve an AstType using a name→type substitution map.
+impl TypeParamSubs {
+    fn of(query: &QueryContext<'_>, owner: Entity, type_args: &[ResolvedTy]) -> Self {
+        let params = query
+            .get::<TypeParams>(owner)
+            .map(|tp| tp.0.clone())
+            .unwrap_or_default();
+        let n = params.len().min(type_args.len());
+        TypeParamSubs {
+            params: params[..n].to_vec(),
+            args: type_args[..n].to_vec(),
+        }
+    }
+
+    fn extend(&mut self, other: TypeParamSubs) {
+        self.params.extend(other.params);
+        self.args.extend(other.args);
+    }
+}
+
+/// Resolve a declared type in `scope_entity` and substitute its type params.
 ///
-/// Handles type parameter substitution (e.g., `T` → `Int`), and falls back
-/// to scope-based lookup for concrete named types (e.g., `Point` → entity).
-/// `scope_entity` is used to walk up the parent chain for name resolution.
+/// Lowers through the canonical type lowering, so the result matches what
+/// inference sees for the same annotation: aliases expanded and omitted
+/// trailing type args filled with their declared defaults (`String` is
+/// `String[GlobalAllocator]`).
 fn resolve_ast_type_with_subs(
     query: &QueryContext<'_>,
     root: Entity,
     ast_ty: Option<&kestrel_ast::AstType>,
-    subs: &[(String, ResolvedTy)],
+    subs: &TypeParamSubs,
     scope_entity: Entity,
 ) -> ResolvedTy {
-    use kestrel_ast::AstType;
-
     let Some(ty) = ast_ty else {
         return ResolvedTy::Error;
     };
-
-    match ty {
-        AstType::Named { segments, .. } => {
-            // A bare single-segment name may be a type parameter — substitute it.
-            if segments.len() == 1 && segments[0].type_args.is_empty() {
-                let name = &segments[0].name;
-                if let Some((_, resolved)) = subs.iter().find(|(n, _)| n == name) {
-                    return resolved.clone();
-                }
-            }
-            // Resolve the path to its type entity via the canonical resolver
-            // (handles builtins like `Bool`/`Int64`, stdlib types, and generic
-            // instantiations like `Optional[Int64]` — the hand-rolled
-            // sibling-scope lookup could not, leaving such payload/field types
-            // as `Error` and breaking nested pattern matching, #189/#190).
-            let path: Vec<String> = segments.iter().map(|s| s.name.clone()).collect();
-            let entity = match query.query(ResolveTypePath {
-                segments: path,
-                context: scope_entity,
-                root,
-            }) {
-                TypeResolution::Found(entity) => entity,
-                _ => return ResolvedTy::Error,
-            };
-            // Recursively resolve the trailing segment's type arguments.
-            let args: Vec<ResolvedTy> = segments
-                .last()
-                .map(|seg| {
-                    seg.type_args
-                        .iter()
-                        .map(|a| {
-                            resolve_ast_type_with_subs(query, root, Some(a), subs, scope_entity)
-                        })
-                        .collect()
-                })
-                .unwrap_or_default();
-            ResolvedTy::Named { entity, args }
-        },
-
-        AstType::Tuple(elems, _) => {
-            let resolved: Vec<_> = elems
-                .iter()
-                .map(|e| resolve_ast_type_with_subs(query, root, Some(e), subs, scope_entity))
-                .collect();
-            ResolvedTy::Tuple(resolved)
-        },
-
-        AstType::Unit(_) => ResolvedTy::Tuple(vec![]),
-
-        AstType::Never(_) => ResolvedTy::Never,
-
-        _ => ResolvedTy::Error,
-    }
+    let hir = kestrel_hir_lower::lower_ast_type(query, scope_entity, root, ty);
+    let resolved = kestrel_type_infer::compare::resolve_hir_type(query, &hir);
+    kestrel_type_infer::substitute_resolved_ty(&resolved, &subs.params, &subs.args)
 }
 
 /// Is `inner` inside `outer`? An empty `inner` covers no value, so nothing

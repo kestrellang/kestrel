@@ -701,9 +701,7 @@ fn describe_existential(ctx: &InferCtx<'_>, kind: &TyKind) -> Option<String> {
     let TyKind::Struct { entity, args } = kind else {
         return None;
     };
-    let [payload] = args.as_slice() else {
-        return None;
-    };
+    let payload = args.first()?;
     let TySlot::Resolved(TyKind::RawExistential { bounds, bindings }) =
         &ctx.types[ctx.resolve(*payload).0 as usize]
     else {

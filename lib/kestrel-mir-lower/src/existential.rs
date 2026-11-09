@@ -684,7 +684,7 @@ pub(crate) fn lower_self_conformance_witnesses(ctx: &mut LowerCtx) {
             .filter(|ty| !done.contains(ty))
             .filter_map(|ty| match ctx.module.ty_arena.get(ty) {
                 MirTy::Named { entity, type_args } => match type_args.as_slice() {
-                    [raw]
+                    [raw, ..]
                         if matches!(
                             ctx.module.ty_arena.get(*raw),
                             MirTy::RawExistential { .. }
@@ -860,10 +860,13 @@ fn forwarder(
         return None;
     }
     let peel = box_peel(ctx, boxed, receiver == ParamConvention::MutBorrow)?;
-    let raw = match ctx.module.ty_arena.get(box_ty) {
-        MirTy::Named { type_args, .. } => *type_args.first()?,
+    // The payload is the box's first type argument; the peel takes all of
+    // them (the rest are the box's allocator).
+    let box_args = match ctx.module.ty_arena.get(box_ty) {
+        MirTy::Named { type_args, .. } => type_args.clone(),
         _ => return None,
     };
+    let raw = *box_args.first()?;
     // `Self` in the requirement is the box.
     let mut subst = kestrel_mir::substitute::SubstMap::new();
     subst.type_params.insert(protocol, box_ty);
@@ -932,7 +935,7 @@ fn forwarder(
         }));
     }
     let view = b.emit_call_returning(
-        Callee::direct_with_args(peel, vec![raw], None),
+        Callee::direct_with_args(peel, box_args, None),
         vec![CallArg {
             value: values[0],
             convention: receiver,

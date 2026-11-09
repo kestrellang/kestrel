@@ -2,12 +2,13 @@
 
 module std.collections
 
-import std.core.(Bool, Cloneable, fatalError)
+import std.core.(Bool, Cloneable, Defaultable, fatalError)
 import std.numeric.(Int64)
 import std.result.(Optional)
-import std.memory.(Layout, Pointer, SystemAllocator, CowBox)
+import std.memory.(Layout, Pointer, Allocator, GlobalAllocator, CowBox)
 import std.collections.(Slice)
 import std.iter.(Iterator, Iterable)
+import std.ffi.(memcpy)
 
 // ============================================================================
 // DEQUE STORAGE (Internal)
@@ -19,7 +20,7 @@ import std.iter.(Iterator, Iterable)
 /// bumps a reference count; mutations write through `storage.value`, which
 /// performs the copy-on-write barrier first. The `clone()` method linearizes
 /// the ring buffer into a fresh contiguous allocation.
-struct DequeStorage[T]: Cloneable {
+struct DequeStorage[T, A]: Cloneable where A: Allocator {
     /// Heap pointer to the element buffer; null when `cap == 0`.
     var ptr: Pointer[T]
     /// Number of initialized elements in the ring buffer.
@@ -28,17 +29,21 @@ struct DequeStorage[T]: Cloneable {
     var cap: Int64
     /// Index of the logical first element in the ring buffer.
     var head: Int64
+    /// Where the buffer came from and goes back to; a handle, copied with
+    /// the storage (see `ArrayStorage.allocator`).
+    var allocator: A
 
     /// @name From Fields
     /// Constructs a `DequeStorage` from raw fields.
     ///
     /// The caller must guarantee `len <= cap`, `head < cap` (or both 0),
     /// and `ptr` valid for `cap` elements when `cap > 0`.
-    init(ptr ptr: Pointer[T], len len: Int64, cap cap: Int64, head head: Int64) {
+    init(ptr ptr: Pointer[T], len len: Int64, cap cap: Int64, head head: Int64, allocator allocator: A) {
         self.ptr = ptr;
         self.len = len;
         self.cap = cap;
         self.head = head;
+        self.allocator = allocator;
     }
 
     /// Deep-copies the storage, linearizing the ring buffer into a fresh
@@ -48,28 +53,47 @@ struct DequeStorage[T]: Cloneable {
     /// contiguously regardless of where they wrapped in the source.
     /// Returns an empty storage with a null pointer when `len == 0`.
     /// Panics if allocation fails.
-    func clone() -> DequeStorage[T] {
+    func clone() -> DequeStorage[T, A] {
         if self.cap == 0 {
             return DequeStorage(
                 ptr: Pointer[T].nullPointer(),
                 len: 0,
                 cap: 0,
-                head: 0
+                head: 0,
+                allocator: self.allocator
             )
         }
         let layout = Layout.array[T](self.cap);
-        var allocator = SystemAllocator();
+        var allocator = self.allocator;
         let result = allocator.allocate(layout);
         if let .Some(rawPtr) = result {
             let newPtr = rawPtr.cast[T]();
-            for i in 0..<self.len {
-                var phys = self.head + i;
-                if phys >= self.cap { phys = phys - self.cap; }
-                unsafe newPtr.offset(by: i).write(self.ptr.offset(by: phys).read());
+            if Bool(boolLiteral: lang.is_bitwise[T]()) {
+                self.copyLinear(to: newPtr);
+            } else {
+                for i in 0..<self.len {
+                    var phys = self.head + i;
+                    if phys >= self.cap { phys = phys - self.cap; }
+                    unsafe newPtr.offset(by: i).write(self.ptr.offset(by: phys).read());
+                }
             }
-            DequeStorage(ptr: newPtr, len: self.len, cap: self.cap, head: 0)
+            DequeStorage(ptr: newPtr, len: self.len, cap: self.cap, head: 0, allocator: allocator)
         } else {
             fatalError("DequeStorage clone allocation failed")
+        }
+    }
+
+    /// Bit-copies the `len` live elements, in order, to the start of `dest`
+    /// (room for `len`): the run from `head`, then the part that wrapped.
+    /// That moves them (the source slots must then count as empty) or,
+    /// for a byte-copied `T`, copies them.
+    func copyLinear(to dest: Pointer[T]) {
+        if self.len == 0 { return }
+        let size = Layout.of[T]().size;
+        let first = if self.head + self.len > self.cap { self.cap - self.head } else { self.len };
+        let _ = unsafe memcpy(dest.asRaw(), self.ptr.offset(by: self.head).asRaw(), first * size);
+        if first < self.len {
+            let _ = unsafe memcpy(dest.offset(by: first).asRaw(), self.ptr.asRaw(), (self.len - first) * size);
         }
     }
 
@@ -92,7 +116,7 @@ struct DequeStorage[T]: Cloneable {
                 i = i + 1
             };
             let layout = Layout.array[T](self.cap);
-            var allocator = SystemAllocator();
+            var allocator = self.allocator;
             unsafe allocator.deallocate(self.ptr.asRaw(), layout)
         }
     }
@@ -200,14 +224,14 @@ public struct DequeIterator[T]: Iterator {
 /// - `popBack`/`popFront` are O(1).
 /// - Subscript access is O(1).
 /// - Iteration order is front-to-back.
-public struct Deque[T]: Iterable, Cloneable {
+public struct Deque[T, A = GlobalAllocator]: Iterable, Cloneable where A: Allocator {
     /// `Iterable` element type.
     type Item = T
     /// `Iterable` iterator type.
     type TargetIterator = DequeIterator[T]
 
     /// COW-wrapped ring-buffer storage.
-    fileprivate var storage: CowBox[DequeStorage[T]]
+    fileprivate var storage: CowBox[DequeStorage[T, A]]
 
     // -- internal helpers --
 
@@ -224,87 +248,37 @@ public struct Deque[T]: Iterable, Cloneable {
     // CONSTRUCTORS
     // ========================================================================
 
-    /// @name Empty
-    /// Creates an empty deque with no allocation.
-    ///
-    /// No heap memory is allocated until the first `pushBack` or
-    /// `pushFront`. Use `Deque(capacity:)` to pre-allocate when the
-    /// expected size is known.
+    /// @name With Allocator
+    /// An empty deque whose buffer will come from `allocator`. Nothing is
+    /// allocated until the first push.
     ///
     /// # Examples
     ///
     /// ```
-    /// var d = Deque[Int64]();
-    /// d.isEmpty;  // true
+    /// var arena = ArenaAllocator();
+    /// var d = Deque[Int64, ArenaAllocator](allocator: arena);
+    /// d.pushBack(1);  // allocated from the arena
     /// ```
-    public init() {
+    public init(allocator allocator: A) {
         self.storage = CowBox(DequeStorage(
             ptr: Pointer[T].nullPointer(),
             len: 0,
             cap: 0,
-            head: 0
+            head: 0,
+            allocator: allocator
         ));
     }
 
-    /// @name With Capacity
-    /// Creates an empty deque with at least `capacity` slots reserved.
-    ///
-    /// Allocates a ring buffer that can hold `capacity` elements before
-    /// needing to grow. Passing 0 is equivalent to `Deque()`.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// var d = Deque[Int64](capacity: 100);
-    /// d.count;  // 0
-    /// d.capacity;  // 100
-    /// ```
-    public init(capacity capacity: Int64) {
-        if capacity > 0 {
-            let layout = Layout.array[T](capacity);
-            var allocator = SystemAllocator();
-            let result = allocator.allocate(layout);
-            if let .Some(rawPtr) = result {
-                self.storage = CowBox(DequeStorage(
-                    ptr: rawPtr.cast[T](),
-                    len: 0,
-                    cap: capacity,
-                    head: 0
-                ))
-            } else {
-                fatalError("Deque allocation failed")
-            }
-        } else {
-            self.storage = CowBox(DequeStorage(
-                ptr: Pointer[T].nullPointer(),
-                len: 0,
-                cap: 0,
-                head: 0
-            ))
-        }
+    /// @name With Capacity And Allocator
+    /// An empty deque with room for `capacity` elements, allocated from
+    /// `allocator`. Panics on allocation failure.
+    public init(capacity capacity: Int64, allocator allocator: A) {
+        self.init(allocator: allocator);
+        self.grow(minCapacity: capacity)
     }
 
-    /// @name From Iterable
-    /// Creates a deque by collecting every element from an iterable.
-    ///
-    /// Elements are appended via `pushBack`, so iteration order of the
-    /// source is preserved as front-to-back order in the deque.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// let d = Deque[Int64](from: 1..<5);
-    /// d.count;  // 4
-    /// d.first();  // .Some(1)
-    /// d.last();   // .Some(4)
-    /// ```
-    public init[I](from iterable: I) where I: Iterable, I: not Static, I.Item = T {
-        self.init();
-        var iter = iterable.iter();
-        while let .Some(item) = iter.next() {
-            self.pushBack(item)
-        }
-    }
+    /// The allocator this deque's buffer comes from.
+    public var allocator: A { self.storage.value.allocator }
 
     // ========================================================================
     // PROPERTIES
@@ -358,19 +332,15 @@ public struct Deque[T]: Iterable, Cloneable {
         while newCap < minCapacity { newCap = newCap * 2; }
 
         let newLayout = Layout.array[T](newCap);
-        var allocator = SystemAllocator();
+        var allocator = self.storage.value.allocator;
         let result = allocator.allocate(newLayout);
         if let .Some(rawPtr) = result {
             let newPtr = rawPtr.cast[T]();
-            // Writing through `value` forks shared storage first. Linearize
-            // the ring into the new buffer by moving each element, then
-            // free the old buffer.
+            // Writing through `value` forks shared storage first. A move is
+            // a bit copy, so the ring is linearized into the new buffer with
+            // (at most) two memcpys, then the old buffer is freed.
             let s = &mutating self.storage.value;
-            for i in 0..<s.len {
-                var phys = s.head + i;
-                if phys >= s.cap { phys = phys - s.cap; }
-                unsafe newPtr.offset(by: i).write(s.ptr.offset(by: phys).take());
-            }
+            s.copyLinear(to: newPtr);
             if s.cap > 0 {
                 unsafe allocator.deallocate(s.ptr.asRaw(), Layout.array[T](s.cap))
             }
@@ -715,9 +685,68 @@ public struct Deque[T]: Iterable, Cloneable {
     /// d.count;   // 3 -- original unchanged
     /// d2.count;  // 4
     /// ```
-    public func clone() -> Deque[T] {
-        var d = Deque[T]();
+    public func clone() -> Deque[T, A] {
+        var d = Deque[T, A](allocator: self.allocator);
         d.storage = self.storage.clone();
         d
+    }
+}
+
+// Constructors that make their own allocator.
+extend Deque[T, A] where A: Defaultable {
+    /// @name Empty
+    /// Creates an empty deque with no allocation.
+    ///
+    /// No heap memory is allocated until the first `pushBack` or
+    /// `pushFront`. Use `Deque(capacity:)` to pre-allocate when the
+    /// expected size is known.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// var d = Deque[Int64]();
+    /// d.isEmpty;  // true
+    /// ```
+    public init() {
+        self.init(allocator: A())
+    }
+
+    /// @name With Capacity
+    /// Creates an empty deque with at least `capacity` slots reserved.
+    ///
+    /// Allocates a ring buffer that can hold `capacity` elements before
+    /// needing to grow. Passing 0 is equivalent to `Deque()`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// var d = Deque[Int64](capacity: 100);
+    /// d.count;  // 0
+    /// d.capacity;  // 100
+    /// ```
+    public init(capacity capacity: Int64) {
+        self.init(capacity: capacity, allocator: A())
+    }
+
+    /// @name From Iterable
+    /// Creates a deque by collecting every element from an iterable.
+    ///
+    /// Elements are appended via `pushBack`, so iteration order of the
+    /// source is preserved as front-to-back order in the deque.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let d = Deque[Int64](from: 1..<5);
+    /// d.count;  // 4
+    /// d.first();  // .Some(1)
+    /// d.last();   // .Some(4)
+    /// ```
+    public init[I](from iterable: I) where I: Iterable, I: not Static, I.Item = T {
+        self.init();
+        var iter = iterable.iter();
+        while let .Some(item) = iter.next() {
+            self.pushBack(item)
+        }
     }
 }

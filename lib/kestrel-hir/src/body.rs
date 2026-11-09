@@ -159,6 +159,12 @@ pub struct OptionalChainBind {
     pub binder: LocalId,
 }
 
+/// Name of the synthetic local a destructuring `let` binds a non-place
+/// initializer to (`let (a, b) = f()` is `{ let $let_tmp = f(); match
+/// $let_tmp { (a, b) => () } }`). Nothing else reads it, so the destructure
+/// may move out of it.
+pub const LET_DESTRUCTURE_TEMP: &str = "$let_tmp";
+
 /// Where a `HirExpr::Match` came from. Drives diagnostic phrasing and lets
 /// analyzers skip desugared matches (for-loop bodies, if-let wildcards) that
 /// would otherwise produce false-positive unreachable / irrefutable warnings.
@@ -177,7 +183,8 @@ pub enum MatchSource {
     GuardLet,
     /// Desugared from `for p in iter { ... }` (the Option match on iterator.next()).
     ForLoop,
-    /// Desugared from `let <pattern> = expr;`.
+    /// Desugared from `let <pattern> = expr;`. A non-place initializer is
+    /// first bound to a [`LET_DESTRUCTURE_TEMP`] local, the scrutinee.
     LetDestructure,
     /// Desugared from a destructured fn / method / closure parameter
     /// (`func f((a, b): (I, I))` or `{ ((a, b): (I, I)) in ... }`).
