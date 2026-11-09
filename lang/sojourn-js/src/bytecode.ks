@@ -129,6 +129,11 @@ enum Instr {
     case ArraySpread(arr: Int64, src: Int64)
     /// Defines an own enumerable data property (object literals).
     case DefineProp(obj: Int64, key: Int64, src: Int64)
+    /// A class evaluation's fresh private name `#x`: a symbol `GetElem`,
+    /// `SetElem`, `DefineProp` and `in` treat as private (`privateGet`).
+    case NewPrivateName(dst: Int64, name: Key)
+    /// Adds a private method (`kind` 0), getter (1) or setter (2) to `obj`.
+    case PrivateMethod(obj: Int64, key: Int64, fn: Int64, kind: Int64)
     /// Defines a method (non-enumerable when `enumerable` is false).
     case DefineMethod(obj: Int64, key: Int64, fn: Int64, enumerable: Bool)
     case DefineAccessor(obj: Int64, key: Int64, fn: Int64, isGetter: Bool, enumerable: Bool)
@@ -179,6 +184,9 @@ enum Instr {
     /// `obj[Symbol.iterator]()`, into `iter`; the `next` method goes in
     /// `iter + 1`.
     case GetIterator(iter: Int64, obj: Int64)
+    /// `obj[Symbol.asyncIterator]()`, or its sync iterator wrapped
+    /// (CreateAsyncFromSyncIterator), and `next`, into `iter` and `iter+1`.
+    case GetAsyncIterator(iter: Int64, obj: Int64)
     /// Calls `next`; jumps to `done` when finished, otherwise writes the value.
     case IteratorNext(dst: Int64, iter: Int64, done: Int64)
     /// Calls the iterator's `return`, if any (leaving a loop early).
@@ -213,6 +221,9 @@ struct Code {
     var isClassConstructor: Bool
     var isDerived: Bool
     var isGenerator: Bool
+    /// An async function: runs as a generator whose awaits are yields
+    /// (see `startAsync`).
+    var isAsync: Bool
     /// Where the function line came from, for error messages.
     var sourceName: String
 }

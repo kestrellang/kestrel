@@ -285,7 +285,7 @@ extend VM {
             instrs: [], scopes: [], nextReg: 1, maxReg: 1, ctl: [], strict: strict,
             isArrow: isArrow, isScript: isScript, pendingLabels: [], chainJumps: [],
             argumentsAt: 0, usesArguments: false, isDerivedCtor: false, hasFields: false,
-            completion: -1, isGenerator: false
+            completion: -1, isGenerator: false, isAsync: false
         ));
         var top = newCScope(true, isArrow);
         if not isArrow { let _ = top.declare("this"); }
@@ -305,9 +305,9 @@ extend VM {
         let code = Code(
             name: name, instrs: f.instrs, registers: f.maxReg, envSize: f.scopes(0).size,
             length: length, isArrow: flags.isArrow, isStrict: f.strict,
-            isConstructor: not flags.isArrow and not flags.isMethod and not f.isGenerator,
+            isConstructor: not flags.isArrow and not flags.isMethod and not f.isGenerator and not f.isAsync,
             isClassConstructor: flags.isClassConstructor, isDerived: flags.isDerived,
-            isGenerator: f.isGenerator,
+            isGenerator: f.isGenerator, isAsync: f.isAsync,
             sourceName: self.sourceName
         );
         self.codes.append(code);
@@ -347,7 +347,6 @@ extend VM {
 
     /// Compiles a function, returning its code index.
     mutating func compileFunction(f: Function, name: String, flags: FnFlags) -> Result[Int64, SyntaxError] {
-        if f.isAsync { throw compileError("async functions aren't supported yet"); }
         let body = match f.body { .Block(b) => b, .Expression(_) => [] };
         let strict = self.strict() or hasUseStrict(body) or flags.isClassConstructor;
         self.beginFunction(strict, flags.isArrow, false);
@@ -355,6 +354,7 @@ extend VM {
         self.fns(fi).isDerivedCtor = flags.isDerived;
         self.fns(fi).hasFields = flags.hasFields;
         self.fns(fi).isGenerator = f.isGenerator;
+        self.fns(fi).isAsync = f.isAsync;
 
         // Declare everything the function's top scope holds.
         let top = self.fns(fi).scopes.count - 1;
@@ -369,6 +369,9 @@ extend VM {
         for n in consts { let _ = self.fns(fi).scopes(top).consts.insert(n); }
         for fun in hoistedFunctions(body) { let _ = self.fns(fi).scopes(top).declare(fun.id ?? ""); }
 
+        // An async function's parameters run inside it, so their errors
+        // reject its promise.
+        if f.isAsync and not f.isGenerator { let _ = self.emit(.GeneratorStart); }
         // Parameters, then hoisted functions.
         let t = self.reg();
         self.load(t, Value.empty);
@@ -548,8 +551,17 @@ extend VM {
                 try self.compileExpr(e, dst);
                 let _ = self.emit(.Unary(op: .ToPropertyKey, dst: dst, src: dst));
             },
-            .Private(_) => throw compileError("private names aren't supported yet")
+            .Private(n) => try self.emitPrivateName(n, dst)
         }
+        .Ok(())
+    }
+
+    /// Loads private name `#n`; naming one no enclosing class declares is
+    /// an early error.
+    mutating func emitPrivateName(n: String, dst: Int64) -> Result[(), SyntaxError] {
+        let r = self.resolve("#" + n);
+        if not r.found { throw compileError("Private field '#\(n)' must be declared in an enclosing class"); }
+        self.emitGetName("#" + n, dst, false);
         .Ok(())
     }
 
@@ -557,7 +569,7 @@ extend VM {
         match p {
             .Name(n) => self.loadString(dst, n),
             .Computed(e) => try self.compileExpr(e, dst),
-            .Private(_) => throw compileError("private names aren't supported yet")
+            .Private(n) => try self.emitPrivateName(n, dst)
         }
         .Ok(())
     }
@@ -569,6 +581,7 @@ extend VM {
             .StringKey(s) => s,
             .NumberKey(n) => numberToString(n),
             .BigIntKey(s) => s,
+            .Private(n) => "#" + n,
             _ => ""
         }
     }

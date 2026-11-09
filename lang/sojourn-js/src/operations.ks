@@ -226,6 +226,7 @@ extend VM {
             .In => {
                 if not b.isObject { return self.throwType("Cannot use 'in' operator to search for a key in a non-object"); }
                 let k = try self.toKey(a);
+                if self.isPrivateKey(k) { return .Ok(Value.bool(self.hasOwn(b.asRef, k))); }
                 return .Ok(Value.bool(self.hasProperty(b, k)));
             },
             .InstanceOf => return .Ok(Value.bool(try self.instanceOf(a, b))),

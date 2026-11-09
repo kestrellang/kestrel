@@ -50,7 +50,9 @@ func runFiles(args: Array[String]) -> Int64 {
         name = path;
     }
     var vm = VM();
-    match vm.runScript(source, name) {
+    let result = vm.runScript(source, name);
+    vm.runJobs();
+    match result {
         .Ok(_) => 0,
         .Err(e) => {
             print("Uncaught \(vm.errorText(e))\n");

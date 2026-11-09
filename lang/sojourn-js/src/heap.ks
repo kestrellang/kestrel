@@ -82,6 +82,20 @@ enum ObjectKind {
     /// A RegExp: its program (`VM.regexPrograms`), source and flags.
     case RegExpObject(id: Int64, source: Value, flags: Value)
     case RegExpStringIterator(regexp: Value, string: Value, global: Bool, unicode: Bool, done: Bool)
+    /// A lazy iterator helper (map, filter, take, drop, flatMap).
+    case IteratorHelper(IterHelper)
+    /// Iterator.from's wrapper for an iterator not inheriting from
+    /// %Iterator.prototype%.
+    case WrappedIterator(iter: Value, next: Value)
+    /// Wraps a sync iterator for `for await` and `yield*` in async
+    /// generators.
+    case AsyncFromSyncIterator(iter: Value, next: Value)
+    /// A built-in function that closes over `captures`, like a promise's
+    /// resolving functions.
+    case NativeClosure(fn: NativeFn, captures: [Value])
+    /// A Promise (`PromiseState`) and its pending reactions, four values
+    /// each: the derived promise, its resolve and reject, and the handler.
+    case PromiseObject(state: Int64, result: Value, fulfill: [Value], reject: [Value], handled: Bool)
 }
 
 /// Generator states.
@@ -90,6 +104,8 @@ struct GenState {
     static var suspendedYield: Int64 { 1 }
     static var executing: Int64 { 2 }
     static var completed: Int64 { 3 }
+    /// An async generator waiting on the value a return() request passed.
+    static var awaitingReturn: Int64 { 4 }
 }
 
 /// A generator's suspended frame and its registers.
@@ -101,6 +117,14 @@ struct GenData {
     var resumeReg: Int64
     /// Whether the last yield handed out an iterator result as is.
     var raw: Bool
+    /// An async function's promise, settled when its body finishes; or
+    /// undefined for a generator.
+    var asyncPromise: Value
+    var isAsyncGenerator: Bool
+    /// An async generator's pending next/throw/return requests, five
+    /// values each: the mode, the value, and the promise with its resolve
+    /// and reject.
+    var queue: [Value]
 }
 
 /// A collection's entries in insertion order. Deleted entries stay as
@@ -300,6 +324,8 @@ struct Heap {
             m.values.append(f.callee);
             m.values.append(f.newTarget);
             for h in f.handlers { m.envs.append(h.env); }
+            m.values.append(g.asyncPromise);
+            for x in g.queue { m.values.append(x); }
         }
         traceKind(o.kind, m);
     }
@@ -380,6 +406,27 @@ func traceKind(kind: ObjectKind, mutating m: Marker) {
         .RegExpObject(_, s, f) => {
             m.values.append(s);
             m.values.append(f);
+        },
+        .IteratorHelper(h) => {
+            m.values.append(h.iter);
+            m.values.append(h.next);
+            m.values.append(h.fn);
+            m.values.append(h.inner);
+            m.values.append(h.innerNext);
+        },
+        .WrappedIterator(it, n) => {
+            m.values.append(it);
+            m.values.append(n);
+        },
+        .AsyncFromSyncIterator(it, n) => {
+            m.values.append(it);
+            m.values.append(n);
+        },
+        .NativeClosure(_, cs) => { for c in cs { m.values.append(c); } },
+        .PromiseObject(_, result, fs, rs, _) => {
+            m.values.append(result);
+            for x in fs { m.values.append(x); }
+            for x in rs { m.values.append(x); }
         },
         .RegExpStringIterator(r, s, _, _, _) => {
             m.values.append(r);

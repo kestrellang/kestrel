@@ -76,6 +76,7 @@ extend VM {
         match self.kindAt(v.asRef) {
             .Closure(_, _, _, _) => true,
             .NativeFunction(_) => true,
+            .NativeClosure(_, _) => true,
             .BoundFunction(_, _, _) => true,
             _ => false
         }
@@ -371,7 +372,7 @@ extend VM {
             if not keyIsSymbol(k) and self.indexOfKey(k) < 0 { out.append(k); }
         }
         for k in shape.keys {
-            if keyIsSymbol(k) { out.append(k); }
+            if keyIsSymbol(k) and not self.isPrivateKey(k) { out.append(k); }
         }
         out
     }
@@ -496,5 +497,78 @@ extend VM {
     /// not enumerable.
     mutating func defineHidden(r: Ref, key: Key, value: Value) {
         self.defineOwn(r, key, value, Attr.writable | Attr.configurable);
+    }
+}
+
+// ----------------------------------------------------------------------
+// Private names
+// ----------------------------------------------------------------------
+//
+// A private name is a symbol in `VM.privateSymbols`. Private fields,
+// methods and accessors are own properties under it that `ownKeys` hides,
+// reached only through the private-aware paths below, which never look
+// at the prototype chain and throw where ordinary property access would
+// quietly do nothing.
+
+extend VM {
+    func isPrivateKey(k: Key) -> Bool { keyIsSymbol(k) and self.privateSymbols.contains(symbolOfKey(k)) }
+
+    /// The own private property `k` of `obj`, or a TypeError naming `verb`.
+    mutating func privateProperty(obj: Value, k: Key, verb: String) -> Result[PropertyRecord, Value] {
+        if obj.isObject {
+            if let .Some(p) = self.ownProperty(obj.asRef, k) { return .Ok(p); }
+        }
+        self.throwType("Cannot \(verb) private member \(self.keyText(k)) from an object whose class did not declare it")
+    }
+
+    /// The accessor pair stored in an accessor property's slot.
+    func accessorPair(p: PropertyRecord) -> (Value, Value) {
+        match self.kindAt(p.value.asRef) {
+            .AccessorPair(g, s) => (g, s),
+            _ => (Value.undefined, Value.undefined)
+        }
+    }
+
+    mutating func privateGet(obj: Value, k: Key) -> Result[Value, Value] {
+        let p = try self.privateProperty(obj, k, "read");
+        if p.attrs & Attr.accessor == 0 { return .Ok(p.value); }
+        let (getter, _) = self.accessorPair(p);
+        if getter.isUndefined { return self.throwType("'\(self.keyText(k))' was defined without a getter"); }
+        self.callValue(getter, obj, [])
+    }
+
+    mutating func privateSet(obj: Value, k: Key, v: Value) -> Result[(), Value] {
+        let p = try self.privateProperty(obj, k, "write");
+        if p.attrs & Attr.accessor != 0 {
+            let (_, setter) = self.accessorPair(p);
+            if setter.isUndefined { return self.throwType("'\(self.keyText(k))' was defined without a setter"); }
+            let _ = try self.callValue(setter, obj, [v]);
+            return .Ok(());
+        }
+        if p.attrs & Attr.writable == 0 { return self.throwType("Private method \(self.keyText(k)) is not writable"); }
+        self.writeOwn(obj.asRef, k, v);
+        .Ok(())
+    }
+
+    /// PrivateMethodOrAccessorAdd: `kind` 0 a method, 1 a getter, 2 a
+    /// setter. A setter joins the getter of the same name.
+    mutating func privateMethodAdd(obj: Value, k: Key, f: Value, kind: Int64) -> Result[(), Value] {
+        let r = obj.asRef;
+        if let .Some(p) = self.ownProperty(r, k) {
+            let (getter, setter) = self.accessorPair(p);
+            let isPair = p.attrs & Attr.accessor != 0;
+            let joins = isPair and ((kind == 2 and setter.isUndefined and not getter.isUndefined) or (kind == 1 and getter.isUndefined and not setter.isUndefined));
+            if not joins { return self.throwType("Cannot initialize \(self.keyText(k)) twice on the same object"); }
+            if kind == 2 { self.defineAccessorOwn(r, k, getter, f, 0); } else { self.defineAccessorOwn(r, k, f, setter, 0); }
+            return .Ok(());
+        }
+        if kind == 0 {
+            self.defineOwn(r, k, f, 0);
+        } else if kind == 1 {
+            self.defineAccessorOwn(r, k, f, Value.undefined, 0);
+        } else {
+            self.defineAccessorOwn(r, k, Value.undefined, f, 0);
+        }
+        .Ok(())
     }
 }

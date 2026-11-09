@@ -85,7 +85,13 @@ extend VM {
                     self.patchHere(over);
                 }
             },
-            .PrivateIn(_, _) => throw compileError("private names aren't supported yet"),
+            .PrivateIn(name, right) => {
+                let key = self.reg();
+                try self.emitPrivateName(name, key);
+                let obj = self.reg();
+                try self.compileExpr(right, obj);
+                let _ = self.emit(.Binary(op: .In, dst: dst, a: key, b: obj));
+            },
             .Assign(op, target, value) => try self.compileAssign(op, target, value, dst),
             .Conditional(test, consequent, alternate) => {
                 try self.compileExpr(test, dst);
@@ -119,7 +125,7 @@ extend VM {
                 for x in items { try self.compileExpr(x, dst); }
             },
             .Yield(argument, delegate) => try self.compileYield(argument, delegate, dst),
-            .Await(_) => throw compileError("async functions aren't supported yet"),
+            .Await(argument) => try self.compileAwait(argument, dst),
             .MetaProperty(meta, _) => {
                 if meta != "new" { throw compileError("import.meta isn't supported yet"); }
                 let _ = self.emit(.NewTarget(dst: dst));
@@ -396,16 +402,153 @@ extend VM {
             .Some(e) => try self.compileExpr(e, v),
             .None => self.load(v, Value.undefined)
         }
+        let isAsync = self.isAsyncGenerator();
         if delegate {
-            try self.compileYieldStar(v, dst);
+            if isAsync { try self.compileAsyncYieldStar(v, dst); } else { try self.compileYieldStar(v, dst); }
             self.freeRegs(to: mark);
             return .Ok(());
         }
         let sent = self.regs(2);
+        // An async generator awaits what it yields.
+        if isAsync { self.emitAwait(v, v); }
         let _ = self.emit(.Yield(dst: sent, src: v, raw: false));
-        try self.emitResumeModes(sent);
+        if isAsync { try self.emitAsyncGenResume(sent); } else { try self.emitResumeModes(sent); }
         let _ = self.emit(.Move(dst: dst, src: sent));
         self.freeRegs(to: mark);
+        .Ok(())
+    }
+
+    /// `await x`: a raw yield of `x` that `asyncStep` turns into waiting on
+    /// a promise; it resumes with the value, or throws the rejection.
+    mutating func compileAwait(argument: Expr, dst: Int64) -> Result[(), SyntaxError] {
+        let mark = self.regMark();
+        let v = self.reg();
+        try self.compileExpr(argument, v);
+        self.emitAwait(v, dst);
+        self.freeRegs(to: mark);
+        .Ok(())
+    }
+
+    func isAsyncGenerator() -> Bool {
+        let f = self.fns(self.fnIndex());
+        f.isAsync and f.isGenerator
+    }
+
+    /// Awaits the value in `src` into `dst`: a raw yield `asyncStep`
+    /// turns into waiting on a promise, resumed with the value or the
+    /// rejection to throw.
+    mutating func emitAwait(src: Int64, dst: Int64) {
+        let mark = self.regMark();
+        let sent = self.regs(2);
+        let _ = self.emit(.Yield(dst: sent, src: src, raw: true));
+        let t = self.reg();
+        let c = self.reg();
+        self.load(c, Value.int(1));
+        let _ = self.emit(.Binary(op: .StrictEq, dst: t, a: sent + 1, b: c));
+        let notThrow = self.emit(.JumpIf(cond: t, target: 0, when: false));
+        let _ = self.emit(.Throw(src: sent));
+        self.patchHere(notThrow);
+        let _ = self.emit(.Move(dst: dst, src: sent));
+        self.freeRegs(to: mark);
+    }
+
+    /// After a yield in an async generator: throw() rethrows; return()
+    /// awaits its value and returns it.
+    mutating func emitAsyncGenResume(sent: Int64) -> Result[(), SyntaxError] {
+        let t = self.reg();
+        let c = self.reg();
+        self.load(c, Value.int(1));
+        let _ = self.emit(.Binary(op: .StrictEq, dst: t, a: sent + 1, b: c));
+        let notThrow = self.emit(.JumpIf(cond: t, target: 0, when: false));
+        let _ = self.emit(.Throw(src: sent));
+        self.patchHere(notThrow);
+        self.load(c, Value.int(2));
+        let _ = self.emit(.Binary(op: .StrictEq, dst: t, a: sent + 1, b: c));
+        let normal = self.emit(.JumpIf(cond: t, target: 0, when: false));
+        self.emitAwait(sent, sent);
+        try self.emitCleanup(-1);
+        let _ = self.emit(.Return(src: sent));
+        self.patchHere(normal);
+        .Ok(())
+    }
+
+    /// `yield*` in an async generator: forwards next/throw/return to an
+    /// async iterator, awaiting each result, and yields the values.
+    mutating func compileAsyncYieldStar(src: Int64, dst: Int64) -> Result[(), SyntaxError] {
+        let iter = self.regs(2);
+        let _ = self.emit(.GetAsyncIterator(iter: iter, obj: src));
+        let recv = self.regs(2);
+        self.load(recv, Value.undefined);
+        self.load(recv + 1, Value.int(0));
+        let res = self.reg();
+        let t = self.reg();
+        let c = self.reg();
+        let m = self.reg();
+        let argReg = self.reg();
+        let done = self.reg();
+        let top = self.here();
+        self.load(c, Value.int(1));
+        let _ = self.emit(.Binary(op: .StrictEq, dst: t, a: recv + 1, b: c));
+        let toThrow = self.emit(.JumpIf(cond: t, target: 0, when: true));
+        self.load(c, Value.int(2));
+        let _ = self.emit(.Binary(op: .StrictEq, dst: t, a: recv + 1, b: c));
+        let toReturn = self.emit(.JumpIf(cond: t, target: 0, when: true));
+        // next(v)
+        let _ = self.emit(.Move(dst: argReg, src: recv));
+        let _ = self.emit(.Call(dst: res, callee: iter + 1, this: iter, args: argReg, argc: 1));
+        let afterNext = self.emit(.Jump(target: 0));
+        // throw(v): forward it, or close the iterator and fail.
+        self.patchHere(toThrow);
+        let _ = self.emit(.GetProp(dst: m, obj: iter, key: self.atom("throw"), ic: self.newIC()));
+        let noThrow = self.emit(.JumpIfNullish(src: m, target: 0));
+        let _ = self.emit(.Move(dst: argReg, src: recv));
+        let _ = self.emit(.Call(dst: res, callee: m, this: iter, args: argReg, argc: 1));
+        let afterThrow = self.emit(.Jump(target: 0));
+        self.patchHere(noThrow);
+        let _ = self.emit(.GetProp(dst: m, obj: iter, key: self.names.returnKey, ic: self.newIC()));
+        let noClose = self.emit(.JumpIfNullish(src: m, target: 0));
+        let _ = self.emit(.Call(dst: res, callee: m, this: iter, args: res, argc: 0));
+        self.emitAwait(res, res);
+        let _ = self.emit(.RequireObjectResult(src: res));
+        self.patchHere(noClose);
+        let _ = self.emit(.ThrowError(kind: .TypeError, message: "The iterator does not provide a 'throw' method"));
+        // return(v): forward it; a done result returns from here.
+        self.patchHere(toReturn);
+        let _ = self.emit(.GetProp(dst: m, obj: iter, key: self.names.returnKey, ic: self.newIC()));
+        let noReturn = self.emit(.JumpIfNullish(src: m, target: 0));
+        let _ = self.emit(.Move(dst: argReg, src: recv));
+        let _ = self.emit(.Call(dst: res, callee: m, this: iter, args: argReg, argc: 1));
+        self.emitAwait(res, res);
+        let _ = self.emit(.RequireObjectResult(src: res));
+        let _ = self.emit(.GetProp(dst: done, obj: res, key: self.names.done, ic: self.newIC()));
+        let returnNotDone = self.emit(.JumpIf(cond: done, target: 0, when: false));
+        let _ = self.emit(.GetProp(dst: done, obj: res, key: self.names.value, ic: self.newIC()));
+        self.emitAwait(done, done);
+        try self.emitCleanup(-1);
+        let _ = self.emit(.Return(src: done));
+        self.patchHere(noReturn);
+        self.emitAwait(recv, recv);
+        try self.emitCleanup(-1);
+        let _ = self.emit(.Return(src: recv));
+        // A next/throw result: done ends the yield*, else yield its value.
+        self.patchHere(afterNext);
+        self.patchHere(afterThrow);
+        self.emitAwait(res, res);
+        let _ = self.emit(.RequireObjectResult(src: res));
+        let _ = self.emit(.GetProp(dst: done, obj: res, key: self.names.done, ic: self.newIC()));
+        let finished = self.emit(.JumpIf(cond: done, target: 0, when: true));
+        self.patchHere(returnNotDone);
+        let _ = self.emit(.GetProp(dst: m, obj: res, key: self.names.value, ic: self.newIC()));
+        let _ = self.emit(.Yield(dst: recv, src: m, raw: false));
+        // A return() request's value is awaited before it's forwarded.
+        self.load(c, Value.int(2));
+        let _ = self.emit(.Binary(op: .StrictEq, dst: t, a: recv + 1, b: c));
+        let notReturn = self.emit(.JumpIf(cond: t, target: 0, when: false));
+        self.emitAwait(recv, recv);
+        self.patchHere(notReturn);
+        let _ = self.emit(.Jump(target: top));
+        self.patchHere(finished);
+        let _ = self.emit(.GetProp(dst: dst, obj: res, key: self.names.value, ic: self.newIC()));
         .Ok(())
     }
 
@@ -674,6 +817,9 @@ extend VM {
         let f = self.fnIndex();
         let savedStrict = self.fns(f).strict;
         self.fns(f).strict = true;
+        // The class scope holds the class's own name, its private names
+        // (fresh symbols each evaluation), and the instance private methods
+        // the field initializer installs on each instance.
         var pushed = false;
         if let .Some(own) = c.id {
             var sc = newCScope(false, false);
@@ -686,10 +832,32 @@ extend VM {
             let _ = self.emit(.InitVar(hops: 0, slot: 0, src: t));
             pushed = true;
         }
+        // The heritage sees the class's name but not its private names.
         var superclass: Int64 = -1;
         if let .Some(s) = c.superClass {
             superclass = self.reg();
             try self.compileExpr(s, superclass);
+        }
+        // An inner scope holds the private names (fresh symbols each
+        // evaluation) and the instance private methods the field
+        // initializer installs on each instance.
+        let privates = try classPrivateNames(c);
+        let privateNames = privates.names;
+        let methodNames = privates.methodNames;
+        let methodKinds = privates.methodKinds;
+        let pushedPrivate = not privateNames.isEmpty;
+        if pushedPrivate {
+            var sc = newCScope(false, false);
+            for n in privateNames { let _ = sc.declare(n); }
+            for i in 0..<methodNames.count { let _ = sc.declare(privateMethodSlot(methodNames(i), methodKinds(i))); }
+            let size = sc.size;
+            self.pushScope(sc);
+            let _ = self.emit(.PushEnv(size: size));
+            let t = self.reg();
+            for n in privateNames {
+                let _ = self.emit(.NewPrivateName(dst: t, name: self.atom(n)));
+                self.emitSetName(n, t, .Declare);
+            }
         }
         let derived = superclass >= 0;
 
@@ -707,7 +875,7 @@ extend VM {
         var flags = plainFlags();
         flags.isClassConstructor = true;
         flags.isDerived = derived;
-        flags.hasFields = not instanceFields.isEmpty;
+        flags.hasFields = not instanceFields.isEmpty or not methodNames.isEmpty;
         let ctorCode = try self.compileFunction(ctorFunction, name, flags);
         let _ = self.emit(.MakeClosure(dst: dst, code: ctorCode, home: -1));
         let proto = self.reg();
@@ -719,6 +887,11 @@ extend VM {
             match m {
                 .Method(key, kind, isStatic, function) => if kind != MethodKind.Constructor {
                     let home = if isStatic { dst } else { proto };
+                    if let .Private(n) = key {
+                        try self.compilePrivateMethod(n, kind, isStatic, function, home, dst);
+                        self.freeRegs(to: mark);
+                        continue;
+                    }
                     let k = self.reg();
                     try self.compileKey(key, k);
                     let fnReg = self.reg();
@@ -735,23 +908,21 @@ extend VM {
         }
 
         // Instance fields run in an initializer the constructor calls.
-        if not instanceFields.isEmpty {
-            let code = try self.compileFieldInitializer(instanceFields);
+        if not instanceFields.isEmpty or not methodNames.isEmpty {
+            let code = try self.compileFieldInitializer(instanceFields, methodNames, methodKinds);
             let fi = self.reg();
             let _ = self.emit(.MakeClosure(dst: fi, code: code, home: proto));
             let _ = self.emit(.SetClassFields(ctor: dst, fn: fi));
         }
 
-        if pushed {
-            let _ = self.emit(.InitVar(hops: 0, slot: 0, src: dst));
-        }
+        if let .Some(own) = c.id { self.emitSetName(own, dst, .Declare); }
 
         // Static fields and blocks run now, in order, with `this` the class.
         for m in c.body {
             let mark = self.regMark();
             match m {
                 .Field(_, isStatic, _) => if isStatic {
-                    let code = try self.compileFieldInitializer([m]);
+                    let code = try self.compileFieldInitializer([m], [], []);
                     try self.emitRunWithThis(code, dst);
                 },
                 .StaticBlock(body) => {
@@ -765,6 +936,7 @@ extend VM {
             }
             self.freeRegs(to: mark);
         }
+        self.exitBlockScope(pushedPrivate);
         self.exitBlockScope(pushed);
         self.fns(f).strict = savedStrict;
         .Ok(())
@@ -779,11 +951,38 @@ extend VM {
         .Ok(())
     }
 
-    /// A method that defines `fields` on `this`.
-    mutating func compileFieldInitializer(fields: Array[ClassMember]) -> Result[Int64, SyntaxError] {
+    /// A private method or accessor `#n`: a static one goes on the class
+    /// now; an instance one waits in its class-scope slot for the field
+    /// initializer.
+    mutating func compilePrivateMethod(n: String, kind: MethodKind, isStatic: Bool, function: Function, home: Int64, ctor: Int64) -> Result[(), SyntaxError] {
+        let fnReg = self.reg();
+        try self.compileMethod(function, kind, "#" + n, home, fnReg);
+        let pk = privateMethodKind(kind);
+        if not isStatic {
+            self.emitSetName(privateMethodSlot("#" + n, pk), fnReg, .Declare);
+            return .Ok(());
+        }
+        let k = self.reg();
+        self.emitGetName("#" + n, k, false);
+        let _ = self.emit(.PrivateMethod(obj: ctor, key: k, fn: fnReg, kind: pk));
+        .Ok(())
+    }
+
+    /// A method that installs the class's instance private methods
+    /// (`methodNames`/`methodKinds`), then defines `fields`, on `this`.
+    mutating func compileFieldInitializer(fields: Array[ClassMember], methodNames: Array[String], methodKinds: Array[Int64]) -> Result[Int64, SyntaxError] {
         self.beginFunction(true, false, false);
         let this = self.reg();
         self.emitGetName("this", this, false);
+        for i in 0..<methodNames.count {
+            let mark = self.regMark();
+            let k = self.reg();
+            self.emitGetName(methodNames(i), k, false);
+            let f = self.reg();
+            self.emitGetName(privateMethodSlot(methodNames(i), methodKinds(i)), f, false);
+            let _ = self.emit(.PrivateMethod(obj: this, key: k, fn: f, kind: methodKinds(i)));
+            self.freeRegs(to: mark);
+        }
         for m in fields {
             if let .Field(key, _, value) = m {
                 let mark = self.regMark();
@@ -876,4 +1075,68 @@ func compoundOp(op: String) -> BinOp {
         "|=" => BinOp.BitOr,
         _ => BinOp.BitXor
     }
+}
+
+/// `PrivateMethod`'s kind for a method: 0 method, 1 getter, 2 setter.
+func privateMethodKind(kind: MethodKind) -> Int64 {
+    match kind {
+        .Get => 1,
+        .Set => 2,
+        _ => 0
+    }
+}
+
+/// The class-scope binding holding instance private method `name`
+/// (with its `#`) of `kind`, until the field initializer installs it.
+func privateMethodSlot(name: String, kind: Int64) -> String {
+    let suffix = if kind == 1 { " get" } else if kind == 2 { " set" } else { " fn" };
+    name + suffix
+}
+
+/// A class's private names (with their `#`), and its instance private
+/// methods with their `privateMethodKind`s.
+struct ClassPrivates {
+    var names: [String]
+    var methodNames: [String]
+    var methodKinds: [Int64]
+}
+
+/// Collects a class's private names. Declaring one twice is an early
+/// error, except a getter and a setter that are both static or both not.
+func classPrivateNames(c: Class) -> Result[ClassPrivates, SyntaxError] {
+    var out = ClassPrivates(names: [], methodNames: [], methodKinds: []);
+    // How each name was declared: 1 getter, 2 setter, 3 anything else;
+    // plus 4 when static.
+    var seen: [String: Int64] = [:];
+    for m in c.body {
+        var name = "";
+        var how: Int64 = 3;
+        match m {
+            .Method(key, kind, isStatic, _) => if let .Private(n) = key {
+                name = "#" + n;
+                let k = privateMethodKind(kind);
+                how = (if k == 0 { 3 } else { k }) + (if isStatic { 4 } else { 0 });
+                if not isStatic {
+                    out.methodNames.append(name);
+                    out.methodKinds.append(k);
+                }
+            },
+            .Field(key, isStatic, _) => if let .Private(n) = key {
+                name = "#" + n;
+                how = 3 + (if isStatic { 4 } else { 0 });
+            },
+            _ => {}
+        }
+        if name.isEmpty { continue; }
+        if let .Some(prev) = seen(name) {
+            // Only a getter/setter pair with the same staticness may share.
+            let pair = (prev & 3) + (how & 3) == 3 and (prev & 4) == (how & 4);
+            if not pair { throw compileError("Identifier '\(name)' has already been declared"); }
+            let _ = seen.insert(name, 3 | (how & 4));
+            continue;
+        }
+        let _ = seen.insert(name, how);
+        out.names.append(name);
+    }
+    .Ok(out)
 }

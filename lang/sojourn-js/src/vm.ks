@@ -62,6 +62,16 @@ struct Intrinsics {
     var generatorFunctionProto: Value
     var regexpStringIteratorProto: Value
     var throwTypeError: Value
+    var promiseCtor: Value
+    var promiseProto: Value
+    var asyncFunctionProto: Value
+    var aggregateErrorProto: Value
+    var asyncIteratorProto: Value
+    var asyncFromSyncIteratorProto: Value
+    var asyncGeneratorFunctionProto: Value
+    var asyncGeneratorProto: Value
+    var iteratorHelperProto: Value
+    var wrapForValidIteratorProto: Value
 }
 
 /// Well-known symbols, by symbol id.
@@ -117,6 +127,8 @@ struct VM {
     var atomIndex: [Int64]
     /// Symbol descriptions (a string value or undefined), by id.
     var symbols: [Value]
+    /// Symbol ids that are class private names.
+    var privateSymbols: Set[Int64]
     var symbolRegistry: [String: Int64]
     var codes: [Code]
     var caches: [InlineCache]
@@ -140,6 +152,8 @@ struct VM {
     /// Compiled regular expressions, and their ids by "flags/source".
     var regexPrograms: [RxProgram]
     var regexCache: [String: Int64]
+    /// Promise jobs waiting to run, oldest first (`runJobs`).
+    var jobs: [Job]
 
     init() {
         self.heap = Heap();
@@ -152,6 +166,7 @@ struct VM {
         self.atomValues = [];
         self.atomIndex = [];
         self.symbols = [];
+        self.privateSymbols = Set();
         self.symbolRegistry = [:];
         self.codes = [];
         self.caches = [];
@@ -172,13 +187,16 @@ struct VM {
             iteratorProto: u, arrayIteratorProto: u, stringIteratorProto: u, regexpProto: u,
             mapIteratorProto: u, setIteratorProto: u, generatorProto: u, generatorFunctionProto: u,
             regexpStringIteratorProto: u,
-            throwTypeError: u
+            throwTypeError: u, promiseCtor: u, promiseProto: u, asyncFunctionProto: u, aggregateErrorProto: u,
+            asyncIteratorProto: u, asyncFromSyncIteratorProto: u, asyncGeneratorFunctionProto: u, asyncGeneratorProto: u,
+            iteratorHelperProto: u, wrapForValidIteratorProto: u
         );
         self.sourceName = "";
         self.depth = 0;
         self.randomState = 0x2545F4914F6CDD1D;
         self.regexPrograms = [];
         self.regexCache = [:];
+        self.jobs = [];
         self.globalEnv = self.heap.allocEnv(Env(slots: [], parent: -1));
         self.names = Names(
             length: self.atom("length"), prototype: self.atom("prototype"), constructor: self.atom("constructor"),
@@ -229,6 +247,7 @@ struct VM {
     func keyText(k: Key) -> String {
         if keyIsSymbol(k) {
             let d = self.symbols(symbolOfKey(k));
+            if self.privateSymbols.contains(symbolOfKey(k)) { return self.text(d); }
             return if d.isString { "Symbol(\(self.text(d)))" } else { "Symbol()" };
         }
         self.atomNames(k)
@@ -282,6 +301,13 @@ struct VM {
             for h in f.handlers { envs.append(h.env); }
             values.append(f.generator);
         }
+        for j in self.jobs {
+            values.append(j.a);
+            values.append(j.b);
+            values.append(j.c);
+            values.append(j.d);
+            values.append(j.e);
+        }
         self.heap.collect(values, envs);
     }
 
@@ -293,7 +319,9 @@ struct VM {
          i.syntaxErrorProto, i.evalErrorProto, i.uriErrorProto, i.iteratorProto,
          i.arrayIteratorProto, i.stringIteratorProto, i.regexpProto, i.mapIteratorProto,
          i.setIteratorProto, i.generatorProto, i.generatorFunctionProto, i.regexpStringIteratorProto,
-         i.throwTypeError]
+         i.throwTypeError, i.promiseCtor, i.promiseProto, i.asyncFunctionProto, i.aggregateErrorProto,
+         i.asyncIteratorProto, i.asyncFromSyncIteratorProto, i.asyncGeneratorFunctionProto, i.asyncGeneratorProto,
+         i.iteratorHelperProto, i.wrapForValidIteratorProto]
     }
 
     mutating func pushRoot(v: Value) { self.roots.append(v); }

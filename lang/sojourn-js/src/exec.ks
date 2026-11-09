@@ -191,7 +191,7 @@ extend VM {
                     return self.throwType("Cannot read properties of \(what)");
                 }
                 let pk = try self.toKey(k);
-                let v = try self.getV(o, pk);
+                let v = if self.isPrivateKey(pk) { try self.privateGet(o, pk) } else { try self.getV(o, pk) };
                 self.setReg(fi, dst, v);
             },
             .SetElem(obj, key, src, strict) => {
@@ -203,7 +203,11 @@ extend VM {
                     return self.throwType("Cannot set properties of \(what)");
                 }
                 let pk = try self.toKey(k);
-                try self.setV(o, pk, v, strict);
+                if self.isPrivateKey(pk) {
+                    try self.privateSet(o, pk, v);
+                } else {
+                    try self.setV(o, pk, v, strict);
+                }
             },
             .DeleteElem(dst, obj, key, strict) => {
                 let o = try self.toObject(self.reg(fi, obj));
@@ -253,8 +257,21 @@ extend VM {
             },
             .DefineProp(obj, key, src) => {
                 let pk = try self.toKey(self.reg(fi, key));
-                self.defineOwn(self.reg(fi, obj).asRef, pk, self.reg(fi, src), Attr.all);
+                let o = self.reg(fi, obj);
+                if self.isPrivateKey(pk) {
+                    if self.hasOwn(o.asRef, pk) { return self.throwType("Cannot initialize \(self.keyText(pk)) twice on the same object"); }
+                    self.defineOwn(o.asRef, pk, self.reg(fi, src), Attr.writable);
+                } else {
+                    self.defineOwn(o.asRef, pk, self.reg(fi, src), Attr.all);
+                }
             },
+            .NewPrivateName(dst, name) => {
+                let d = self.atomValues(name);
+                let s = self.newSymbol(d);
+                let _ = self.privateSymbols.insert(s.asRef);
+                self.setReg(fi, dst, s);
+            },
+            .PrivateMethod(obj, key, fn, kind) => try self.privateMethodAdd(self.reg(fi, obj), symbolKey(self.reg(fi, key).asRef), self.reg(fi, fn), kind),
             .DefineMethod(obj, key, fn, enumerable) => {
                 let k = self.reg(fi, key);
                 let pk = try self.toKey(k);
@@ -412,6 +429,11 @@ extend VM {
             },
             .GetIterator(iter, obj) => {
                 let (it, next) = try self.getIterator(self.reg(fi, obj));
+                self.setReg(fi, iter, it);
+                self.setReg(fi, iter + 1, next);
+            },
+            .GetAsyncIterator(iter, obj) => {
+                let (it, next) = try self.getAsyncIterator(self.reg(fi, obj));
                 self.setReg(fi, iter, it);
                 self.setReg(fi, iter + 1, next);
             },

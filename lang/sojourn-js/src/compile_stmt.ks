@@ -76,12 +76,17 @@ extend VM {
             .For(setup, test, update, body) => try self.compileFor(setup, test, update, body, labels),
             .ForIn(left, right, body) => try self.compileForInOf(left, right, body, false, labels),
             .ForOf(left, right, body, isAwait) => {
-                if isAwait { throw compileError("for await isn't supported yet"); }
-                try self.compileForInOf(left, right, body, true, labels);
+                if isAwait {
+                    try self.compileForAwait(left, right, body, labels);
+                } else {
+                    try self.compileForInOf(left, right, body, true, labels);
+                }
             },
             .Return(value) => {
                 let r = self.reg();
                 if let .Some(v) = value { try self.compileExpr(v, r); } else { self.load(r, Value.undefined); }
+                // An async generator awaits what it returns.
+                if self.isAsyncGenerator() and value.isSome { self.emitAwait(r, r); }
                 try self.emitCleanup(-1);
                 let _ = self.emit(.Return(src: r));
             },
@@ -231,6 +236,68 @@ extend VM {
         .Ok(())
     }
 
+    /// `for await (x of y)`: like for-of over an async iterator, awaiting
+    /// each `next()` result.
+    mutating func compileForAwait(left: ForTarget, right: Expr, body: Stmt, labels: Array[String]) -> Result[(), SyntaxError] {
+        let obj = self.reg();
+        try self.compileExpr(right, obj);
+        let it = self.regs(2);
+        let _ = self.emit(.GetAsyncIterator(iter: it, obj: obj));
+        let top = self.here();
+        let res = self.reg();
+        let _ = self.emit(.Call(dst: res, callee: it + 1, this: it, args: res, argc: 0));
+        self.emitAwait(res, res);
+        let _ = self.emit(.RequireObjectResult(src: res));
+        let done = self.reg();
+        let _ = self.emit(.GetProp(dst: done, obj: res, key: self.names.done, ic: self.newIC()));
+        let exit = self.emit(.JumpIf(cond: done, target: 0, when: true));
+        let v = self.reg();
+        let _ = self.emit(.GetProp(dst: v, obj: res, key: self.names.value, ic: self.newIC()));
+        self.pushCtl(.Loop, labels, it);
+        let f = self.fnIndex();
+        let at = self.fns(f).ctl.count - 1;
+        self.fns(f).ctl(at).asyncIter = true;
+        var pushed = false;
+        match left {
+            .Declaration(d) => {
+                let target = d.declarations(0).target;
+                if d.kind != VariableKind.Var {
+                    let stmt = Stmt(kind: .Var(d), span: Span(start: 0, end: 0));
+                    pushed = try self.enterBlockScope([stmt], []);
+                }
+                try self.bindPattern(target, v, .Declare);
+            },
+            .Target(p) => try self.bindPattern(p, v, .Assign)
+        }
+        try self.compileSubstatement(body);
+        self.exitBlockScope(pushed);
+        self.patchContinues(self.here());
+        let _ = self.emit(.Jump(target: top));
+        self.patchHere(exit);
+        self.popCtl();
+        .Ok(())
+    }
+
+    /// Closes the iterator of loop `c` when a jump leaves it: a sync one
+    /// with IteratorClose, an async one by awaiting its `return()`.
+    mutating func emitIteratorClose(c: Ctl) -> Result[(), SyntaxError] {
+        if not c.asyncIter {
+            let _ = self.emit(.IteratorClose(iter: c.iter));
+            return .Ok(());
+        }
+        let mark = self.regMark();
+        let m = self.reg();
+        let _ = self.emit(.GetProp(dst: m, obj: c.iter, key: self.names.returnKey, ic: self.newIC()));
+        let skip = self.emit(.JumpIfNullish(src: m, target: 0));
+        let r = self.reg();
+        let _ = self.emit(.Call(dst: r, callee: m, this: c.iter, args: r, argc: 0));
+        self.emitAwait(r, r);
+        let _ = self.emit(.RequireObjectResult(src: r));
+        self.patchHere(skip);
+        self.freeRegs(to: mark);
+        .Ok(())
+    }
+
     // ------------------------------------------------------------------
     // Jumps out
     // ------------------------------------------------------------------
@@ -238,7 +305,7 @@ extend VM {
     mutating func pushCtl(kind: CtlKind, labels: Array[String], iter: Int64) {
         let f = self.fnIndex();
         let depth = self.scopeDepth();
-        self.fns(f).ctl.append(Ctl(kind: kind, labels: labels, breaks: [], continues: [], envDepth: depth, finalizer: .None, iter: iter));
+        self.fns(f).ctl.append(Ctl(kind: kind, labels: labels, breaks: [], continues: [], envDepth: depth, finalizer: .None, iter: iter, asyncIter: false));
     }
 
     /// Pops the innermost construct, pointing its breaks here.
@@ -277,7 +344,7 @@ extend VM {
         if target < 0 { throw compileError("no target for break or continue"); }
         try self.emitCleanup(target);
         let c = self.fns(f).ctl(target);
-        if isBreak and c.iter >= 0 { let _ = self.emit(.IteratorClose(iter: c.iter)); }
+        if isBreak and c.iter >= 0 { try self.emitIteratorClose(c); }
         var depth = self.scopeDepth();
         while depth > c.envDepth {
             let _ = self.emit(.PopEnv);
@@ -311,7 +378,7 @@ extend VM {
                     if let .Some(body) = c.finalizer { try self.compileFinallyInline(i, body); }
                 },
                 .Catch => { let _ = self.emit(.LeaveTry); },
-                .Loop => if c.iter >= 0 { let _ = self.emit(.IteratorClose(iter: c.iter)); },
+                .Loop => if c.iter >= 0 { try self.emitIteratorClose(c); },
                 _ => {}
             }
             i = i - 1;

@@ -151,6 +151,65 @@ enum NativeFn {
     case EvalErrorCtor
     case URIErrorCtor
     case ErrorToString
+    case GeneratorFunctionCtor
+    case AsyncFunctionCtor
+    case AsyncGeneratorFunctionCtor
+    // Iterator
+    case IteratorCtor
+    case IteratorFrom
+    case IteratorCtorGet
+    case IteratorCtorSet
+    case IteratorTagGet
+    case IteratorTagSet
+    case IteratorMap
+    case IteratorFilter
+    case IteratorTake
+    case IteratorDrop
+    case IteratorFlatMap
+    case IteratorReduce
+    case IteratorToArray
+    case IteratorForEach
+    case IteratorSome
+    case IteratorEvery
+    case IteratorFind
+    case IteratorHelperNext
+    case IteratorHelperReturn
+    case WrappedIteratorNext
+    case WrappedIteratorReturn
+    // Async iteration
+    case AsyncGeneratorNext
+    case AsyncGeneratorReturn
+    case AsyncGeneratorThrow
+    case AsyncGeneratorReturnSettled
+    case AsyncFromSyncNext
+    case AsyncFromSyncReturn
+    case AsyncFromSyncThrow
+    case AsyncFromSyncUnwrap
+    case AsyncFromSyncCloseRejected
+    // Promise
+    case PromiseCtor
+    case PromiseResolveFunction
+    case PromiseRejectFunction
+    case PromiseCapabilityExecutor
+    case PromiseThen
+    case PromiseCatch
+    case PromiseFinally
+    case PromiseThenFinally
+    case PromiseCatchFinally
+    case PromiseValueThunk
+    case PromiseThrower
+    case PromiseResolve
+    case PromiseReject
+    case PromiseWithResolvers
+    case PromiseAll
+    case PromiseAllSettled
+    case PromiseAny
+    case PromiseRace
+    case PromiseAllResolveElement
+    case PromiseAllSettledElement
+    case PromiseAnyRejectElement
+    case AsyncResume
+    case AggregateErrorCtor
     // RegExp
     case RegExpCtor
     case RegExpExec
@@ -386,6 +445,9 @@ extend VM {
             .ReturnThis => return .Ok(this),
             .FunctionProto => return .Ok(Value.undefined),
             .FunctionCtor => return self.functionConstructor(args),
+            .GeneratorFunctionCtor => return self.dynamicFunction(args, "function*"),
+            .AsyncFunctionCtor => return self.dynamicFunction(args, "async function"),
+            .AsyncGeneratorFunctionCtor => return self.dynamicFunction(args, "async function*"),
             _ => {}
         }
         if let .Some(r) = try self.objectNative(n, this, args, newTarget) { return .Ok(r); }
@@ -398,6 +460,9 @@ extend VM {
         if let .Some(r) = try self.dateNative(n, this, args, newTarget) { return .Ok(r); }
         if let .Some(r) = try self.generatorNative(n, this, args) { return .Ok(r); }
         if let .Some(r) = try self.regexpNative(n, callee, this, args, newTarget) { return .Ok(r); }
+        if let .Some(r) = try self.promiseNative(n, callee, this, args, newTarget) { return .Ok(r); }
+        if let .Some(r) = try self.asyncIterationNative(n, callee, this, args) { return .Ok(r); }
+        if let .Some(r) = try self.iteratorNative(n, callee, this, args, newTarget) { return .Ok(r); }
         self.throwType("built-in not implemented")
     }
 

@@ -58,6 +58,8 @@ extend VM {
         self.setupDate();
         self.setupGenerators();
         self.setupRegExp();
+        self.setupPromise();
+        self.setupIterator();
         let objectCtor = self.ownValue(g.asRef, self.atom("Object"));
         self.method(objectCtor, "groupBy", .ObjectGroupBy, 2);
 

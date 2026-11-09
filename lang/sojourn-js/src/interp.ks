@@ -53,13 +53,19 @@ extend VM {
     /// `new Function(p1, ..., body)`: parses the pieces as one function
     /// expression in the global scope.
     mutating func functionConstructor(args: Array[Value]) -> Result[Value, Value] {
+        self.dynamicFunction(args, "function")
+    }
+
+    /// CreateDynamicFunction for `kind`: "function", "function*" or
+    /// "async function".
+    mutating func dynamicFunction(args: Array[Value], kind: String) -> Result[Value, Value] {
         var params = "";
         for i in 0..<(args.count - 1) {
             if i > 0 { params.append(","); }
             params.append(try self.toText(args(i)));
         }
         let body = if args.count > 0 { try self.toText(args(args.count - 1)) } else { "" };
-        let source = "(function (" + params + "\n) {\n" + body + "\n})";
+        let source = "(" + kind + " (" + params + "\n) {\n" + body + "\n})";
         // Anything that closes the function early leaves more than the
         // one expression statement.
         let program = match parseScript(source) {
@@ -128,6 +134,7 @@ extend VM {
                 return self.run(stop + 1);
             },
             .NativeFunction(n) => return self.callNative(n, f, this, args, Value.undefined),
+            .NativeClosure(n, _) => return self.callNative(n, f, this, args, Value.undefined),
             .BoundFunction(target, boundThis, boundArgs) => {
                 var all = boundArgs;
                 for a in args { all.append(a); }
@@ -307,7 +314,13 @@ extend VM {
         self.defineReadOnly(r, "length", Value.int(c.length));
         let name = self.str(c.name);
         self.defineReadOnly(r, "name", name);
-        if c.isGenerator {
+        if c.isAsync and c.isGenerator {
+            self.heap.objects(r).proto = self.intrinsics.asyncGeneratorFunctionProto;
+            let proto = self.newObjectKind(self.intrinsics.asyncGeneratorProto, .Ordinary);
+            self.defineOwn(r, self.names.prototype, proto, Attr.writable);
+        } else if c.isAsync {
+            self.heap.objects(r).proto = self.intrinsics.asyncFunctionProto;
+        } else if c.isGenerator {
             // Generator functions inherit from %GeneratorFunction.prototype%
             // and own a prototype for their generator objects.
             self.heap.objects(r).proto = self.intrinsics.generatorFunctionProto;
@@ -324,10 +337,12 @@ extend VM {
     /// GeneratorStart: moves the top frame into a new generator object,
     /// which becomes the call's result.
     mutating func startGenerator(fi: Int64, stop: Int64) -> Result[Step, Value] {
+        let code = self.codes(self.frames(fi).code);
+        if code.isAsync and not code.isGenerator { return self.startAsync(fi, stop); }
         let callee = self.frames(fi).callee;
         var proto = try self.getV(callee, self.names.prototype);
-        if not proto.isObject { proto = self.intrinsics.generatorProto; }
-        let placeholder = GenData(frame: self.frames(fi), registers: [], state: GenState.suspendedStart, resumeReg: -1, raw: false);
+        if not proto.isObject { proto = if code.isAsync { self.intrinsics.asyncGeneratorProto } else { self.intrinsics.generatorProto }; }
+        let placeholder = GenData(frame: self.frames(fi), registers: [], state: GenState.suspendedStart, resumeReg: -1, raw: false, asyncPromise: Value.undefined, isAsyncGenerator: code.isAsync, queue: []);
         let id = self.heap.allocGenerator(placeholder);
         let gen = self.newObjectKind(proto, .Generator(id: id));
         self.frames(fi).generator = gen;
@@ -357,23 +372,7 @@ extend VM {
             if mode == 1 { return .Err(value); }
             return .Ok(self.iterResult(if mode == 2 { value } else { Value.undefined }, true));
         }
-        if self.depth > 2000 { return .Err(self.makeError(.RangeError, "Maximum call stack size exceeded")); }
-        // Put the frame back on top of the stack.
-        var f = self.heap.generators(id).frame;
-        f.base = self.stack.count;
-        f.returnTo = -1;
-        let regs = self.heap.generators(id).registers;
-        for v in regs { self.stack.append(v); }
-        self.heap.generators(id).registers = [];
-        self.frames.append(f);
-        self.depth = self.depth + 1;
-        if state == GenState.suspendedYield {
-            let at = f.base + self.heap.generators(id).resumeReg;
-            self.stack(at) = value;
-            self.stack(at + 1) = Value.int(mode);
-        }
-        self.heap.generators(id).state = GenState.executing;
-        let result = self.run(self.frames.count);
+        let result = self.enterGenerator(id, value, mode);
         let yielded = self.heap.generators(id).state == GenState.suspendedYield;
         match result {
             .Err(e) => {
@@ -389,6 +388,28 @@ extend VM {
                 .Ok(self.iterResult(v, true))
             }
         }
+    }
+
+    /// Puts generator `id`'s frame back on top of the stack, hands it the
+    /// sent value and mode, and runs it until it yields or finishes. The
+    /// generator's state then tells which.
+    mutating func enterGenerator(id: Int64, value: Value, mode: Int64) -> Result[Value, Value] {
+        if self.depth > 2000 { return .Err(self.makeError(.RangeError, "Maximum call stack size exceeded")); }
+        var f = self.heap.generators(id).frame;
+        f.base = self.stack.count;
+        f.returnTo = -1;
+        let regs = self.heap.generators(id).registers;
+        for v in regs { self.stack.append(v); }
+        self.heap.generators(id).registers = [];
+        self.frames.append(f);
+        self.depth = self.depth + 1;
+        if self.heap.generators(id).resumeReg >= 0 {
+            let at = f.base + self.heap.generators(id).resumeReg;
+            self.stack(at) = value;
+            self.stack(at + 1) = Value.int(mode);
+        }
+        self.heap.generators(id).state = GenState.executing;
+        self.run(self.frames.count)
     }
 
     mutating func finishGenerator(id: Int64) {

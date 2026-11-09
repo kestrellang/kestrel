@@ -48,6 +48,8 @@ struct Ctl {
     /// The iterator register of a for-of loop, closed when a jump leaves
     /// it, or -1.
     var iter: Int64
+    /// The iterator is async (`for await`): closing it awaits `return()`.
+    var asyncIter: Bool
 }
 
 @derive(Equatable)
@@ -85,6 +87,7 @@ struct FnState {
     /// `eval` returns), or -1.
     var completion: Int64
     var isGenerator: Bool
+    var isAsync: Bool
 }
 
 /// The names a list of statements declares with `var` (looking into

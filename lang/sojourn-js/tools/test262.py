@@ -23,22 +23,17 @@ def limit_memory():
 
 # Features the engine doesn't support yet.
 UNSUPPORTED = {
-    "async-functions", "async-iteration", "class-fields-private",
-    "class-methods-private", "class-static-methods-private", "class-fields-private-in",
-    "BigInt", "Proxy", "Promise", "regexp-unicode-property-escapes",
+    "BigInt", "Proxy", "regexp-unicode-property-escapes",
     "regexp-v-flag",
     "regexp-modifiers", "regexp-duplicate-named-groups", "TypedArray", "ArrayBuffer",
     "DataView", "SharedArrayBuffer", "Atomics", "WeakRef", "FinalizationRegistry",
     "tail-call-optimization", "dynamic-import",
     "import-meta", "top-level-await", "Temporal", "ShadowRealm", "decorators",
     "Intl", "intl-normative-optional", "cross-realm", "IsHTMLDDA", "host-gc-required",
-    "explicit-resource-management", "promise-with-resolvers", "Array.fromAsync",
+    "explicit-resource-management", "Array.fromAsync",
     "iterator-helpers", "set-methods", "uint8array-base64", "resizable-arraybuffer",
     "arraybuffer-transfer", "Float16Array", "json-parse-with-source", "RegExp.escape",
-    "Symbol.asyncIterator", "async-generators", "class-static-block", "regexp-sticky",
-    "Symbol.search",
-    "Reflect.construct", "error-cause",
-    "Atomics.waitAsync", "change-array-by-copy", "array-grouping", "source-phase-imports",
+    "Atomics.waitAsync", "source-phase-imports",
     "import-attributes", "json-modules", "upsert", "Math.sumPrecise", "Error.isError",
     "promise-try", "iterator-sequencing", "await-dictionary", "immutable-arraybuffer",
     "canonical-tz", "legacy-regexp",
@@ -69,7 +64,7 @@ def run_test(root, path):
     meta = m.group(1) if m else ""
     flags = set(meta_list(meta, "flags"))
     features = set(meta_list(meta, "features"))
-    if flags & {"module", "async", "CanBlockIsTrue"}:
+    if flags & {"module", "CanBlockIsTrue"}:
         return "skip", "flags"
     bad = features & UNSUPPORTED
     if bad:
@@ -79,6 +74,8 @@ def run_test(root, path):
     if "raw" not in flags:
         files = [os.path.join(harness, "assert.js"), os.path.join(harness, "sta.js")]
         files += [os.path.join(harness, f) for f in meta_list(meta, "includes")]
+    if "async" in flags:
+        files.append(os.path.join(harness, "doneprintHandle.js"))
     cmd = [BINARY, "run"] + (["--strict"] if "onlyStrict" in flags else []) + files + [path]
     try:
         p = subprocess.run(cmd, capture_output=True, timeout=TIMEOUT, preexec_fn=limit_memory)
@@ -99,6 +96,12 @@ def run_test(root, path):
         return "pass", ""
     if uncaught:
         return "fail", uncaught.group(1)[:300]
+    if "async" in flags:
+        failure = re.search(r"^Test262:AsyncTestFailure:(.*)$", out, re.M)
+        if failure:
+            return "fail", failure.group(1)[:300]
+        if "Test262:AsyncTestComplete" not in out:
+            return "fail", "async test never called $DONE"
     return "pass", ""
 
 def main():
