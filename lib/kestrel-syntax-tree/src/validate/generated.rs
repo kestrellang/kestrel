@@ -1193,7 +1193,7 @@ pub(super) static RULES: &[(K, R)] = &[
             R::Kind(K::LBrace),
             R::Opt(&R::Seq(&[
                 R::Kind(K::MatchArm),
-                R::Rep(&R::Seq(&[R::Kind(K::Comma), R::Kind(K::MatchArm)])),
+                R::Rep(&R::Seq(&[R::Opt(&R::Kind(K::Comma)), R::Kind(K::MatchArm)])),
                 R::Opt(&R::Kind(K::Comma)),
             ])),
             R::Kind(K::RBrace),
