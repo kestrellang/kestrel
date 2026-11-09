@@ -762,6 +762,25 @@ pub(super) fn solve_member(
                 });
             }
 
+            // Same-label inits the protocol collapse couldn't merge (a
+            // concrete `init(from: CString)` beside a generic
+            // `init[I](from: I)`) are picked by their argument types. Only a
+            // concrete type has such inits; requirements reached through a
+            // param's bounds (`T: F1, T: F2`) stay a plain ambiguity.
+            let concrete = matches!(recv_kind, TyKind::Struct { .. } | TyKind::Enum { .. });
+            if name == "init" && is_call && concrete && top.len() > 1 {
+                let candidates = top.iter().map(|(c, _)| *c).collect();
+                return super::call::solve_overloaded_call(
+                    ctx,
+                    candidates,
+                    explicit_type_args.to_vec(),
+                    args,
+                    result,
+                    expr,
+                    span,
+                );
+            }
+
             if let [(winner, ext)] = top.as_slice() {
                 match ctx.resolver.resolve_single_member(&recv_kind, *winner) {
                     Ok(mut res) => {
@@ -805,6 +824,15 @@ pub(super) fn solve_member(
                 &|ext| extension_applies(ctx, ext, &recv_kind),
             ) {
                 Ok(res) => res,
+                // Called on the type already (`L.bind(port: 0)`): the static
+                // member exists, only no overload takes these labels.
+                Err(_) if is_static_context => {
+                    ctx.poison(result);
+                    return SolveResult::Error(InferError::NoMatchingOverload {
+                        name: name.to_string(),
+                        span,
+                    });
+                },
                 Err(_) => {
                     ctx.poison(result);
                     return SolveResult::Error(InferError::MemberIsStatic {

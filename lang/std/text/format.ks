@@ -203,7 +203,7 @@ public enum FloatStyle: Equatable, Matchable {
 /// Mutable bag of formatting knobs threaded through every `Formattable.format` call.
 ///
 /// `FormatOptions` is the parsed form of the format-spec mini-language.
-/// String interpolation `"\{expr:spec}"` constructs one of these from the
+/// String interpolation `"\(expr:spec)"` constructs one of these from the
 /// trailing spec, then hands it to the formatter for `expr`'s type. Each
 /// formatter reads only the fields that apply to it: integers ignore
 /// `floatStyle`, strings ignore `radix`, and so on.
@@ -220,14 +220,14 @@ public enum FloatStyle: Equatable, Matchable {
 /// # Examples
 ///
 /// ```
-/// "\{n:>8}";      // right-align, width 8
-/// "\{n:08x}";     // zero-pad, width 8, hex
-/// "\{n:#X}";      // hex upper with 0x prefix
-/// "\{pi:.2}";     // precision 2 decimal places
-/// "\{pi:.2e}";    // scientific with 2 decimal places
-/// "\{ratio:%}";   // as percentage (0.5 -> "50%")
-/// "\{name:^10}";  // center, width 10
-/// "\{value:?}";   // debug format
+/// "\(n:>8)";      // right-align, width 8
+/// "\(n:08x)";     // zero-pad, width 8, hex
+/// "\(n:#X)";      // hex upper with 0x prefix
+/// "\(pi:.2)";     // precision 2 decimal places
+/// "\(pi:.2e)";    // scientific with 2 decimal places
+/// "\(ratio:%)";   // as percentage (0.5 -> "50%")
+/// "\(name:^10)";  // center, width 10
+/// "\(value:?)";   // debug format
 /// ```
 ///
 /// # Representation
@@ -349,7 +349,7 @@ public struct FormatOptions: Equatable {
 
 /// Protocol for types that can render themselves as a `String` under a `FormatOptions`.
 ///
-/// Print routines and string interpolation `"\{expr}"` and `"\{expr:spec}"`
+/// Print routines and string interpolation `"\(expr)"` and `"\(expr:spec)"`
 /// both ultimately bottom out in `format`. Implementors should honour
 /// every `FormatOptions` field that is meaningful for their domain
 /// (alignment and width are universal; `radix` applies to integers, and to
@@ -359,11 +359,11 @@ public struct FormatOptions: Equatable {
 /// # Examples
 ///
 /// ```
-/// "\{name}";         // "Alice"          (default formatting)
-/// "\{name:>10}";     // "     Alice"     (right-align, width 10)
-/// "\{n:08x}";        // "0000002a"       (zero-pad, hex, width 8)
-/// "\{pi:.2}";        // "3.14"           (precision 2)
-/// "\{value:?}";      // debug representation
+/// "\(name)";         // "Alice"          (default formatting)
+/// "\(name:>10)";     // "     Alice"     (right-align, width 10)
+/// "\(n:08x)";        // "0000002a"       (zero-pad, hex, width 8)
+/// "\(pi:.2)";        // "3.14"           (precision 2)
+/// "\(value:?)";      // debug representation
 /// ```
 /// Mutable destination for formatted text.
 ///
@@ -499,7 +499,7 @@ public protocol Interpolatable {
     /// Constructs an empty accumulator with capacity hints derived from the literal at compile time.
     ///
     /// `literalCapacity` is the total byte count of the static segments;
-    /// `interpolationCount` is the number of `\{...}` holes. Implementors
+    /// `interpolationCount` is the number of `\(...)` holes. Implementors
     /// can use these to preallocate.
     @sugarOnly
     @builtin(.InterpolatableInit)
@@ -507,7 +507,7 @@ public protocol Interpolatable {
 
     /// Appends a static literal segment.
     ///
-    /// Called once per run of literal text between `\{...}` holes. May be
+    /// Called once per run of literal text between `\(...)` holes. May be
     /// called with the empty string; implementors should be cheap in
     /// that case.
     @builtin(.InterpolatableAppendLiteral)

@@ -5194,8 +5194,10 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
             return (CallArg { value, convention }, prop_ty);
         }
         self.ctx.register_name(prop);
-        let type_args = self.prepend_receiver_type_args(receiver_ty, vec![]);
-        let callee = Callee::direct_with_args(prop, type_args, None);
+        // Same callee rule as a plain `x.prop` read: a getter declared in a
+        // protocol extension dispatches through the witness with the
+        // receiver as `Self`, never a direct call with `Self` unbound.
+        let callee = self.place_accessor_callee(prop, receiver_ty, vec![]);
         let result = self.emit_call_returning(callee, vec![receiver], prop_ty);
         if let MirTy::Ref { pointee, .. } = *self.ctx.module.ty_arena.get(prop_ty) {
             let arg = CallArg {

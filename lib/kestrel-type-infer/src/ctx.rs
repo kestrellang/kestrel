@@ -212,6 +212,10 @@ pub struct InferCtx<'a> {
     /// emits while deciding another one — an overload candidate's parameter
     /// equalities, say — stay queued, since that decision may still back out.
     pub(crate) solving_depth: u32,
+    /// Span of the member or call constraint being solved. Types formed by
+    /// instantiating the callee's signature report their well-formedness
+    /// here (the user's `.collect()`), not at the signature in std.
+    pub(crate) formation_site: Option<Span>,
     /// Off while the body's assumptions Γ (params, where clauses) are being
     /// set up: those constraints are interdependent and settle as one batch.
     /// On once the walker starts (bidi P5).
@@ -525,6 +529,7 @@ impl<'a> InferCtx<'a> {
             synth_gate: true,
             interpolation_depth: 0,
             solving_depth: 0,
+            formation_site: None,
             eager: false,
             poison_protocol_call_recv_on_failure: HashSet::default(),
             for_loop_iter_calls: HashSet::default(),
