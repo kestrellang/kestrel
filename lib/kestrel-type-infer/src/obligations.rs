@@ -46,6 +46,11 @@ const DEFAULT_RULES: &[(&str, DefaultRule)] = &[
 
 /// Finish inference for a body: flush, default, report.
 pub fn finish_body(ctx: &mut InferCtx<'_>, hir: &HirBody) {
+    kestrel_debug::ktrace!(
+        "finish-body",
+        "{}",
+        kestrel_ast_builder::qualified_name(ctx.query_ctx, ctx.owner)
+    );
     // P5 audit: which constraint kinds the walker left for the flush.
     for c in ctx
         .constraints

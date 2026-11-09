@@ -438,7 +438,40 @@ pub(crate) fn apply_literal_defaults(ctx: &mut InferCtx<'_>) -> bool {
     if apply_context_literals(ctx) {
         return true;
     }
+    // Then literal receivers, also alone: `let d = "12"; d.chars.iter().map
+    // { … ?? 0 }` defers the whole chain on `d`, so the closure's `0` must
+    // not default in the same batch, before its `??` has a receiver.
+    if apply_receiver_literal_defaults(ctx) {
+        return true;
+    }
     apply_literal_defaults_rest(ctx)
+}
+
+/// Default the open literals that are a deferred member's receiver.
+fn apply_receiver_literal_defaults(ctx: &mut InferCtx<'_>) -> bool {
+    let receivers: Vec<(TyVar, LiteralKind)> = ctx
+        .constraints
+        .iter()
+        .filter_map(|c| match c {
+            Constraint::Member { receiver, .. } => Some(ctx.resolve(*receiver)),
+            _ => None,
+        })
+        .filter_map(|tv| match ctx.slot(tv) {
+            TySlot::Unresolved { literal: Some(lit) } => Some((tv, *lit)),
+            _ => None,
+        })
+        .collect();
+    let mut progress = false;
+    for (tv, lit) in receivers {
+        // A receiver listed twice is already defaulted.
+        if matches!(
+            ctx.slot(ctx.resolve(tv)),
+            TySlot::Unresolved { literal: Some(_) }
+        ) {
+            progress |= default_literal_var(ctx, tv, lit);
+        }
+    }
+    progress
 }
 
 /// The context-driven first pass of `apply_literal_defaults`.
@@ -485,6 +518,7 @@ pub(crate) fn apply_context_literals(ctx: &mut InferCtx<'_>) -> bool {
             TySlot::Unresolved { literal: Some(_) }
         ) {
             let ty = ctx.named(entity, Vec::new());
+            kestrel_debug::ktrace!("lit-default", "rule C pick {recv:?}");
             progress |= unify::unify(ctx, recv, ty).is_ok();
         }
     }
@@ -493,6 +527,7 @@ pub(crate) fn apply_context_literals(ctx: &mut InferCtx<'_>) -> bool {
             &ctx.types[literal_tv.0 as usize],
             TySlot::Unresolved { literal: Some(_) }
         ) {
+            kestrel_debug::ktrace!("lit-default", "context {literal_tv:?} -> {context_tv:?}");
             ctx.types[literal_tv.0 as usize] = TySlot::Redirect(*context_tv);
             progress = true;
         }
@@ -581,6 +616,7 @@ pub(crate) fn default_literal_var(
         ctx.literal_default_args.extend(&args);
     }
     let default_tv = ctx.named(entity, args);
+    kestrel_debug::ktrace!("lit-default", "default {resolved:?} {literal:?}");
     ctx.types[resolved.0 as usize] = TySlot::Redirect(default_tv);
     true
 }
