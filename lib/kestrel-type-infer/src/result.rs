@@ -79,6 +79,12 @@ pub struct TypedBody {
     /// the iterable itself is CONSUMED as the loop's iterator. Decided once
     /// by inference; the move checker and MIR lowering both read it.
     pub direct_iterators: HashSet<HirExprId>,
+
+    /// Subscript / computed-property reads that lend a MUTABLE place: a
+    /// value returned as `&mutating T` (`func f(mutating xs: [T]) ->
+    /// &mutating T { xs(0) }`). Inference types them `&mutating T`; MIR
+    /// lowering calls the member's `mutating ref` accessor for them.
+    pub mutating_lends: HashSet<HirExprId>,
     /// Expressions of type `Optional[&T]` whose value decays to `Optional[T]`:
     /// bound initializers (`let f = b.first`) and operator receivers
     /// (`xs.first() ?? 0`). MIR copies the payload out wherever the
@@ -208,6 +214,7 @@ impl Hash for TypedBody {
             kind_coercions,
             field_callee_types,
             direct_iterators,
+            mutating_lends,
             optional_ref_decays,
             ref_return_calls,
             existential_conversions,
@@ -229,6 +236,9 @@ impl Hash for TypedBody {
         let mut direct: Vec<_> = direct_iterators.iter().map(|e| e.raw()).collect();
         direct.sort_unstable();
         direct.hash(state);
+        let mut lends: Vec<_> = mutating_lends.iter().map(|e| e.raw()).collect();
+        lends.sort_unstable();
+        lends.hash(state);
         let mut decays: Vec<_> = optional_ref_decays.iter().map(|e| e.raw()).collect();
         decays.sort_unstable();
         decays.hash(state);
@@ -516,6 +526,7 @@ pub fn build_result(ctx: &InferCtx<'_>) -> TypedBody {
             .collect(),
         kind_coercions: ctx.kind_coercions.clone(),
         direct_iterators: ctx.direct_iterators.clone(),
+        mutating_lends: ctx.mutating_lends.clone(),
         optional_ref_decays: ctx.optional_ref_decays.clone(),
         ref_return_calls: ctx
             .call_return_tvs
@@ -926,6 +937,12 @@ pub(crate) fn describe_error(ctx: &InferCtx<'_>, err: &InferError) -> String {
                 struct_name, got_desc, expected
             )
         },
+        InferError::MemberwiseInitMissing {
+            struct_name, field, ..
+        } => format!("missing argument for field '{field}' of struct '{struct_name}'"),
+        InferError::MemberwiseInitUnexpected {
+            struct_name, label, ..
+        } => format!("unexpected argument {label:?} for struct '{struct_name}'"),
         InferError::ItWrongArity { expected, .. } => {
             format!(
                 "implicit 'it' parameter used in {}-parameter context",
@@ -1111,6 +1128,7 @@ mod tests {
             kind_coercions: HashMap::default(),
             field_callee_types: HashMap::default(),
             direct_iterators: HashSet::default(),
+            mutating_lends: HashSet::default(),
             optional_ref_decays: HashSet::default(),
             ref_return_calls: HashMap::default(),
             existential_conversions: HashMap::default(),

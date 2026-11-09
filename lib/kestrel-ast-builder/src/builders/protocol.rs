@@ -2,7 +2,7 @@
 
 use kestrel_hecs::{Entity, World};
 use kestrel_syntax_tree::SyntaxNodePtr;
-use kestrel_syntax_tree::ast::{self, AstNode, HasName};
+use kestrel_syntax_tree::ast::{self, AstNode, HasName, HasUnsafe};
 use kestrel_syntax_tree::utils::get_decl_span;
 
 use super::helpers::*;
@@ -36,7 +36,7 @@ pub fn build_protocol(
 
     set_visibility(world, entity, node);
     set_attributes(world, entity, node, file_id);
-    if node.unsafe_modifier().is_some() {
+    if node.is_unsafe() {
         world.set(entity, IsUnsafe);
     }
     set_documentation(world, entity, syntax);

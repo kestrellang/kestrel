@@ -64,7 +64,9 @@ A requirement can be called through `any P` (it is *dispatchable*) unless it:
 - uses `Self` outside the receiver, as `Equatable`'s `==` does, or
 - mentions an associated type the existential leaves unbound.
 
-Calling one of these is E145, which names the reason. Protocol extension methods work on any existential. `mutating` requirements need a box that grants mutation, and `consuming` ones need `ConsumingIndirection` (E148 suggests `any[OwnedBox] P`).
+Calling one of these is E145, which names the reason. `mutating` requirements need a box that grants mutation, and `consuming` ones need `ConsumingIndirection` (E148 suggests `any[OwnedBox] P`). A `{ get set }` property can be written through the existential (`x.n = 1`, `x.n += 1`, `x.items.append(3)`): the write calls the payload's setter, on the shared payload for `any P` and after a fork for `any[CowBox] P`.
+
+Protocol extension methods run with the existential as `Self`, so they need `any P` to conform to `P` (below). That rules them out on `any[CowBox] P` for now: `P` refines `Cloneable`, and `clone() -> Self` can't be called through an existential (E146).
 
 **`any P` conforms to `P`** when every requirement is dispatchable and the box grants the access each one needs. That lets you pass an existential to generic code (`func f[T](x: T) where T: P`, or a `some P` parameter). E146 names the requirement that blocks it.
 

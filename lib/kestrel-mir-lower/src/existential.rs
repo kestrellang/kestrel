@@ -39,6 +39,7 @@ pub struct ExistentialState {
     discard_fn: Option<Entity>,
     take_fn: Option<Entity>,
     thunks: HashMap<Entity, Entity>,
+    setter_thunks: HashMap<Entity, Entity>,
     protocol_templates: HashMap<(Entity, Entity), Entity>,
     composition_templates: HashMap<(Entity, Vec<Entity>), Entity>,
 }
@@ -56,15 +57,11 @@ pub(crate) fn ancestors(ctx: &LowerCtx, protocol: Entity) -> Vec<Entity> {
     out
 }
 
-/// `protocol`'s own requirements that get a table slot, in slot order.
-fn slots(ctx: &LowerCtx, protocol: Entity) -> Vec<Entity> {
-    ctx.query
-        .query(kestrel_semantics::ExistentialLayout {
-            protocol,
-            root: ctx.root,
-        })
-        .slots()
-        .collect()
+fn layout(ctx: &LowerCtx, protocol: Entity) -> std::sync::Arc<kestrel_semantics::Layout> {
+    ctx.query.query(kestrel_semantics::ExistentialLayout {
+        protocol,
+        root: ctx.root,
+    })
 }
 
 /// The bounds of a raw existential, canonical order.
@@ -75,12 +72,14 @@ pub(crate) fn bounds_of(ctx: &LowerCtx, raw: TyId) -> Vec<Entity> {
     }
 }
 
-/// Where requirement `requirement` lives in a table for `bounds`: the words
-/// to load in turn (each yields a sub-table), then the slot word.
+/// Where requirement `requirement` (its setter, with `setter`) lives in a
+/// table for `bounds`: the words to load in turn (each yields a sub-table),
+/// then the slot word.
 pub(crate) fn dispatch_path(
     ctx: &LowerCtx,
     bounds: &[Entity],
     requirement: Entity,
+    setter: bool,
 ) -> Option<(Vec<u32>, u32)> {
     let owner = ctx.world.parent_of(requirement)?;
     let mut hops = Vec::new();
@@ -98,7 +97,7 @@ pub(crate) fn dispatch_path(
         let i = ancestors(ctx, protocol).iter().position(|&a| a == owner)?;
         hops.push(VTABLE_HEADER_WORDS + i as u32);
     }
-    let slot = slots(ctx, owner).iter().position(|&r| r == requirement)?;
+    let slot = layout(ctx, owner).slot_index(requirement, setter)?;
     let slot = VTABLE_HEADER_WORDS + ancestors(ctx, owner).len() as u32 + slot as u32;
     Some((hops, slot))
 }
@@ -161,12 +160,18 @@ fn protocol_template(ctx: &mut LowerCtx, boxed: Entity, protocol: Entity) -> Ent
     for a in ancestors(ctx, protocol) {
         entries.push(VTableEntry::Table(protocol_template(ctx, boxed, a)));
     }
-    for requirement in slots(ctx, protocol) {
+    // Function words in `Layout::slot_index` order: requirements, then
+    // property setters.
+    let layout = layout(ctx, protocol);
+    for requirement in layout.slots() {
         entries.push(VTableEntry::Func(requirement_thunk(
             ctx,
             protocol,
             requirement,
         )));
+    }
+    for &property in &layout.setters {
+        entries.push(VTableEntry::Func(setter_thunk(ctx, protocol, property)));
     }
     let name = format!(
         "__vtable.{}.{}",
@@ -517,6 +522,59 @@ fn requirement_thunk(ctx: &mut LowerCtx, protocol: Entity, requirement: Entity) 
     entity
 }
 
+/// The setter thunk for `{ get set }` property `property` of `protocol`:
+/// `fn [Self](data, newValue: T)` calling `Self`'s `"name.set"` witness on
+/// the payload in place.
+fn setter_thunk(ctx: &mut LowerCtx, protocol: Entity, property: Entity) -> Entity {
+    if let Some(&t) = ctx.existentials.setter_thunks.get(&property) {
+        return t;
+    }
+    let entity = ctx.next_synthetic_entity();
+    let name = format!("{}.set.__thunk", ctx.register_name(property));
+    ctx.register_name(protocol);
+    let self_ty = ctx.module.ty_arena.intern(MirTy::TypeParam(protocol));
+    let self_ptr = ctx.module.ty_arena.pointer(self_ty);
+    let value_ty = crate::ty::resolve_callable_return_type(ctx, property);
+    let unit = ctx.module.ty_arena.unit();
+    let key = ctx.witness_setter_key(property);
+    let conv = crate::body::setter_value();
+
+    let mut b = ThunkBuilder::new(ctx);
+    let data = b.data_param();
+    let value = b.param(value_ty, conv);
+    let ptr = b.op1(Op::PtrCast(self_ptr), data, self_ptr);
+    b.insts.push(Instruction::new(InstKind::Call {
+        result: None,
+        callee: Callee::Witness {
+            protocol,
+            method: key,
+            self_type: self_ty,
+            method_type_args: Vec::new(),
+        },
+        args: vec![
+            CallArg {
+                value: ptr,
+                convention: ParamConvention::MutBorrow,
+            },
+            CallArg {
+                value,
+                convention: conv,
+            },
+        ],
+    }));
+    for v in [ptr, data] {
+        b.insts
+            .push(Instruction::new(InstKind::DestroyValue { operand: v }));
+    }
+    let ret = b.literal(Immediate::unit(), unit);
+    b.extra_params
+        .push(ParamDef::new("newValue", value, value_ty, conv));
+    let tps = vec![TypeParamDef::new(protocol, "Self")];
+    b.finish(ctx, entity, &name, tps, unit, ret);
+    ctx.existentials.setter_thunks.insert(property, entity);
+    entity
+}
+
 /// Hand-builds a single-block thunk body. The first param is always the
 /// payload's data word (`Pointer[i8]`, by value).
 struct ThunkBuilder {
@@ -757,6 +815,23 @@ fn collect_type_params(arena: &kestrel_mir::TyArena, ty: TyId, out: &mut Vec<Ent
     }
 }
 
+/// Box type `boxed`'s own `value` accessor that reaches the payload (every
+/// stdlib box declares `ref` / `mutating ref`): `mutating ref` with
+/// `mutating`.
+pub(crate) fn box_peel(ctx: &LowerCtx, boxed: Entity, mutating: bool) -> Option<Entity> {
+    let place = ctx
+        .query
+        .query(kestrel_name_res::TypeMembersByName {
+            type_entity: boxed,
+            name: kestrel_hir::INDIRECTION_PLACE.to_string(),
+            context: boxed,
+            root: ctx.root,
+        })
+        .first()?
+        .entity;
+    ctx.find_ref_accessor_child(place, mutating)
+}
+
 /// `fn requirement(self: B[rawany P], args…) -> R` forwarding through the
 /// payload's table. `None` when the box lacks the accessor it needs.
 fn forwarder(
@@ -784,19 +859,7 @@ fn forwarder(
     if receiver == ParamConvention::Consuming {
         return None;
     }
-    // The box's own `value` accessor (every stdlib box declares `ref` /
-    // `mutating ref`): `mutating ref` for a `mutating` requirement.
-    let place = ctx
-        .query
-        .query(kestrel_name_res::TypeMembersByName {
-            type_entity: boxed,
-            name: kestrel_hir::INDIRECTION_PLACE.to_string(),
-            context: boxed,
-            root: ctx.root,
-        })
-        .first()?
-        .entity;
-    let peel = ctx.find_ref_accessor_child(place, receiver == ParamConvention::MutBorrow)?;
+    let peel = box_peel(ctx, boxed, receiver == ParamConvention::MutBorrow)?;
     // The payload is the box's first type argument; the peel takes all of
     // them (the rest are the box's allocator).
     let box_args = match ctx.module.ty_arena.get(box_ty) {

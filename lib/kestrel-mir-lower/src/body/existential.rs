@@ -8,7 +8,7 @@ use kestrel_mir::inst::CallArg;
 use kestrel_mir::{MirTy, Op, ParamConvention, TyId, ValueId};
 
 use super::OssaBodyCtx;
-use crate::existential::{bounds_of, dispatch_path};
+use crate::existential::{bounds_of, box_peel, dispatch_path};
 
 impl OssaBodyCtx<'_, '_> {
     /// A requirement call whose receiver is a raw existential (`args[0]`, a
@@ -22,11 +22,47 @@ impl OssaBodyCtx<'_, '_> {
         args: Vec<CallArg>,
         result_ty: TyId,
     ) -> Option<ValueId> {
+        self.emit_table_call(requirement, false, receiver_ty, args, result_ty)
+    }
+
+    /// Write `value` to `{ get set }` property `property` of the payload
+    /// behind `view` (a `&mutating` raw existential, the box's `mutating
+    /// ref` peel), through the table's setter slot.
+    pub(crate) fn emit_dynamic_setter_call(
+        &mut self,
+        property: Entity,
+        receiver_ty: TyId,
+        view: ValueId,
+        value: ValueId,
+    ) -> Option<ValueId> {
+        // Check for the slot before emitting anything for the arguments.
+        dispatch_path(self.ctx, &bounds_of(self.ctx, receiver_ty), property, true)?;
+        let args = vec![
+            CallArg {
+                value: view,
+                convention: ParamConvention::MutBorrow,
+            },
+            self.prepare_call_arg(value, super::setter_value()),
+        ];
+        let unit = self.ctx.module.ty_arena.unit();
+        self.emit_table_call(property, true, receiver_ty, args, unit)
+    }
+
+    /// Call slot `requirement` (its setter slot, with `setter`) of the
+    /// table behind `args[0]`.
+    fn emit_table_call(
+        &mut self,
+        requirement: Entity,
+        setter: bool,
+        receiver_ty: TyId,
+        args: Vec<CallArg>,
+        result_ty: TyId,
+    ) -> Option<ValueId> {
         let bounds = bounds_of(self.ctx, receiver_ty);
-        let (hops, slot) = dispatch_path(self.ctx, &bounds, requirement)?;
+        let (hops, slot) = dispatch_path(self.ctx, &bounds, requirement, setter)?;
         kestrel_debug::ktrace!(
             "vtable",
-            "dynamic call {} slot {slot} via {hops:?}",
+            "dynamic call {} (setter: {setter}) slot {slot} via {hops:?}",
             kestrel_ast_builder::qualified_name(self.ctx.world, requirement)
         );
         let raw = self.raw_ptr_ty();
@@ -59,6 +95,56 @@ impl OssaBodyCtx<'_, '_> {
             self.end_ref_and_sources(recv);
         }
         Some(result)
+    }
+
+    /// A get→modify→set writeback of property requirement `member` on an
+    /// existential receiver place `place` (of box type `box_ty`,
+    /// `B[rawany P]`): peel the box through its `mutating ref` (a
+    /// `CowBox` forks here, before the write) and return the payload view
+    /// with its raw existential type. The writeback's get and set then go
+    /// through the table. `None` for any other receiver.
+    pub(crate) fn peel_existential_receiver(
+        &mut self,
+        place: ValueId,
+        box_ty: TyId,
+        member: Entity,
+    ) -> Option<(ValueId, TyId)> {
+        if !kestrel_semantics::is_requirement(&self.ctx.query, member) {
+            return None;
+        }
+        let MirTy::Named { entity, type_args } = self.ctx.module.ty_arena.get(box_ty) else {
+            return None;
+        };
+        // The payload is the first arg; any others are the box's allocator.
+        let (boxed, box_args) = (*entity, type_args.clone());
+        let Some(&raw) = box_args.first() else {
+            return None;
+        };
+        if !matches!(
+            self.ctx.module.ty_arena.get(raw),
+            MirTy::RawExistential { .. }
+        ) {
+            return None;
+        }
+        let peel = box_peel(self.ctx, boxed, true)?;
+        self.ctx.register_name(peel);
+        let view = self.emit_call_returning(
+            Callee::direct_with_args(peel, box_args, None),
+            vec![CallArg {
+                value: place,
+                convention: ParamConvention::MutBorrow,
+            }],
+            raw,
+        );
+        Some((view, raw))
+    }
+
+    /// Is `ty` a raw existential (a payload view's type)?
+    pub(crate) fn is_raw_existential(&self, ty: TyId) -> bool {
+        matches!(
+            self.ctx.module.ty_arena.get(ty),
+            MirTy::RawExistential { .. }
+        )
     }
 
     /// The table of fat value `value`, then each word of `hops` in turn

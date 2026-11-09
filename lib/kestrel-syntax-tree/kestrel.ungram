@@ -90,7 +90,7 @@ EnumCaseParameter =
   (Name ':')? Ty
 
 FunctionDeclaration =
-  AttributeList? Visibility StaticModifier? UnsafeModifier? ('mutating' | 'consuming')?
+  AttributeList? Visibility UnsafeModifier? StaticModifier? UnsafeModifier? ('mutating' | 'consuming')?
   'func' Name TypeParameterList? ParameterList ReturnType? WhereClause?
   FunctionBody?
 
@@ -109,7 +109,7 @@ FunctionBody =
 | '=' Expression
 
 SubscriptDeclaration =
-  AttributeList? Visibility StaticModifier? UnsafeModifier? 'subscript' TypeParameterList?
+  AttributeList? Visibility UnsafeModifier? StaticModifier? UnsafeModifier? 'subscript' TypeParameterList?
   ParameterList FailableMarker? ReturnType WhereClause? SubscriptBody
 
 // `?` after a subscript's parameters or a property's name: a failable
@@ -120,9 +120,8 @@ FailableMarker =
 SubscriptBody =
   CodeBlock | PropertyAccessors
 
-// `lazy` may also lead the modifiers (`lazy static var`, rejected later as E639).
 FieldDeclaration =
-  AttributeList? Visibility (LazyModifier StaticModifier)? StaticModifier? UnsafeModifier? LazyModifier? ('let' | 'var') Name
+  AttributeList? Visibility LazyModifier? UnsafeModifier? StaticModifier? UnsafeModifier? LazyModifier? ('let' | 'var') Name
   FailableMarker? ':' Ty
   (PropertyAccessors ('=' Expression)? | '=' Expression PropertyAccessors?)? ';'?
 

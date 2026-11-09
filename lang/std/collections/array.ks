@@ -28,7 +28,7 @@ import std.collections.(Sliceable, Slice, SliceIndex, SliceClampable)
 /// # Representation
 ///
 /// A `CowBox` share (one refcount) and the `(ptr, remaining)` cursor.
-public struct ArrayIterator[T, A = GlobalAllocator]: Iterator, Cloneable where A: Allocator {
+public struct ArrayIterator[T, A = GlobalAllocator]: Iterator, DoubleEndedIterator, Cloneable where A: Allocator {
     type Item = T
 
     private var storage: CowBox[ArrayStorage[T, A]]
@@ -44,6 +44,11 @@ public struct ArrayIterator[T, A = GlobalAllocator]: Iterator, Cloneable where A
     /// Yields the next element, or `.None` at the end.
     public mutating func next() -> Optional[T] {
         self.cursor.next()
+    }
+
+    /// Yields the last remaining element, or `.None` at the end.
+    public mutating func nextBack() -> Optional[T] {
+        self.cursor.nextBack()
     }
 
     /// An independent cursor at the same position, holding its own share.

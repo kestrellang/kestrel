@@ -68,6 +68,14 @@ pub trait HasStatic: AstNode {
     }
 }
 
+/// A declaration that may be `unsafe`. The modifier is found by kind, so
+/// `unsafe static` and `static unsafe` read the same.
+pub trait HasUnsafe: AstNode {
+    fn is_unsafe(&self) -> bool {
+        support::child::<UnsafeModifier>(self.syntax()).is_some()
+    }
+}
+
 macro_rules! impl_trait {
     ($tr:ident: $($t:ident),* $(,)?) => { $(impl $tr for $t {})* };
 }
@@ -87,6 +95,8 @@ impl_trait!(HasGenerics: StructDeclaration, EnumDeclaration, ProtocolDeclaration
 impl_trait!(HasConformances: StructDeclaration, EnumDeclaration, ProtocolDeclaration,
     TypeAliasDeclaration, ExtensionDeclaration);
 impl_trait!(HasStatic: FunctionDeclaration, FieldDeclaration, SubscriptDeclaration);
+impl_trait!(HasUnsafe: FunctionDeclaration, FieldDeclaration, SubscriptDeclaration,
+    InitializerDeclaration, ProtocolDeclaration);
 
 impl Name {
     pub fn text(&self) -> Option<String> {
@@ -190,9 +200,10 @@ impl FieldDeclaration {
         self.expressions().next()
     }
 
-    /// `lazy let|var` (or `lazy static var`).
+    /// `lazy let|var`. The grammar takes `lazy` before or after `static`
+    /// (`lazy static var`, `static lazy var`), hence `lazy_modifiers`.
     pub fn is_lazy(&self) -> bool {
-        self.lazy_modifiers().next().is_some()
+        support::child::<LazyModifier>(self.syntax()).is_some()
     }
 
     /// Instance storage the user declared: not `static`, not `lazy` (its
