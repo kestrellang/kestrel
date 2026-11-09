@@ -82,6 +82,10 @@ enum ObjectKind {
     /// A RegExp: its program (`VM.regexPrograms`), source and flags.
     case RegExpObject(id: Int64, source: Value, flags: Value)
     case RegExpStringIterator(regexp: Value, string: Value, global: Bool, unicode: Bool, done: Bool)
+    /// An ArrayBuffer: its bytes are `Heap.buffers(id)`.
+    case ArrayBufferObject(Int64)
+    case TypedArrayObject(TypedArrayData)
+    case DataViewObject(buffer: Value, offset: Int64, length: Int64)
     /// A lazy iterator helper (map, filter, take, drop, flatMap).
     case IteratorHelper(IterHelper)
     /// Iterator.from's wrapper for an iterator not inheriting from
@@ -125,6 +129,21 @@ struct GenData {
     /// values each: the mode, the value, and the promise with its resolve
     /// and reject.
     var queue: [Value]
+}
+
+/// An ArrayBuffer's bytes. A detached buffer has none.
+struct BufferData {
+    var bytes: [UInt8]
+    var detached: Bool
+}
+
+/// A typed array's view of its buffer: the element type (`TAKind`), the
+/// buffer object, and where the elements start and how many there are.
+struct TypedArrayData {
+    var kind: Int64
+    var buffer: Value
+    var offset: Int64
+    var length: Int64
 }
 
 /// A collection's entries in insertion order. Deleted entries stay as
@@ -181,6 +200,10 @@ struct Heap {
     var freeMaps: [Int64]
     var generators: [GenData]
     var freeGenerators: [Int64]
+    /// ArrayBuffer contents, owned by one `ObjectKind.ArrayBufferObject`
+    /// each and freed with it.
+    var buffers: [BufferData]
+    var freeBuffers: [Int64]
     /// Cells allocated since the last collection, which decides when to
     /// collect next.
     var allocated: Int64
@@ -201,6 +224,8 @@ struct Heap {
         self.freeMaps = [];
         self.generators = [];
         self.freeGenerators = [];
+        self.buffers = [];
+        self.freeBuffers = [];
         self.allocated = 0;
         self.threshold = 100000;
     }
@@ -248,6 +273,15 @@ struct Heap {
         }
         self.maps.append(empty);
         self.maps.count - 1
+    }
+
+    mutating func allocBuffer(b: BufferData) -> Int64 {
+        if let .Some(id) = self.freeBuffers.pop() {
+            self.buffers(id) = b;
+            return id;
+        }
+        self.buffers.append(b);
+        self.buffers.count - 1
     }
 
     mutating func allocGenerator(g: GenData) -> Int64 {
@@ -340,6 +374,10 @@ struct Heap {
                     self.maps(id) = MapData(keys: [], values: [], index: [:], size: 0);
                     self.freeMaps.append(id);
                 }
+                if let .ArrayBufferObject(id) = kind {
+                    self.buffers(id) = BufferData(bytes: [], detached: true);
+                    self.freeBuffers.append(id);
+                }
                 if let .Generator(id) = kind {
                     self.generators(id).registers = [];
                     self.generators(id).frame.args = [];
@@ -407,6 +445,8 @@ func traceKind(kind: ObjectKind, mutating m: Marker) {
             m.values.append(s);
             m.values.append(f);
         },
+        .TypedArrayObject(d) => m.values.append(d.buffer),
+        .DataViewObject(b, _, _) => m.values.append(b),
         .IteratorHelper(h) => {
             m.values.append(h.iter);
             m.values.append(h.next);

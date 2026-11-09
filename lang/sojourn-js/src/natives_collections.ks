@@ -49,25 +49,25 @@ extend VM {
         self.method(mapCtor, "groupBy", .MapGroupBy, 2);
 
         for (name, n, len) in [
-            ("add", NativeFn.SetAdd, 1), ("has", NativeFn.MapHas, 1), ("delete", NativeFn.MapDelete, 1),
-            ("clear", NativeFn.MapClear, 0), ("forEach", NativeFn.MapForEach, 1), ("entries", NativeFn.MapEntries, 0),
+            ("add", NativeFn.SetAdd, 1), ("has", NativeFn.SetHas, 1), ("delete", NativeFn.SetDelete, 1),
+            ("clear", NativeFn.SetClear, 0), ("forEach", NativeFn.SetForEach, 1), ("entries", NativeFn.SetEntries, 0),
             ("values", NativeFn.SetValues, 0)
         ] {
             self.method(setProto, name, n, len);
         }
-        self.getter(setProto, "size", self.atom("size"), .MapSize);
+        self.getter(setProto, "size", self.atom("size"), .SetSize);
         // keys and @@iterator are the same function as values.
         let setValues = self.ownValue(setProto.asRef, self.atom("values"));
         self.defineHidden(setProto.asRef, self.atom("keys"), setValues);
         self.defineHidden(setProto.asRef, symbolKey(WellKnown.iterator), setValues);
 
         for (name, n, len) in [
-            ("get", NativeFn.MapGet, 1), ("set", NativeFn.MapSet, 2), ("has", NativeFn.MapHas, 1),
-            ("delete", NativeFn.MapDelete, 1)
+            ("get", NativeFn.WeakMapGet, 1), ("set", NativeFn.WeakMapSet, 2), ("has", NativeFn.WeakMapHas, 1),
+            ("delete", NativeFn.WeakMapDelete, 1)
         ] {
             self.method(protos(2), name, n, len);
         }
-        for (name, n, len) in [("add", NativeFn.SetAdd, 1), ("has", NativeFn.MapHas, 1), ("delete", NativeFn.MapDelete, 1)] {
+        for (name, n, len) in [("add", NativeFn.WeakSetAdd, 1), ("has", NativeFn.WeakSetHas, 1), ("delete", NativeFn.WeakSetDelete, 1)] {
             self.method(protos(3), name, n, len);
         }
 
@@ -141,38 +141,43 @@ extend VM {
     mutating func collectionNative(n: NativeFn, this: Value, args: Array[Value], newTarget: Value) -> Result[Optional[Value], Value] {
         let a0 = arg(args, 0);
         let a1 = arg(args, 1);
-        let r: Value = match n {
+        // Each prototype's methods check for their own kind of receiver.
+        let (op, owner) = collectionOp(n);
+        let kinds = [owner];
+        let r: Value = match op {
             .MapCtor => try self.makeCollection(newTarget, CollectionKind.mapKind, a0),
             .SetCtor => try self.makeCollection(newTarget, CollectionKind.setKind, a0),
             .WeakMapCtor => try self.makeCollection(newTarget, CollectionKind.weakMap, a0),
             .WeakSetCtor => try self.makeCollection(newTarget, CollectionKind.weakSet, a0),
             .MapGet => {
-                let id = try self.receiver(this, [CollectionKind.mapKind, CollectionKind.weakMap], "get");
+                let id = try self.receiver(this, kinds, "get");
                 let at = self.collectionFind(id, self.collectionKey(a0));
                 if at < 0 { Value.undefined } else { self.heap.maps(id).values(at) }
             },
             .MapSet => {
-                let id = try self.receiver(this, [CollectionKind.mapKind, CollectionKind.weakMap], "set");
+                let id = try self.receiver(this, kinds, "set");
                 if self.isWeak(this) and not self.canBeHeldWeakly(a0) { return self.throwType("Invalid value used as weak map key"); }
                 self.collectionPut(id, a0, a1);
                 this
             },
             .SetAdd => {
-                let id = try self.receiver(this, [CollectionKind.setKind, CollectionKind.weakSet], "add");
+                let id = try self.receiver(this, kinds, "add");
                 if self.isWeak(this) and not self.canBeHeldWeakly(a0) { return self.throwType("Invalid value used in weak set"); }
-                self.collectionPut(id, a0, a0);
+                // Sets store -0 as +0, value included.
+                let v = if a0.isNumber and a0.asNumber == 0.0 { Value.int(0) } else { a0 };
+                self.collectionPut(id, v, v);
                 this
             },
             .MapHas => {
-                let id = try self.receiver(this, [0, 1, 2, 3], "has");
+                let id = try self.receiver(this, kinds, "has");
                 Value.bool(self.collectionFind(id, self.collectionKey(a0)) >= 0)
             },
             .MapDelete => {
-                let id = try self.receiver(this, [0, 1, 2, 3], "delete");
+                let id = try self.receiver(this, kinds, "delete");
                 Value.bool(self.collectionRemove(id, a0))
             },
             .MapClear => {
-                let id = try self.receiver(this, [CollectionKind.mapKind, CollectionKind.setKind], "clear");
+                let id = try self.receiver(this, kinds, "clear");
                 for i in 0..<self.heap.maps(id).keys.count {
                     self.heap.maps(id).keys(i) = Value.empty;
                     self.heap.maps(id).values(i) = Value.empty;
@@ -182,11 +187,11 @@ extend VM {
                 Value.undefined
             },
             .MapSize => {
-                let id = try self.receiver(this, [CollectionKind.mapKind, CollectionKind.setKind], "size");
+                let id = try self.receiver(this, kinds, "size");
                 Value.int(self.heap.maps(id).size)
             },
             .MapForEach => {
-                let id = try self.receiver(this, [CollectionKind.mapKind, CollectionKind.setKind], "forEach");
+                let id = try self.receiver(this, kinds, "forEach");
                 let f = try self.requireCallable(a0);
                 var i: Int64 = 0;
                 // Entries added during the walk are visited too.
@@ -203,11 +208,7 @@ extend VM {
             .MapKeys => try self.collectionIterator(this, CollectionKind.mapKind, 0),
             .MapValues => try self.collectionIterator(this, CollectionKind.mapKind, 1),
             .MapEntries => {
-                // Set.prototype.entries shares this native.
-                let isSet = if this.isObject {
-                    match self.kindAt(this.asRef) { .Collection(_, k) => k == CollectionKind.setKind, _ => false }
-                } else { false };
-                try self.collectionIterator(this, if isSet { CollectionKind.setKind } else { CollectionKind.mapKind }, 2)
+                try self.collectionIterator(this, owner, 2)
             },
             .SetValues => try self.collectionIterator(this, CollectionKind.setKind, 1),
             .CollectionIteratorNext => {
@@ -364,5 +365,27 @@ extend VM {
         let _ = try self.receiver(this, [kind], if kind == CollectionKind.mapKind { "Map Iterator" } else { "Set Iterator" });
         let proto = if kind == CollectionKind.mapKind { self.intrinsics.mapIteratorProto } else { self.intrinsics.setIteratorProto };
         .Ok(self.newObjectKind(proto, .CollectionIterator(target: this, index: 0, kind: which)))
+    }
+}
+
+/// The shared implementation behind a collection native, and the kind
+/// of collection its prototype holds.
+func collectionOp(n: NativeFn) -> (NativeFn, Int64) {
+    match n {
+        .SetHas => (NativeFn.MapHas, CollectionKind.setKind),
+        .SetDelete => (NativeFn.MapDelete, CollectionKind.setKind),
+        .SetClear => (NativeFn.MapClear, CollectionKind.setKind),
+        .SetForEach => (NativeFn.MapForEach, CollectionKind.setKind),
+        .SetEntries => (NativeFn.MapEntries, CollectionKind.setKind),
+        .SetSize => (NativeFn.MapSize, CollectionKind.setKind),
+        .SetAdd => (NativeFn.SetAdd, CollectionKind.setKind),
+        .WeakMapGet => (NativeFn.MapGet, CollectionKind.weakMap),
+        .WeakMapSet => (NativeFn.MapSet, CollectionKind.weakMap),
+        .WeakMapHas => (NativeFn.MapHas, CollectionKind.weakMap),
+        .WeakMapDelete => (NativeFn.MapDelete, CollectionKind.weakMap),
+        .WeakSetAdd => (NativeFn.SetAdd, CollectionKind.weakSet),
+        .WeakSetHas => (NativeFn.MapHas, CollectionKind.weakSet),
+        .WeakSetDelete => (NativeFn.MapDelete, CollectionKind.weakSet),
+        _ => (n, CollectionKind.mapKind)
     }
 }

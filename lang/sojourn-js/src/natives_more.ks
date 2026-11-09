@@ -60,6 +60,7 @@ extend VM {
         self.setupRegExp();
         self.setupPromise();
         self.setupIterator();
+        self.setupSetMethods();
         let objectCtor = self.ownValue(g.asRef, self.atom("Object"));
         self.method(objectCtor, "groupBy", .ObjectGroupBy, 2);
 

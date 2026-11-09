@@ -115,7 +115,9 @@ extend VM {
         };
         if n.isNaN { return self.closeWith(this, self.makeError(.RangeError, "\(numberToString(n)) must be a number")); }
         let i = toIntegerOrInfinityOf(n);
-        if i < 0.0 { return self.closeWith(this, self.makeError(.RangeError, "\(numberToString(i)) must be positive")); }
+        // Above 2^53 - 1 only +Infinity is allowed.
+        let tooBig = i > 9007199254740991.0 and i != Float64.infinity;
+        if i < 0.0 or tooBig { return self.closeWith(this, self.makeError(.RangeError, "\(numberToString(i)) is out of range")); }
         .Ok(i)
     }
 

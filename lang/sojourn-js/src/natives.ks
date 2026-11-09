@@ -154,6 +154,14 @@ enum NativeFn {
     case GeneratorFunctionCtor
     case AsyncFunctionCtor
     case AsyncGeneratorFunctionCtor
+    // Set methods
+    case SetUnion
+    case SetIntersection
+    case SetDifference
+    case SetSymmetricDifference
+    case SetIsSubsetOf
+    case SetIsSupersetOf
+    case SetIsDisjointFrom
     // Iterator
     case IteratorCtor
     case IteratorFrom
@@ -313,6 +321,19 @@ enum NativeFn {
     case MapGet
     case MapGroupBy
     case MapHas
+    case SetHas
+    case SetDelete
+    case SetClear
+    case SetForEach
+    case SetEntries
+    case SetSize
+    case WeakMapGet
+    case WeakMapSet
+    case WeakMapHas
+    case WeakMapDelete
+    case WeakSetAdd
+    case WeakSetHas
+    case WeakSetDelete
     case MapKeys
     case MapSet
     case MapSize
@@ -463,6 +484,7 @@ extend VM {
         if let .Some(r) = try self.promiseNative(n, callee, this, args, newTarget) { return .Ok(r); }
         if let .Some(r) = try self.asyncIterationNative(n, callee, this, args) { return .Ok(r); }
         if let .Some(r) = try self.iteratorNative(n, callee, this, args, newTarget) { return .Ok(r); }
+        if let .Some(r) = try self.setMethodsNative(n, this, args) { return .Ok(r); }
         self.throwType("built-in not implemented")
     }
 

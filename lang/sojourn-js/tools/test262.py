@@ -23,6 +23,7 @@ def limit_memory():
 
 # Features the engine doesn't support yet.
 UNSUPPORTED = {
+    "iterator-chunking", "iterator-includes", "Iterator.prototype.join", "joint-iteration",
     "BigInt", "Proxy", "regexp-unicode-property-escapes",
     "regexp-v-flag",
     "regexp-modifiers", "regexp-duplicate-named-groups", "TypedArray", "ArrayBuffer",
@@ -31,7 +32,7 @@ UNSUPPORTED = {
     "import-meta", "top-level-await", "Temporal", "ShadowRealm", "decorators",
     "Intl", "intl-normative-optional", "cross-realm", "IsHTMLDDA", "host-gc-required",
     "explicit-resource-management", "Array.fromAsync",
-    "iterator-helpers", "set-methods", "uint8array-base64", "resizable-arraybuffer",
+    "uint8array-base64", "resizable-arraybuffer",
     "arraybuffer-transfer", "Float16Array", "json-parse-with-source", "RegExp.escape",
     "Atomics.waitAsync", "source-phase-imports",
     "import-attributes", "json-modules", "upsert", "Math.sumPrecise", "Error.isError",
