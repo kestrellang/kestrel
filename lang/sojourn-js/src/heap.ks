@@ -467,6 +467,7 @@ func traceKind(kind: ObjectKind, mutating m: Marker) {
             m.values.append(h.fn);
             m.values.append(h.inner);
             m.values.append(h.innerNext);
+            m.values.append(h.extra);
         },
         .WrappedIterator(it, n) => {
             m.values.append(it);

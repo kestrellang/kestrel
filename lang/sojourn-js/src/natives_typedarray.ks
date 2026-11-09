@@ -22,17 +22,18 @@ struct TAKind {
     static var float64: Int64 { 8 }
     static var bigInt64: Int64 { 9 }
     static var bigUint64: Int64 { 10 }
-    static var count: Int64 { 11 }
+    static var float16: Int64 { 11 }
+    static var count: Int64 { 12 }
 }
 
-func taElementSize(kind: Int64) -> Int64 { [1, 1, 1, 2, 2, 4, 4, 4, 8, 8, 8](kind) }
+func taElementSize(kind: Int64) -> Int64 { [1, 1, 1, 2, 2, 4, 4, 4, 8, 8, 8, 2](kind) }
 
 /// The element type is BigInt (content type BigInt, in the spec's terms).
-func taIsBig(kind: Int64) -> Bool { kind >= TAKind.bigInt64 }
+func taIsBig(kind: Int64) -> Bool { kind == TAKind.bigInt64 or kind == TAKind.bigUint64 }
 
 func taName(kind: Int64) -> String {
     ["Int8Array", "Uint8Array", "Uint8ClampedArray", "Int16Array", "Uint16Array",
-     "Int32Array", "Uint32Array", "Float32Array", "Float64Array", "BigInt64Array", "BigUint64Array"](kind)
+     "Int32Array", "Uint32Array", "Float32Array", "Float64Array", "BigInt64Array", "BigUint64Array", "Float16Array"](kind)
 }
 
 /// The largest buffer this engine allocates.
@@ -58,6 +59,46 @@ func toUint8Clamp(x: Float64) -> Int64 {
     if x - f > 0.5 { return fi + 1; }
     if x - f < 0.5 { return fi; }
     if fi % 2 == 0 { fi } else { fi + 1 }
+}
+
+/// The binary16 bits of `x`, rounded once (ties to even).
+func float64ToFloat16(x: Float64) -> UInt64 {
+    let bits = x.bitPattern;
+    let sign = (bits >> 63) << 15;
+    if x.isNaN { return 0x7E00; }
+    let a = x.abs();
+    if a >= 65520.0 { return sign | 0x7C00; }
+    if a < pow2(0 - 14) {
+        // Subnormal: a whole number of 2^-24 (1024 carries into the
+        // smallest normal, whose bits are the same).
+        let q = a * pow2(24);
+        let f = q.floor();
+        var m = f.toInt64() ?? 0;
+        let d = q - f;
+        if d > 0.5 or (d == 0.5 and m % 2 == 1) { m = m + 1; }
+        return sign | UInt64(bitPattern: m);
+    }
+    var e = Int64(bitPattern: (bits >> 52) & 0x7FF) - 1023;
+    let mant = bits & 0xFFFFFFFFFFFFF;
+    var m = mant >> 42;
+    let rest = mant & 0x3FFFFFFFFFF;
+    let half: UInt64 = 0x20000000000;
+    if rest > half or (rest == half and m & 1 == 1) { m = m + 1; }
+    if m == 1024 {
+        m = 0;
+        e = e + 1;
+    }
+    if e > 15 { return sign | 0x7C00; }
+    sign | (UInt64(bitPattern: e + 15) << 10) | m
+}
+
+func float16ToFloat64(h: UInt64) -> Float64 {
+    let e = Int64(bitPattern: (h >> 10) & 0x1F);
+    let m = Float64(from: Int64(bitPattern: h & 0x3FF));
+    let v = if e == 0 { m * pow2(0 - 24) } else if e == 31 {
+        if m == 0.0 { Float64.infinity } else { Float64.nan }
+    } else { (1024.0 + m) * pow2(e - 25) };
+    if (h >> 15) & 1 == 1 { v * (0.0 - 1.0) } else { v }
 }
 
 extend VM {
@@ -136,7 +177,7 @@ extend VM {
         }
         let dvTag = self.str("DataView");
         self.defineOwn(dvProto.asRef, symbolKey(WellKnown.toStringTag), dvTag, Attr.configurable);
-        let kindNames = ["Int8", "Uint8", "", "Int16", "Uint16", "Int32", "Uint32", "Float32", "Float64", "BigInt64", "BigUint64"];
+        let kindNames = ["Int8", "Uint8", "", "Int16", "Uint16", "Int32", "Uint32", "Float32", "Float64", "BigInt64", "BigUint64", "Float16"];
         for kind in 0..<TAKind.count {
             if kind == TAKind.uint8Clamped { continue; }
             let getName = "get" + kindNames(kind);
@@ -227,6 +268,7 @@ extend VM {
         let bits = self.rawBits(id, at, size, little);
         if kind == TAKind.float32 { return Value.number(Float64(from: Float32(bitPattern: UInt32(truncating: bits)))); }
         if kind == TAKind.float64 { return Value.number(Float64(bitPattern: bits)); }
+        if kind == TAKind.float16 { return Value.number(float16ToFloat64(bits)); }
         var n = Int64(bitPattern: bits);
         let signed = kind == TAKind.int8 or kind == TAKind.int16 or kind == TAKind.int32;
         let width = 8 * size;
@@ -245,6 +287,8 @@ extend VM {
             UInt64(from: x.toFloat32().bitPattern)
         } else if kind == TAKind.float64 {
             x.bitPattern
+        } else if kind == TAKind.float16 {
+            float64ToFloat16(x)
         } else if kind == TAKind.uint8Clamped {
             UInt64(bitPattern: toUint8Clamp(x))
         } else {

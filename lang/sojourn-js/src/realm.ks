@@ -324,6 +324,7 @@ extend VM {
         self.method(host, "evalScript", .EvalScript, 1);
         self.method(host, "gc", .GC, 0);
         self.setupMore();
+        self.setupSelfHosted();
     }
 
     mutating func makeErrorType(name: String, n: NativeFn, errorCtor: Value, errorProto: Value) -> Value {

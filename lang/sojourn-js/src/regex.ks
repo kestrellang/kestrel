@@ -12,22 +12,24 @@ module js
 // all but the rarest capture cases.
 
 enum RxInst {
-    /// One character (a code point in unicode mode), canonicalized for
-    /// case-insensitive patterns.
-    case Char(Int64)
-    case AnyChar
+    /// One character (a code point in unicode mode), canonicalized when
+    /// `fold` (case-insensitive). The flag-dependent instructions carry
+    /// the flags in effect where they appear, since `(?i:...)` and the
+    /// like change them for part of a pattern.
+    case Char(cp: Int64, fold: Bool)
+    case AnyChar(dotAll: Bool)
     /// A class from `RxProgram.classes`.
-    case Class(index: Int64, negate: Bool)
+    case Class(index: Int64, negate: Bool, fold: Bool)
     /// Try pc + first, and on failure pc + second.
     case Split(first: Int64, second: Int64)
     case Jump(Int64)
     case Save(Int64)
     /// Resets the captures of groups [from, to), for each loop iteration.
     case ClearCaptures(from: Int64, to: Int64)
-    case AssertStart
-    case AssertEnd
-    case WordBoundary(negate: Bool)
-    case BackRef(Int64)
+    case AssertStart(multiline: Bool)
+    case AssertEnd(multiline: Bool)
+    case WordBoundary(negate: Bool, fold: Bool)
+    case BackRef(group: Int64, fold: Bool)
     /// A lookaround whose program is the next `length` instructions.
     case Look(length: Int64, behind: Bool, negate: Bool)
     /// Loop registers: the position an iteration started at, so an
@@ -105,6 +107,7 @@ func parseRxFlags(f: Units) -> Optional[RxFlags] {
 func compileRegex(pattern: Units, flags: RxFlags) -> Result[RxProgram, String] {
     let unicode = flags.unicode or flags.unicodeSets;
     var p = RxParser(src: pattern, pos: 0, unicode: unicode, ignoreCase: flags.ignoreCase,
+                     multiline: flags.multiline, dotAll: flags.dotAll,
                      groupCount: 0, nextGroup: 1, names: [""], hasNames: false, classes: [], registers: 0);
     try p.prescan();
     let body = try p.parseDisjunction();
@@ -139,7 +142,10 @@ struct RxParser {
     var src: Units
     var pos: Int64
     var unicode: Bool
+    /// The flags in effect at `pos`.
     var ignoreCase: Bool
+    var multiline: Bool
+    var dotAll: Bool
     var groupCount: Int64
     var nextGroup: Int64
     var names: [String]
@@ -250,16 +256,16 @@ struct RxParser {
         // Assertions.
         if c == 94 {
             self.pos = self.pos + 1;
-            return self.unquantified([RxInst.AssertStart]);
+            return self.unquantified([RxInst.AssertStart(multiline: self.multiline)]);
         }
         if c == 36 {
             self.pos = self.pos + 1;
-            return self.unquantified([RxInst.AssertEnd]);
+            return self.unquantified([RxInst.AssertEnd(multiline: self.multiline)]);
         }
         if c == 92 and (self.peekAt(1) == 98 or self.peekAt(1) == 66) {
             let negate = self.peekAt(1) == 66;
             self.pos = self.pos + 2;
-            return self.unquantified([RxInst.WordBoundary(negate: negate)]);
+            return self.unquantified([RxInst.WordBoundary(negate: negate, fold: self.ignoreCase)]);
         }
         if c == 40 and self.peekAt(1) == 63 {
             let c2 = self.peekAt(2);
@@ -391,15 +397,20 @@ struct RxParser {
         let capFrom = self.nextGroup;
         if c == 46 {
             self.pos = self.pos + 1;
-            return .Ok(RxAtom(code: [RxInst.AnyChar], capFrom: capFrom, capTo: capFrom, quantifiable: true));
+            return .Ok(RxAtom(code: [RxInst.AnyChar(dotAll: self.dotAll)], capFrom: capFrom, capTo: capFrom, quantifiable: true));
         }
         if c == 40 {
             self.pos = self.pos + 1;
             var group: Int64 = -1;
+            let saved = (self.ignoreCase, self.multiline, self.dotAll);
             if self.peek() == 63 {
-                if self.peekAt(1) == 58 {
+                let m = self.peekAt(1);
+                if m == 58 {
                     self.pos = self.pos + 2;
-                } else if self.peekAt(1) == 60 {
+                } else if m == 105 or m == 109 or m == 115 or m == 45 {
+                    self.pos = self.pos + 1;
+                    try self.parseModifiers();
+                } else if m == 60 {
                     self.pos = self.pos + 2;
                     let name = try self.parseGroupName();
                     if self.names.contains(name) { return .Err("Duplicate capture group name"); }
@@ -417,6 +428,10 @@ struct RxParser {
             let sub = try self.parseDisjunction();
             if self.peek() != 41 { return .Err("Unterminated group"); }
             self.pos = self.pos + 1;
+            let (ic, ml, da) = saved;
+            self.ignoreCase = ic;
+            self.multiline = ml;
+            self.dotAll = da;
             var code: [RxInst] = [];
             if group >= 0 { code.append(.Save(group * 2)); }
             for x in sub { code.append(x); }
@@ -441,15 +456,88 @@ struct RxParser {
         .Ok(RxAtom(code: self.charCode(cp), capFrom: capFrom, capTo: capFrom, quantifiable: true))
     }
 
+    /// `{Name}` or `{Name=Value}` after `\p` (or `\P`, `negate`): the
+    /// property's code points, complemented for `\P`.
+    mutating func parsePropertyEscape(negate: Bool) -> Result[Array[Int64], String] {
+        if self.peek() != 123 { return .Err("Invalid property name"); }
+        self.pos = self.pos + 1;
+        let name = self.propertyNamePart();
+        var value = "";
+        var hasValue = false;
+        if self.peek() == 61 {
+            self.pos = self.pos + 1;
+            value = self.propertyNamePart();
+            hasValue = true;
+        }
+        if self.peek() != 125 { return .Err("Invalid property name"); }
+        self.pos = self.pos + 1;
+        var id: Int64 = -1;
+        if hasValue {
+            if name == "General_Category" or name == "gc" {
+                id = unicodeLookup(unicodeGcNames(), value);
+            } else if name == "Script" or name == "sc" {
+                id = unicodeLookup(unicodeScriptNames(), value);
+            } else if name == "Script_Extensions" or name == "scx" {
+                id = unicodeLookup(unicodeScriptExtensionNames(), value);
+            }
+        } else if not name.isEmpty {
+            id = unicodeLookup(unicodeGcNames(), name);
+            if id < 0 { id = unicodeLookup(unicodeBinaryNames(), name); }
+        }
+        if id < 0 { return .Err("Invalid property name"); }
+        let ranges = decodeUnicodeTable(unicodeTable(id));
+        .Ok(if negate { complementRanges(ranges, 0x10FFFF) } else { ranges })
+    }
+
+    /// Letters, digits and underscores of a property name or value.
+    mutating func propertyNamePart() -> String {
+        var out = "";
+        while true {
+            let c = self.peek();
+            let ok = (c >= 65 and c <= 90) or (c >= 97 and c <= 122) or (c >= 48 and c <= 57) or c == 95;
+            if not ok { break; }
+            out.append(char: Char(unchecked: UInt32(truncating: c)));
+            self.pos = self.pos + 1;
+        }
+        out
+    }
+
+    /// `ims-ims:` after `(?`: the flags a modifier group adds and removes,
+    /// applied to the parser until the group ends.
+    mutating func parseModifiers() -> Result[(), String] {
+        var add: [Int64] = [];
+        var remove: [Int64] = [];
+        var removing = false;
+        while true {
+            let c = self.next();
+            if c == 58 { break; }
+            if c == 45 and not removing {
+                removing = true;
+                continue;
+            }
+            if c != 105 and c != 109 and c != 115 { return .Err("Invalid regular expression modifiers"); }
+            if add.contains(c) or remove.contains(c) { return .Err("Repeated regular expression modifier"); }
+            if removing { remove.append(c); } else { add.append(c); }
+        }
+        if removing and add.isEmpty and remove.isEmpty { return .Err("Empty regular expression modifiers"); }
+        for c in add { self.setModifier(c, true); }
+        for c in remove { self.setModifier(c, false); }
+        .Ok(())
+    }
+
+    mutating func setModifier(c: Int64, on: Bool) {
+        if c == 105 { self.ignoreCase = on; } else if c == 109 { self.multiline = on; } else { self.dotAll = on; }
+    }
+
     /// A literal character's code: a non-unicode pattern matches an
     /// astral character as its two code units.
     func charCode(cp: Int64) -> [RxInst] {
         if cp > 0xFFFF and not self.unicode {
             let hi = 0xD800 + ((cp - 0x10000) >> 10);
             let lo = 0xDC00 + ((cp - 0x10000) & 0x3FF);
-            return [RxInst.Char(hi), RxInst.Char(lo)];
+            return [RxInst.Char(cp: hi, fold: self.ignoreCase), RxInst.Char(cp: lo, fold: self.ignoreCase)];
         }
-        [RxInst.Char(if self.ignoreCase { canonicalize(cp, self.unicode) } else { cp })]
+        [RxInst.Char(cp: if self.ignoreCase { canonicalize(cp, self.unicode) } else { cp }, fold: self.ignoreCase)]
     }
 
     /// `name>` after `(?<` or `\k<`.
@@ -484,7 +572,7 @@ struct RxParser {
         if c >= 49 and c <= 57 {
             let start = self.pos;
             let n = self.parseDecimal();
-            if n <= self.groupCount { return .Ok([RxInst.BackRef(n)]); }
+            if n <= self.groupCount { return .Ok([RxInst.BackRef(group: n, fold: self.ignoreCase)]); }
             if self.unicode { return .Err("Invalid escape"); }
             // Annex B: an octal escape, or 8 and 9 as themselves.
             self.pos = start;
@@ -511,11 +599,11 @@ struct RxParser {
                 self.pos = self.pos + 1;
                 let name = try self.parseGroupName();
                 for i in 1..<self.names.count {
-                    if self.names(i) == name { return .Ok([RxInst.BackRef(i)]); }
+                    if self.names(i) == name { return .Ok([RxInst.BackRef(group: i, fold: self.ignoreCase)]); }
                 }
                 // A name defined later in the pattern.
                 let later = try self.groupNumberOf(name);
-                return .Ok([RxInst.BackRef(later)]);
+                return .Ok([RxInst.BackRef(group: later, fold: self.ignoreCase)]);
             }
             self.pos = self.pos + 1;
             return .Ok(self.charCode(107));
@@ -524,10 +612,13 @@ struct RxParser {
             self.pos = self.pos + 1;
             let ranges = classEscapeRanges(c, self.unicode, self.ignoreCase);
             self.classes.append(ranges);
-            return .Ok([RxInst.Class(index: self.classes.count - 1, negate: false)]);
+            return .Ok([RxInst.Class(index: self.classes.count - 1, negate: false, fold: self.ignoreCase)]);
         }
-        if c == 112 or c == 80 {
-            if self.unicode { return .Err("Unicode property escapes aren't supported yet"); }
+        if (c == 112 or c == 80) and self.unicode {
+            self.pos = self.pos + 1;
+            let ranges = try self.parsePropertyEscape(c == 80);
+            self.classes.append(ranges);
+            return .Ok([RxInst.Class(index: self.classes.count - 1, negate: false, fold: self.ignoreCase)]);
         }
         let cp = try self.parseCharacterEscape(false);
         .Ok(self.charCode(cp))
@@ -718,7 +809,7 @@ struct RxParser {
             addClassAtom(ranges, a);
         }
         self.classes.append(normalizeRanges(ranges));
-        .Ok([RxInst.Class(index: self.classes.count - 1, negate: negate)])
+        .Ok([RxInst.Class(index: self.classes.count - 1, negate: negate, fold: self.ignoreCase)])
     }
 
     mutating func parseClassAtom() -> Result[RxClassAtom, String] {
@@ -742,7 +833,10 @@ struct RxParser {
             self.pos = self.pos + 1;
             return .Ok(RxClassAtom(cp: -1, ranges: classEscapeRanges(e, self.unicode, self.ignoreCase), isSet: true));
         }
-        if (e == 112 or e == 80) and self.unicode { return .Err("Unicode property escapes aren't supported yet"); }
+        if (e == 112 or e == 80) and self.unicode {
+            self.pos = self.pos + 1;
+            return .Ok(RxClassAtom(cp: -1, ranges: try self.parsePropertyEscape(e == 80), isSet: true));
+        }
         if e >= 48 and e <= 57 {
             if self.unicode {
                 if e == 48 and not (self.peekAt(1) >= 48 and self.peekAt(1) <= 57) {
@@ -933,10 +1027,10 @@ func rxCharAt(p: RxProgram, s: Units, pos: Int64) -> (Int64, Int64) {
     (c, 1)
 }
 
-func rxClassHas(p: RxProgram, index: Int64, c: Int64) -> Bool {
+func rxClassHas(p: RxProgram, index: Int64, c: Int64, fold: Bool) -> Bool {
     let r = p.classes(index);
     if rxInRanges(r, c) { return true; }
-    if not p.ignoreCase { return false; }
+    if not fold { return false; }
     // Some member canonicalizes to the same character: try c's case
     // variants.
     let k = canonicalize(c, p.unicode);
@@ -965,12 +1059,12 @@ func rxRun(p: RxProgram, s: Units, pc0: Int64, pos0: Int64, mutating caps: Array
         let inst = p.insts(pc);
         var ok = true;
         match inst {
-            .Char(c) => {
+            .Char(c, fold) => {
                 if pos >= n {
                     ok = false;
                 } else {
                     let (x, w) = rxCharAt(p, s, pos);
-                    let y = if p.ignoreCase { canonicalize(x, p.unicode) } else { x };
+                    let y = if fold { canonicalize(x, p.unicode) } else { x };
                     if y == c {
                         pos = pos + w;
                         pc = pc + 1;
@@ -979,12 +1073,12 @@ func rxRun(p: RxProgram, s: Units, pc0: Int64, pos0: Int64, mutating caps: Array
                     }
                 }
             },
-            .AnyChar => {
+            .AnyChar(dotAll) => {
                 if pos >= n {
                     ok = false;
                 } else {
                     let (x, w) = rxCharAt(p, s, pos);
-                    if not p.dotAll and isLineTerminator(x) {
+                    if not dotAll and isLineTerminator(x) {
                         ok = false;
                     } else {
                         pos = pos + w;
@@ -992,12 +1086,12 @@ func rxRun(p: RxProgram, s: Units, pc0: Int64, pos0: Int64, mutating caps: Array
                     }
                 }
             },
-            .Class(index, negate) => {
+            .Class(index, negate, fold) => {
                 if pos >= n {
                     ok = false;
                 } else {
                     let (x, w) = rxCharAt(p, s, pos);
-                    if rxClassHas(p, index, x) != negate {
+                    if rxClassHas(p, index, x, fold) != negate {
                         pos = pos + w;
                         pc = pc + 1;
                     } else {
@@ -1022,19 +1116,19 @@ func rxRun(p: RxProgram, s: Units, pc0: Int64, pos0: Int64, mutating caps: Array
                 }
                 pc = pc + 1;
             },
-            .AssertStart => {
-                if pos == 0 or (p.multiline and isLineTerminator(Int64(from: s(pos - 1)))) { pc = pc + 1; } else { ok = false; }
+            .AssertStart(multiline) => {
+                if pos == 0 or (multiline and isLineTerminator(Int64(from: s(pos - 1)))) { pc = pc + 1; } else { ok = false; }
             },
-            .AssertEnd => {
-                if pos == n or (p.multiline and isLineTerminator(Int64(from: s(pos)))) { pc = pc + 1; } else { ok = false; }
+            .AssertEnd(multiline) => {
+                if pos == n or (multiline and isLineTerminator(Int64(from: s(pos)))) { pc = pc + 1; } else { ok = false; }
             },
-            .WordBoundary(negate) => {
-                let ui = p.unicode and p.ignoreCase;
+            .WordBoundary(negate, fold) => {
+                let ui = p.unicode and fold;
                 let a = pos > 0 and isWordChar(Int64(from: s(pos - 1)), ui);
                 let b = pos < n and isWordChar(Int64(from: s(pos)), ui);
                 if (a != b) != negate { pc = pc + 1; } else { ok = false; }
             },
-            .BackRef(g) => {
+            .BackRef(g, fold) => {
                 let st = caps(g * 2);
                 let en = caps(g * 2 + 1);
                 if st < 0 or en < 0 {
@@ -1048,7 +1142,7 @@ func rxRun(p: RxProgram, s: Units, pc0: Int64, pos0: Int64, mutating caps: Array
                         for i in 0..<len {
                             let x = Int64(from: s(st + i));
                             let y = Int64(from: s(pos + i));
-                            if x != y and (not p.ignoreCase or canonicalize(x, p.unicode) != canonicalize(y, p.unicode)) {
+                            if x != y and (not fold or canonicalize(x, p.unicode) != canonicalize(y, p.unicode)) {
                                 same = false;
                                 break;
                             }
@@ -1124,4 +1218,47 @@ func rxRun(p: RxProgram, s: Units, pc0: Int64, pos0: Int64, mutating caps: Array
         if not resumed { return -1; }
     }
     return -1;
+}
+
+/// The table id `key` has in a `|name:id|` lookup string, or -1.
+func unicodeLookup(names: String, key: String) -> Int64 {
+    if key.isEmpty { return -1; }
+    let hay = unitsOf(names);
+    let at = unitsIndexOf(hay, unitsOf("|" + key + ":"), 0);
+    if at < 0 { return -1; }
+    var i = at + unitsOf(key).count + 2;
+    var id: Int64 = 0;
+    while i < hay.count and Int64(from: hay(i)) != 124 {
+        id = id * 10 + Int64(from: hay(i)) - 48;
+        i = i + 1;
+    }
+    id
+}
+
+/// A `unicodeTable` string as flattened [lo, hi] ranges.
+func decodeUnicodeTable(s: String) -> Array[Int64] {
+    var out: [Int64] = [];
+    var vals: [Int64] = [];
+    var cur: Int64 = 0;
+    for u in unitsOf(s) {
+        let c = Int64(from: u);
+        if c == 44 {
+            vals.append(cur);
+            cur = 0;
+        } else {
+            cur = cur * 36 + (if c <= 57 { c - 48 } else { c - 87 });
+        }
+    }
+    vals.append(cur);
+    var prev: Int64 = -1;
+    var i: Int64 = 0;
+    while i + 1 < vals.count {
+        let lo = prev + 1 + vals(i);
+        let hi = lo + vals(i + 1);
+        out.append(lo);
+        out.append(hi);
+        prev = hi;
+        i = i + 2;
+    }
+    out
 }

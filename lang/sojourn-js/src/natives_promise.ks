@@ -46,6 +46,10 @@ struct Combinator {
     static var allSettled: Int64 { 1 }
     static var any: Int64 { 2 }
     static var race: Int64 { 3 }
+    /// allKeyed / allSettledKeyed: `all` / `allSettled` over an object's
+    /// enumerable own properties, settling with a null-prototype object.
+    static var allKeyed: Int64 { 4 }
+    static var allSettledKeyed: Int64 { 5 }
 }
 
 extend VM {
@@ -65,7 +69,8 @@ extend VM {
             ("resolve", NativeFn.PromiseResolve, 1), ("reject", NativeFn.PromiseReject, 1),
             ("all", NativeFn.PromiseAll, 1), ("allSettled", NativeFn.PromiseAllSettled, 1),
             ("any", NativeFn.PromiseAny, 1), ("race", NativeFn.PromiseRace, 1),
-            ("withResolvers", NativeFn.PromiseWithResolvers, 0)
+            ("withResolvers", NativeFn.PromiseWithResolvers, 0), ("allKeyed", NativeFn.PromiseAllKeyed, 1),
+            ("allSettledKeyed", NativeFn.PromiseAllSettledKeyed, 1)
         ] {
             self.method(c, name, n, len);
         }
@@ -379,7 +384,11 @@ extend VM {
         self.pushRoot(p);
         self.pushRoot(res);
         self.pushRoot(rej);
-        let r = self.combinatorBody(kind, c, iterable, res, rej);
+        let r = if kind >= Combinator.allKeyed {
+            self.keyedCombinatorBody(kind - Combinator.allKeyed, c, iterable, res, rej)
+        } else {
+            self.combinatorBody(kind, c, iterable, res, rej)
+        };
         if let .Err(e) = r {
             let rejected = self.callValue(rej, Value.undefined, [e]);
             self.truncateRoots(mark);
@@ -404,7 +413,7 @@ extend VM {
         while true {
             let step = try self.iteratorStep(it, next);
             if let .Some(value) = step {
-                let r = self.combinatorElement(kind, c, resolveFn, value, index, values, remaining, res, rej);
+                let r = self.combinatorElement(kind, c, resolveFn, value, index, values, Value.undefined, remaining, res, rej);
                 if let .Err(e) = r {
                     let _ = self.iteratorClose(it);
                     return .Err(e);
@@ -415,13 +424,43 @@ extend VM {
             }
         }
         if kind == Combinator.race { return .Ok(()); }
-        if self.countDown(remaining) { try self.finishCombinator(kind, values, res, rej); }
+        if self.countDown(remaining) { try self.finishCombinator(kind, values, Value.undefined, res, rej); }
+        .Ok(())
+    }
+
+    /// PerformPromiseAllKeyed: `kind` is all or allSettled.
+    mutating func keyedCombinatorBody(kind: Int64, c: Value, promises: Value, res: Value, rej: Value) -> Result[(), Value] {
+        let resolveFn = try self.getV(c, self.atom("resolve"));
+        if not self.isCallable(resolveFn) { return self.throwType("Promise resolve is not a function"); }
+        if not promises.isObject { return self.throwType("Promise keyed combinators need an object"); }
+        let allKeys = try self.ownKeys(promises.asRef);
+        let keys = self.newArray([]);
+        self.pushRoot(keys);
+        let values = self.newArray([]);
+        self.pushRoot(values);
+        let remaining = self.newRecord(Value.int(1));
+        self.pushRoot(remaining);
+        var index = 0;
+        for key in allKeys {
+            let desc = try self.getOwnPropertyV(promises, key);
+            let enumerable = match desc {
+                .Some(d) => d.enumerable ?? false,
+                .None => false
+            };
+            if not enumerable { continue; }
+            let value = try self.getV(promises, key);
+            let kv = self.keyValue(key);
+            self.appendElement(keys.asRef, kv);
+            try self.combinatorElement(kind, c, resolveFn, value, index, values, keys, remaining, res, rej);
+            index = index + 1;
+        }
+        if self.countDown(remaining) { try self.finishCombinator(kind, values, keys, res, rej); }
         .Ok(())
     }
 
     /// Subscribes to one element of a combinator's iterable.
     mutating func combinatorElement(kind: Int64, c: Value, resolveFn: Value, value: Value, index: Int64,
-                                    values: Value, remaining: Value, res: Value, rej: Value) -> Result[(), Value] {
+                                    values: Value, keys: Value, remaining: Value, res: Value, rej: Value) -> Result[(), Value] {
         if kind != Combinator.race { self.appendElement(values.asRef, Value.undefined); }
         let next = try self.callValue(resolveFn, c, [value]);
         if kind == Combinator.race {
@@ -435,13 +474,13 @@ extend VM {
         var onF = res;
         var onR = rej;
         if kind == Combinator.all {
-            onF = self.nativeClosure(.PromiseAllResolveElement, 1, [called, i, values, res, remaining]);
+            onF = self.nativeClosure(.PromiseAllResolveElement, 1, [called, i, values, res, remaining, Value.bool(false), keys]);
         } else if kind == Combinator.allSettled {
-            onF = self.nativeClosure(.PromiseAllSettledElement, 1, [called, i, values, res, remaining, Value.bool(false)]);
+            onF = self.nativeClosure(.PromiseAllSettledElement, 1, [called, i, values, res, remaining, Value.bool(false), keys]);
             self.pushRoot(onF);
-            onR = self.nativeClosure(.PromiseAllSettledElement, 1, [called, i, values, res, remaining, Value.bool(true)]);
+            onR = self.nativeClosure(.PromiseAllSettledElement, 1, [called, i, values, res, remaining, Value.bool(true), keys]);
         } else {
-            onR = self.nativeClosure(.PromiseAnyRejectElement, 1, [called, i, values, rej, remaining]);
+            onR = self.nativeClosure(.PromiseAnyRejectElement, 1, [called, i, values, rej, remaining, Value.bool(false), Value.undefined]);
         }
         self.pushRoot(onF);
         self.pushRoot(onR);
@@ -461,13 +500,24 @@ extend VM {
     }
 
     /// Settles a combinator's promise once every element has reported.
-    mutating func finishCombinator(kind: Int64, values: Value, res: Value, rej: Value) -> Result[(), Value] {
+    /// With `keys`, the result is a null-prototype object of key: value.
+    mutating func finishCombinator(kind: Int64, values: Value, keys: Value, res: Value, rej: Value) -> Result[(), Value] {
         if kind == Combinator.any {
             let e = self.aggregateError(values);
             let _ = try self.callValue(rej, Value.undefined, [e]);
             return .Ok(());
         }
-        let _ = try self.callValue(res, Value.undefined, [values]);
+        var result = values;
+        if not keys.isUndefined {
+            result = self.newObjectKind(Value.nullValue, .Ordinary);
+            let names = self.arrayElements(keys);
+            let items = self.arrayElements(values);
+            for i in 0..<names.count {
+                let k = try self.toKey(names(i));
+                self.defineOwn(result.asRef, k, items(i), Attr.all);
+            }
+        }
+        let _ = try self.callValue(res, Value.undefined, [result]);
         .Ok(())
     }
 
@@ -501,7 +551,7 @@ extend VM {
         self.setElement(cs(2).asRef, index, item);
         if not self.countDown(cs(4)) { return .Ok(Value.undefined); }
         let kind = if n == NativeFn.PromiseAnyRejectElement { Combinator.any } else { Combinator.all };
-        try self.finishCombinator(kind, cs(2), cs(3), cs(3));
+        try self.finishCombinator(kind, cs(2), cs(6), cs(3), cs(3));
         .Ok(Value.undefined)
     }
 
@@ -600,6 +650,8 @@ extend VM {
             .PromiseAll => try self.promiseCombinator(Combinator.all, this, a0),
             .PromiseAllSettled => try self.promiseCombinator(Combinator.allSettled, this, a0),
             .PromiseAny => try self.promiseCombinator(Combinator.any, this, a0),
+            .PromiseAllKeyed => try self.promiseCombinator(Combinator.allKeyed, this, a0),
+            .PromiseAllSettledKeyed => try self.promiseCombinator(Combinator.allSettledKeyed, this, a0),
             .PromiseRace => try self.promiseCombinator(Combinator.race, this, a0),
             .PromiseAllResolveElement or .PromiseAllSettledElement or .PromiseAnyRejectElement =>
                 try self.combinatorElementCall(n, callee, a0),

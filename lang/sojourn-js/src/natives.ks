@@ -387,6 +387,31 @@ enum NativeFn {
     case MapGet
     case MapGroupBy
     case MapHas
+    case MapGetOrInsert
+    case MapGetOrInsertComputed
+    case WeakMapGetOrInsert
+    case WeakMapGetOrInsertComputed
+    case PromiseTry
+    case Uint8FromBase64
+    case Uint8FromHex
+    case Uint8ToBase64
+    case Uint8ToHex
+    case Uint8SetFromBase64
+    case Uint8SetFromHex
+    case MathF16Round
+    case PromiseAllKeyed
+    case PromiseAllSettledKeyed
+    case SelfHostOp
+    case IteratorConcat
+    case IteratorZip
+    case IteratorZipKeyed
+    case IteratorChunks
+    case IteratorWindows
+    case IteratorIncludes
+    case IteratorJoin
+    case ErrorIsError
+    case MathSumPrecise
+    case RegExpEscape
     case SetHas
     case SetDelete
     case SetClear
@@ -550,6 +575,9 @@ extend VM {
         if let .Some(r) = try self.typedArrayNative(n, callee, this, args, newTarget) { return .Ok(r); }
         if let .Some(r) = try self.proxyNative(n, callee, args, newTarget) { return .Ok(r); }
         if let .Some(r) = try self.bigintNative(n, this, args, newTarget) { return .Ok(r); }
+        if let .Some(r) = try self.proposalNative(n, this, args) { return .Ok(r); }
+        if let .Some(r) = try self.base64Native(n, this, args) { return .Ok(r); }
+        if let .Some(r) = try self.iteratorProposalNative(n, this, args) { return .Ok(r); }
         self.throwType("built-in not implemented")
     }
 

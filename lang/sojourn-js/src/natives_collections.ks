@@ -38,7 +38,8 @@ extend VM {
         for (name, n, len) in [
             ("get", NativeFn.MapGet, 1), ("set", NativeFn.MapSet, 2), ("has", NativeFn.MapHas, 1),
             ("delete", NativeFn.MapDelete, 1), ("clear", NativeFn.MapClear, 0), ("forEach", NativeFn.MapForEach, 1),
-            ("keys", NativeFn.MapKeys, 0), ("values", NativeFn.MapValues, 0), ("entries", NativeFn.MapEntries, 0)
+            ("keys", NativeFn.MapKeys, 0), ("values", NativeFn.MapValues, 0), ("entries", NativeFn.MapEntries, 0),
+            ("getOrInsert", NativeFn.MapGetOrInsert, 2), ("getOrInsertComputed", NativeFn.MapGetOrInsertComputed, 2)
         ] {
             self.method(mapProto, name, n, len);
         }
@@ -63,7 +64,8 @@ extend VM {
 
         for (name, n, len) in [
             ("get", NativeFn.WeakMapGet, 1), ("set", NativeFn.WeakMapSet, 2), ("has", NativeFn.WeakMapHas, 1),
-            ("delete", NativeFn.WeakMapDelete, 1)
+            ("delete", NativeFn.WeakMapDelete, 1), ("getOrInsert", NativeFn.WeakMapGetOrInsert, 2),
+            ("getOrInsertComputed", NativeFn.WeakMapGetOrInsertComputed, 2)
         ] {
             self.method(protos(2), name, n, len);
         }
@@ -164,6 +166,20 @@ extend VM {
                 if self.isWeak(this) and not self.canBeHeldWeakly(a0) { return self.throwType("Invalid value used as weak map key"); }
                 self.collectionPut(id, a0, a1);
                 this
+            },
+            .MapGetOrInsert or .MapGetOrInsertComputed => {
+                let computed = op == NativeFn.MapGetOrInsertComputed;
+                let id = try self.receiver(this, kinds, if computed { "getOrInsertComputed" } else { "getOrInsert" });
+                if self.isWeak(this) and not self.canBeHeldWeakly(a0) { return self.throwType("Invalid value used as weak map key"); }
+                if computed and not self.isCallable(a1) { return self.throwType("\(self.describe(a1)) is not a function"); }
+                // -0 is stored (and handed to the callback) as +0.
+                let key = if a0.isNumber and a0.asNumber == 0.0 { Value.int(0) } else { a0 };
+                let at = self.collectionFind(id, self.collectionKey(key));
+                if at >= 0 { return .Ok(.Some(self.heap.maps(id).values(at))); }
+                // The callback may change the map, so the insert looks again.
+                let v = if computed { try self.callValue(a1, Value.undefined, [key]) } else { a1 };
+                self.collectionPut(id, key, v);
+                v
             },
             .SetAdd => {
                 let id = try self.receiver(this, kinds, "add");
@@ -388,6 +404,8 @@ func collectionOp(n: NativeFn) -> (NativeFn, Int64) {
         .WeakMapSet => (NativeFn.MapSet, CollectionKind.weakMap),
         .WeakMapHas => (NativeFn.MapHas, CollectionKind.weakMap),
         .WeakMapDelete => (NativeFn.MapDelete, CollectionKind.weakMap),
+        .WeakMapGetOrInsert => (NativeFn.MapGetOrInsert, CollectionKind.weakMap),
+        .WeakMapGetOrInsertComputed => (NativeFn.MapGetOrInsertComputed, CollectionKind.weakMap),
         .WeakSetAdd => (NativeFn.SetAdd, CollectionKind.weakSet),
         .WeakSetHas => (NativeFn.MapHas, CollectionKind.weakSet),
         .WeakSetDelete => (NativeFn.MapDelete, CollectionKind.weakSet),

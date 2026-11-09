@@ -15,6 +15,10 @@ struct HelperKind {
     static var take: Int64 { 2 }
     static var drop: Int64 { 3 }
     static var flatMap: Int64 { 4 }
+    static var concat: Int64 { 5 }
+    static var chunks: Int64 { 6 }
+    static var windows: Int64 { 7 }
+    static var zip: Int64 { 8 }
 }
 
 /// `IterHelper.state`.
@@ -28,6 +32,8 @@ struct HelperState {
 /// A lazy iterator helper's state: the underlying iterator and its
 /// `next`, the callback, the index passed to it, take/drop's remaining
 /// count, and flatMap's current inner iterator (undefined when none).
+/// The proposal helpers (natives_iterator_more.ks) reuse these fields
+/// their own way, plus `extra` (a traced value) and `mode`.
 struct IterHelper {
     var kind: Int64
     var iter: Value
@@ -38,6 +44,8 @@ struct IterHelper {
     var inner: Value
     var innerNext: Value
     var state: Int64
+    var extra: Value
+    var mode: Int64
 }
 
 extend VM {
@@ -124,7 +132,8 @@ extend VM {
     mutating func newHelper(kind: Int64, this: Value, fn: Value, remaining: Float64) -> Result[Value, Value] {
         let (it, next) = try self.iteratorDirect(this);
         let h = IterHelper(kind: kind, iter: it, next: next, fn: fn, counter: 0, remaining: remaining,
-                           inner: Value.undefined, innerNext: Value.undefined, state: HelperState.suspendedStart);
+                           inner: Value.undefined, innerNext: Value.undefined, state: HelperState.suspendedStart,
+                           extra: Value.undefined, mode: 0);
         .Ok(self.newObjectKind(self.intrinsics.iteratorHelperProto, .IteratorHelper(h)))
     }
 
@@ -194,6 +203,7 @@ extend VM {
             return self.iteratorStep(h.iter, h.next);
         }
         if h.kind == HelperKind.flatMap { return self.flatMapStep(this, h); }
+        if h.kind >= HelperKind.concat { return self.proposalHelperStep(this, h); }
         while true {
             let step = try self.iteratorStep(h.iter, h.next);
             let v = match step {
@@ -257,6 +267,7 @@ extend VM {
         };
         if h.state == HelperState.running { return self.throwType("Iterator Helper is already running"); }
         if h.state == HelperState.completed { return .Ok(self.iterResult(Value.undefined, true)); }
+        if h.kind >= HelperKind.concat { return self.proposalHelperReturn(this, h); }
         let inner = h.inner;
         h.state = HelperState.completed;
         h.inner = Value.undefined;

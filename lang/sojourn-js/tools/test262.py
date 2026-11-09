@@ -14,7 +14,7 @@ import concurrent.futures, os, re, resource, subprocess, sys
 from collections import Counter
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-BINARY = os.path.join(HERE, "..", "build", "sojourn-js")
+BINARY = os.environ.get("SOJOURN_JS", os.path.join(HERE, "..", "build", "sojourn-js"))
 TIMEOUT = 10
 MEMORY = 1 << 30  # bytes per test process
 
@@ -23,18 +23,18 @@ def limit_memory():
 
 # Features the engine doesn't support yet.
 UNSUPPORTED = {
-    "iterator-chunking", "iterator-includes", "Iterator.prototype.join", "joint-iteration", "regexp-unicode-property-escapes",
+    
     "regexp-v-flag",
-    "regexp-modifiers", "regexp-duplicate-named-groups", "SharedArrayBuffer", "Atomics", "WeakRef", "FinalizationRegistry",
+    "regexp-duplicate-named-groups", "SharedArrayBuffer", "Atomics", "WeakRef", "FinalizationRegistry",
     "tail-call-optimization", "dynamic-import",
     "import-meta", "top-level-await", "Temporal", "ShadowRealm", "decorators",
     "Intl", "intl-normative-optional", "cross-realm", "IsHTMLDDA", "host-gc-required",
-    "explicit-resource-management", "Array.fromAsync",
-    "uint8array-base64", "resizable-arraybuffer",
-    "arraybuffer-transfer", "Float16Array", "json-parse-with-source", "RegExp.escape",
+    "explicit-resource-management",
+    "resizable-arraybuffer",
+    "arraybuffer-transfer", "json-parse-with-source",
     "Atomics.waitAsync", "source-phase-imports",
-    "import-attributes", "json-modules", "upsert", "Math.sumPrecise", "Error.isError",
-    "promise-try", "iterator-sequencing", "await-dictionary", "immutable-arraybuffer",
+    "import-attributes", "json-modules",
+    "immutable-arraybuffer",
     "canonical-tz", "legacy-regexp",
 }
 
