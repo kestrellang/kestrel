@@ -207,8 +207,8 @@ extend Headers {
             }
             match line.firstIndex(of: ":") {
                 .Some(colonIdx) => {
-                    let name = line.subslice(from: line.start, to: colonIdx.value).trimmed().toOwned();
-                    let value = line.subslice(from: colonIdx.value + 1, to: line.end).trimmed().toOwned();
+                    let name = line.subslice(from: 0, to: colonIdx.value).trimmed().toOwned();
+                    let value = line.subslice(from: colonIdx.value + 1, to: line.bytes.count).trimmed().toOwned();
                     headers.add(name, value)
                 },
                 .None => {}

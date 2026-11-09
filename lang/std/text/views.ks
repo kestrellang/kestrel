@@ -228,7 +228,7 @@ public struct BytesView: Iterable, Cloneable {
 
     /// Internal: build a sub-view over byte range `[startByte, endByte)`.
     fileprivate func _subView(startByte startByte: Int64, endByte endByte: Int64) -> BytesView {
-        BytesView(slice: self.slice.subslice(from: self.slice.start + startByte, to: self.slice.start + endByte))
+        BytesView(slice: self.slice.subslice(from: startByte, to: endByte))
     }
 }
 
@@ -459,7 +459,7 @@ public struct CharsView: Iterable, Cloneable {
 
     /// Internal: build a sub-view over byte range `[startByte, endByte)`.
     fileprivate func _subView(startByte startByte: Int64, endByte endByte: Int64) -> CharsView {
-        CharsView(slice: self.slice.subslice(from: self.slice.start + startByte, to: self.slice.start + endByte))
+        CharsView(slice: self.slice.subslice(from: startByte, to: endByte))
     }
 
     /// Materializes the view as an owned `String`. O(n) — copies bytes.
@@ -728,7 +728,7 @@ public struct GraphemesView: Iterable, Cloneable {
 
     /// Internal: build a sub-view over byte range `[startByte, endByte)`.
     fileprivate func _subView(startByte startByte: Int64, endByte endByte: Int64) -> GraphemesView {
-        GraphemesView(slice: self.slice.subslice(from: self.slice.start + startByte, to: self.slice.start + endByte))
+        GraphemesView(slice: self.slice.subslice(from: startByte, to: endByte))
     }
 
     /// Materializes the view as an owned `String`. O(n) — copies bytes.
@@ -869,8 +869,7 @@ public struct LinesIterator: Iterator {
 
     /// Bytes `[start, end)` of the source as a slice sharing its storage.
     private func createSubstring(start: Int64, end: Int64) -> StringSlice {
-        let base = self.source.start;
-        self.source.subslice(from: base + start, to: base + end)
+        self.source.subslice(from: start, to: end)
     }
 }
 
@@ -1066,7 +1065,7 @@ public struct LinesView: Iterable, Cloneable {
 
     /// Internal: build a sub-view over byte range `[startByte, endByte)`.
     fileprivate func _subView(startByte startByte: Int64, endByte endByte: Int64) -> LinesView {
-        LinesView(slice: self.slice.subslice(from: self.slice.start + startByte, to: self.slice.start + endByte))
+        LinesView(slice: self.slice.subslice(from: startByte, to: endByte))
     }
 }
 
@@ -2940,7 +2939,7 @@ extend CharIndex: CharsIndex {
 extend BytesView {
     /// Returns a `StringSlice` covering the byte range `[start, end)`.
     public func slice(from start: ByteIndex, to end: ByteIndex) -> StringSlice {
-        self.slice.subslice(from: self.slice.start + start.value, to: self.slice.start + end.value)
+        self.slice.subslice(from: start.value, to: end.value)
     }
 
     /// Byte index of the first byte.
@@ -2953,7 +2952,7 @@ extend BytesView {
 extend CharsView {
     /// Returns a `StringSlice` covering `[start, end)` by byte offset.
     public func slice(from start: CharIndex, to end: CharIndex) -> StringSlice {
-        self.slice.subslice(from: self.slice.start + start.byteOffset, to: self.slice.start + end.byteOffset)
+        self.slice.subslice(from: start.byteOffset, to: end.byteOffset)
     }
 
     /// Char index at byte 0 (the first code point).
@@ -2966,7 +2965,7 @@ extend CharsView {
 extend GraphemesView {
     /// Returns a `StringSlice` covering `[start, end)` by byte offset.
     public func slice(from start: GraphemeIndex, to end: GraphemeIndex) -> StringSlice {
-        self.slice.subslice(from: self.slice.start + start.byteOffset, to: self.slice.start + end.byteOffset)
+        self.slice.subslice(from: start.byteOffset, to: end.byteOffset)
     }
 
     /// Grapheme index at byte 0.
@@ -2979,7 +2978,7 @@ extend GraphemesView {
 extend LinesView {
     /// Returns a `StringSlice` covering `[start, end)` by byte offset.
     public func slice(from start: LineIndex, to end: LineIndex) -> StringSlice {
-        self.slice.subslice(from: self.slice.start + start.byteOffset, to: self.slice.start + end.byteOffset)
+        self.slice.subslice(from: start.byteOffset, to: end.byteOffset)
     }
 
     /// Line index at byte 0.
@@ -3581,7 +3580,7 @@ public struct SplitViewIterator: Iterator, Cloneable {
             let result = decodeUtf8(rawPtr, self.sourceLen, at: self.index);
             if let .Some(decoded) = result {
                 self.index = self.index + decoded.bytesConsumed;
-                return .Some(self.slice.subslice(from: self.slice.start + start, to: self.slice.start + self.index))
+                return .Some(self.slice.subslice(from: start, to: self.index))
             }
             self.done = true;
             return .None
@@ -3598,7 +3597,7 @@ public struct SplitViewIterator: Iterator, Cloneable {
                 let diff: lang.i64 = lang.i64_sub(result.address.raw, base.address.raw);
                 let matchIndex = self.index + Int64(intLiteral: diff);
                 self.index = matchIndex + sepLen;
-                return .Some(self.slice.subslice(from: self.slice.start + start, to: self.slice.start + matchIndex))
+                return .Some(self.slice.subslice(from: start, to: matchIndex))
             }
         }
 
@@ -3607,7 +3606,7 @@ public struct SplitViewIterator: Iterator, Cloneable {
         // and that empty segment is kept, just as a leading one is.
         self.done = true;
         if start < self.sourceLen or start > 0 {
-            return .Some(self.slice.subslice(from: self.slice.start + start, to: self.slice.end))
+            return .Some(self.slice.subslice(from: start, to: self.slice.end - self.slice.start))
         }
         .None
     }
@@ -3737,7 +3736,7 @@ public struct SplitWhereViewIterator: Iterator, Cloneable {
                 if self.predicate(decoded.char) {
                     let matchIndex = self.index;
                     self.index = self.index + decoded.bytesConsumed;
-                    return .Some(self.slice.subslice(from: self.slice.start + start, to: self.slice.start + matchIndex))
+                    return .Some(self.slice.subslice(from: start, to: matchIndex))
                 }
                 self.index = self.index + decoded.bytesConsumed
             } else {
@@ -3749,7 +3748,7 @@ public struct SplitWhereViewIterator: Iterator, Cloneable {
         // segment like SplitViewIterator does.
         self.done = true;
         if start < self.sourceLen or start > 0 {
-            return .Some(self.slice.subslice(from: self.slice.start + start, to: self.slice.end))
+            return .Some(self.slice.subslice(from: start, to: self.slice.end - self.slice.start))
         }
         .None
     }

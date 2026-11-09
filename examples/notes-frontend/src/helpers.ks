@@ -10,8 +10,8 @@ public func parseForm(body: String) -> Dictionary[String, String] {
         let kv = part.trimmed();
         match kv.firstIndex(of: "=") {
             .Some(eqIdx) => {
-                let key = percentDecode(kv.subslice(from: kv.start, to: eqIdx.value).toOwned());
-                let value = percentDecode(kv.subslice(from: eqIdx.value + 1, to: kv.end).toOwned());
+                let key = percentDecode(kv.subslice(from: 0, to: eqIdx.value).toOwned());
+                let value = percentDecode(kv.subslice(from: eqIdx.value + 1, to: kv.bytes.count).toOwned());
                 result.insert(key, value);
             },
             .None => {}

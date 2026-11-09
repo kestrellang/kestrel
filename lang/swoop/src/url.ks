@@ -118,8 +118,8 @@ public func parseClientUrl(raw: String) -> ClientUrl throws SwoopError {
     var port = defaultPort;
     let hpSlice = hostPort.asSlice();
     if let .Some(colonIdx) = hostPort.firstIndex(of: ":") {
-        host = hpSlice.subslice(from: hpSlice.start, to: colonIdx.value).toOwned();
-        let portStr = hpSlice.subslice(from: colonIdx.value + 1, to: hpSlice.end).toOwned();
+        host = hpSlice.subslice(from: 0, to: colonIdx.value).toOwned();
+        let portStr = hpSlice.subslice(from: colonIdx.value + 1, to: hpSlice.bytes.count).toOwned();
         let port64 = parseDecimal(portStr);
         if port64 > 0 and port64 <= 65535 {
             port = UInt16(truncating: port64)
@@ -134,8 +134,8 @@ public func parseClientUrl(raw: String) -> ClientUrl throws SwoopError {
         let remainder = rawSlice.subslice(from: pathStart, to: len).toOwned();
         let remSlice = remainder.asSlice();
         if let .Some(qIdx) = remainder.firstIndex(of: "?") {
-            path = remSlice.subslice(from: remSlice.start, to: qIdx.value).toOwned();
-            queryString = remSlice.subslice(from: qIdx.value + 1, to: remSlice.end).toOwned()
+            path = remSlice.subslice(from: 0, to: qIdx.value).toOwned();
+            queryString = remSlice.subslice(from: qIdx.value + 1, to: remSlice.bytes.count).toOwned()
         } else {
             path = remainder
         }

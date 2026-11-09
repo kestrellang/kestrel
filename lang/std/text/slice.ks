@@ -125,7 +125,8 @@ extend CharIndex {
 ///
 /// `(base: &StringBytes, start: Int64, end: Int64)`: a borrow of the
 /// string's bytes (whatever its allocator). `start` and `end` are
-/// byte offsets into the whole string, not into this slice.
+/// byte offsets into the whole string; they stay internal to std, and
+/// every public offset counts from the slice's first byte.
 public struct StringSlice: Str, Equatable, Equal[StringSlice], Equal[String], NotEqual[StringSlice], NotEqual[String], Comparable, Hashable, Cloneable, Formattable, Iterable {
     type Item = Char
     type TargetIterator = CharsIterator
@@ -136,8 +137,10 @@ public struct StringSlice: Str, Equatable, Equal[StringSlice], Equal[String], No
 
     // Module-internal so `String.asSlice()` can build one (memberwise).
     let base: &StringBytes
-    public let start: Int64
-    public let end: Int64
+    // Positions in `base`, internal to std: everything public counts
+    // from the slice's own first byte.
+    let start: Int64
+    let end: Int64
 
     // -- Size ----------------------------------------------------------------
 
@@ -146,11 +149,11 @@ public struct StringSlice: Str, Equatable, Equal[StringSlice], Equal[String], No
 
     // -- Narrowing -----------------------------------------------------------
 
-    /// Returns a sub-slice covering `[newStart, newEnd)` relative to
-    /// the source buffer (absolute byte offsets, not relative to this
-    /// slice's start).
+    /// Returns the sub-slice covering bytes `[from, to)` of this slice.
+    /// Offsets count from this slice's first byte, like every byte
+    /// position std hands out for a slice (`firstIndex(of:)`, `bytes`).
     public func subslice(from newStart: Int64, to newEnd: Int64) -> StringSlice {
-        StringSlice(base: self.base, start: newStart, end: newEnd)
+        StringSlice(base: self.base, start: self.start + newStart, end: self.start + newEnd)
     }
 
     // -- Conversion ----------------------------------------------------------
