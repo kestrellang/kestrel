@@ -1,0 +1,3 @@
+First 15: [0, 1, 3, 6, 2, 7, 13, 20, 12, 21, 11, 22, 10, 23, 9]
+First duplicate: 42
+Terms needed to cover 0..1000: 328002

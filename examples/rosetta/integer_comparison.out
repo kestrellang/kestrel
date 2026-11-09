@@ -1,0 +1,6 @@
+1 is less than 2
+  compare: Less
+5 is equal to 5
+  compare: Equal
+9 is greater than -9
+  compare: Greater

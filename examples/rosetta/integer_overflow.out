@@ -1,0 +1,7 @@
+max + 1 wrapping:   -9223372036854775808
+max + 1 checked:    true
+max + 1 saturating: 9223372036854775807
+-min checked:       true
+min / -1 checked:   true
+4000000000 * 3000000000 checked: true
+UInt32 max + 1 wrapping: 0

@@ -1,0 +1,9 @@
+A = [1, 2, 3, 4, 5]
+B = [4, 5, 6, 7]
+3 in A: true
+A union B: [1, 2, 3, 4, 5, 6, 7]
+A intersection B: [4, 5]
+A minus B: [1, 2, 3]
+C subset of A: true
+A == B: false
+A after insert 42, remove 1: [2, 3, 4, 5, 42]

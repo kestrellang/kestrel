@@ -1,0 +1,6 @@
+starts with "ab": true
+ends with "cd": true
+contains "bc": true
+contains "xy": false
+first "cd" at byte 2
+last "cd" at byte 7

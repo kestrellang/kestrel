@@ -1,0 +1,9 @@
+"123" numeric: true
+"-45" numeric: true
+"3.14" numeric: true
+"1e10" numeric: true
+"abc" numeric: false
+"12a" numeric: false
+"" numeric: false
+" 7" numeric: false
+"0x1F" numeric: false

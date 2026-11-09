@@ -1,0 +1,4 @@
+t = true, f = false
+not t = false
+t and f = false, t or f = true
+t == f: false

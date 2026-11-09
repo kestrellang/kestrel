@@ -1,0 +1,4 @@
+"12" + "30" = 42
+"7" + "" failed: empty input
+"4x" + "1" failed: bad digit 'x'
+"5" + "-9" failed: -9 is negative
