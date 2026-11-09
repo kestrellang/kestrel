@@ -4,7 +4,9 @@
 //! statement binding, and local variable, then emits constraints
 //! capturing the type relationships between them.
 
-use kestrel_ast_builder::arg_binding::{BindArg, BindError, BindParam, Binding, bind_arguments};
+use kestrel_ast_builder::arg_binding::{
+    BindArg, BindError, BindParam, Binding, bind_arguments, names_unlabeled_param,
+};
 use kestrel_ast_builder::{Callable, InitEffect, Name, NodeKind, TypeParams};
 use kestrel_hecs::Entity;
 use kestrel_hir::Builtin;
@@ -424,6 +426,27 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
                     let err = match e {
                         BindError::AmbiguousTrailingClosure { candidates, .. } => {
                             InferError::AmbiguousTrailingClosure { candidates, span }
+                        },
+                        // `greet(name: x)` against `func greet(name: String)`:
+                        // say the label is the param's name, not "no overload".
+                        BindError::LabelMismatch {
+                            arg_label,
+                            expected,
+                            ..
+                        } if names_unlabeled_param(
+                            callable
+                                .params
+                                .iter()
+                                .map(|p| (p.label.as_deref(), p.name.as_str())),
+                            arg_label.as_deref(),
+                        ) =>
+                        {
+                            InferError::LabelMismatch {
+                                expected,
+                                got: arg_label,
+                                got_is_param_name: true,
+                                span,
+                            }
                         },
                         _ => InferError::NoMatchingOverload {
                             name: ctx
@@ -4255,6 +4278,7 @@ pub(crate) fn check_variant_pattern_labels(
             ctx.report_error(InferError::LabelMismatch {
                 expected,
                 got: Some(got.clone()),
+                got_is_param_name: false,
                 span: span.clone(),
             });
         }

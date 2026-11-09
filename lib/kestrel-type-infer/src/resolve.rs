@@ -63,6 +63,8 @@ pub struct MemberResolution {
 #[derive(Clone, Debug)]
 pub struct ParamInfo {
     pub label: Option<String>,
+    /// The internal (body) name, for diagnostics.
+    pub name: String,
     pub ty: HirTy,
     pub has_default: bool,
     /// `AstParam::takes_closure`: a trailing closure may fill it.
@@ -1720,6 +1722,7 @@ impl WorldResolver<'_> {
                         .unwrap_or(HirTy::Error(Span::synthetic(0)));
                     ParamInfo {
                         label: p.label.clone(),
+                        name: p.name.clone(),
                         ty,
                         has_default: p.default_entity.is_some(),
                         takes_closure: p.takes_closure(),
@@ -1974,6 +1977,7 @@ impl WorldResolver<'_> {
             .enumerate()
             .map(|(i, p)| ParamInfo {
                 label: p.label.clone(),
+                name: p.name.clone(),
                 ty: lowered
                     .as_ref()
                     .and_then(|tys| tys.get(i))

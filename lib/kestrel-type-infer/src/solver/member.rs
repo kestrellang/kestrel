@@ -1423,9 +1423,18 @@ pub(super) fn solve_member(
             expected,
             ..
         }) => {
+            let got = args[arg_index].label.clone();
+            let got_is_param_name = names_unlabeled_param(
+                resolution
+                    .param_types
+                    .iter()
+                    .map(|p| (p.label.as_deref(), p.name.as_str())),
+                got.as_deref(),
+            );
             return SolveResult::Error(InferError::LabelMismatch {
                 expected,
-                got: args[arg_index].label.clone(),
+                got,
+                got_is_param_name,
                 span,
             });
         },

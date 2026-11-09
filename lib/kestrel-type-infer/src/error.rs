@@ -124,10 +124,13 @@ pub enum InferError {
         span: Span,
     },
 
-    /// Wrong argument label in a call.
+    /// Wrong argument label in a call. `got_is_param_name`: the label is the
+    /// internal name of a one-name (so unlabeled) parameter, e.g.
+    /// `joined(separator: ",")` against `func joined(separator: String)`.
     LabelMismatch {
         expected: Option<String>,
         got: Option<String>,
+        got_is_param_name: bool,
         span: Span,
     },
 
@@ -521,6 +524,21 @@ impl InferError {
             Self::ArgCountMismatch { expected, got, .. } => detailed(format!(
                 "wrong number of arguments: expected {expected}, got {got}"
             )),
+
+            Self::LabelMismatch {
+                got: Some(name),
+                got_is_param_name: true,
+                ..
+            } => RenderedInferError {
+                code: self.code(),
+                message: format!("'{name}' is the parameter's name, not an argument label"),
+                label: Some(format!("remove `{name}:`")),
+                notes: vec![format!(
+                    "a parameter declared with one name takes no label; to give it one, \
+                     declare it with two names: `<label> {name}: T`"
+                )],
+                secondary: Vec::new(),
+            },
 
             Self::LabelMismatch { .. } => detailed("wrong argument label".into()),
 

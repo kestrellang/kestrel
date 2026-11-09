@@ -280,6 +280,20 @@ fn ambiguity(params: &[BindParam<'_>], args: &[BindArg<'_>], plans: &[Vec<Bindin
     }
 }
 
+/// Is `label` the internal name of a one-name parameter? One-name params take
+/// no label, so a call like `joined(separator: ",")` against
+/// `func joined(separator: String)` gets a targeted diagnostic.
+/// `params` yields each parameter's `(label, internal name)`.
+pub fn names_unlabeled_param<'a>(
+    params: impl IntoIterator<Item = (Option<&'a str>, &'a str)>,
+    label: Option<&str>,
+) -> bool {
+    let Some(label) = label else { return false };
+    params
+        .into_iter()
+        .any(|(l, name)| l.is_none() && name == label)
+}
+
 /// Convenience: does this argument list bind to these parameters at all? Used by
 /// overload selection, which only needs a yes/no.
 pub fn binds(params: &[BindParam<'_>], args: &[BindArg<'_>]) -> bool {

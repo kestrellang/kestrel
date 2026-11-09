@@ -872,10 +872,11 @@ pub(crate) fn describe_error(ctx: &InferCtx<'_>, err: &InferError) -> String {
         InferError::ArgCountMismatch { expected, got, .. } => {
             format!("expected {} argument(s), got {}", expected, got)
         },
-        InferError::LabelMismatch { expected, got, .. } => {
-            let exp = expected.as_deref().unwrap_or("_");
-            let g = got.as_deref().unwrap_or("_");
-            format!("wrong label: expected '{}', got '{}'", exp, g)
+        InferError::LabelMismatch { expected, got, .. } => match (expected, got) {
+            (Some(e), Some(g)) => format!("expected label `{e}:`, got `{g}:`"),
+            (Some(e), None) => format!("missing label `{e}:`"),
+            (None, Some(g)) => format!("this argument takes no label; remove `{g}:`"),
+            (None, None) => "wrong argument label".into(),
         },
         InferError::AmbiguousTrailingClosure { candidates, .. } => {
             let names: Vec<&str> = candidates
