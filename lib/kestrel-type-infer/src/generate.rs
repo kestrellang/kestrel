@@ -787,6 +787,9 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
             // Like lib1, validation of BooleanConditional conformance
             // happens in a later pass. This avoids i1/Bool mismatches
             // when stdlib code uses lang intrinsics directly in conditions.
+            // A condition is read by value, so a ref-returning call
+            // (`flags(i)` on an `Array[Bool]`) decays to its pointee.
+            mark_arm_value(ctx, hir, *condition);
             let _cond_tv = gen_expr(ctx, hir, *condition);
 
             // Check mode: every arm is checked against the expectation, so a
@@ -917,6 +920,7 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
                 // Guard must be bool
                 if let Some(guard) = arm.guard {
                     // Guard type validated later (same as if-condition)
+                    mark_arm_value(ctx, hir, guard);
                     let _guard_tv = gen_expr(ctx, hir, guard);
                 }
 

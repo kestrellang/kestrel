@@ -46,6 +46,11 @@ const DEFAULT_RULES: &[(&str, DefaultRule)] = &[
 
 /// Finish inference for a body: flush, default, report.
 pub fn finish_body(ctx: &mut InferCtx<'_>, hir: &HirBody) {
+    kestrel_debug::ktrace!(
+        "finish-body",
+        "{}",
+        kestrel_ast_builder::qualified_name(ctx.query_ctx, ctx.owner)
+    );
     // P5 audit: which constraint kinds the walker left for the flush.
     for c in ctx
         .constraints
@@ -76,6 +81,14 @@ pub fn finish_body(ctx: &mut InferCtx<'_>, hir: &HirBody) {
     // Type-parameter defaults (`H = DefaultHasher`) for vars nothing pinned.
     if solver::apply_type_param_defaults(ctx) {
         fixpoint(ctx);
+    }
+
+    // Last resort, after every other default had its chance: literals still
+    // held back for a receiver nothing resolved take their defaults, and
+    // whatever they unblock gets the full default pass again.
+    if solver::apply_held_literal_defaults(ctx) {
+        fixpoint(ctx);
+        apply_defaults(ctx);
     }
 
     // Reports. Unresolved generic type params first, so their vars are

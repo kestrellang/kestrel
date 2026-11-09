@@ -364,9 +364,15 @@ fn postfix(p: &mut Parser<'_>, cond: bool) -> Option<ExprInfo> {
     } else {
         let chain = primary(p)?;
         let mut chain = tight_ops(p, chain, false, &mut binds);
-        chain = trailing_closures(p, chain);
-        // Continuation: `.member` on a later line, followed by tight operators.
-        while p.at(K::Dot) {
+        // Each link of a `.member` chain, on this line or a later one, may
+        // take trailing closures: `xs.filter { … }.map { … }`.
+        loop {
+            chain = trailing_closures(p, chain);
+            // A `.` on a later line never continues a bare `{ … }`: in a
+            // match it starts the next arm's pattern (`=> { … }` then `.Nil =>`).
+            if !p.at(K::Dot) || matches!(chain, Chain::Done(_, K::ExprClosure)) {
+                break;
+            }
             chain = member(p, chain, true);
             chain = tight_ops(p, chain, false, &mut binds);
         }
@@ -1011,8 +1017,13 @@ fn match_expr(p: &mut Parser<'_>) -> ExprInfo {
     cond_expr(p);
     if p.expect(K::LBrace) {
         while !p.at(K::RBrace) && !p.at_eof() {
-            match_arm(p);
+            let block_body = match_arm(p);
             if p.eat(K::Comma) {
+                continue;
+            }
+            // Like Rust, a `=> { … }` arm needs no comma before an arm on
+            // the next line.
+            if block_body && p.nl_before() && super::patterns::at_pattern_start(p) {
                 continue;
             }
             if !p.at(K::RBrace) && !p.at_eof() {
@@ -1026,11 +1037,12 @@ fn match_expr(p: &mut Parser<'_>) -> ExprInfo {
     finish2(p, m, K::ExprMatch)
 }
 
-fn match_arm(p: &mut Parser<'_>) {
+/// Parse one arm; returns whether its body is a `{ … }` block.
+fn match_arm(p: &mut Parser<'_>) -> bool {
     if !super::patterns::at_pattern_start(p) {
         p.error_expected_what("pattern");
         p.err_recover_balanced(|p| p.at_any(&[K::Comma, K::RBrace]));
-        return;
+        return false;
     }
     let m = p.start();
     pattern(p);
@@ -1040,8 +1052,13 @@ fn match_arm(p: &mut Parser<'_>) {
         cond_expr(p);
         g.complete(p, K::MatchArmGuard);
     }
+    let mut block_body = false;
     if p.expect(K::FatArrow) {
+        block_body = p.at(K::LBrace);
         expr(p);
+        // `=> { … } + 1` is not a block body.
+        block_body &= p.kind_at(p.token_pos().wrapping_sub(1)) == Some(K::RBrace);
     }
     m.complete(p, K::MatchArm);
+    block_body
 }

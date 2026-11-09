@@ -368,7 +368,14 @@ impl OssaBodyCtx<'_, '_> {
                 self.set_field_init(field, pre.join(*post));
             }
         }
-        self.emit_literal(Immediate::unit())
+        let unit = self.emit_literal(Immediate::unit());
+        // No `break` reaches the exit: the loop only leaves by `return`, so
+        // the exit block is dead. Leave no open block (as a match whose arms
+        // all diverge does), or a function tail would return this unit.
+        if break_var_inits.is_empty() {
+            self.current_block = None;
+        }
+        unit
     }
 
     // ================================================================
