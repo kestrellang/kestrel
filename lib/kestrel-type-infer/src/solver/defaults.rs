@@ -501,7 +501,16 @@ pub(crate) fn apply_context_literals(ctx: &mut InferCtx<'_>) -> bool {
 }
 
 pub(crate) fn apply_literal_defaults_rest(ctx: &mut InferCtx<'_>) -> bool {
-    apply_literal_defaults_from(ctx, 0)
+    apply_literal_defaults_from(ctx, 0, true)
+}
+
+/// Stall breaker, run only when every other end-of-body rule is stuck: the
+/// literals `apply_literal_defaults` held back for a receiver that never
+/// resolved take their defaults. The hold-back can deadlock when the
+/// receiver waits on the very literal it holds — `var j = i + i; j + i`:
+/// `j` is `i`'s `add` result, and `i` is an argument of `j`'s `add`.
+pub(crate) fn apply_held_literal_defaults(ctx: &mut InferCtx<'_>) -> bool {
+    apply_literal_defaults_from(ctx, 0, false)
 }
 
 /// Literal defaulting restricted to TyVars allocated at or after `start`.
@@ -576,7 +585,11 @@ pub(crate) fn default_literal_var(
     true
 }
 
-pub(crate) fn apply_literal_defaults_from(ctx: &mut InferCtx<'_>, start: usize) -> bool {
+pub(crate) fn apply_literal_defaults_from(
+    ctx: &mut InferCtx<'_>,
+    start: usize,
+    hold_back: bool,
+) -> bool {
     let mut progress = false;
 
     // The literal TyVars held back: arg-position literals whose receiver is
@@ -584,7 +597,7 @@ pub(crate) fn apply_literal_defaults_from(ctx: &mut InferCtx<'_>, start: usize) 
     let blocked: crate::collections::HashSet<TyVar> = {
         let mut set = crate::collections::HashSet::default();
 
-        for constraint in &ctx.constraints {
+        for constraint in ctx.constraints.iter().filter(|_| hold_back) {
             let (receiver, args) = match constraint {
                 Constraint::Member { receiver, args, .. } => (*receiver, args),
                 Constraint::Call { callee, args, .. } => (*callee, args),

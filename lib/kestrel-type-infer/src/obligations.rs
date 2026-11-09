@@ -78,6 +78,14 @@ pub fn finish_body(ctx: &mut InferCtx<'_>, hir: &HirBody) {
         fixpoint(ctx);
     }
 
+    // Last resort, after every other default had its chance: literals still
+    // held back for a receiver nothing resolved take their defaults, and
+    // whatever they unblock gets the full default pass again.
+    if solver::apply_held_literal_defaults(ctx) {
+        fixpoint(ctx);
+        apply_defaults(ctx);
+    }
+
     // Reports. Unresolved generic type params first, so their vars are
     // poisoned before cascades; the never-fallback (Rust's
     // `never_type_fallback`) before unsolved constraints; unsolved
