@@ -139,6 +139,9 @@ enum Instr {
     /// `obj[key]`, where `key` is a register.
     case GetElem(dst: Int64, obj: Int64, key: Int64)
     case SetElem(obj: Int64, key: Int64, src: Int64, strict: Bool)
+    /// A `with` object's binding: like SetElem, but strict code throws a
+    /// ReferenceError if the property is gone.
+    case SetBinding(obj: Int64, key: Int64, src: Int64, strict: Bool)
     case DeleteElem(dst: Int64, obj: Int64, key: Int64, strict: Bool)
     /// `super[key]` with `this` as the receiver.
     case SuperGet(dst: Int64, key: Int64, this: Int64)

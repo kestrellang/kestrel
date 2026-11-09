@@ -220,6 +220,15 @@ extend VM {
                 let v = if self.isPrivateKey(pk) { try self.privateGet(o, pk) } else { try self.getV(o, pk) };
                 self.setReg(fi, dst, v);
             },
+            .SetBinding(obj, key, src, strict) => {
+                let o = self.reg(fi, obj);
+                let pk = try self.toKey(self.reg(fi, key));
+                if strict {
+                    let has = try self.hasProperty(o, pk);
+                    if not has { return .Err(self.makeError(.ReferenceError, "\(self.keyText(pk)) is not defined")); }
+                }
+                try self.setV(o, pk, self.reg(fi, src), strict);
+            },
             .SetElem(obj, key, src, strict) => {
                 let o = self.reg(fi, obj);
                 let k = self.reg(fi, key);

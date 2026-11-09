@@ -647,37 +647,75 @@ extend VM {
     /// once, for reading and writing it.
     mutating func compileReference(e: Expr) -> Result[Reference, SyntaxError] {
         match e.kind {
-            .Identifier(n) => return .Ok(Reference(name: n, obj: -1, key: -1, isSuper: false)),
+            .Identifier(n) => return .Ok(self.compileNameReference(n)),
             .Member(object, property, _) => {
                 let key = self.reg();
+                let computed = match property { .Computed(_) => true, _ => false };
                 if let .Super = object.kind {
                     let this = self.reg();
                     self.emitGetName("this", this, false);
                     try self.compileMemberKey(property, key);
-                    return .Ok(Reference(name: "", obj: this, key: key, isSuper: true));
+                    return .Ok(Reference(name: "", obj: this, key: key, isSuper: true, dyn: -1, computed: false));
                 }
                 let obj = self.reg();
                 try self.compileExpr(object, obj);
                 try self.compileMemberKey(property, key);
-                return .Ok(Reference(name: "", obj: obj, key: key, isSuper: false));
+                return .Ok(Reference(name: "", obj: obj, key: key, isSuper: false, dyn: -1, computed: computed));
             },
             _ => throw compileError("invalid assignment target")
         }
     }
 
+    /// A name, resolved once: if a `with` (or eval-vars) object holds it
+    /// now, the read and the write both use that object, even if the read
+    /// removes the property.
+    mutating func compileNameReference(n: String) -> Reference {
+        let r = self.resolve(n);
+        if r.withHops.isEmpty { return Reference(name: n, obj: -1, key: -1, isSuper: false, dyn: -1, computed: false); }
+        let dyn = self.reg();
+        self.load(dyn, Value.undefined);
+        var jumps: [Int64] = [];
+        for h in r.withHops {
+            jumps.append(self.emit(.WithGet(dst: -1, this: dyn, hops: h.hops, slot: h.slot, name: self.atom(n), target: 0)));
+        }
+        for j in jumps { self.patchHere(j); }
+        let key = self.reg();
+        self.loadString(key, n);
+        Reference(name: n, obj: -1, key: key, isSuper: false, dyn: dyn, computed: false)
+    }
+
     mutating func readReference(r: Reference, dst: Int64) -> Result[(), SyntaxError] {
-        if r.obj < 0 {
+        if r.dyn >= 0 {
+            let isStatic = self.emit(.JumpIfUndefined(src: r.dyn, target: 0));
+            let _ = self.emit(.GetElem(dst: dst, obj: r.dyn, key: r.key));
+            let over = self.emit(.Jump(target: 0));
+            self.patchHere(isStatic);
+            self.emitGetResolved(r.name, self.resolve(r.name), dst, false);
+            self.patchHere(over);
+        } else if r.obj < 0 {
             self.emitGetName(r.name, dst, false);
         } else if r.isSuper {
             let _ = self.emit(.SuperGet(dst: dst, key: r.key, this: r.obj));
         } else {
+            if r.computed {
+                // The base's null check comes before the key's conversion.
+                let _ = self.emit(.Unary(op: .RequireObject, dst: dst, src: r.obj));
+                let _ = self.emit(.Unary(op: .ToPropertyKey, dst: r.key, src: r.key));
+            }
             let _ = self.emit(.GetElem(dst: dst, obj: r.obj, key: r.key));
         }
         .Ok(())
     }
 
     mutating func writeReference(r: Reference, src: Int64) -> Result[(), SyntaxError] {
-        if r.obj < 0 {
+        if r.dyn >= 0 {
+            let isStatic = self.emit(.JumpIfUndefined(src: r.dyn, target: 0));
+            let _ = self.emit(.SetBinding(obj: r.dyn, key: r.key, src: src, strict: self.strict()));
+            let over = self.emit(.Jump(target: 0));
+            self.patchHere(isStatic);
+            self.emitSetResolved(r.name, self.resolve(r.name), src, .Assign);
+            self.patchHere(over);
+        } else if r.obj < 0 {
             self.emitSetName(r.name, src, .Assign);
         } else if r.isSuper {
             let _ = self.emit(.SuperSet(key: r.key, src: src, this: r.obj));
@@ -1021,6 +1059,12 @@ struct Reference {
     var obj: Int64
     var key: Int64
     var isSuper: Bool
+    /// For a name inside `with`: the register holding the object that
+    /// supplies it, or undefined when it's an ordinary binding; else -1.
+    var dyn: Int64
+    /// A computed member key, converted by the first read so the write
+    /// reuses the converted key.
+    var computed: Bool
 }
 
 /// `constructor(...args) { super(...args); }` or `constructor() {}`.
