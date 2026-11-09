@@ -770,22 +770,50 @@ pub(super) fn solve_member(
 
             // Same-label inits the protocol collapse couldn't merge (a
             // concrete `init(from: CString)` beside a generic
-            // `init[I](from: I)`) are picked by their argument types. Only a
+            // `init[I](from: I)`) are picked by their argument types; the
+            // winner then resolves as a member below, so the receiver's own
+            // type args (`String[A]`) bind like any other init's. Only a
             // concrete type has such inits; requirements reached through a
             // param's bounds (`T: F1, T: F2`) stay a plain ambiguity.
             let concrete = matches!(recv_kind, TyKind::Struct { .. } | TyKind::Enum { .. });
-            if name == "init" && is_call && concrete && top.len() > 1 {
-                let candidates = top.iter().map(|(c, _)| *c).collect();
-                return super::call::solve_overloaded_call(
-                    ctx,
-                    candidates,
-                    explicit_type_args.to_vec(),
-                    args,
-                    result,
-                    expr,
-                    span,
-                );
-            }
+            let top = if name == "init" && is_call && concrete && top.len() > 1 {
+                let candidates: Vec<Entity> = top.iter().map(|(c, _)| *c).collect();
+                let picks = match super::call::narrow_overloads(ctx, &candidates, &args) {
+                    super::call::Narrowed::Open(_) => {
+                        return SolveResult::Deferred(Constraint::Member {
+                            receiver,
+                            name: name.to_string(),
+                            args,
+                            result,
+                            expr,
+                            is_call,
+                            is_static_context,
+                            explicit_type_args: explicit_type_args.to_vec(),
+                            span,
+                        });
+                    },
+                    super::call::Narrowed::ByLabels(picks) if picks.is_empty() => {
+                        ctx.poison(result);
+                        return SolveResult::Error(InferError::NoMatchingOverload {
+                            name: name.to_string(),
+                            span,
+                        });
+                    },
+                    super::call::Narrowed::ByTypes(picks) if picks.is_empty() => {
+                        return SolveResult::Error(InferError::NoMember {
+                            receiver,
+                            name: name.to_string(),
+                            is_call,
+                            span,
+                        });
+                    },
+                    super::call::Narrowed::ByLabels(picks)
+                    | super::call::Narrowed::ByTypes(picks) => picks,
+                };
+                top.into_iter().filter(|(c, _)| picks.contains(c)).collect()
+            } else {
+                top
+            };
 
             if let [(winner, ext)] = top.as_slice() {
                 match ctx.resolver.resolve_single_member(&recv_kind, *winner) {
@@ -1223,6 +1251,13 @@ pub(super) fn solve_member(
     // Pattern params follow: MIR's signature orders the extension's own
     // params (`ExtensionOwnTypeParams`) after the receiver's.
     let mut recorded_type_args = proto_type_args_tvs.clone();
+    // A type's own init (`String[A].init[I](from:)`, reached here when
+    // several inits share the call's labels) leads with the type's args,
+    // the same full list `gen_struct_init` records for a lone match: the
+    // init function inherits its type's params ahead of its own.
+    if is_concrete_type_init(ctx, resolution.entity) {
+        recorded_type_args.extend(recv_type_args.iter().copied());
+    }
     recorded_type_args.extend(pattern_tvs);
     recorded_type_args.extend(fresh_params.iter().copied());
     if !recorded_type_args.is_empty() {
@@ -1554,6 +1589,32 @@ pub(super) fn solve_member(
 }
 
 /// Whether `kind` is an enum with a case named `name`.
+/// Is `entity` an init declared on a struct or enum (directly or in one of
+/// its extensions), not a protocol requirement or protocol default?
+fn is_concrete_type_init(ctx: &InferCtx<'_>, entity: Entity) -> bool {
+    use kestrel_ast_builder::NodeKind;
+    let qctx = ctx.query_ctx;
+    if qctx.get::<NodeKind>(entity) != Some(&NodeKind::Initializer) {
+        return false;
+    }
+    let Some(parent) = qctx.parent_of(entity) else {
+        return false;
+    };
+    let owner = match qctx.get::<NodeKind>(parent) {
+        Some(NodeKind::Extension) => qctx.query(kestrel_name_res::ExtensionTargetEntity {
+            extension: parent,
+            root: ctx.root,
+        }),
+        _ => Some(parent),
+    };
+    owner.is_some_and(|o| {
+        matches!(
+            qctx.get::<NodeKind>(o),
+            Some(NodeKind::Struct | NodeKind::Enum)
+        )
+    })
+}
+
 /// Does `ext`'s target admit `recv`? Unknown (an open var in the receiver)
 /// admits — the same rule the instance path's ambiguity filter uses.
 pub(crate) fn extension_applies(ctx: &InferCtx<'_>, ext: Entity, recv: &TyKind) -> bool {
