@@ -28,21 +28,23 @@ extend VM {
                 if self.heap.envs(e).slots(slot).isEmpty { return .Err(self.tdzError(name)); }
                 self.heap.envs(e).slots(slot) = self.reg(fi, src);
             },
-            .WithGet(dst, this, hops, name, target) => {
-                let obj = self.heap.envs(self.envAt(self.frames(fi).env, hops)).slots(0);
-                let has = try self.withHas(obj, name);
+            .WithGet(dst, this, hops, slot, name, target) => {
+                let obj = self.dynamicScopeObject(fi, hops, slot);
+                let has = try self.dynamicHas(obj, slot, name);
                 if has {
                     if dst >= 0 {
                         let v = try self.getV(obj, name);
                         self.setReg(fi, dst, v);
                     }
-                    if this >= 0 { self.setReg(fi, this, obj); }
+                    // Eval vars are plain variables, so calls get no `this`
+                    // from them; a find-only lookup (dst -1) still wants the object.
+                    if this >= 0 and (slot < 0 or dst < 0) { self.setReg(fi, this, obj); }
                     self.frames(fi).pc = target;
                 }
             },
-            .WithSet(hops, name, src, strict, target) => {
-                let obj = self.heap.envs(self.envAt(self.frames(fi).env, hops)).slots(0);
-                let has = try self.withHas(obj, name);
+            .WithSet(hops, slot, name, src, strict, target) => {
+                let obj = self.dynamicScopeObject(fi, hops, slot);
+                let has = try self.dynamicHas(obj, slot, name);
                 if has {
                     try self.setV(obj, name, self.reg(fi, src), strict);
                     self.frames(fi).pc = target;
@@ -57,14 +59,32 @@ extend VM {
                 self.setReg(fi, dst, v);
             },
             .SetGlobal(name, src, strict) => try self.setGlobal(name, self.reg(fi, src), strict),
+            .InitEvalVars(slot) => {
+                let vars = self.newObjectKind(Value.nullValue, .Ordinary);
+                self.heap.envs(self.frames(fi).env).slots(slot) = vars;
+            },
+            .DeclareEvalVar(hops, slot, name) => try self.declareEvalVarAt(fi, hops, slot, name),
+            .DirectEval(dst, callee, this, args, argc, ctx) => {
+                var argv: [Value] = [];
+                for i in 0..<argc { argv.append(self.reg(fi, args + i)); }
+                let f = self.reg(fi, callee);
+                if not self.isCallable(f) { return self.throwType("\(self.calleeName(fi, callee)) is not a function"); }
+                if f.bits != self.intrinsics.evalFn.bits {
+                    try self.callFromBytecode(fi, dst, f, self.reg(fi, this), argv);
+                } else {
+                    try self.directEval(fi, dst, argv, ctx);
+                }
+            },
             .DeclareGlobalVar(name) => {
+                let _ = self.globalVarNames.insert(name);
                 if not self.hasOwn(self.global.asRef, name) {
                     self.defineOwn(self.global.asRef, name, Value.undefined, Attr.writable | Attr.enumerable);
                 }
             },
-            .DeclareGlobalFunction(name, src) => {
-                self.defineOwn(self.global.asRef, name, self.reg(fi, src), Attr.writable | Attr.enumerable);
-            },
+            .DeclareGlobalFunction(name, src, deletable) => self.declareGlobalFunction(name, self.reg(fi, src), deletable),
+            .CheckGlobalVar(name) => try self.checkGlobalDecl(name, false),
+            .CheckGlobalFunction(name) => try self.checkGlobalDecl(name, true),
+            .CheckGlobalLexical(name) => try self.checkGlobalLexical(name),
             .DeclareGlobalLexical(name, isConst) => {
                 if let .Some(_) = self.globalLexicals(name) {
                     return .Err(self.makeError(.SyntaxError, "Identifier '\(self.keyText(name))' has already been declared"));
@@ -483,6 +503,21 @@ extend VM {
 
     /// HasBinding for a `with` object: `name` is on `obj` and its
     /// @@unscopables doesn't list it.
+    /// The object a WithGet/WithSet looks on: a `with` object (slot -1,
+    /// stored in slot 0) or an eval-vars object.
+    func dynamicScopeObject(fi: Int64, hops: Int64, slot: Int64) -> Value {
+        let s = if slot < 0 { 0 } else { slot };
+        let e = self.envAt(self.frames(fi).env, hops);
+        self.heap.envs(e).slots(s)
+    }
+
+    /// Whether a `with` object (`slot` -1) or a function's eval-vars
+    /// object (an ordinary object with no prototype) supplies `name`.
+    mutating func dynamicHas(obj: Value, slot: Int64, name: Key) -> Result[Bool, Value] {
+        if slot >= 0 { return .Ok(obj.isObject and self.hasOwn(obj.asRef, name)); }
+        self.withHas(obj, name)
+    }
+
     mutating func withHas(obj: Value, name: Key) -> Result[Bool, Value] {
         let hp15 = try self.hasProperty(obj, name);
         if not hp15 { return .Ok(false); }

@@ -77,6 +77,8 @@ struct Intrinsics {
     var typedArrayCtor: Value
     var dataViewProto: Value
     var bigintProto: Value
+    /// The realm's `eval`, which a direct eval call site checks for.
+    var evalFn: Value
 }
 
 /// Well-known symbols, by symbol id.
@@ -138,11 +140,17 @@ struct VM {
     var codes: [Code]
     var caches: [InlineCache]
     var fns: [FnState]
+    /// Each direct eval call site's compile-time scope, by DirectEval's ctx.
+    var evalContexts: [EvalContext]
+    /// The context indirect eval compiles in, or -1 before first use.
+    var globalEvalCtx: Int64
     /// Script-level lexical names seen so far (compile time).
     var globalLexicalNames: Set[String]
     /// Slots of script-level lexical bindings in `globalEnv`.
     var globalLexicals: [Int64: Int64]
     var globalConsts: Set[Int64]
+    /// Global `var` and function names scripts and eval declared ([[VarNames]]).
+    var globalVarNames: Set[Int64]
     var globalEnv: Int64
     var stack: [Value]
     var frames: [Frame]
@@ -179,9 +187,12 @@ struct VM {
         self.codes = [];
         self.caches = [];
         self.fns = [];
+        self.evalContexts = [];
+        self.globalEvalCtx = -1;
         self.globalLexicalNames = Set();
         self.globalLexicals = [:];
         self.globalConsts = Set();
+        self.globalVarNames = Set();
         self.globalEnv = 0;
         self.stack = [];
         self.frames = [];
@@ -198,7 +209,7 @@ struct VM {
             throwTypeError: u, promiseCtor: u, promiseProto: u, asyncFunctionProto: u, aggregateErrorProto: u,
             asyncIteratorProto: u, asyncFromSyncIteratorProto: u, asyncGeneratorFunctionProto: u, asyncGeneratorProto: u,
             iteratorHelperProto: u, wrapForValidIteratorProto: u,
-            arrayBufferProto: u, typedArrayProto: u, typedArrayCtor: u, dataViewProto: u, bigintProto: u
+            arrayBufferProto: u, typedArrayProto: u, typedArrayCtor: u, dataViewProto: u, bigintProto: u, evalFn: u
         );
         self.sourceName = "";
         self.depth = 0;
@@ -333,7 +344,7 @@ struct VM {
          i.throwTypeError, i.promiseCtor, i.promiseProto, i.asyncFunctionProto, i.aggregateErrorProto,
          i.asyncIteratorProto, i.asyncFromSyncIteratorProto, i.asyncGeneratorFunctionProto, i.asyncGeneratorProto,
          i.iteratorHelperProto, i.wrapForValidIteratorProto,
-         i.arrayBufferProto, i.typedArrayProto, i.typedArrayCtor, i.dataViewProto, i.bigintProto];
+         i.arrayBufferProto, i.typedArrayProto, i.typedArrayCtor, i.dataViewProto, i.bigintProto, i.evalFn];
         for v in self.typedArrayProtos { out.append(v); }
         for v in self.typedArrayCtors { out.append(v); }
         out

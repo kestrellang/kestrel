@@ -21,7 +21,7 @@ extend VM {
                 let r = if completion >= 0 { completion } else { self.reg() };
                 try self.compileExpr(e, r);
             },
-            .Directive(_) => {},
+            .Directive(_, v) => if completion >= 0 { self.loadString(completion, v); },
             .Var(d) => try self.compileDeclaration(d),
             .FunctionDecl(_) => {},
             .ClassDecl(c) => {

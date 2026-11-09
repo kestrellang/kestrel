@@ -231,6 +231,11 @@ extend VM {
         for i in 0..<arguments.count {
             if let .Item(x) = arguments(i) { try self.compileExpr(x, args + i); }
         }
+        if isDirectEvalCallee(callee) and not optional and not isMethod {
+            let ctx = self.snapshotEvalContext();
+            let _ = self.emit(.DirectEval(dst: dst, callee: f, this: this, args: args, argc: arguments.count, ctx: ctx));
+            return .Ok(());
+        }
         let _ = self.emit(.Call(dst: dst, callee: f, this: this, args: args, argc: arguments.count));
         .Ok(())
     }
@@ -313,7 +318,7 @@ extend VM {
                 let obj = self.reg();
                 var jumps: [Int64] = [];
                 for h in r.withHops {
-                    jumps.append(self.emit(.WithGet(dst: -1, this: obj, hops: h, name: self.atom(n), target: 0)));
+                    jumps.append(self.emit(.WithGet(dst: -1, this: obj, hops: h.hops, slot: h.slot, name: self.atom(n), target: 0)));
                 }
                 if r.found {
                     self.load(dst, Value.bool(false));
@@ -798,6 +803,7 @@ extend VM {
             if not isArrow {
                 var sc = newCScope(false, false);
                 let _ = sc.declare(own);
+                sc.isFunctionName = true;
                 self.pushScope(sc);
                 let _ = self.emit(.PushEnv(size: 1));
                 let code = try self.compileFunction(f, name, flags);
@@ -975,6 +981,8 @@ extend VM {
     /// (`methodNames`/`methodKinds`), then defines `fields`, on `this`.
     mutating func compileFieldInitializer(fields: Array[ClassMember], methodNames: Array[String], methodKinds: Array[Int64]) -> Result[Int64, SyntaxError] {
         self.beginFunction(true, false, false);
+        self.fns(self.fnIndex()).isMethod = true;
+        self.fns(self.fnIndex()).isFieldInit = true;
         let this = self.reg();
         self.emitGetName("this", this, false);
         for i in 0..<methodNames.count {

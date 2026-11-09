@@ -19,10 +19,21 @@ struct CScope {
     /// A `with` statement's scope: slot 0 holds the object, and names
     /// resolved past it are looked up on the object first.
     var isWith: Bool
+    /// The names declared lexically here (let, const, class, block
+    /// functions): a sloppy direct eval can't `var` over them.
+    var lexicals: Set[String]
+    /// A sloppy function containing a direct eval: slot `evalSlot` holds
+    /// an object with the `var`s that eval code declares, and names
+    /// resolved past this scope are looked up on it first.
+    var hasEvalVars: Bool
+    var evalSlot: Int64
+    /// Holds just a named function expression's own name.
+    var isFunctionName: Bool
 }
 
 func newCScope(isFunction: Bool, isArrow: Bool) -> CScope {
-    CScope(slots: [:], consts: Set(), size: 0, isFunction: isFunction, isArrow: isArrow, isWith: false)
+    CScope(slots: [:], consts: Set(), size: 0, isFunction: isFunction, isArrow: isArrow, isWith: false,
+        lexicals: Set(), hasEvalVars: false, evalSlot: 0, isFunctionName: false)
 }
 
 extend CScope {
@@ -88,6 +99,29 @@ struct FnState {
     var completion: Int64
     var isGenerator: Bool
     var isAsync: Bool
+    /// Eval code: a sloppy one shares its caller's var scope.
+    var isEval: Bool
+    /// A method (super properties allowed) or class field initializer.
+    var isMethod: Bool
+    var isFieldInit: Bool
+    /// Compiling the parameter list: eval code there can't declare `arguments`.
+    var inParams: Bool
+    /// The parameters' bound names, which eval code in them can't redeclare.
+    var paramNames: Set[String]
+}
+
+/// What a direct eval call site sees: the compiler's function stack at
+/// the call (scopes only), for compiling the eval code at run time.
+struct EvalContext {
+    var fns: [FnState]
+}
+
+/// A name lookup on a `with` object (`slot` -1, the object in slot 0) or
+/// on a function's eval-declared vars (the object in `slot`), `hops`
+/// environments out.
+struct DynamicScope {
+    var hops: Int64
+    var slot: Int64
 }
 
 /// The names a list of statements declares with `var` (looking into
@@ -218,7 +252,7 @@ func expectedArgumentCount(params: Array[Pattern]) -> Int64 {
 func hasUseStrict(stmts: Array[Stmt]) -> Bool {
     for s in stmts {
         match s.kind {
-            .Directive(d) => if d == "use strict" { return true; },
+            .Directive(d, _) => if d == "use strict" { return true; },
             _ => return false
         }
     }

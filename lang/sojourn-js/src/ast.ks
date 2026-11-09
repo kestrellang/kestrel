@@ -212,9 +212,9 @@ struct Stmt {
 
 indirect enum StmtKind {
     case Expression(Expr)
-    /// A directive in a prologue, `"use strict";`. The text between the
-    /// quotes, undecoded.
-    case Directive(String)
+    /// A directive in a prologue, `"use strict";`: the text between the
+    /// quotes undecoded, and the string's value (its completion in eval).
+    case Directive(raw: String, value: String)
     case Var(VariableDeclaration)
     case FunctionDecl(Function)
     case ClassDecl(Class)

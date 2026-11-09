@@ -68,6 +68,9 @@ struct Parser {
     var exportedLocalPositions: Array[Int64]
     /// A direct `eval(...)` call was parsed in the current function.
     var sawDirectEval: Bool
+    /// Direct eval calls parsed so far: an arrow's parameters contain one
+    /// when this grew while they were parsed.
+    var directEvalCalls: Int64
 
     init(source source: String, isModule isModule: Bool) {
         self.lexer = Lexer(text: source);
@@ -89,6 +92,7 @@ struct Parser {
         self.exportedLocals = [];
         self.exportedLocalPositions = [];
         self.sawDirectEval = false;
+        self.directEvalCalls = 0;
     }
 
     /// Parses a whole script or module.
@@ -266,6 +270,7 @@ struct Parser {
             if not ends or self.continuesExpression(next) { break; }
             let start = self.tok.start;
             let raw = self.lexer.text(self.tok.start + 1, self.tok.end - 1);
+            let value = self.tok.value;
             if self.tok.legacyOctal { sawOctal = true; }
             if raw == "use strict" {
                 sawStrict = true;
@@ -273,7 +278,7 @@ struct Parser {
             }
             try self.advance();
             try self.semicolon();
-            body.append(self.stmt(.Directive(raw), start));
+            body.append(self.stmt(.Directive(raw: raw, value: value), start));
         }
         if sawOctal and self.ctx.strict {
             throw earlyError("octal escape in strict mode", at: self.tok.start);

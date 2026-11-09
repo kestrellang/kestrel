@@ -58,7 +58,7 @@ func dumpString(s: String, mutating out: String) {
 func dumpStmt(s: Stmt, mutating out: String) {
     match s.kind {
         .Expression(e) => { out.append("(expr "); dumpExpr(e, out); out.append(")"); },
-        .Directive(raw) => { out.append("(directive "); dumpString(raw, out); out.append(")"); },
+        .Directive(raw, _) => { out.append("(directive "); dumpString(raw, out); out.append(")"); },
         .Var(d) => dumpDeclaration(d, out),
         .FunctionDecl(f) => { out.append("(function-decl "); dumpFunction(f, out); out.append(")"); },
         .ClassDecl(c) => { out.append("(class-decl "); dumpClass(c, out); out.append(")"); },

@@ -513,11 +513,7 @@ extend VM {
             .GlobalIsFinite => return .Ok(Value.bool((try self.toNumber(a0)).isFinite)),
             .ParseInt => return self.parseIntNative(a0, a1),
             .ParseFloat => return self.parseFloatNative(a0),
-            .Eval => {
-                if not a0.isString { return .Ok(a0); }
-                let src = self.text(a0);
-                return self.runScript(src, "eval");
-            },
+            .Eval => return self.indirectEval(a0),
             .EvalScript => {
                 let src = try self.toText(a0);
                 return self.runScript(src, "evalScript");

@@ -25,9 +25,12 @@ struct Resolved {
     var hops: Int64
     var slot: Int64
     var isConst: Bool
-    /// Hops to each `with` scope crossed before the binding, innermost
-    /// first: the name is looked up on those objects first.
-    var withHops: [Int64]
+    /// A named function expression's own name: assignments are ignored
+    /// (a TypeError in strict code).
+    var isFunctionName: Bool
+    /// Each `with` or eval-vars scope crossed before the binding,
+    /// innermost first: the name is looked up on those objects first.
+    var withHops: [DynamicScope]
 }
 
 /// What kind of function is being compiled.
@@ -95,8 +98,8 @@ extend VM {
             .JumpIfNullish(s, _) => Instr.JumpIfNullish(src: s, target: target),
             .JumpIfUndefined(s, _) => Instr.JumpIfUndefined(src: s, target: target),
             .JumpIfNotUndefined(s, _) => Instr.JumpIfNotUndefined(src: s, target: target),
-            .WithGet(d, t, h, n, _) => Instr.WithGet(dst: d, this: t, hops: h, name: n, target: target),
-            .WithSet(h, n, s, st, _) => Instr.WithSet(hops: h, name: n, src: s, strict: st, target: target),
+            .WithGet(d, t, h, sl, n, _) => Instr.WithGet(dst: d, this: t, hops: h, slot: sl, name: n, target: target),
+            .WithSet(h, sl, n, s, st, _) => Instr.WithSet(hops: h, slot: sl, name: n, src: s, strict: st, target: target),
             .EnterTry(_, e) => Instr.EnterTry(handler: target, exception: e),
             .ForInNext(d, it, _) => Instr.ForInNext(dst: d, iter: it, done: target),
             .IteratorNext(d, it, _) => Instr.IteratorNext(dst: d, iter: it, done: target),
@@ -133,26 +136,27 @@ extend VM {
     /// non-arrow function.
     mutating func resolve(name: String) -> Resolved {
         var hops: Int64 = 0;
-        var withHops: [Int64] = [];
+        var withHops: [DynamicScope] = [];
         var fi = self.fns.count - 1;
         while fi >= 0 {
             var si = self.fns(fi).scopes.count - 1;
             while si >= 0 {
                 let sc = self.fns(fi).scopes(si);
                 if let .Some(slot) = sc.slots(name) {
-                    return Resolved(found: true, hops: hops, slot: slot, isConst: sc.consts.contains(name), withHops: withHops);
+                    return Resolved(found: true, hops: hops, slot: slot, isConst: sc.consts.contains(name), isFunctionName: sc.isFunctionName, withHops: withHops);
                 }
                 if name == "arguments" and sc.isFunction and not sc.isArrow and not self.fns(fi).isScript {
                     let slot = self.declareArguments(fi, si);
-                    return Resolved(found: true, hops: hops, slot: slot, isConst: false, withHops: withHops);
+                    return Resolved(found: true, hops: hops, slot: slot, isConst: false, isFunctionName: false, withHops: withHops);
                 }
-                if sc.isWith { withHops.append(hops); }
+                if sc.isWith { withHops.append(DynamicScope(hops: hops, slot: -1)); }
+                if sc.hasEvalVars and isEvalVisible(name) { withHops.append(DynamicScope(hops: hops, slot: sc.evalSlot)); }
                 hops = hops + 1;
                 si = si - 1;
             }
             fi = fi - 1;
         }
-        Resolved(found: false, hops: 0, slot: 0, isConst: false, withHops: withHops)
+        Resolved(found: false, hops: 0, slot: 0, isConst: false, isFunctionName: false, withHops: withHops)
     }
 
     /// Adds an `arguments` binding to function `fi`'s top scope and fills
@@ -179,7 +183,7 @@ extend VM {
         let r = self.resolve(name);
         var jumps: [Int64] = [];
         for h in r.withHops {
-            jumps.append(self.emit(.WithGet(dst: dst, this: this, hops: h, name: self.atom(name), target: 0)));
+            jumps.append(self.emit(.WithGet(dst: dst, this: this, hops: h.hops, slot: h.slot, name: self.atom(name), target: 0)));
         }
         self.emitGetResolved(name, r, dst, forTypeof);
         for j in jumps { self.patchHere(j); }
@@ -201,7 +205,7 @@ extend VM {
         let a = self.atom(name);
         var jumps: [Int64] = [];
         for h in r.withHops {
-            jumps.append(self.emit(.WithSet(hops: h, name: a, src: src, strict: self.strict(), target: 0)));
+            jumps.append(self.emit(.WithSet(hops: h.hops, slot: h.slot, name: a, src: src, strict: self.strict(), target: 0)));
         }
         self.emitSetResolved(name, r, src, mode);
         for j in jumps { self.patchHere(j); }
@@ -213,6 +217,12 @@ extend VM {
         if r.found {
             if mode == BindMode.Declare {
                 let _ = self.emit(.InitVar(hops: r.hops, slot: r.slot, src: src));
+                return;
+            }
+            if r.isFunctionName {
+                if self.strict() {
+                    let _ = self.emit(.ThrowError(kind: .TypeError, message: "Assignment to constant variable '\(name)'."));
+                }
                 return;
             }
             if r.isConst {
@@ -241,7 +251,10 @@ extend VM {
         if names.isEmpty and extra.isEmpty { return .Ok(false); }
         var sc = newCScope(false, false);
         for n in extra { let _ = sc.declare(n); }
-        for n in names { let _ = sc.declare(n); }
+        for n in names {
+            let _ = sc.declare(n);
+            let _ = sc.lexicals.insert(n);
+        }
         for n in consts { let _ = sc.consts.insert(n); }
         let size = sc.size;
         self.pushScope(sc);
@@ -285,7 +298,7 @@ extend VM {
             instrs: [], scopes: [], nextReg: 1, maxReg: 1, ctl: [], strict: strict,
             isArrow: isArrow, isScript: isScript, pendingLabels: [], chainJumps: [],
             argumentsAt: 0, usesArguments: false, isDerivedCtor: false, hasFields: false,
-            completion: -1, isGenerator: false, isAsync: false
+            completion: -1, isGenerator: false, isAsync: false, isEval: false, isMethod: false, isFieldInit: false, inParams: false, paramNames: Set()
         ));
         var top = newCScope(true, isArrow);
         if not isArrow { let _ = top.declare("this"); }
@@ -324,6 +337,10 @@ extend VM {
         var lexicals: [String] = [];
         var consts: [String] = [];
         collectLexicalNames(p.body, false, lexicals, consts);
+        // Every check comes before any declaration.
+        for n in lexicals { let _ = self.emit(.CheckGlobalLexical(name: self.atom(n))); }
+        for fun in hoistedFunctions(p.body) { let _ = self.emit(.CheckGlobalFunction(name: self.atom(fun.id ?? ""))); }
+        for n in vars { let _ = self.emit(.CheckGlobalVar(name: self.atom(n))); }
         for n in vars { let _ = self.emit(.DeclareGlobalVar(name: self.atom(n))); }
         for n in lexicals {
             let _ = self.globalLexicalNames.insert(n);
@@ -334,7 +351,7 @@ extend VM {
             let name = fun.id ?? "";
             let code = try self.compileFunction(fun, name, plainFlags());
             let _ = self.emit(.MakeClosure(dst: t, code: code, home: -1));
-            let _ = self.emit(.DeclareGlobalFunction(name: self.atom(name), src: t));
+            let _ = self.emit(.DeclareGlobalFunction(name: self.atom(name), src: t, deletable: false));
         }
         self.freeRegs(to: 1);
         let completion = self.reg();
@@ -358,16 +375,24 @@ extend VM {
 
         // Declare everything the function's top scope holds.
         let top = self.fns(fi).scopes.count - 1;
-        for n in boundNames(f.params) { let _ = self.fns(fi).scopes(top).declare(n); }
+        for n in boundNames(f.params) {
+            let _ = self.fns(fi).scopes(top).declare(n);
+            let _ = self.fns(fi).paramNames.insert(n);
+        }
         var vars: [String] = [];
         collectVarNames(body, vars);
         for n in vars { let _ = self.fns(fi).scopes(top).declare(n); }
         var lexicals: [String] = [];
         var consts: [String] = [];
         collectLexicalNames(body, false, lexicals, consts);
-        for n in lexicals { let _ = self.fns(fi).scopes(top).declare(n); }
+        for n in lexicals {
+            let _ = self.fns(fi).scopes(top).declare(n);
+            let _ = self.fns(fi).scopes(top).lexicals.insert(n);
+        }
         for n in consts { let _ = self.fns(fi).scopes(top).consts.insert(n); }
         for fun in hoistedFunctions(body) { let _ = self.fns(fi).scopes(top).declare(fun.id ?? ""); }
+        self.fns(fi).isMethod = flags.isMethod or flags.isClassConstructor;
+        if f.hasDirectEval { self.prepareDirectEval(fi); }
 
         // An async function's parameters run inside it, so their errors
         // reject its promise.
@@ -379,6 +404,7 @@ extend VM {
             let r = self.resolve(n);
             let _ = self.emit(.InitVar(hops: r.hops, slot: r.slot, src: t));
         }
+        self.fns(fi).inParams = true;
         for i in 0..<f.params.count {
             let mark = self.regMark();
             let v = self.reg();
@@ -394,6 +420,7 @@ extend VM {
             }
             self.freeRegs(to: mark);
         }
+        self.fns(fi).inParams = false;
         for fun in hoistedFunctions(body) {
             let n = fun.id ?? "";
             let code = try self.compileFunction(fun, n, plainFlags());
@@ -590,6 +617,12 @@ extend VM {
         self.caches.append(InlineCache(shape: -1, slot: 0));
         self.caches.count - 1
     }
+}
+
+/// Names eval code can declare: not `this` or the compiler's internal
+/// bindings (`%…`, private `#…`).
+func isEvalVisible(name: String) -> Bool {
+    name != "this" and not name.starts(with: "%") and not name.starts(with: "#")
 }
 
 func panicFn() -> FnState {

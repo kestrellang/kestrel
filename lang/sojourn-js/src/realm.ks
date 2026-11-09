@@ -301,6 +301,7 @@ extend VM {
         ] {
             self.method(g, name, n, len);
         }
+        self.intrinsics.evalFn = self.ownValue(g.asRef, self.atom("eval"));
         let parseIntFn = self.ownValue(g.asRef, self.atom("parseInt"));
         let parseFloatFn = self.ownValue(g.asRef, self.atom("parseFloat"));
         self.defineHidden(numberCtor.asRef, self.atom("parseInt"), parseIntFn);

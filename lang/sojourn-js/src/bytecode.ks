@@ -81,15 +81,37 @@ enum Instr {
     /// @@unscopables doesn't hide it), reads it into `dst`, puts the object
     /// in `this` (unless -1) and jumps to `target`. A `dst` of -1 only
     /// finds the object.
-    case WithGet(dst: Int64, this: Int64, hops: Int64, name: Key, target: Int64)
+    case WithGet(dst: Int64, this: Int64, hops: Int64, slot: Int64, name: Key, target: Int64)
     /// The same lookup for an assignment: stores `src` and jumps.
-    case WithSet(hops: Int64, name: Key, src: Int64, strict: Bool, target: Int64)
+    case WithSet(hops: Int64, slot: Int64, name: Key, src: Int64, strict: Bool, target: Int64)
     case GetGlobal(dst: Int64, name: Key, forTypeof: Bool)
     case SetGlobal(name: Key, src: Int64, strict: Bool)
+    /// Puts a fresh eval-vars object (see `CScope.hasEvalVars`) in slot
+    /// `slot` of the current env.
+    case InitEvalVars(slot: Int64)
+    /// A `var` or function a sloppy direct eval declares: a configurable
+    /// property, left alone if it exists, on the eval-vars object in
+    /// `slot` `hops` envs up, or (hops -1) on the global object.
+    case DeclareEvalVar(hops: Int64, slot: Int64, name: Key)
+    /// `eval(...)` by name: if `callee` is the realm's eval, runs the
+    /// string in the scope `VM.evalContexts(ctx)` describes; otherwise
+    /// an ordinary call.
+    case DirectEval(dst: Int64, callee: Int64, this: Int64, args: Int64, argc: Int64, ctx: Int64)
     /// Script-level `var`: a global property, left alone if it exists.
     case DeclareGlobalVar(name: Key)
     /// Script-level function: a global property set to `src`.
-    case DeclareGlobalFunction(name: Key, src: Int64)
+    /// Script-level (or global eval) function: defines the global, or only
+    /// sets its value when the existing property can't be redefined.
+    /// `deletable` (eval) makes a new property configurable.
+    case DeclareGlobalFunction(name: Key, src: Int64, deletable: Bool)
+    /// The checks before a script or global eval declares anything:
+    /// CanDeclareGlobalVar / CanDeclareGlobalFunction (TypeError) and a
+    /// clash with a global lexical (SyntaxError).
+    case CheckGlobalVar(name: Key)
+    case CheckGlobalFunction(name: Key)
+    /// A script-level let/const/class can't shadow a global var or a
+    /// non-configurable global property (SyntaxError).
+    case CheckGlobalLexical(name: Key)
     /// Script-level `let`/`const`/`class`: a binding in the shared global
     /// lexical scope, uninitialized until `InitGlobalLexical`.
     case DeclareGlobalLexical(name: Key, isConst: Bool)

@@ -383,7 +383,12 @@ extend Parser {
                 current = self.expr(.Member(object: current, property: .Computed(prop), optional: false), start);
             } else if self.at("(") and allowCall {
                 let args = try self.parseArguments();
-                if let .Identifier(n) = current.kind { if n == "eval" { self.sawDirectEval = true; } }
+                if let .Identifier(n) = current.kind {
+                    if n == "eval" {
+                        self.sawDirectEval = true;
+                        self.directEvalCalls = self.directEvalCalls + 1;
+                    }
+                }
                 current = self.expr(.Call(callee: current, arguments: args, optional: false), start);
             } else if self.tok.kind == TokenKind.Template or self.tok.kind == TokenKind.TemplateHead {
                 if inChain { throw self.error("tagged template in an optional chain"); }
@@ -503,7 +508,7 @@ extend Parser {
                         let name = try param;
                         if not self.at("=>") or self.tok.newlineBefore { throw self.unexpected(); }
                         let _ = paramStart;
-                        return self.parseArrowFunction(start, [Pattern.Identifier(name)], true, true);
+                        return self.parseArrowFunction(start, [Pattern.Identifier(name)], true, false);
                     }
                     if next.isPunct("(") {
                         return self.parseAsyncCallOrArrow();
@@ -520,7 +525,7 @@ extend Parser {
         let name = try self.parseIdentifier();
         if self.at("=>") and not self.tok.newlineBefore {
             try self.checkBindingName(name, start);
-            return self.parseArrowFunction(start, [Pattern.Identifier(name)], false, true);
+            return self.parseArrowFunction(start, [Pattern.Identifier(name)], false, false);
         }
         .Ok(self.expr(.Identifier(name), start))
     }
@@ -536,6 +541,7 @@ extend Parser {
         var spreads: [Bool] = [];
         var rest: Optional[Pattern] = .None;
         let savedAsync = self.ctx.inAsync;
+        let evalsBefore = self.directEvalCalls;
         let savedYield = self.ctx.yieldPos;
         self.ctx.yieldPos = -1;
         while not self.at(")") {
@@ -573,7 +579,7 @@ extend Parser {
                 if patternContainsAwait(r) { throw earlyError("'await' in async arrow parameters", at: start); }
                 params.append(restMarker(r));
             }
-            return self.parseArrowFunction(start, params, true, false);
+            return self.parseArrowFunction(start, params, true, self.directEvalCalls > evalsBefore);
         }
         var args: [Argument] = [];
         for i in 0..<items.count {
@@ -592,6 +598,7 @@ extend Parser {
         var items: [Expr] = [];
         var rest: Optional[Pattern] = .None;
         var trailingComma = false;
+        let evalsBefore = self.directEvalCalls;
         let savedYield = self.ctx.yieldPos;
         self.ctx.yieldPos = -1;
         while not self.at(")") {
@@ -617,7 +624,7 @@ extend Parser {
             }
             self.coverInit = -1;
             if let .Some(r) = rest { params.append(restMarker(r)); }
-            return self.parseArrowFunction(start, params, false, false);
+            return self.parseArrowFunction(start, params, false, self.directEvalCalls > evalsBefore);
         }
         let hasRest = match rest { .Some(_) => true, .None => false };
         if items.isEmpty or hasRest or trailingComma { throw self.unexpected(); }
@@ -945,7 +952,8 @@ extend Parser {
     }
 
     /// An arrow function body after `=>`. `params` are already patterns.
-    mutating func parseArrowFunction(start: Int64, params: Array[Pattern], isAsync: Bool, simpleParam: Bool) -> Result[Expr, SyntaxError] {
+    /// `paramsEval`: the parameters contain a direct eval.
+    mutating func parseArrowFunction(start: Int64, params: Array[Pattern], isAsync: Bool, paramsEval: Bool) -> Result[Expr, SyntaxError] {
         try self.expect("=>");
         let outer = self.ctx;
         self.ctx.inGenerator = false;
@@ -957,15 +965,14 @@ extend Parser {
         self.ctx.loopLabels = [];
         self.ctx.loopDepth = 0;
         self.ctx.switchDepth = 0;
-        let result = self.parseArrowBody(start, params, isAsync);
+        let result = self.parseArrowBody(start, params, isAsync, paramsEval);
         self.ctx = outer;
-        let _ = simpleParam;
         result
     }
 
-    mutating func parseArrowBody(start: Int64, params: Array[Pattern], isAsync: Bool) -> Result[Expr, SyntaxError] {
+    mutating func parseArrowBody(start: Int64, params: Array[Pattern], isAsync: Bool, paramsEval: Bool) -> Result[Expr, SyntaxError] {
         let outerEval = self.sawDirectEval;
-        self.sawDirectEval = false;
+        self.sawDirectEval = paramsEval;
         let names = boundNames(params);
         if self.at("{") {
             let bodyStart = self.tok.start;
