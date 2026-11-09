@@ -179,7 +179,7 @@ plus a droppable env double-frees; `Clone` without drop leaks:
 
 The six sites: `ty_query::copy_behavior`, `ty_query::needs_drop`,
 `expand::ty_needs_drop`, `audit::mono_needs_drop`,
-`clone_shim::ty_needs_clone_shim`, and `mono::concrete_copy`
+`clone_shim::DeepCloneQuery::ty_need`, and `mono::concrete_copy`
 (`drop_fix::field_needs_drop` follows via `needs_drop`). With no stdlib —
 no `Cloneable` protocol in the module — the escaping row degrades to
 `Bitwise`, the only self-consistent answer when nothing can clone anyway.
