@@ -436,10 +436,9 @@ fn witness_proto_args_match(
         .proto_type_args
         .iter()
         .zip(expected.iter())
-        .all(|(&w, &e)| match arena.get(w) {
-            MirTy::TypeParam(p) => *bindings.entry(*p).or_insert(e) == e,
-            _ => w == e,
-        })
+        // A structured arg (`Addable[W[A]]`) matches structurally, binding
+        // or checking the params inside it like a bare one.
+        .all(|(&w, &e)| match_pattern(arena, w, e, bindings))
 }
 
 /// Resolve a `Callee::Witness` to a concrete function entity + type_args + self_type.

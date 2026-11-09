@@ -41,18 +41,118 @@ use kestrel_mir::{FieldIdx, Immediate, MirTy, Op, ParamConvention, TyId, ValueId
 
 use super::OssaBodyCtx;
 
+/// One wrapper struct between a box handle and its raw pointer word.
+#[derive(Clone)]
+pub(crate) struct HandleLayer {
+    /// The wrapper struct type.
+    pub ty: TyId,
+    /// The field leading down to the pointer.
+    pub ptr_field: FieldIdx,
+    /// Every field's type, substituted at `ty`. All but `ptr_field` are empty
+    /// structs: dropped when the handle is forgotten down to its word, and
+    /// rebuilt (they hold nothing) when the word becomes a handle again.
+    pub fields: Vec<TyId>,
+}
+
+impl HandleLayer {
+    /// The type one step further down: the next layer, or the raw pointer.
+    fn inner_ty(layers: &[HandleLayer], i: usize, raw_ty: TyId) -> TyId {
+        layers.get(i + 1).map_or(raw_ty, |l| l.ty)
+    }
+}
+
+/// `layers` rebuilt around `raw`, innermost first, as plain instructions
+/// (for the synthesized shims, which have no `OssaBodyCtx`).
+fn wrap_raw_insts(
+    body: &mut OssaBody,
+    insts: &mut Vec<Instruction>,
+    layers: &[HandleLayer],
+    raw: ValueId,
+) -> ValueId {
+    let mut cur = raw;
+    for layer in layers.iter().rev() {
+        let fields = layer
+            .fields
+            .iter()
+            .enumerate()
+            .map(|(i, &ty)| {
+                let idx = FieldIdx::new(i);
+                if idx == layer.ptr_field {
+                    return (idx, cur);
+                }
+                let empty = body.alloc_value(ValueDef::owned(ty));
+                insts.push(Instruction::new(InstKind::Struct {
+                    result: empty,
+                    ty,
+                    fields: vec![],
+                }));
+                (idx, empty)
+            })
+            .collect();
+        let outer = body.alloc_value(ValueDef::owned(layer.ty));
+        insts.push(Instruction::new(InstKind::Struct {
+            result: outer,
+            ty: layer.ty,
+            fields,
+        }));
+        cur = outer;
+    }
+    cur
+}
+
+/// `handle` taken apart down to its raw word (the inverse of
+/// [`wrap_raw_insts`]); the empty side fields are destroyed on the way.
+fn forget_handle_insts(
+    body: &mut OssaBody,
+    insts: &mut Vec<Instruction>,
+    layers: &[HandleLayer],
+    raw_ty: TyId,
+    handle: ValueId,
+) -> ValueId {
+    let mut cur = handle;
+    for (i, layer) in layers.iter().enumerate() {
+        let inner_ty = HandleLayer::inner_ty(layers, i, raw_ty);
+        let results: Vec<ValueId> = layer
+            .fields
+            .iter()
+            .enumerate()
+            .map(|(f, &ty)| {
+                let ty = if FieldIdx::new(f) == layer.ptr_field {
+                    inner_ty
+                } else {
+                    ty
+                };
+                body.alloc_value(ValueDef::owned(ty))
+            })
+            .collect();
+        insts.push(Instruction::new(InstKind::DestructureStruct {
+            results: results.clone(),
+            operand: cur,
+        }));
+        for (f, &v) in results.iter().enumerate() {
+            if FieldIdx::new(f) != layer.ptr_field {
+                insts.push(Instruction::new(InstKind::DestroyValue { operand: v }));
+            }
+        }
+        cur = results[layer.ptr_field.index()];
+    }
+    cur
+}
+
 /// The resolved `@builtin(.SharedBox)` binding, specialized at one payload
 /// type. Every member is found BY REQUIREMENT NAME on the binding entity —
 /// never by a hard-coded `RcBox` reference (plan D9).
 pub(crate) struct BoxBinding {
     /// `Named{binding, [payload]}` — the handle type.
     pub handle_ty: TyId,
-    /// Single-field wrapper types from the handle down to the raw machine
-    /// pointer, OUTERMOST FIRST — e.g. `[RcBox[E], std.memory.Pointer[Sto]]`.
-    /// A handle is required to be a chain of single-field wrappers ending in a
-    /// pointer (shared-box.md "Constraints on a Box Implementation"); anything
-    /// else has no one-word representation and the binding is rejected.
-    pub wrappers: Vec<TyId>,
+    /// Wrapper structs from the handle down to the raw machine pointer,
+    /// OUTERMOST FIRST — e.g. `[RcBox[E, A], std.memory.Pointer[Sto]]`.
+    /// A handle is required to be a chain of wrappers ending in a pointer,
+    /// each holding one field on the way down plus only empty structs (a
+    /// stateless allocator) beside it (shared-box.md "Constraints on a Box
+    /// Implementation"); anything else has no one-word representation and
+    /// the binding is rejected.
+    pub wrappers: Vec<HandleLayer>,
     /// The raw machine pointer at the bottom of `wrappers`. This — NOT the
     /// handle struct, which codegen addresses by reference — is the word
     /// packed into the closure value.
@@ -166,7 +266,7 @@ impl OssaBodyCtx<'_, '_> {
         })?;
         self.ctx.register_name(entity);
 
-        let type_args = vec![payload_ty];
+        let type_args = crate::ty::with_default_type_args(self.ctx, entity, vec![payload_ty]);
         let handle_ty = self.ctx.module.ty_arena.named(entity, type_args.clone());
         let (wrappers, raw_ty) = self.unwrap_handle_to_pointer(handle_ty)?;
 
@@ -190,39 +290,69 @@ impl OssaBodyCtx<'_, '_> {
         })
     }
 
-    /// Peel single-field wrapper structs off `handle_ty` until a raw
-    /// `MirTy::Pointer` is reached, returning `(wrappers outermost-first, raw
-    /// pointer type)`. `RcBox[E]` → `std.memory.Pointer[RcBoxStorage[E]]` →
-    /// `MirTy::Pointer(RcBoxStorage[E])`.
+    /// Peel wrapper structs off `handle_ty` until a raw `MirTy::Pointer` is
+    /// reached, returning `(wrappers outermost-first, raw pointer type)`.
+    /// `RcBox[E, A]` → `std.memory.Pointer[RcBoxStorage[E]]` →
+    /// `MirTy::Pointer(RcBoxStorage[E])`. Each wrapper holds exactly one
+    /// non-empty field, the next step down; its other fields must be empty
+    /// structs (a stateless allocator), which add nothing to the word.
     pub(crate) fn unwrap_handle_to_pointer(
         &mut self,
         handle_ty: TyId,
-    ) -> Option<(Vec<TyId>, TyId)> {
+    ) -> Option<(Vec<HandleLayer>, TyId)> {
         let mut wrappers = Vec::new();
         let mut cur = handle_ty;
         // Small bound: a handle is a thin wrapper, not a deep tower.
         for _ in 0..4 {
-            match self.ctx.module.ty_arena.get(cur) {
+            let fields = match self.ctx.module.ty_arena.get(cur) {
                 MirTy::Pointer(_) => return Some((wrappers, cur)),
-                MirTy::Named { entity, type_args } => {
-                    let (entity, type_args): (kestrel_hecs::Entity, Vec<TyId>) =
-                        (*entity, type_args.clone());
-                    let sdef = self.ctx.module.structs.get(&entity)?;
-                    if sdef.fields.len() != 1 {
-                        return None;
-                    }
-                    let (field_ty, tps) = (sdef.fields[0].ty, sdef.type_params.clone());
-                    let mut subst = kestrel_mir::SubstMap::new();
-                    for (tp, &arg) in tps.iter().zip(type_args.iter()) {
-                        subst.type_params.insert(tp.entity, arg);
-                    }
-                    wrappers.push(cur);
-                    cur = kestrel_mir::substitute(&mut self.ctx.module.ty_arena, field_ty, &subst);
-                },
+                MirTy::Named { .. } => self.struct_field_tys_at(cur)?,
                 _ => return None,
-            }
+            };
+            let mut non_empty = (0..fields.len()).filter(|&i| !self.is_empty_struct(fields[i]));
+            let (Some(ptr), None) = (non_empty.next(), non_empty.next()) else {
+                return None;
+            };
+            wrappers.push(HandleLayer {
+                ty: cur,
+                ptr_field: FieldIdx::new(ptr),
+                fields: fields.clone(),
+            });
+            cur = fields[ptr];
         }
         None
+    }
+
+    /// The field types of struct type `ty`, substituted at its type args.
+    fn struct_field_tys_at(&mut self, ty: TyId) -> Option<Vec<TyId>> {
+        let MirTy::Named { entity, type_args } = self.ctx.module.ty_arena.get(ty).clone() else {
+            return None;
+        };
+        let sdef = self.ctx.module.structs.get(&entity)?;
+        let field_tys: Vec<TyId> = sdef.fields.iter().map(|f| f.ty).collect();
+        let mut subst = kestrel_mir::SubstMap::new();
+        for (tp, &arg) in sdef.type_params.iter().zip(type_args.iter()) {
+            subst.type_params.insert(tp.entity, arg);
+        }
+        Some(
+            field_tys
+                .into_iter()
+                .map(|f| kestrel_mir::substitute(&mut self.ctx.module.ty_arena, f, &subst))
+                .collect(),
+        )
+    }
+
+    /// A struct with no fields (`SystemAllocator`): no bytes, nothing owned.
+    fn is_empty_struct(&self, ty: TyId) -> bool {
+        match self.ctx.module.ty_arena.get(ty) {
+            MirTy::Named { entity, .. } => self
+                .ctx
+                .module
+                .structs
+                .get(entity)
+                .is_some_and(|s| s.fields.is_empty()),
+            _ => false,
+        }
     }
 
     /// The binding's member for the `@builtin`-tagged `tag`: the tagged
@@ -347,21 +477,35 @@ impl OssaBodyCtx<'_, '_> {
     /// Consume a handle value without releasing it, yielding its raw pointer
     /// word. See [`Self::emit_box_env`] for why this is the right primitive.
     pub(crate) fn emit_forget_handle(&mut self, binding: &BoxBinding, handle: ValueId) -> ValueId {
+        let layers = &binding.wrappers;
         let mut cur = handle;
-        for i in 0..binding.wrappers.len() {
-            let inner_ty = binding
-                .wrappers
-                .get(i + 1)
-                .copied()
-                .unwrap_or(binding.raw_ty);
-            let inner = self.alloc_value(inner_ty, Ownership::Owned);
+        for (i, layer) in layers.iter().enumerate() {
+            let inner_ty = HandleLayer::inner_ty(layers, i, binding.raw_ty);
+            let results: Vec<ValueId> = layer
+                .fields
+                .iter()
+                .enumerate()
+                .map(|(f, &ty)| {
+                    let ty = if FieldIdx::new(f) == layer.ptr_field {
+                        inner_ty
+                    } else {
+                        ty
+                    };
+                    self.alloc_value(ty, Ownership::Owned)
+                })
+                .collect();
             self.consume(cur);
             self.push_inst(InstKind::DestructureStruct {
-                results: vec![inner],
+                results: results.clone(),
                 operand: cur,
             });
-            self.track_owned(inner);
-            cur = inner;
+            for (f, &v) in results.iter().enumerate() {
+                self.track_owned(v);
+                if FieldIdx::new(f) != layer.ptr_field {
+                    self.emit_destroy_value(v);
+                }
+            }
+            cur = results[layer.ptr_field.index()];
         }
         cur
     }
@@ -372,8 +516,21 @@ impl OssaBodyCtx<'_, '_> {
     /// exactly once against the +1 the word already stands for.
     pub(crate) fn emit_handle_from_raw(&mut self, binding: &BoxBinding, raw: ValueId) -> ValueId {
         let mut cur = raw;
-        for &wrapper in binding.wrappers.iter().rev() {
-            cur = self.emit_struct(wrapper, vec![(FieldIdx::new(0), cur)]);
+        for layer in binding.wrappers.iter().rev() {
+            let fields = layer
+                .fields
+                .iter()
+                .enumerate()
+                .map(|(i, &ty)| {
+                    let idx = FieldIdx::new(i);
+                    if idx == layer.ptr_field {
+                        (idx, cur)
+                    } else {
+                        (idx, self.emit_struct(ty, vec![]))
+                    }
+                })
+                .collect();
+            cur = self.emit_struct(layer.ty, fields);
         }
         cur
     }
@@ -541,17 +698,7 @@ fn build_unique_release_shim(
     let owned = |body: &mut OssaBody, ty: TyId| body.alloc_value(ValueDef::owned(ty));
 
     // Reconstitute the handle from the word, then `destroy()` it.
-    let mut cur = raw_param;
-    for &wrapper in binding.wrappers.iter().rev() {
-        let outer = body.alloc_value(ValueDef::owned(wrapper));
-        insts.push(Instruction::new(InstKind::Struct {
-            result: outer,
-            ty: wrapper,
-            fields: vec![(FieldIdx::new(0), cur)],
-        }));
-        cur = outer;
-    }
-    let box_val = cur;
+    let box_val = wrap_raw_insts(&mut body, &mut insts, &binding.wrappers, raw_param);
     let borrow = body.alloc_value(ValueDef::guaranteed(binding.handle_ty, box_val));
     insts.push(Instruction::new(InstKind::BeginBorrow {
         result: borrow,
@@ -574,21 +721,14 @@ fn build_unique_release_shim(
     insts.push(Instruction::new(InstKind::EndBorrow { operand: borrow }));
     // The handle itself owns nothing once `destroy()` has run — forget it back
     // down to the POD word rather than destroying a dangling box value.
-    let mut cur = box_val;
-    for i in 0..binding.wrappers.len() {
-        let inner_ty = binding
-            .wrappers
-            .get(i + 1)
-            .copied()
-            .unwrap_or(binding.raw_ty);
-        let inner = owned(&mut body, inner_ty);
-        insts.push(Instruction::new(InstKind::DestructureStruct {
-            results: vec![inner],
-            operand: cur,
-        }));
-        cur = inner;
-    }
-    insts.push(Instruction::new(InstKind::DestroyValue { operand: cur }));
+    let word = forget_handle_insts(
+        &mut body,
+        &mut insts,
+        &binding.wrappers,
+        binding.raw_ty,
+        box_val,
+    );
+    insts.push(Instruction::new(InstKind::DestroyValue { operand: word }));
 
     let unit_val = owned(&mut body, unit_ty);
     insts.push(Instruction::new(InstKind::Literal {
@@ -643,20 +783,7 @@ fn build_shim(
 
     // %box = Handle { … { raw } } — conjured, standing for the reference the
     // word already holds.
-    let wrap = |body: &mut OssaBody, insts: &mut Vec<Instruction>, raw: ValueId| {
-        let mut cur = raw;
-        for &wrapper in binding.wrappers.iter().rev() {
-            let outer = body.alloc_value(ValueDef::owned(wrapper));
-            insts.push(Instruction::new(InstKind::Struct {
-                result: outer,
-                ty: wrapper,
-                fields: vec![(FieldIdx::new(0), cur)],
-            }));
-            cur = outer;
-        }
-        cur
-    };
-    let box_val = wrap(&mut body, &mut insts, raw_param);
+    let box_val = wrap_raw_insts(&mut body, &mut insts, &binding.wrappers, raw_param);
 
     if is_retain {
         // Share: CopyValue routes through the ordinary clone machinery (the
@@ -675,21 +802,9 @@ fn build_shim(
         // Forget BOTH handles: the conjured one never owned anything, and the
         // fresh one IS the extra reference we are handing to the copy.
         for h in [box_val, extra] {
-            let mut cur = h;
-            for i in 0..binding.wrappers.len() {
-                let inner_ty = binding
-                    .wrappers
-                    .get(i + 1)
-                    .copied()
-                    .unwrap_or(binding.raw_ty);
-                let inner = owned(&mut body, inner_ty);
-                insts.push(Instruction::new(InstKind::DestructureStruct {
-                    results: vec![inner],
-                    operand: cur,
-                }));
-                cur = inner;
-            }
-            insts.push(Instruction::new(InstKind::DestroyValue { operand: cur }));
+            let word =
+                forget_handle_insts(&mut body, &mut insts, &binding.wrappers, binding.raw_ty, h);
+            insts.push(Instruction::new(InstKind::DestroyValue { operand: word }));
         }
     } else {
         // Release: hand the word's reference back. The drop shim runs the

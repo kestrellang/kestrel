@@ -26,14 +26,14 @@ func main() -> lang.i64 {
     }
     match child.wait() {
         .Ok(status) => {
-            if not status.isEqual(to: .Terminated) { return 6 }
+            if not status.isEqual(to: .Terminated(signal: 9)) { return 6 }
             if status.code.isSome { return 7 }
         },
         .Err(_) => { return 8 }
     }
     // The status is remembered; a second wait returns it again.
     match child.wait() {
-        .Ok(status) => { if not status.isEqual(to: .Terminated) { return 9 } },
+        .Ok(status) => { if not status.isEqual(to: .Terminated(signal: 9)) { return 9 } },
         .Err(_) => { return 10 }
     }
     0

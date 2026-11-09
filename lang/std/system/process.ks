@@ -83,14 +83,16 @@ public enum Process {
 public enum ExitStatus: Equatable, Formattable {
     /// It returned from `main` or called `exit` with this code.
     case Exited(ExitCode)
-    /// It was ended from outside, by a signal such as `SIGKILL`.
-    case Terminated
+    /// It was ended by a signal: `signal` is its number (9 for `SIGKILL`,
+    /// 11 for `SIGSEGV`, 2 for `SIGINT`), so a crash and a kill are told
+    /// apart.
+    case Terminated(signal: Int32)
 
     /// True if it exited with code 0.
     public var isSuccess: Bool {
         match self {
             .Exited(code) => code.isSuccess,
-            .Terminated => false
+            .Terminated(_) => false
         }
     }
 
@@ -98,23 +100,23 @@ public enum ExitStatus: Equatable, Formattable {
     public var code: Optional[ExitCode] {
         match self {
             .Exited(code) => .Some(code),
-            .Terminated => .None
+            .Terminated(_) => .None
         }
     }
 
     public func isEqual(to other: ExitStatus) -> Bool {
         match (self, other) {
             (.Exited(a), .Exited(b)) => a.isEqual(to: b),
-            (.Terminated, .Terminated) => true,
+            (.Terminated(a), .Terminated(b)) => a == b,
             _ => false
         }
     }
 
-    /// Prints `exit code 3` or `terminated`.
+    /// Prints `exit code 3` or `terminated by signal 9`.
     public func format(mutating into writer: some Formatter, options: FormatOptions = FormatOptions.default()) {
         let text: String = match self {
             .Exited(code) => "exit code \(code.value)",
-            .Terminated => "terminated"
+            .Terminated(signal) => "terminated by signal \(signal)"
         };
         _writePadded(into: writer, text, options)
     }
@@ -606,7 +608,7 @@ public struct Child: not Copyable {
         let status: ExitStatus = if cells.read(at: 0) == 1 {
             .Exited(ExitCode(UInt8(from: cells.read(at: 1))))
         } else {
-            .Terminated
+            .Terminated(signal: cells.read(at: 1))
         };
         self.status = .Some(status);
         .Ok(.Some(status))

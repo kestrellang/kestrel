@@ -808,6 +808,8 @@ fn seed_pointer_ops(world: &mut World, lang: Entity) {
     );
     seed_generic_fn(world, lang, "sizeof", &[], i64_ty.clone());
     seed_generic_fn(world, lang, "alignof", &[], i64_ty.clone());
+    // Whether copying a `T` is a plain byte copy (no clone, not move-only).
+    seed_generic_fn(world, lang, "is_bitwise", &[], lang_ty("i1"));
     // Size / alignment of the value at an address — the only way to measure
     // an unsized pointee, whose layout lives in its function table
     // (existentials). For a sized `T` they are `sizeof` / `alignof`.

@@ -18,7 +18,7 @@ fn write_ty(world: &World, ty: &ResolvedTy, out: &mut String) {
     match ty {
         // A box over a raw existential reads as the `any` it was written as.
         ResolvedTy::Named { entity, args }
-            if matches!(args.as_slice(), [ResolvedTy::RawExistential { .. }]) =>
+            if matches!(args.as_slice(), [ResolvedTy::RawExistential { .. }, ..]) =>
         {
             out.push_str("any[");
             out.push_str(&entity_path(world, *entity));

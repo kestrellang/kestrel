@@ -14,8 +14,8 @@ import std.core.(Bool, Cloneable, Indirection, MutableIndirection)
 /// The contract a box type meets to hold an existential: `any[B] P` is
 /// `B[<raw existential>]` (docs/plans/existentials/existentials-design.md §3).
 ///
-/// Beyond conforming, `B` must have exactly one type parameter, declared
-/// `not Sized`, and store it only behind a pointer, so the compiler can widen
+/// Beyond conforming, `B` must have exactly one type parameter without a
+/// default (others, like an allocator, must have one), declared `not Sized`, and store it only behind a pointer, so the compiler can widen
 /// `B[T]` to `B[<raw existential>]` (E402 checks this).
 @builtin(.ExistentialBox)
 public protocol ExistentialBox: Indirection {

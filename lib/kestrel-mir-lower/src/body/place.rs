@@ -444,6 +444,13 @@ impl OssaBodyCtx<'_, '_> {
                 }
                 Some(self.emit_field_addr(base_addr, base_ty, FieldIdx::new(index as usize)))
             },
+            // Global / `static var` root: its GlobalRef is the storage address,
+            // as in `lower_place`'s Def arm. Without it `gpos.x = v` fell back
+            // to writing a loaded copy of the global.
+            HirExpr::Def(entity, _, _) if self.is_stored_global_def(entity) => {
+                self.ctx.register_name(entity);
+                Some(self.emit_global_ref(entity))
+            },
             _ => None,
         }
     }

@@ -204,7 +204,12 @@ The compiler enforces these when a type is bound as `@lang(sharedBox)`:
    works only because the handle is pointer-sized no matter the payload).
    Checked structurally: every stored field's layout must be
    `Target`-independent — in practice, pointers only. `RcBox` is one
-   `Pointer[RcBoxStorage[T]]`: ✓.
+   `Pointer[RcBoxStorage[T]]` plus its allocator `A`: ✓. For the boxes the
+   compiler builds itself (closure environments, indirect enum payloads)
+   the handle must also be one word: one field leading to the pointer, and
+   any other field an empty struct (the default `GlobalAllocator`), which
+   the compiler drops when it forgets the handle down to its word and
+   rebuilds when it turns the word back into a handle.
 2. **No self-dependence.** The box implementation may not itself require
    implicit boxing — no escaping closures, classes, `indirect enum`s, or
    `any` types inside it. `RcBox` today uses only normal frame-view closures

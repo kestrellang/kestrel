@@ -7,7 +7,7 @@ import std.core.(ExpressibleByArrayLiteral, _ExpressibleByArrayLiteral)
 import std.core.(Range, ClosedRange, Hashable)
 import std.collections.(SeqRange)
 import std.text.(Formattable, FormatOptions, StringBuilder)
-import std.numeric.(Int64)
+import std.numeric.(Int64, UInt8)
 import std.numeric.(RandomNumberGenerator, Lcg64, DefaultRandom)
 import std.result.(Optional)
 import std.memory.(Layout, Pointer, UnsafeSlice, UnsafeSliceIterator, RawPointer, Allocator, GlobalAllocator, LiteralSlice, CowBox)
@@ -28,7 +28,7 @@ import std.collections.(Sliceable, Slice, SliceIndex, SliceClampable)
 /// # Representation
 ///
 /// A `CowBox` share (one refcount) and the `(ptr, remaining)` cursor.
-public struct ArrayIterator[T, A = GlobalAllocator]: Iterator, Cloneable where A: Allocator {
+public struct ArrayIterator[T, A = GlobalAllocator]: Iterator, DoubleEndedIterator, Cloneable where A: Allocator {
     type Item = T
 
     private var storage: CowBox[ArrayStorage[T, A]]
@@ -44,6 +44,11 @@ public struct ArrayIterator[T, A = GlobalAllocator]: Iterator, Cloneable where A
     /// Yields the next element, or `.None` at the end.
     public mutating func next() -> Optional[T] {
         self.cursor.next()
+    }
+
+    /// Yields the last remaining element, or `.None` at the end.
+    public mutating func nextBack() -> Optional[T] {
+        self.cursor.nextBack()
     }
 
     /// An independent cursor at the same position, holding its own share.
@@ -314,6 +319,50 @@ public struct Array[T, A = GlobalAllocator]: Sliceable[T], Iterable, Cloneable w
         self.grow(capacity)
     }
 
+    /// @name Repeating Value With Allocator
+    /// `count` copies of `value`, allocated from `allocator`.
+    ///
+    /// When `value` is copied byte for byte and its bytes are all zero, the
+    /// buffer comes from `allocator.allocateZeroed` and nothing is written:
+    /// zeroed memory already holds the copies.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// var arena = ArenaAllocator();
+    /// let zeros = Array[Int64, ArenaAllocator](repeating: 0, count: 4, allocator: arena);
+    /// ```
+    public init(repeating value: T, count count: Int64, allocator allocator: A) {
+        if count <= 0 {
+            self.init(allocator: allocator)
+        } else {
+            let layout = Layout.array[T](count);
+            var alloc = allocator;
+            // A byte-copied value whose bytes are all zero: zeroed memory
+            // already holds `count` copies of it, and `calloc` hands back a
+            // big block without touching its pages.
+            let zero = Bool(boolLiteral: lang.is_bitwise[T]()) and
+                bytesAreZero(Pointer[T](raw: lang.ptr_to(value)).asRaw(), Layout.of[T]().size);
+            let result = if zero { alloc.allocateZeroed(layout) } else { alloc.allocate(layout) };
+            if let .Some(rawPtr) = result {
+                let newPtr = rawPtr.cast[T]();
+                if not zero {
+                    for i in 0..<count {
+                        unsafe newPtr.offset(by: i).write(value);
+                    }
+                }
+                self.storage = CowBox(ArrayStorage(
+                    ptr: newPtr,
+                    len: count,
+                    cap: count,
+                    allocator: alloc
+                ))
+            } else {
+                fatalError("Array allocation failed")
+            }
+        }
+    }
+
     /// The allocator this array's buffer comes from.
     public var allocator: A { self.storage.value.allocator }
 
@@ -338,6 +387,44 @@ public struct Array[T, A = GlobalAllocator]: Sliceable[T], Iterable, Cloneable w
     public mutating func asMutableSlice() -> &mutating Slice[T] {
         self.makeUnique();
         unsafe Slice.lendMutating(start: self.ptr(), count: self.len())
+    }
+
+    /// The `capacity - count` slots past the last element, for filling in
+    /// place (a stream `read` straight into the array, say); `setCount`
+    /// then claims the filled ones. Grow first with `reserveCapacity`.
+    ///
+    /// # Safety
+    ///
+    /// The slots are uninitialized: nothing may be read from one before
+    /// it is written, and only slots that were written may be claimed.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// var bytes = Array[UInt8]();
+    /// bytes.reserveCapacity(4096);
+    /// let n = try input.read(into: unsafe bytes.spareCapacity());
+    /// unsafe bytes.setCount(bytes.count + n);
+    /// ```
+    public unsafe mutating func spareCapacity() -> &mutating Slice[T] {
+        self.makeUnique();
+        let myLen = self.len();
+        unsafe Slice.lendMutating(start: self.ptr().offset(by: myLen), count: self.cap() - myLen)
+    }
+
+    /// Sets `count` without touching any element: claims slots filled
+    /// through `spareCapacity`, or forgets trailing ones without dropping
+    /// them. Panics when `newCount` is negative or above `capacity`.
+    ///
+    /// # Safety
+    ///
+    /// Every slot below `newCount` must hold an initialized element.
+    public unsafe mutating func setCount(newCount: Int64) {
+        if newCount < 0 or newCount > self.cap() {
+            fatalError("Array.setCount: count out of range")
+        }
+        self.makeUnique();
+        self.storage.value.len = newCount
     }
 
     /// Element access and sub-slicing, in place: `xs(2)` is a reference to
@@ -1387,30 +1474,7 @@ extend Array[T, A]: ExpressibleByArrayLiteral, _ExpressibleByArrayLiteral, Defau
     /// let pad   = Array(repeating: " ", count: 3);  // [" ", " ", " "]
     /// ```
     public init(repeating value: T, count count: Int64) {
-        if count <= 0 {
-            self.init()
-        } else {
-            let layout = Layout.array[T](count);
-            var allocator = A();
-            let result = allocator.allocate(layout);
-            if let .Some(rawPtr) = result {
-                let newPtr = rawPtr.cast[T]();
-                // Write first element directly
-                unsafe newPtr.write(value);
-                // Copy for remaining elements
-                for i in 1..<count {
-                    unsafe newPtr.offset(by: i).write(value);
-                }
-                self.storage = CowBox(ArrayStorage(
-                    ptr: newPtr,
-                    len: count,
-                    cap: count,
-                    allocator: allocator
-                ))
-            } else {
-                fatalError("Array allocation failed")
-            }
-        }
+        self.init(repeating: value, count: count, allocator: A())
     }
 
     /// @name From Iterable
@@ -1902,3 +1966,12 @@ extend Array[T, A]: Formattable where T: Formattable {}
 /// ```
 @builtin(.ArrayTypeOperator)
 public type ArrayTypeOperator[T] = Array[T, GlobalAllocator];
+
+/// Whether the `size` bytes at `p` are all zero.
+func bytesAreZero(p: RawPointer, size: Int64) -> Bool {
+    let bytes = p.cast[UInt8]();
+    for i in 0..<size {
+        if unsafe bytes.offset(by: i).read() != 0 { return false }
+    }
+    true
+}

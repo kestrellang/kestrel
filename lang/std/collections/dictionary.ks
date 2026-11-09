@@ -6,8 +6,9 @@ import std.core.(Bool, Equatable, Cloneable, Hashable, Hasher, Defaultable, Adda
 import std.text.(Formattable, Formatter, FormatOptions, String, StringBuilder)
 import std.numeric.(Int64, UInt8, UInt64)
 import std.result.(Optional)
-import std.memory.(Layout, Pointer, RawPointer, SystemAllocator, CowBox, swap)
+import std.memory.(Layout, Pointer, RawPointer, Allocator, GlobalAllocator, CowBox, swap)
 import std.iter.(Iterator, Iterable)
+import std.ffi.(memcpy, memset)
 import std.collections.(DefaultHasher, Array)
 
 // ============================================================================
@@ -111,7 +112,7 @@ func nextPowerOfTwo(n: Int64) -> Int64 {
 // ============================================================================
 
 /// Single-pass forward iterator over the `(key, value)` entries of a
-/// `Dictionary[K, V, H]`.
+/// `Dictionary[K, V, H, A]`.
 ///
 /// Produced by `Dictionary.iter()`. Walks the slots once, skipping empty
 /// and deleted ones, and yields each live entry as a tuple. Iteration
@@ -140,20 +141,20 @@ func nextPowerOfTwo(n: Int64) -> Int64 {
 /// sees the dictionary as it was when `iter()` was called: inserting into
 /// or dropping the dictionary while iterating copies or releases the
 /// dictionary's own table, never the one being read.
-public struct DictionaryIterator[K, V]: Iterator {
+public struct DictionaryIterator[K, V, A = GlobalAllocator]: Iterator where A: Allocator {
     /// Element type yielded by `next()` — a `(key, value)` tuple.
     type Item = (K, V)
 
     /// Keeps the table alive for the iterator's lifetime. Never written
     /// while the share is held.
-    private var storage: CowBox[DictionaryStorage[K, V]]
+    private var storage: CowBox[DictionaryStorage[K, V, A]]
     /// Current scan position; advances every `next()` call.
     private var index: Int64
 
     /// @name From Storage
     /// Iterates `storage`'s slots, holding the share until dropped.
     /// Use `Dictionary.iter()`, `keys` or `values` to get one.
-    fileprivate init(storage storage: CowBox[DictionaryStorage[K, V]]) {
+    fileprivate init(storage storage: CowBox[DictionaryStorage[K, V, A]]) {
         self.storage = storage;
         self.index = 0;
     }
@@ -186,7 +187,7 @@ public struct DictionaryIterator[K, V]: Iterator {
 // DICTIONARY STORAGE (Internal)
 // ============================================================================
 
-/// Internal storage cell shared by `Dictionary[K, V, H]` instances: one
+/// Internal storage cell shared by `Dictionary[K, V, H, A]` instances: one
 /// heap block of `cap` entry slots followed by `cap` control bytes (see
 /// TABLE LAYOUT above).
 ///
@@ -204,7 +205,7 @@ public struct DictionaryIterator[K, V]: Iterator {
 ///
 /// Owns the block; `deinit` drops every live entry and frees it. The
 /// key/value hashing lives in `Dictionary`, which knows the hasher.
-struct DictionaryStorage[K, V]: Cloneable {
+struct DictionaryStorage[K, V, A]: Cloneable where A: Allocator {
     /// Entry slots; null when `cap == 0`. Initialized only where `ctrl`
     /// holds a tag.
     var entries: Pointer[Entry[K, V]]
@@ -218,30 +219,34 @@ struct DictionaryStorage[K, V]: Cloneable {
     var deleted: Int64
     /// Total slot count; always a power of two or zero.
     var cap: Int64
+    /// Where the block came from and goes back to; a handle, copied with
+    /// the storage (see `ArrayStorage.allocator`).
+    var allocator: A
 
     /// @name Empty
     /// Storage with no allocation (`cap == 0`).
-    init() {
+    init(allocator allocator: A) {
         self.entries = Pointer[Entry[K, V]].nullPointer();
         self.ctrl = Pointer[UInt8].nullPointer();
         self.len = 0;
         self.deleted = 0;
         self.cap = 0;
+        self.allocator = allocator;
     }
 
     /// @name With Capacity
     /// A fresh block of `cap` empty slots. `cap` must be a power of two
     /// (zero gives the unallocated storage). Panics on allocation failure.
-    init(capacity cap: Int64) {
-        self.init();
+    init(capacity cap: Int64, allocator allocator: A) {
+        self.init(allocator: allocator);
         if cap == 0 { return; }
-        let (layout, ctrlOffset) = DictionaryStorage[K, V].blockLayout(cap);
-        var allocator = SystemAllocator();
+        let (layout, ctrlOffset) = DictionaryStorage[K, V, A].blockLayout(cap);
+        var allocator = self.allocator;
         if let .Some(raw) = allocator.allocate(layout) {
             self.entries = raw.cast[Entry[K, V]]();
             self.ctrl = raw.offset(by: ctrlOffset).cast[UInt8]();
             self.cap = cap;
-            for i in 0..<(cap + groupWidth) { unsafe self.ctrl.offset(by: i).write(ctrlEmpty); }
+            let _ = unsafe memset(self.ctrl.asRaw(), Int64(from: ctrlEmpty), cap + groupWidth);
         } else {
             fatalError("Dictionary allocation failed")
         }
@@ -328,7 +333,7 @@ struct DictionaryStorage[K, V]: Cloneable {
         for i in 0..<self.cap {
             if self.isFull(i) { unsafe self.entries.offset(by: i).dropInPlace(); }
         }
-        for i in 0..<(self.cap + groupWidth) { unsafe self.ctrl.offset(by: i).write(ctrlEmpty); }
+        if self.cap > 0 { let _ = unsafe memset(self.ctrl.asRaw(), Int64(from: ctrlEmpty), self.cap + groupWidth); }
         self.len = 0;
         self.deleted = 0
     }
@@ -339,15 +344,19 @@ struct DictionaryStorage[K, V]: Cloneable {
     /// the copy keeps existing probe chains and tombstones. Empty storage
     /// clones to empty storage without allocating. This is the slow half
     /// of COW, fired by `Dictionary.makeUnique()` when storage is shared.
-    func clone() -> DictionaryStorage[K, V] {
-        var copy = DictionaryStorage(capacity: self.cap);
+    func clone() -> DictionaryStorage[K, V, A] {
+        var copy = DictionaryStorage[K, V, A](capacity: self.cap, allocator: self.allocator);
         if self.cap == 0 { return copy; }
-        for i in 0..<(self.cap + groupWidth) {
-            unsafe copy.ctrl.offset(by: i).write(self.ctrl.offset(by: i).read());
-        }
-        for i in 0..<self.cap {
-            if self.isFull(i) {
-                unsafe copy.entries.offset(by: i).write(self.entries.offset(by: i).read());
+        let _ = unsafe memcpy(copy.ctrl.asRaw(), self.ctrl.asRaw(), self.cap + groupWidth);
+        // Byte-copied entries copy as one block, empty slots included; the
+        // rest clone slot by slot.
+        if Bool(boolLiteral: lang.is_bitwise[Entry[K, V]]()) {
+            let _ = unsafe memcpy(copy.entries.asRaw(), self.entries.asRaw(), Layout.array[Entry[K, V]](self.cap).size);
+        } else {
+            for i in 0..<self.cap {
+                if self.isFull(i) {
+                    unsafe copy.entries.offset(by: i).write(self.entries.offset(by: i).read());
+                }
             }
         }
         copy.len = self.len;
@@ -366,8 +375,8 @@ struct DictionaryStorage[K, V]: Cloneable {
         for i in 0..<self.cap {
             if self.isFull(i) { unsafe self.entries.offset(by: i).dropInPlace(); }
         }
-        let (layout, _) = DictionaryStorage[K, V].blockLayout(self.cap);
-        var allocator = SystemAllocator();
+        let (layout, _) = DictionaryStorage[K, V, A].blockLayout(self.cap);
+        var allocator = self.allocator;
         unsafe allocator.deallocate(self.entries.asRaw(), layout)
     }
 }
@@ -420,7 +429,7 @@ struct DictionaryStorage[K, V]: Cloneable {
 ///
 /// # Representation
 ///
-/// One field: a `CowBox[DictionaryStorage[K, V]]` over one heap block
+/// One field: a `CowBox[DictionaryStorage[K, V, A]]` over one heap block
 /// of entry slots and control bytes (see TABLE LAYOUT).
 ///
 /// # Memory Model
@@ -441,15 +450,15 @@ struct DictionaryStorage[K, V]: Cloneable {
 ///   work but tombstones reduce effective capacity until the next
 ///   resize.
 /// - Iteration order is **not** specified.
-public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: Hashable, H: Hasher, H: Defaultable {
+public struct Dictionary[K, V, H = DefaultHasher, A = GlobalAllocator]: Iterable, Cloneable where K: Hashable, H: Hasher, H: Defaultable, A: Allocator {
     /// `Iterable` element type — a `(key, value)` tuple.
     type Item = (K, V)
     /// Concrete iterator type returned by `iter()`.
-    type TargetIterator = DictionaryIterator[K, V]
+    type TargetIterator = DictionaryIterator[K, V, A]
 
     /// COW storage — `CowBox` handles the reference counting and
     /// clone-on-write barrier.
-    private var storage: CowBox[DictionaryStorage[K, V]]
+    private var storage: CowBox[DictionaryStorage[K, V, A]]
 
     /// Returns the live-entry count from storage. Internal helper.
     private func len() -> Int64 { self.storage.value.len }
@@ -469,7 +478,7 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
 
     /// @name From Storage
     /// Wraps an existing storage box in a new `Dictionary`.
-    private init(storage storage: CowBox[DictionaryStorage[K, V]]) {
+    private init(storage storage: CowBox[DictionaryStorage[K, V, A]]) {
         self.storage = storage;
     }
 
@@ -477,141 +486,30 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
     // CONSTRUCTORS
     // ========================================================================
 
-    /// @name Empty
-    /// Creates an empty dictionary with no allocation.
-    ///
-    /// Capacity starts at zero; the first insert allocates the smallest
-    /// table (currently 8 slots). For pre-sized creation use
-    /// `init(capacity:)`.
+    /// @name With Allocator
+    /// An empty dictionary whose table will come from `allocator`. Nothing
+    /// is allocated until the first insert.
     ///
     /// # Examples
     ///
     /// ```
-    /// var d = Dictionary[String, Int64]();
-    /// d.count;     // 0
-    /// d.capacity;  // 0
+    /// var arena = ArenaAllocator();
+    /// var d = Dictionary[String, Int64, DefaultHasher, ArenaAllocator](allocator: arena);
+    /// d.insert("a", 1);  // allocated from the arena
     /// ```
-    public init() {
-        self.storage = CowBox(DictionaryStorage());
+    public init(allocator allocator: A) {
+        self.storage = CowBox(DictionaryStorage[K, V, A](allocator: allocator));
     }
 
-    /// @name With Capacity
-    /// Creates an empty dictionary sized to hold at least the requested
-    /// number of entries without resizing.
-    ///
-    /// The actual allocated capacity is the next power of two `>= capacity`
-    /// (minimum 8). A non-positive `capacity` behaves like `init()` (no
-    /// allocation). Panics on allocation failure.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// var d = Dictionary[String, Int64](capacity: 100);
-    /// d.capacity;   // 128 (next power of two)
-    /// d.count;      // 0
-    /// ```
-    public init(capacity capacity: Int64) {
-        self.storage = CowBox(DictionaryStorage(capacity: nextPowerOfTwo(capacity)));
+    /// @name With Capacity And Allocator
+    /// An empty dictionary with room for at least `capacity` entries before
+    /// growing, allocated from `allocator`.
+    public init(capacity capacity: Int64, allocator allocator: A) {
+        self.storage = CowBox(DictionaryStorage[K, V, A](capacity: nextPowerOfTwo(capacity), allocator: allocator));
     }
 
-    /// @name From Pairs
-    /// Creates a dictionary by inserting every `(key, value)` pair
-    /// produced by an iterable.
-    ///
-    /// Last write wins for duplicate keys. For a panic-on-duplicate
-    /// variant use `init(uniquePairs:)`. Capacity grows
-    /// geometrically as inserts arrive — for sized sources, follow up
-    /// with `shrinkToFit()` if memory matters.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// let pairs = [("a", 1), ("b", 2)];
-    /// let dict = Dictionary(from: pairs);              // ["a": 1, "b": 2]
-    /// let dups = Dictionary(from: [("a", 1), ("a", 2)]);  // ["a": 2] — later wins
-    /// ```
-    public init[I](from pairs: I) where I: Iterable, I: not Static, I.Item = (K, V) {
-        self.init();
-        var iter = pairs.iter();
-        while let .Some(pair) = iter.next() {
-             self.insert( pair.0, pair.1);
-        }
-    }
-
-    /// @name Grouping
-    /// Buckets each element of an iterable into an array under the key
-    /// derived from `keyFunc`.
-    ///
-    /// The value type is constrained to `Array[E]`: each bucket
-    /// accumulates the elements that mapped to it, in insertion order
-    /// within that bucket. Useful for building "index-by" tables from a
-    /// flat collection. The `keyFunc` runs once per element.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// let words = ["apple", "apricot", "banana", "blueberry"];
-    /// let grouped = Dictionary(grouping: words) { (w) in w.chars.first().unwrap() };
-    /// // ["a": ["apple", "apricot"], "b": ["banana", "blueberry"]]
-    ///
-    /// let nums = [1, 2, 3, 4, 5];
-    /// let parity = Dictionary(grouping: nums) { (n) in n % 2 };
-    /// // [0: [2, 4], 1: [1, 3, 5]]
-    /// ```
-    public init[I, E](grouping elements: I, by keyFunc: (E) -> K)
-        where I: Iterable, I: not Static, I.Item = E, V = Array[E]
-    {
-        self.init();
-        var iter = elements.iter();
-        while let .Some(element) = iter.next() {
-            let key = keyFunc(element);
-            let maybeArray: Array[E]? = self(key);
-            match maybeArray {
-                .Some(arr) => {
-                    var newArr: Array[E] = arr;
-                    newArr.append( element);
-                     self.insert( key, newArr);
-                },
-                .None => {
-                    var arr = Array[E]();
-                    arr.append( element);
-                     self.insert( key, arr);
-                }
-            }
-        }
-    }
-
-    /// @name Unique Keys
-    /// Creates a dictionary from key-value pairs, panicking on any
-    /// duplicate key.
-    ///
-    /// Use this when duplicate keys would indicate a bug in upstream
-    /// data; for last-write-wins semantics use `init(from:)`. Each pair
-    /// triggers a `contains` check before insertion, so it's slower
-    /// than `init(from:)` for large inputs.
-    ///
-    /// # Errors
-    ///
-    /// Panics with `"Dictionary(uniquePairs:): duplicate key"`
-    /// the first time `pairs` yields a key already in the dictionary.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// let dict = Dictionary(uniquePairs: [("a", 1), ("b", 2)]);
-    /// Dictionary(uniquePairs: [("a", 1), ("a", 2)]);
-    /// // PANIC: Dictionary(uniquePairs:): duplicate key
-    /// ```
-    public init[I](uniquePairs pairs: I) where I: Iterable, I: not Static, I.Item = (K, V) {
-        self.init();
-        var iter = pairs.iter();
-        while let .Some(pair) = iter.next() {
-            if self.contains( pair.0) {
-                fatalError("Dictionary(uniquePairs:): duplicate key")
-            }
-             self.insert( pair.0, pair.1);
-        }
-    }
+    /// The allocator this dictionary's table comes from.
+    public var allocator: A { self.storage.value.allocator }
 
     // ========================================================================
     // HASHING (Internal)
@@ -686,7 +584,7 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
     /// for key in dict.keys { print(key) }
     /// let keyArray = Array(from: dict.keys);
     /// ```
-    public var keys: KeysView[K, V] { get { KeysView(storage: self.storage.clone()) } }
+    public var keys: KeysView[K, V, A] { get { KeysView(storage: self.storage.clone()) } }
 
     /// Lazy view of the dictionary's values, iterable in unspecified
     /// order.
@@ -703,7 +601,7 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
     /// for value in dict.values { print(value) }
     /// let sum = dict.values.iter().sum();  // 6
     /// ```
-    public var values: ValuesView[K, V] { get { ValuesView(storage: self.storage.clone()) } }
+    public var values: ValuesView[K, V, A] { get { ValuesView(storage: self.storage.clone()) } }
 
     // ========================================================================
     // SUBSCRIPTS
@@ -951,7 +849,7 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
     /// without exceeding the load factor; this routine itself does
     /// not check. Panics on allocation failure.
     private mutating func resizeToCapacity(newCap: Int64) {
-        var fresh = DictionaryStorage[K, V](capacity: newCap);
+        var fresh = DictionaryStorage[K, V, A](capacity: newCap, allocator: self.storage.value.allocator);
 
         if not self.storage.isUnique {
             // Shared (another copy or an iterator holds it): copy the live
@@ -1119,7 +1017,7 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
     /// a.merge(b) { (old, new) in old + new };
     /// // a == ["x": 1, "y": 22, "z": 30]
     /// ```
-    public mutating func merge(other: Dictionary[K, V, H], uniquingKeysWith combine: (V, V) -> V) {
+    public mutating func merge(other: Dictionary[K, V, H, A], uniquingKeysWith combine: (V, V) -> V) {
         var otherIter = other.iter();
         while let .Some(pair) = otherIter.next() {
             let maybeExisting = self(pair.0);
@@ -1262,7 +1160,7 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
     // ITERATION
     // ========================================================================
 
-    /// Returns a `DictionaryIterator[K, V]` over the live entries.
+    /// Returns a `DictionaryIterator[K, V, A]` over the live entries.
     ///
     /// Order is unspecified and may change between mutations. The
     /// iterator holds a share of the storage, so it sees the entries as
@@ -1276,7 +1174,7 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
     /// for (k, v) in dict.iter() { ... }
     /// let entries = Array(from: dict);
     /// ```
-    public func iter() -> DictionaryIterator[K, V] {
+    public func iter() -> DictionaryIterator[K, V, A] {
         DictionaryIterator(storage: self.storage.clone())
     }
 
@@ -1482,8 +1380,8 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
     /// let dict = ["a": 1, "b": 2, "c": 3];
     /// let big = dict.filter { (k, v) in v > 1 };  // ["b": 2, "c": 3]
     /// ```
-    public func filter(where predicate: (K, V) -> Bool) -> Dictionary[K, V, H] {
-        var result = Dictionary[K, V, H]();
+    public func filter(where predicate: (K, V) -> Bool) -> Dictionary[K, V, H, A] {
+        var result = Dictionary[K, V, H, A](allocator: self.allocator);
 
         for i in 0..<self.capacity {
             if let .Some(e) = self.entryAt(i) {
@@ -1512,8 +1410,8 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
     /// // merged == ["x": 1, "y": 20, "z": 30]
     /// // a is unchanged
     /// ```
-    public func merging(other: Dictionary[K, V, H], uniquingKeysWith combine: (V, V) -> V)
-        -> Dictionary[K, V, H]
+    public func merging(other: Dictionary[K, V, H, A], uniquingKeysWith combine: (V, V) -> V)
+        -> Dictionary[K, V, H, A]
     {
         var result = self.clone();
         result.merge( other, uniquingKeysWith: combine);
@@ -1540,7 +1438,7 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
     /// var b = a.clone();  // O(1), shares storage
     /// b("y") = 2;         // b deep-copies here; a is unchanged
     /// ```
-    public func clone() -> Dictionary[K, V, H] {
+    public func clone() -> Dictionary[K, V, H, A] {
         Dictionary(storage: self.storage.clone())
     }
 }
@@ -1554,7 +1452,7 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
 /// `Hashable` conformance — order-independent over entries, so two
 /// dictionaries with the same `(key, value)` pairs hash equal
 /// regardless of insertion order.
-extend Dictionary[K, V, H]: Hashable where K: Hashable, V: Hashable, H: Hasher, H: Defaultable {
+extend Dictionary[K, V, H, A]: Hashable where K: Hashable, V: Hashable, H: Hasher, H: Defaultable {
 
     /// Order-independent hash: hashes each `(key, value)` entry with a
     /// fresh hasher (key then value) and combines the per-entry digests
@@ -1585,7 +1483,7 @@ extend Dictionary[K, V, H]: Hashable where K: Hashable, V: Hashable, H: Hasher, 
     }
 }
 
-extend Dictionary[K, V, H]: Equatable where K: Hashable, V: Equatable, H: Hasher, H: Defaultable {
+extend Dictionary[K, V, H, A]: Equatable where K: Hashable, V: Equatable, H: Hasher, H: Defaultable {
     /// Order-independent equality: dictionaries are equal iff they have
     /// the same `count` and every key in `self` is present in `other`
     /// with an equal value.
@@ -1600,7 +1498,7 @@ extend Dictionary[K, V, H]: Equatable where K: Hashable, V: Equatable, H: Hasher
     /// ["a": 1].isEqual(to: ["a": 2]);                  // false
     /// ["a": 1].isEqual(to: [:]);                       // false
     /// ```
-    public func isEqual(to other: Dictionary[K, V, H]) -> Bool {
+    public func isEqual(to other: Dictionary[K, V, H, A]) -> Bool {
         let selfCount = self.count;
         let otherCount = other.count;
         if selfCount != otherCount {
@@ -1627,7 +1525,7 @@ extend Dictionary[K, V, H]: Equatable where K: Hashable, V: Equatable, H: Hasher
 }
 
 /// Value-based search operations available when `V: Equatable`.
-extend Dictionary[K, V, H] where K: Hashable, V: Equatable, H: Hasher, H: Defaultable {
+extend Dictionary[K, V, H, A] where K: Hashable, V: Equatable, H: Hasher, H: Defaultable {
 
     /// `true` if any entry's value equals `value`.
     ///
@@ -1713,7 +1611,7 @@ extend Dictionary[K, V, H] where K: Hashable, V: Equatable, H: Hasher, H: Defaul
 ///
 /// Drives string interpolation. Empty dictionaries render as `"{}"`.
 /// Entry order in the output reflects bucket order and is unspecified.
-extend Dictionary[K, V, H]: Formattable where K: Hashable, K: Formattable, V: Formattable, H: Hasher, H: Defaultable {
+extend Dictionary[K, V, H, A]: Formattable where K: Hashable, K: Formattable, V: Formattable, H: Hasher, H: Defaultable {
     /// Renders the dictionary as `"{" + entries.joined(", ") + "}"`,
     /// passing `options` to each key and value's `format`.
     ///
@@ -1722,7 +1620,7 @@ extend Dictionary[K, V, H]: Formattable where K: Hashable, K: Formattable, V: Fo
     /// ```
     /// ["a": 1, "b": 2].format();  // "{a: 1, b: 2}"  — order unspecified
     /// Dictionary[String, Int64]().format();  // "{}"
-    /// "\{["a": 1, "b": 2]}";      // "{a: 1, b: 2}"  via interpolation
+    /// "\(["a": 1, "b": 2])";      // "{a: 1, b: 2}"  via interpolation
     /// ```
     public func format(mutating into writer: some Formatter, options: FormatOptions = FormatOptions.default()) {
         writer.append(char: '{');
@@ -1748,7 +1646,7 @@ extend Dictionary[K, V, H]: Formattable where K: Hashable, K: Formattable, V: Fo
 
 /// Eager-copy variant of `clone()` for callers that don't want to
 /// inherit the COW share with the source.
-extend Dictionary[K, V, H] where K: Hashable, H: Hasher, H: Defaultable {
+extend Dictionary[K, V, H, A] where K: Hashable, H: Hasher, H: Defaultable {
 
     /// Returns a fully-detached copy of the dictionary, with no shared
     /// storage.
@@ -1765,8 +1663,8 @@ extend Dictionary[K, V, H] where K: Hashable, H: Hasher, H: Defaultable {
     /// let a = ["x": [1, 2, 3]];
     /// let b = a.deepClone();  // fully independent copy
     /// ```
-    public func deepClone() -> Dictionary[K, V, H] {
-        var result = Dictionary[K, V, H](capacity: self.capacity);
+    public func deepClone() -> Dictionary[K, V, H, A] {
+        var result = Dictionary[K, V, H, A](capacity: self.capacity, allocator: self.allocator);
 
         for i in 0..<self.capacity {
             if let .Some(e) = self.entryAt(i) {
@@ -1781,7 +1679,7 @@ extend Dictionary[K, V, H] where K: Hashable, H: Hasher, H: Defaultable {
 
 /// Aggregation available when the value type forms an `Addable`
 /// monoid (`V + V = V` with a `Defaultable` zero).
-extend Dictionary[K, V, H] where K: Hashable, V: Addable, V.Output = V, V: Defaultable, H: Hasher, H: Defaultable {
+extend Dictionary[K, V, H, A] where K: Hashable, V: Addable, V.Output = V, V: Defaultable, H: Hasher, H: Defaultable {
 
     /// Returns the sum of every value, starting from `V()` (the
     /// default-constructed zero).
@@ -1815,7 +1713,7 @@ extend Dictionary[K, V, H] where K: Hashable, V: Addable, V.Output = V, V: Defau
 
 /// Single-pass iterator yielding only the keys of a dictionary.
 ///
-/// Wraps a `DictionaryIterator[K, V]` and discards the value half of
+/// Wraps a `DictionaryIterator[K, V, A]` and discards the value half of
 /// each entry. Order matches the underlying entry iteration and is
 /// unspecified.
 ///
@@ -1830,24 +1728,24 @@ extend Dictionary[K, V, H] where K: Hashable, V: Addable, V.Output = V, V: Defau
 ///
 /// # Representation
 ///
-/// Wraps a `DictionaryIterator[K, V]`.
+/// Wraps a `DictionaryIterator[K, V, A]`.
 ///
 /// # Memory Model
 ///
 /// Value type. Aliases dictionary storage; do not retain across
 /// mutations.
-public struct KeysIterator[K, V]: Iterator where K: Hashable {
+public struct KeysIterator[K, V, A = GlobalAllocator]: Iterator where K: Hashable, A: Allocator {
     /// Element type yielded by `next()` — `K`.
     type Item = K
 
     /// The underlying entry iterator; only `pair.0` is read.
-    private var dictIter: DictionaryIterator[K, V]
+    private var dictIter: DictionaryIterator[K, V, A]
 
     /// @name From Dict
     /// Wraps a `DictionaryIterator` to yield only its keys.
     ///
     /// Prefer `KeysView.iter()` over calling this directly.
-    public init(dictIter dictIter: DictionaryIterator[K, V]) {
+    public init(dictIter dictIter: DictionaryIterator[K, V, A]) {
         self.dictIter = dictIter;
     }
 
@@ -1893,27 +1791,27 @@ public struct KeysIterator[K, V]: Iterator where K: Hashable {
 ///
 /// Holds a share of the storage (one refcount), so the view stays valid
 /// after the dictionary changes or is dropped, and sees it unchanged.
-public struct KeysView[K, V]: Iterable where K: Hashable {
+public struct KeysView[K, V, A = GlobalAllocator]: Iterable where K: Hashable, A: Allocator {
     /// `Iterable` element type — `K`.
     type Item = K
     /// Concrete iterator type returned by `iter()`.
-    type TargetIterator = KeysIterator[K, V]
+    type TargetIterator = KeysIterator[K, V, A]
 
     /// A share of the source dictionary's storage.
-    private var storage: CowBox[DictionaryStorage[K, V]]
+    private var storage: CowBox[DictionaryStorage[K, V, A]]
 
     /// @name From Storage
     /// Internal — constructs a view over a share of `storage`.
     /// Use `Dictionary.keys` to obtain a view.
-    fileprivate init(storage storage: CowBox[DictionaryStorage[K, V]]) {
+    fileprivate init(storage storage: CowBox[DictionaryStorage[K, V, A]]) {
         self.storage = storage;
     }
 
-    /// Returns a fresh `KeysIterator[K, V]` over the view.
+    /// Returns a fresh `KeysIterator[K, V, A]` over the view.
     ///
     /// Each call returns a new iterator starting at the beginning of
     /// the bucket array.
-    public func iter() -> KeysIterator[K, V] {
+    public func iter() -> KeysIterator[K, V, A] {
         KeysIterator(dictIter: DictionaryIterator(storage: self.storage.clone()))
     }
 }
@@ -1924,7 +1822,7 @@ public struct KeysView[K, V]: Iterable where K: Hashable {
 
 /// Single-pass iterator yielding only the values of a dictionary.
 ///
-/// Wraps a `DictionaryIterator[K, V]` and discards the key half of
+/// Wraps a `DictionaryIterator[K, V, A]` and discards the key half of
 /// each entry. Order matches the underlying entry iteration and is
 /// unspecified.
 ///
@@ -1939,24 +1837,24 @@ public struct KeysView[K, V]: Iterable where K: Hashable {
 ///
 /// # Representation
 ///
-/// Wraps a `DictionaryIterator[K, V]`.
+/// Wraps a `DictionaryIterator[K, V, A]`.
 ///
 /// # Memory Model
 ///
 /// Value type. Aliases dictionary storage; do not retain across
 /// mutations.
-public struct ValuesIterator[K, V]: Iterator where K: Hashable {
+public struct ValuesIterator[K, V, A = GlobalAllocator]: Iterator where K: Hashable, A: Allocator {
     /// Element type yielded by `next()` — `V`.
     type Item = V
 
     /// The underlying entry iterator; only `pair.1` is read.
-    private var dictIter: DictionaryIterator[K, V]
+    private var dictIter: DictionaryIterator[K, V, A]
 
     /// @name From Dict
     /// Wraps a `DictionaryIterator` to yield only its values.
     ///
     /// Prefer `ValuesView.iter()` over calling this directly.
-    public init(dictIter dictIter: DictionaryIterator[K, V]) {
+    public init(dictIter dictIter: DictionaryIterator[K, V, A]) {
         self.dictIter = dictIter;
     }
 
@@ -2002,27 +1900,27 @@ public struct ValuesIterator[K, V]: Iterator where K: Hashable {
 ///
 /// Holds a share of the storage (one refcount), so the view stays valid
 /// after the dictionary changes or is dropped, and sees it unchanged.
-public struct ValuesView[K, V]: Iterable where K: Hashable {
+public struct ValuesView[K, V, A = GlobalAllocator]: Iterable where K: Hashable, A: Allocator {
     /// `Iterable` element type — `V`.
     type Item = V
     /// Concrete iterator type returned by `iter()`.
-    type TargetIterator = ValuesIterator[K, V]
+    type TargetIterator = ValuesIterator[K, V, A]
 
     /// A share of the source dictionary's storage.
-    private var storage: CowBox[DictionaryStorage[K, V]]
+    private var storage: CowBox[DictionaryStorage[K, V, A]]
 
     /// @name From Storage
     /// Internal — constructs a view over a share of `storage`.
     /// Use `Dictionary.values` to obtain a view.
-    fileprivate init(storage storage: CowBox[DictionaryStorage[K, V]]) {
+    fileprivate init(storage storage: CowBox[DictionaryStorage[K, V, A]]) {
         self.storage = storage;
     }
 
-    /// Returns a fresh `ValuesIterator[K, V]` over the view.
+    /// Returns a fresh `ValuesIterator[K, V, A]` over the view.
     ///
     /// Each call returns a new iterator starting at the beginning of
     /// the bucket array.
-    public func iter() -> ValuesIterator[K, V] {
+    public func iter() -> ValuesIterator[K, V, A] {
         ValuesIterator(dictIter: DictionaryIterator(storage: self.storage.clone()))
     }
 }
@@ -2034,8 +1932,147 @@ public struct ValuesView[K, V]: Iterable where K: Hashable {
 
 /// `_ExpressibleByDictionaryLiteral` / `ExpressibleByDictionaryLiteral`
 /// / `Defaultable` conformances — what makes the `["a": 1, "b": 2]`
-/// literal syntax work for `Dictionary[K, V, H]`.
-extend Dictionary[K, V, H]: std.core._ExpressibleByDictionaryLiteral, std.core.ExpressibleByDictionaryLiteral, std.core.Defaultable where K: Hashable, H: Hasher, H: Defaultable {
+/// literal syntax work for `Dictionary[K, V, H, A]`.
+// Constructors that make their own allocator.
+extend Dictionary[K, V, H, A] where A: Defaultable {
+    /// @name Empty
+    /// Creates an empty dictionary with no allocation.
+    ///
+    /// Capacity starts at zero; the first insert allocates the smallest
+    /// table (currently 8 slots). For pre-sized creation use
+    /// `init(capacity:)`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// var d = Dictionary[String, Int64]();
+    /// d.count;     // 0
+    /// d.capacity;  // 0
+    /// ```
+    public init() {
+        self.init(allocator: A())
+    }
+
+    /// @name With Capacity
+    /// Creates an empty dictionary sized to hold at least the requested
+    /// number of entries without resizing.
+    ///
+    /// The actual allocated capacity is the next power of two `>= capacity`
+    /// (minimum 8). A non-positive `capacity` behaves like `init()` (no
+    /// allocation). Panics on allocation failure.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// var d = Dictionary[String, Int64](capacity: 100);
+    /// d.capacity;   // 128 (next power of two)
+    /// d.count;      // 0
+    /// ```
+    public init(capacity capacity: Int64) {
+        self.init(capacity: capacity, allocator: A())
+    }
+
+    /// @name From Pairs
+    /// Creates a dictionary by inserting every `(key, value)` pair
+    /// produced by an iterable.
+    ///
+    /// Last write wins for duplicate keys. For a panic-on-duplicate
+    /// variant use `init(uniquePairs:)`. Capacity grows
+    /// geometrically as inserts arrive — for sized sources, follow up
+    /// with `shrinkToFit()` if memory matters.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let pairs = [("a", 1), ("b", 2)];
+    /// let dict = Dictionary(from: pairs);              // ["a": 1, "b": 2]
+    /// let dups = Dictionary(from: [("a", 1), ("a", 2)]);  // ["a": 2] — later wins
+    /// ```
+    public init[I](from pairs: I) where I: Iterable, I: not Static, I.Item = (K, V) {
+        self.init();
+        var iter = pairs.iter();
+        while let .Some(pair) = iter.next() {
+             self.insert( pair.0, pair.1);
+        }
+    }
+
+    /// @name Grouping
+    /// Buckets each element of an iterable into an array under the key
+    /// derived from `keyFunc`.
+    ///
+    /// The value type is constrained to `Array[E]`: each bucket
+    /// accumulates the elements that mapped to it, in insertion order
+    /// within that bucket. Useful for building "index-by" tables from a
+    /// flat collection. The `keyFunc` runs once per element.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let words = ["apple", "apricot", "banana", "blueberry"];
+    /// let grouped = Dictionary(grouping: words) { (w) in w.chars.first().unwrap() };
+    /// // ["a": ["apple", "apricot"], "b": ["banana", "blueberry"]]
+    ///
+    /// let nums = [1, 2, 3, 4, 5];
+    /// let parity = Dictionary(grouping: nums) { (n) in n % 2 };
+    /// // [0: [2, 4], 1: [1, 3, 5]]
+    /// ```
+    public init[I, E](grouping elements: I, by keyFunc: (E) -> K)
+        where I: Iterable, I: not Static, I.Item = E, V = Array[E]
+    {
+        self.init();
+        var iter = elements.iter();
+        while let .Some(element) = iter.next() {
+            let key = keyFunc(element);
+            let maybeArray: Array[E]? = self(key);
+            match maybeArray {
+                .Some(arr) => {
+                    var newArr: Array[E] = arr;
+                    newArr.append( element);
+                     self.insert( key, newArr);
+                },
+                .None => {
+                    var arr = Array[E]();
+                    arr.append( element);
+                     self.insert( key, arr);
+                }
+            }
+        }
+    }
+
+    /// @name Unique Keys
+    /// Creates a dictionary from key-value pairs, panicking on any
+    /// duplicate key.
+    ///
+    /// Use this when duplicate keys would indicate a bug in upstream
+    /// data; for last-write-wins semantics use `init(from:)`. Each pair
+    /// triggers a `contains` check before insertion, so it's slower
+    /// than `init(from:)` for large inputs.
+    ///
+    /// # Errors
+    ///
+    /// Panics with `"Dictionary(uniquePairs:): duplicate key"`
+    /// the first time `pairs` yields a key already in the dictionary.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let dict = Dictionary(uniquePairs: [("a", 1), ("b", 2)]);
+    /// Dictionary(uniquePairs: [("a", 1), ("a", 2)]);
+    /// // PANIC: Dictionary(uniquePairs:): duplicate key
+    /// ```
+    public init[I](uniquePairs pairs: I) where I: Iterable, I: not Static, I.Item = (K, V) {
+        self.init();
+        var iter = pairs.iter();
+        while let .Some(pair) = iter.next() {
+            if self.contains( pair.0) {
+                fatalError("Dictionary(uniquePairs:): duplicate key")
+            }
+             self.insert( pair.0, pair.1);
+        }
+    }
+}
+
+extend Dictionary[K, V, H, A]: std.core._ExpressibleByDictionaryLiteral, std.core.ExpressibleByDictionaryLiteral, std.core.Defaultable where K: Hashable, H: Hasher, H: Defaultable, A: Defaultable {
     /// Key type for the literal protocol — matches `K`.
     type Key = K
     /// Value type for the literal protocol — matches `V`.

@@ -250,7 +250,7 @@ impl LowerCtx<'_> {
 
         // Complex pattern: allocate temp, then destructure via match
         // Emits: { let $let_tmp = value; match $let_tmp { pattern => () } }
-        let temp = self.define_local("$let_tmp", is_mut, span.clone());
+        let temp = self.define_local(LET_DESTRUCTURE_TEMP, is_mut, span.clone());
         let let_stmt = self.alloc_stmt(HirStmt::Let {
             local: temp,
             ty: lowered_ty,
