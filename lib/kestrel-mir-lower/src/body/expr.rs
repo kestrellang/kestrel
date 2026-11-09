@@ -98,7 +98,7 @@ impl OssaBodyCtx<'_, '_> {
         self.return_tail = matches!(
             self.hir.exprs[expr_id],
             HirExpr::If { .. } | HirExpr::Match { .. } | HirExpr::Block { .. }
-        ) && !self.has_value_conversion(expr_id);
+        ) && !self.has_representation_change(expr_id);
         let value = self.lower_expr(expr_id);
         self.return_tail = false;
         // A field moved out of an owned local (`self.inner` in a consuming
@@ -111,7 +111,7 @@ impl OssaBodyCtx<'_, '_> {
     /// caller knows this read is its last use. `None` when `expr_id` isn't
     /// such a local, so the caller falls back to `lower_expr`'s copy.
     pub(super) fn try_move_var_local(&mut self, expr_id: HirExprId) -> Option<ValueId> {
-        if self.has_value_conversion(expr_id) {
+        if self.has_representation_change(expr_id) {
             return None;
         }
         let HirExpr::Local(hir_local, _) = self.hir.exprs[expr_id] else {
@@ -187,10 +187,6 @@ impl OssaBodyCtx<'_, '_> {
         self.emit_call_returning(callee, vec![arg], target_ty)
     }
 
-    /// Does this expression's value change representation at its use (a
-    /// cross-kind closure coercion, or an existential conversion)? Such an
-    /// expression must go through `lower_expr`: the place-oriented fast paths
-    /// would hand back the unconverted source.
     /// Copy a decaying `Optional[&T]` value out (`optional_ref_decays`).
     fn apply_optional_ref_decay(&mut self, expr_id: HirExprId, value: ValueId) -> ValueId {
         if !self.decays_optional_ref(expr_id) {
@@ -201,7 +197,24 @@ impl OssaBodyCtx<'_, '_> {
         self.emit_optional_ref_decay(value, decayed)
     }
 
+    /// Does this expression's value change at its use — a representation
+    /// change (below) or a `FromValue` promotion (`v` passed where `T?` is
+    /// expected)? The place-oriented argument/borrow fast paths must defer to
+    /// `lower_expr` for these, or they hand the callee the unwrapped source
+    /// (a `String` local borrowed as a `String?` param read as `.None`).
     pub(crate) fn has_value_conversion(&self, expr_id: HirExprId) -> bool {
+        self.has_representation_change(expr_id)
+            || self
+                .typed
+                .as_ref()
+                .is_some_and(|typed| typed.promotions.contains_key(&expr_id))
+    }
+
+    /// The conversions besides promotion: an optional-ref decay, a cross-kind
+    /// closure coercion, or an existential conversion. Move paths that apply
+    /// the promotion themselves after moving (`try_move_var_local`, return
+    /// tails) check only these.
+    pub(crate) fn has_representation_change(&self, expr_id: HirExprId) -> bool {
         self.decays_optional_ref(expr_id)
             || self.has_kind_coercion(expr_id)
             || self
