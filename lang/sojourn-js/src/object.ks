@@ -222,6 +222,12 @@ extend VM {
                     }
                 }
             },
+            .ModuleNamespace(_) => {
+                // Exports hold import references; the value may be the TDZ marker.
+                let slot = self.shapeSlot(o.shape, key);
+                if slot < 0 { return .None; }
+                return .Some(PropertyRecord(value: self.derefImport(o.slots(slot)), attrs: self.shapes(o.shape).attrs(slot)));
+            },
             .TypedArrayObject(d) => {
                 // Numeric keys are elements or nothing, never shape slots.
                 if let .Some(n) = self.canonicalNumeric(key) {
@@ -492,6 +498,7 @@ extend VM {
         while cur.isObject {
             let r = cur.asRef;
             if self.isProxy(cur) { return self.proxyGet(cur, key, receiver); }
+            if self.isNamespace(cur) { return self.namespaceGet(r, key); }
             // A typed array's numeric keys never reach its prototype.
             if let .Some((d, n)) = self.taKeyIndex(r, key) {
                 if not self.taValidIndex(d, n) { return .Ok(Value.undefined); }
@@ -556,6 +563,8 @@ extend VM {
         while cur.isObject {
             let r = cur.asRef;
             if self.isProxy(cur) { return self.proxySet(cur, key, value, receiver); }
+            // A module namespace's [[Set]] always fails.
+            if self.isNamespace(cur) { return .Ok(false); }
             // TypedArray [[Set]]: write the element when the typed array is
             // the receiver; an invalid index silently does nothing.
             if let .Some((d, n)) = self.taKeyIndex(r, key) {
@@ -585,6 +594,11 @@ extend VM {
         if not receiver.isObject { return .Ok(false); }
         if self.isProxy(receiver) { return self.setOnReceiver(receiver, key, value); }
         let rr = receiver.asRef;
+        // A namespace receiver: its [[DefineOwnProperty]] (which throws in the TDZ).
+        if self.isNamespace(receiver) and not keyIsSymbol(key) {
+            let d = Descriptor(value: .Some(value), writable: .None, getter: .None, setter: .None, enumerable: .None, configurable: .None);
+            return self.namespaceDefine(rr, key, d);
+        }
         // A typed array receiver defines elements through its own [[DefineOwnProperty]].
         if let .Some((d, n)) = self.taKeyIndex(rr, key) {
             if not self.taValidIndex(d, n) { return .Ok(false); }

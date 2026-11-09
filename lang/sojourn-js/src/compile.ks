@@ -341,7 +341,8 @@ extend VM {
             isConstructor: not flags.isArrow and not flags.isMethod and not f.isGenerator and not f.isAsync,
             isClassConstructor: flags.isClassConstructor, isDerived: flags.isDerived,
             isGenerator: f.isGenerator, isAsync: f.isAsync,
-            sourceName: self.sourceName, argumentSlots: f.argumentSlots, needsContext: f.needsContext
+            sourceName: self.sourceName, argumentSlots: f.argumentSlots, needsContext: f.needsContext,
+            moduleId: self.compilingModule
         );
         self.codes.append(code);
         self.codes.count - 1

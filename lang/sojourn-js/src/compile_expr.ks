@@ -130,11 +130,24 @@ extend VM {
             .Yield(argument, delegate) => try self.compileYield(argument, delegate, dst),
             .Await(argument) => try self.compileAwait(argument, dst),
             .MetaProperty(meta, _) => {
-                if meta != "new" { throw compileError("import.meta isn't supported yet"); }
-                self.markNeedsContext();
-                let _ = self.emit(.NewTarget(dst: dst));
+                if meta == "import" {
+                    let _ = self.emit(.ImportMeta(dst: dst));
+                } else {
+                    self.markNeedsContext();
+                    let _ = self.emit(.NewTarget(dst: dst));
+                }
             },
-            .Import(_, _) => throw compileError("dynamic import isn't supported yet")
+            .Import(source, options) => {
+                let s = self.reg();
+                try self.compileExpr(source, s);
+                var o: Int64 = -1;
+                if let .Some(x) = options {
+                    o = self.reg();
+                    try self.compileExpr(x, o);
+                }
+                let _ = self.emit(.DynamicImport(dst: dst, spec: s, options: o));
+                self.freeRegs(to: s);
+            }
         }
         .Ok(())
     }

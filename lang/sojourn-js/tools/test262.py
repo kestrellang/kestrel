@@ -26,8 +26,8 @@ UNSUPPORTED = {
     
     "regexp-v-flag",
     "regexp-duplicate-named-groups", "SharedArrayBuffer", "Atomics", "WeakRef", "FinalizationRegistry",
-    "tail-call-optimization", "dynamic-import",
-    "import-meta", "top-level-await", "Temporal", "ShadowRealm", "decorators",
+    "tail-call-optimization",
+    "Temporal", "ShadowRealm", "decorators", "import-defer",
     "Intl", "intl-normative-optional", "cross-realm", "IsHTMLDDA", "host-gc-required",
     "explicit-resource-management",
     "resizable-arraybuffer",
@@ -63,7 +63,7 @@ def run_test(root, path):
     meta = m.group(1) if m else ""
     flags = set(meta_list(meta, "flags"))
     features = set(meta_list(meta, "features"))
-    if flags & {"module", "CanBlockIsTrue"}:
+    if "CanBlockIsTrue" in flags:
         return "skip", "flags"
     bad = features & UNSUPPORTED
     if bad:
@@ -75,7 +75,8 @@ def run_test(root, path):
         files += [os.path.join(harness, f) for f in meta_list(meta, "includes")]
     if "async" in flags:
         files.append(os.path.join(harness, "doneprintHandle.js"))
-    cmd = [BINARY, "run"] + (["--strict"] if "onlyStrict" in flags else []) + files + [path]
+    mode = ["--module"] if "module" in flags else (["--strict"] if "onlyStrict" in flags else [])
+    cmd = [BINARY, "run"] + mode + files + [path]
     try:
         p = subprocess.run(cmd, capture_output=True, timeout=TIMEOUT, preexec_fn=limit_memory)
     except subprocess.TimeoutExpired:

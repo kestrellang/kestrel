@@ -5,6 +5,7 @@ module js
 //   sojourn-js parse [--module] FILE      print FILE's syntax tree
 //   sojourn-js test262 DIR [--verbose]    run tc39/test262-parser-tests in DIR
 //   sojourn-js run [--strict] FILE...     run the files as one script
+//   sojourn-js run --module FILE... MOD   run the files as a script, then MOD as a module
 
 import std.system.(Process)
 import std.files.(File, Path, Directory)
@@ -31,8 +32,16 @@ func main() -> Int64 {
 func runFiles(args: Array[String]) -> Int64 {
     var source = "";
     var name = "";
+    var isModule = false;
+    var last = args.count;
     for i in 2..<args.count {
+        if args(i) == "--module" { isModule = true; }
+    }
+    // With --module the last file is the module.
+    if isModule { last = args.count - 1; }
+    for i in 2..<last {
         let path = args(i);
+        if path == "--module" { continue; }
         if path == "--strict" {
             source = "\"use strict\";\n" + source;
             continue;
@@ -50,7 +59,21 @@ func runFiles(args: Array[String]) -> Int64 {
         name = path;
     }
     var vm = VM();
-    let result = vm.runScript(source, name);
+    vm.scriptPath = name;
+    var result = vm.runScript(source, name);
+    let scriptOk = match result { .Ok(_) => true, .Err(_) => false };
+    if isModule and scriptOk {
+        let path = args(args.count - 1);
+        vm.scriptPath = path;
+        result = vm.runModuleFile(path);
+        // A module whose evaluation fails rejects its promise.
+        if let .Ok(p) = result {
+            vm.runJobs();
+            if let .PromiseObject(state, reason, _, _, _) = vm.kindAt(p.asRef) {
+                if state == PromiseState.rejected { result = .Err(reason); }
+            }
+        }
+    }
     vm.runJobs();
     match result {
         .Ok(_) => 0,

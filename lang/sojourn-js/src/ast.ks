@@ -18,6 +18,8 @@ struct Span {
 struct Program {
     var body: Array[Stmt]
     var isModule: Bool
+    /// A module with `await` outside any function: it evaluates asynchronously.
+    var hasTopLevelAwait: Bool
 }
 
 // ----------------------------------------------------------------------

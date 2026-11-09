@@ -190,6 +190,9 @@ enum Instr {
     /// `super(...)` with the arguments array in `args`. Binds `this` in
     /// the slot (hops, slot).
     case SuperCall(dst: Int64, args: Int64, hops: Int64, slot: Int64)
+    /// `import(spec, options)` (options -1 when absent): a promise for the namespace.
+    case DynamicImport(dst: Int64, spec: Int64, options: Int64)
+    case ImportMeta(dst: Int64)
     case Return(src: Int64)
     case Throw(src: Int64)
     case ThrowError(kind: ErrorKind, message: String)
@@ -272,4 +275,6 @@ struct Code {
     /// direct eval: its closure captures the enclosing function's callee
     /// and new.target (see `VM.functionContext`).
     var needsContext: Bool
+    /// The module this code belongs to (for import() and import.meta), or -1.
+    var moduleId: Int64
 }

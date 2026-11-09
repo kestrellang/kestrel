@@ -67,6 +67,9 @@ enum ObjectKind {
     /// A sloppy function's `arguments` with simple parameters: index i
     /// aliases slot `map(i)` of the function's env `env` (-1: unmapped).
     case MappedArguments(env: Int64, map: [Int64])
+    /// A module namespace object for module `module`: its export
+    /// properties hold import references, read live.
+    case ModuleNamespace(index: Int64)
     /// A getter/setter pair stored in an accessor property's slot.
     case AccessorPair(getter: Value, setter: Value)
     /// For-in state: the keys left to visit.

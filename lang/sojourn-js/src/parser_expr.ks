@@ -227,6 +227,7 @@ extend Parser {
             }
             if v == "await" and self.awaitIsOperator() {
                 if self.ctx.inParameters { throw earlyError("'await' in parameters", at: start); }
+                if not self.ctx.inFunction { self.topLevelAwait = true; }
                 try self.advance();
                 let argument = try self.parseUnaryOperand();
                 return .Ok(self.expr(.Await(argument), start));
@@ -336,7 +337,10 @@ extend Parser {
             if not next.isPunct(".") and not next.isPunct("[") { throw self.error("'new super()' isn't allowed"); }
             try self.parseSuper()
         } else if self.atKeyword("import") {
-            throw self.error("'new import(…)' isn't allowed")
+            // `new import.meta` is fine; `new import(…)` isn't.
+            let next = try self.peek();
+            if not next.isPunct(".") { throw self.error("'new import(…)' isn't allowed"); }
+            try self.parseImportExpression()
         } else {
             try self.parsePrimary()
         };

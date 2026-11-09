@@ -197,6 +197,7 @@ extend VM {
     /// [[GetOwnProperty]], as a complete descriptor.
     mutating func getOwnPropertyV(o: Value, key: Key) -> Result[Optional[Descriptor], Value] {
         if not self.isProxy(o) {
+            if self.isNamespace(o) { let _ = try self.namespaceGet(o.asRef, key); }
             return match self.ownPropertyValue(o.asRef, key) {
                 .Some(p) => .Ok(.Some(self.recordDescriptor(p))),
                 .None => .Ok(.None)

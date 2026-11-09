@@ -163,6 +163,16 @@ struct VM {
     var global: Value
     var intrinsics: Intrinsics
     var sourceName: String
+    /// The entry script's path, which import() in scripts resolves against.
+    var scriptPath: String
+    /// Every loaded module, by index and by path (module.ks).
+    var modules: [ModuleRecord]
+    var moduleIndex: [String: Int64]
+    /// The bindings import references point at.
+    var importRefs: [ImportRef]
+    var asyncEvaluationCount: Int64
+    /// The module whose code is being compiled, or -1.
+    var compilingModule: Int64
     /// Calls deep, to turn runaway recursion into a RangeError.
     var depth: Int64
     var randomState: UInt64
@@ -218,6 +228,12 @@ struct VM {
             arrayBufferProto: u, typedArrayProto: u, typedArrayCtor: u, dataViewProto: u, bigintProto: u, evalFn: u
         );
         self.sourceName = "";
+        self.scriptPath = "";
+        self.modules = [];
+        self.moduleIndex = [:];
+        self.importRefs = [];
+        self.asyncEvaluationCount = 0;
+        self.compilingModule = -1;
         self.depth = 0;
         self.randomState = 0x2545F4914F6CDD1D;
         self.regexPrograms = [];
@@ -319,6 +335,14 @@ struct VM {
         for v in self.atomValues { values.append(v); }
         for v in self.symbols { values.append(v); }
         for v in self.templateObjects { values.append(v); }
+        for m in self.modules {
+            if m.env >= 0 { envs.append(m.env); }
+            values.append(m.namespace);
+            values.append(m.meta);
+            values.append(m.error);
+            values.append(m.promise);
+        }
+        for r in self.importRefs { envs.append(r.env); }
         values.append(self.global);
         for v in self.intrinsicValues() { values.append(v); }
         for f in self.frames {

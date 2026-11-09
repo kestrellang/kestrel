@@ -19,8 +19,12 @@ extend VM {
             // Variables
             .GetVar(dst, hops, slot, name) => {
                 let e = self.envAt(self.frames(fi).env, hops);
-                let v = self.heap.envs(e).slots(slot);
-                if v.isEmpty { return .Err(self.tdzError(name)); }
+                var v = self.heap.envs(e).slots(slot);
+                if v.isEmpty {
+                    // An import: follow it to the exporting module's slot.
+                    v = self.derefImport(v);
+                    if v.isEmpty { return .Err(self.tdzError(name)); }
+                }
                 self.setReg(fi, dst, v);
             },
             .SetVar(hops, slot, src, name) => {
@@ -410,6 +414,15 @@ extend VM {
                 self.setReg(fi, dst, result);
             },
             .Return(src) => return self.doReturn(self.reg(fi, src), stop),
+            .DynamicImport(dst, spec, options) => {
+                let o = if options >= 0 { self.reg(fi, options) } else { Value.undefined };
+                let p = self.dynamicImport(fi, self.reg(fi, spec), o);
+                self.setReg(fi, dst, p);
+            },
+            .ImportMeta(dst) => {
+                let m = self.importMeta(fi);
+                self.setReg(fi, dst, m);
+            },
             .Throw(src) => return .Err(self.reg(fi, src)),
             .ThrowError(kind, message) => return .Err(self.makeError(kind, message)),
             .GetArg(dst, index) => {
@@ -682,6 +695,8 @@ func hasExoticKeys(kind: ObjectKind) -> Bool {
     match kind {
         .ArrayObject => true,
         .StringBox(_) => true,
+        // Exports read through import references.
+        .ModuleNamespace(_) => true,
         _ => false
     }
 }

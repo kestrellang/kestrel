@@ -129,6 +129,7 @@ extend VM {
     /// `r`, returning false when the change isn't allowed.
     mutating func defineProperty(r: Ref, key: Key, d: Descriptor) -> Result[Bool, Value] {
         if self.mappedArgumentSlot(r, key) >= 0 { return self.defineMappedArgument(r, key, d); }
+        if self.isNamespace(Value.object(r)) and not keyIsSymbol(key) { return self.namespaceDefine(r, key, d); }
         self.ordinaryDefineProperty(r, key, d)
     }
 

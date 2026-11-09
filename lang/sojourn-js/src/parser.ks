@@ -71,6 +71,8 @@ struct Parser {
     /// Direct eval calls parsed so far: an arrow's parameters contain one
     /// when this grew while they were parsed.
     var directEvalCalls: Int64
+    /// Saw `await` (or `for await`) at a module's top level.
+    var topLevelAwait: Bool
 
     init(source source: String, isModule isModule: Bool) {
         self.lexer = Lexer(text: source);
@@ -93,6 +95,7 @@ struct Parser {
         self.exportedLocalPositions = [];
         self.sawDirectEval = false;
         self.directEvalCalls = 0;
+        self.topLevelAwait = false;
     }
 
     /// Parses a whole script or module.
@@ -105,7 +108,7 @@ struct Parser {
             body.append(try self.parseStatementListItem());
         }
         if self.isModule { try self.checkExportedLocals(); }
-        .Ok(Program(body: body, isModule: self.isModule))
+        .Ok(Program(body: body, isModule: self.isModule, hasTopLevelAwait: self.topLevelAwait))
     }
 
     // ------------------------------------------------------------------

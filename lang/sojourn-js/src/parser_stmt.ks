@@ -270,6 +270,7 @@ extend Parser {
                 throw self.unexpected();
             }
             isAwait = true;
+            if not self.ctx.inFunction { self.topLevelAwait = true; }
             try self.advance();
         }
         try self.expect("(");
@@ -646,6 +647,10 @@ extend Parser {
     mutating func parseModuleExportName() -> Result[ExportName, SyntaxError] {
         if self.tok.kind == TokenKind.String {
             let name = self.tok.value;
+            let u = unitsOf(name);
+            for i in 0..<u.count {
+                if isLoneSurrogate(u, i) { throw self.error("A module export name can't contain a lone surrogate"); }
+            }
             try self.advance();
             return .Ok(ExportName(name: name, isString: true));
         }

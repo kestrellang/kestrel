@@ -392,6 +392,11 @@ enum NativeFn {
     case WeakMapGetOrInsert
     case WeakMapGetOrInsertComputed
     case PromiseTry
+    case ModuleAsyncFulfilled
+    case ModuleAsyncRejected
+    case ModuleImportStart
+    case ModuleImportFulfilled
+    case ModuleImportRejected
     case Uint8FromBase64
     case Uint8FromHex
     case Uint8ToBase64
@@ -576,6 +581,7 @@ extend VM {
         if let .Some(r) = try self.proxyNative(n, callee, args, newTarget) { return .Ok(r); }
         if let .Some(r) = try self.bigintNative(n, this, args, newTarget) { return .Ok(r); }
         if let .Some(r) = try self.proposalNative(n, this, args) { return .Ok(r); }
+        if let .Some(r) = try self.moduleNative(n, callee, args) { return .Ok(r); }
         if let .Some(r) = try self.base64Native(n, this, args) { return .Ok(r); }
         if let .Some(r) = try self.iteratorProposalNative(n, this, args) { return .Ok(r); }
         self.throwType("built-in not implemented")
