@@ -23,6 +23,6 @@ func main() {
             .map { it.toOwned() }
             .collect();
         words.reverse();
-        println(words.joined(" "));
+        println(words.joined(by: " "));
     }
 }

@@ -11,7 +11,7 @@ func letters(s: String) -> Array[Int64] {
 }
 
 func toText(codes: Array[Int64]) -> String {
-    codes.map { Char(unchecked: 'A'.value() + UInt32(truncating: it)) }.joined("")
+    codes.map { Char(unchecked: 'A'.value() + UInt32(truncating: it)) }.joined(by: "")
 }
 
 func vigenere(text: String, key: String, decrypt: Bool) -> String {

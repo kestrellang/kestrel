@@ -18,6 +18,6 @@ func main() {
     println("C(5, 3) = \(binomial(5, 3))");
     println("C(60, 30) = \(binomial(60, 30))");
     for n in 0..=6 {
-        println((0..=n).iter().map { binomial(n, it) }.collect().joined(" "));
+        println((0..=n).iter().map { binomial(n, it) }.collect().joined(by: " "));
     }
 }

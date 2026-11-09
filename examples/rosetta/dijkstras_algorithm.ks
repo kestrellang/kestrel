@@ -57,6 +57,6 @@ func main() {
     ];
     for target in ["e", "f"] {
         let (cost, path) = shortestPath(edges, "a", target);
-        println("a -> \(target): \(path.joined(" -> ")) (cost \(cost))");
+        println("a -> \(target): \(path.joined(by: " -> ")) (cost \(cost))");
     }
 }

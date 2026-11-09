@@ -1612,7 +1612,7 @@ extend Dictionary[K, V, H, A] where K: Hashable, V: Equatable, H: Hasher, H: Def
 /// Drives string interpolation. Empty dictionaries render as `"{}"`.
 /// Entry order in the output reflects bucket order and is unspecified.
 extend Dictionary[K, V, H, A]: Formattable where K: Hashable, K: Formattable, V: Formattable, H: Hasher, H: Defaultable {
-    /// Renders the dictionary as `"{" + entries.joined(", ") + "}"`,
+    /// Renders the dictionary as `"{" + entries.joined(by: ", ") + "}"`,
     /// passing `options` to each key and value's `format`.
     ///
     /// # Examples

@@ -38,6 +38,6 @@ func isKolakoski(seq: Array[Int64]) -> Bool {
 func main() {
     for (digits, len) in [([1, 2], 20), ([2, 1], 20), ([1, 3, 1, 2], 30), ([1, 3, 2, 1], 30)] {
         let seq = kolakoski(digits, len);
-        println("\(digits): \(seq.joined(""))  kolakoski: \(isKolakoski(seq))");
+        println("\(digits): \(seq.joined(by: ""))  kolakoski: \(isKolakoski(seq))");
     }
 }

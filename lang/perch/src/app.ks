@@ -115,7 +115,7 @@ func matchPath(requestSegments: Array[String], patternSegments: Array[String]) -
 /// Splits a path into its non-empty segments.
 func splitPathSegments(path: String) -> Array[String] {
     var segments: Array[String] = [];
-    for part in path.split("/") {
+    for part in path.split(by: "/") {
         if part.bytes.count > 0 {
             segments.append(part.toOwned())
         }

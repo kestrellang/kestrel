@@ -3767,7 +3767,7 @@ for targeted access.
 ### Examples
 
 ```
-let view = "a,b,c".asSlice().split(",");
+let view = "a,b,c".asSlice().split(by: ",");
 view.first();            // Some("a")
 view.count;              // 3
 view.collect();          // [StringSlice("a"), StringSlice("b"), StringSlice("c")]
@@ -4513,8 +4513,8 @@ point. Adjacent separators produce empty segments.
 ##### Examples
 
 ```
-"a,b,c".split(",").collect();   // ["a", "b", "c"]
-"a,,b".split(",").count;        // 3 (empty segment preserved)
+"a,b,c".split(by: ",").collect();   // ["a", "b", "c"]
+"a,,b".split(by: ",").count;        // 3 (empty segment preserved)
 ```
 
 _Defined in `lang/std/text/str.ks`._

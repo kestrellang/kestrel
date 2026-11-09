@@ -24,6 +24,6 @@ func spiral(n: Int64) -> Array[Array[Int64]] {
 @main
 func main() {
     for row in spiral(5) {
-        println(row.map { "\(it:>3)" }.joined(""));
+        println(row.map { "\(it:>3)" }.joined(by: ""));
     }
 }

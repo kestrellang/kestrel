@@ -6,7 +6,7 @@ import perch.(Request, HttpError, FromRequest)
 /// Parses an `application/x-www-form-urlencoded` body into its fields.
 public func parseForm(body: String) -> Dictionary[String, String] {
     var result = Dictionary[String, String]();
-    for part in body.split("&") {
+    for part in body.split(by: "&") {
         let kv = part.trimmed();
         match kv.firstIndex(of: "=") {
             .Some(eqIdx) => {

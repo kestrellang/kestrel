@@ -12,7 +12,7 @@ func main() -> lang.i64 {
 
     // ---- SplitView via Str protocol (separator) ----
     let csv: std.text.String = "a,b,c";
-    let view = csv.asSlice().split(",");
+    let view = csv.asSlice().split(by: ",");
 
     // count
     if view.count != 3 { return 1 }
@@ -35,7 +35,7 @@ func main() -> lang.i64 {
 
     // No separator found — single segment
     let noSep: std.text.String = "hello";
-    let noSepView = noSep.asSlice().split(",");
+    let noSepView = noSep.asSlice().split(by: ",");
     if noSepView.count != 1 { return 10 }
     if let .Some(only) = noSepView.first {
         if only.toOwned().isEqual(to: "hello") == false { return 11 }
@@ -43,31 +43,31 @@ func main() -> lang.i64 {
 
     // Adjacent separators — empty segments preserved
     let adj: std.text.String = "a,,b";
-    let adjParts = adj.asSlice().split(",").collect();
+    let adjParts = adj.asSlice().split(by: ",").collect();
     if adjParts.count != 3 { return 13 }
     if unsafe adjParts(unchecked: 1).toOwned().isEqual(to: "") == false { return 14 }
 
     // Multi-byte separator
     let multi: std.text.String = "one::two::three";
-    let multiParts = multi.asSlice().split("::").collect();
+    let multiParts = multi.asSlice().split(by: "::").collect();
     if multiParts.count != 3 { return 15 }
     if unsafe multiParts(unchecked: 0).toOwned().isEqual(to: "one") == false { return 16 }
     if unsafe multiParts(unchecked: 2).toOwned().isEqual(to: "three") == false { return 17 }
 
     // Empty separator — splits per code point
     let chars: std.text.String = "abc";
-    let charParts = chars.asSlice().split("").collect();
+    let charParts = chars.asSlice().split(by: "").collect();
     if charParts.count != 3 { return 18 }
     if unsafe charParts(unchecked: 0).toOwned().isEqual(to: "a") == false { return 19 }
     if unsafe charParts(unchecked: 2).toOwned().isEqual(to: "c") == false { return 20 }
 
     // isEmpty
     let empty: std.text.String = "";
-    if empty.asSlice().split(",").isEmpty == false { return 21 }
+    if empty.asSlice().split(by: ",").isEmpty == false { return 21 }
 
     // for-in iteration
     var count: Int64 = 0;
-    for segment in csv.asSlice().split(",") {
+    for segment in csv.asSlice().split(by: ",") {
         count = count + 1
     }
     if count != 3 { return 22 }

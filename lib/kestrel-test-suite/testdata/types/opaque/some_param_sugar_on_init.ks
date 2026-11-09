@@ -29,6 +29,6 @@ func main() {
     let s = "hello";
     print("\(Unlabeled(s).n) \(Labeled(text: s).n) \(Unlabeled("lit").n) \(Labeled(text: "lit").n)\n");
     var line = "";
-    for part in "a b".split(" ") { line.append("\(AcceptsSlices(part).n) ") }
+    for part in "a b".split(by: " ") { line.append("\(AcceptsSlices(part).n) ") }
     print("\(line)\(AcceptsSlices("lit").n)\n");
 }

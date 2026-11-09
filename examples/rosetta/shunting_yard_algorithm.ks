@@ -14,7 +14,7 @@ func precedence(op: String) -> Int64 {
 func toRpn(infix: String) -> String {
     var output = Array[String]();
     var ops = Array[String]();
-    for piece in infix.split(" ") {
+    for piece in infix.split(by: " ") {
         let token = piece.toOwned();
         if token == "(" {
             ops.append(token);
@@ -40,7 +40,7 @@ func toRpn(infix: String) -> String {
         }
     }
     while let some op = ops.pop() { output.append(op); }
-    output.joined(" ")
+    output.joined(by: " ")
 }
 
 @main

@@ -16,5 +16,4 @@ struct Joiner {
 func main() {
     let _ = greet(name: "x"); // ERROR: 'name' is the parameter's name, not an argument label
     let _ = Joiner().join(separator: ","); // ERROR: 'separator' is the parameter's name, not an argument label
-    let _ = ["a", "b"].joined(separator: ","); // ERROR: 'separator' is the parameter's name, not an argument label
 }

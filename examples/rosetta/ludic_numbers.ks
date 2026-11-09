@@ -25,5 +25,5 @@ func main() {
     println("Ludic numbers <= 1000: \(l.iter().filter { it <= 1000 }.count())");
     println("2000th..2005th: \(l(1999..<2005).toArray())");
     let triplets = l.iter().filter { (x) in x + 6 < 250 and l.contains(x + 2) and l.contains(x + 6) }.collect();
-    println("Triplets below 250: \(triplets.map { "(\(it), \(it + 2), \(it + 6))" }.joined(" "))");
+    println("Triplets below 250: \(triplets.map { "(\(it), \(it + 2), \(it + 6))" }.joined(by: " "))");
 }

@@ -35,7 +35,7 @@ func main() {
                 u = next(u)(j);
                 path.append(u + 1);
             }
-            println("\(i + 1) -> \(j + 1)  \(dist(i)(j):>4)     \(path.joined(" -> "))");
+            println("\(i + 1) -> \(j + 1)  \(dist(i)(j):>4)     \(path.joined(by: " -> "))");
         }
     }
 }

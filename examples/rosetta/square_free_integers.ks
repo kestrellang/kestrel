@@ -15,7 +15,7 @@ func isSquareFree(n: Int64) -> Bool {
 func main() {
     let upTo145 = (1..=145).iter().filter { isSquareFree(it) }.collect();
     for row in upTo145.chunks(of: 20).toArray() {
-        println(row.map { "\(it:>4)" }.joined(""));
+        println(row.map { "\(it:>4)" }.joined(by: ""));
     }
     for limit in [100, 1000, 10000, 100000] {
         println("Square-free numbers up to \(limit): \((1..=limit).iter().filter { isSquareFree(it) }.count())");

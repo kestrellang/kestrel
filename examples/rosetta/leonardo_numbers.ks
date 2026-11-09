@@ -12,6 +12,6 @@ func leonardo(count: Int64, l0: Int64, l1: Int64, add: Int64) -> Array[Int64] {
 
 @main
 func main() {
-    println("Leonardo:  \(leonardo(25, 1, 1, 1).joined(" "))");
-    println("Fibonacci: \(leonardo(25, 0, 1, 0).joined(" "))");
+    println("Leonardo:  \(leonardo(25, 1, 1, 1).joined(by: " "))");
+    println("Fibonacci: \(leonardo(25, 0, 1, 0).joined(by: " "))");
 }

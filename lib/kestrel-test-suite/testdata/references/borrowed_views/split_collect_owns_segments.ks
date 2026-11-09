@@ -13,7 +13,7 @@ import std.text.(String)
 
 func parts() -> Array[String] {
     let line: String = "a,bb,ccc";
-    line.split(",").collect()
+    line.split(by: ",").collect()
 }
 
 @main

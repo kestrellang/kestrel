@@ -38,7 +38,7 @@ struct Life {
     func show() {
         for y in 0..<self.height {
             let row = (0..<self.width).iter().map { if self.alive(it, y) { "#" } else { "." } }.collect();
-            println(row.joined(""));
+            println(row.joined(by: ""));
         }
     }
 }

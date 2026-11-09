@@ -4,7 +4,7 @@ module Main
 
 func combinations(n: Int64, k: Int64, start: Int64, mutating current: Array[Int64]) {
     if current.count == k {
-        println(current.joined(" "));
+        println(current.joined(by: " "));
         return
     }
     for i in start..<n {

@@ -270,7 +270,7 @@ public struct Command: not Copyable {
             return if isExecutable(program) { .Some(program) } else { .None }
         }
         let path = Environment.variable("PATH") ?? "/usr/bin:/bin";
-        for directory in path.split(":") {
+        for directory in path.split(by: ":") {
             let dir = if directory.isEmpty { "." } else { directory.toOwned() };
             let candidate = "\(dir)/\(program)";
             if isExecutable(candidate) {

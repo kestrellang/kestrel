@@ -6,6 +6,6 @@ module Main
 func main() {
     // Char isn't a range bound, so step through the code points.
     let alphabet = ('a'.value()..='z'.value()).iter().map { Char(unchecked: it) }.collect();
-    println(alphabet.joined(""));
+    println(alphabet.joined(by: ""));
     println("\(alphabet.count) letters");
 }

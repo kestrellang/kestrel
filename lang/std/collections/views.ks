@@ -448,9 +448,9 @@ extend Slice[T] where T: Equatable, T: Copyable {
     /// `separator`. `toArray()` copies them into owned arrays.
     ///
     /// ```
-    /// [1, 0, 2, 0, 3].split(0).toArray();   // [[1], [2], [3]]
+    /// [1, 0, 2, 0, 3].split(by: 0).toArray();   // [[1], [2], [3]]
     /// ```
-    public func split(separator: T) -> ArraySplitView[T] {
+    public func split(by separator: T) -> ArraySplitView[T] {
         let s = &self;
         ArraySplitView(slice: s, separator: separator)
     }
@@ -471,8 +471,8 @@ extend Array[T, A] {
 }
 
 extend Array[T, A] where T: Equatable {
-    /// See `Slice.split(separator:)`.
-    public func split(separator: T) -> ArraySplitView[T] {
+    /// See `Slice.split(by:)`.
+    public func split(by separator: T) -> ArraySplitView[T] {
         let s = &self.asSlice();
         ArraySplitView(slice: s, separator: separator)
     }

@@ -31,5 +31,5 @@ func main() {
     let exponents = (2..<63).iter().filter { (p) in
         (2..<p).iter().all { p % it != 0 } and isMersennePrime(p)
     }.collect();
-    println("Mersenne primes 2^p - 1 for p in: \(exponents.joined(" "))");
+    println("Mersenne primes 2^p - 1 for p in: \(exponents.joined(by: " "))");
 }

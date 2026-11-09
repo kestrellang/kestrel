@@ -49,7 +49,7 @@ func sha256(message: Array[UInt8]) -> String {
         }
         for i in 0..<8 { h(i) = h(i).addWrapping(v(i)); }
     }
-    h.map { "\(it:08x)" }.joined("")
+    h.map { "\(it:08x)" }.joined(by: "")
 }
 
 @main

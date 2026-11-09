@@ -27,6 +27,6 @@ func main() {
             brackets.append(']');
         }
         brackets.shuffle(using: rng);
-        report(brackets.joined(""));
+        report(brackets.joined(by: ""));
     }
 }

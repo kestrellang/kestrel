@@ -11,7 +11,7 @@ func main() {
                  "levi", "live", "veil", "vile", "kestrel", "falcon", "hawk"];
     // Group words by their sorted letters.
     let groups = Dictionary[String, Array[String]](grouping: words, by: { (w: String) in
-        w.chars.iter().collect().sorted().joined("")
+        w.chars.iter().collect().sorted().joined(by: "")
     });
     let largest = groups.values.iter().map { it.count }.max() ?? 0;
     let best = groups.values.iter()
@@ -20,6 +20,6 @@ func main() {
         .collect()
         .sorted(by: { (a, b) in a(0) < b(0) });
     for group in best {
-        println(group.joined(" "));
+        println(group.joined(by: " "));
     }
 }

@@ -31,7 +31,7 @@ func spell(n: Int64) -> String {
         rest = rest / 1000;
         scale = scale + 1;
     }
-    groups.joined(", ")
+    groups.joined(by: ", ")
 }
 
 @main
