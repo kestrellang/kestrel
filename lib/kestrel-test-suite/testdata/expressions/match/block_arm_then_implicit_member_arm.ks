@@ -21,7 +21,7 @@ func walk(l: List) {
             println(head);
             walk(tail);
         }
-        .Nil => println("end")
+        .Nil => { println("end"); }
     }
 }
 
