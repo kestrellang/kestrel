@@ -817,7 +817,9 @@ public struct String[A = GlobalAllocator]: Str, Iterable, Equatable, Equal[Strin
     }
 }
 
-extend String {
+// Generic over the allocator like `init(from: CString)`, so the two
+// `init(from:)` overloads are ranked together and picked by argument type.
+extend String[A] where A: Defaultable {
     /// @name From Char Iterable
     /// Builds a string by encoding each character of `chars` as UTF-8.
     ///
@@ -830,7 +832,7 @@ extend String {
     /// // "HELLO"
     /// ```
     public init[I](from chars: I) where I: Iterable, I: not Static, I.Item = Char {
-        var b = StringBuilder();
+        var b = StringBuilder[A]();
         var iter = chars.iter();
         while let .Some(c) = iter.next() {
             b.append(char: c)
