@@ -10,6 +10,10 @@ extend VM {
         let f = self.fnIndex();
         let labels = self.fns(f).pendingLabels;
         self.fns(f).pendingLabels = [];
+        // These statements' completion is UpdateEmpty(…, undefined): `1; if (x) {}`
+        // gives undefined, so eval sees undefined unless the body sets a value.
+        let completion = self.fns(f).completion;
+        if completion >= 0 and resetsCompletion(s.kind) { self.load(completion, Value.undefined); }
         match s.kind {
             .Expression(e) => {
                 // Script code keeps the last expression's value for eval.
@@ -102,7 +106,7 @@ extend VM {
                     self.popCtl();
                 }
             },
-            .With(_, _) => throw compileError("'with' isn't supported yet"),
+            .With(object, body) => try self.compileWith(object, body),
             .Import(_) => throw compileError("modules aren't supported yet"),
             .Export(_) => throw compileError("modules aren't supported yet")
         }
@@ -338,6 +342,23 @@ extend VM {
         result
     }
 
+    /// `with (object) body`: a one-slot scope holds the object, and names
+    /// resolved past it check the object first (see `emitGetNameThis`).
+    mutating func compileWith(object: Expr, body: Stmt) -> Result[(), SyntaxError] {
+        let t = self.reg();
+        try self.compileExpr(object, t);
+        let _ = self.emit(.Unary(op: .ToObject, dst: t, src: t));
+        var sc = newCScope(false, false);
+        sc.isWith = true;
+        sc.size = 1;
+        self.pushScope(sc);
+        let _ = self.emit(.PushEnv(size: 1));
+        let _ = self.emit(.InitVar(hops: 0, slot: 0, src: t));
+        try self.compileStmt(body);
+        self.exitBlockScope(true);
+        .Ok(())
+    }
+
     // ------------------------------------------------------------------
     // try and switch
     // ------------------------------------------------------------------
@@ -432,6 +453,16 @@ func isLoop(s: Stmt) -> Bool {
         .While(_, _) => true,
         .DoWhile(_, _) => true,
         .Labeled(_, body) => isLoop(body),
+        _ => false
+    }
+}
+
+/// Whether a statement's completion value starts as undefined rather than
+/// keeping the previous statement's.
+func resetsCompletion(k: StmtKind) -> Bool {
+    match k {
+        .If(_, _, _) or .While(_, _) or .DoWhile(_, _) or .For(_, _, _, _) or .ForIn(_, _, _)
+            or .ForOf(_, _, _, _) or .Try(_, _, _) or .Switch(_, _) or .With(_, _) => true,
         _ => false
     }
 }

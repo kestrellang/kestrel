@@ -203,8 +203,13 @@ extend VM {
             }
         }
         if not isMethod {
-            try self.compileExpr(callee, f);
             self.load(this, Value.undefined);
+            // A name found on a `with` object calls with that object as `this`.
+            if let .Identifier(n) = callee.kind {
+                self.emitGetNameThis(n, f, this, false);
+            } else {
+                try self.compileExpr(callee, f);
+            }
         }
         if optional { self.emitChainCheck(f); }
         if hasSpread(arguments) {
@@ -291,17 +296,28 @@ extend VM {
                 self.patchHere(over);
             },
             .Identifier(n) => {
-                // Declared bindings can't be deleted; global properties can.
+                // Declared bindings can't be deleted; global properties
+                // and `with` object properties can.
                 let r = self.resolve(n);
+                let key = self.reg();
+                self.loadString(key, n);
+                let obj = self.reg();
+                var jumps: [Int64] = [];
+                for h in r.withHops {
+                    jumps.append(self.emit(.WithGet(dst: -1, this: obj, hops: h, name: self.atom(n), target: 0)));
+                }
                 if r.found {
                     self.load(dst, Value.bool(false));
                 } else {
                     let global = self.reg();
                     self.emitGetName("globalThis", global, false);
-                    let key = self.reg();
-                    self.loadString(key, n);
                     let _ = self.emit(.DeleteElem(dst: dst, obj: global, key: key, strict: false));
                 }
+                if jumps.isEmpty { return .Ok(()); }
+                let over = self.emit(.Jump(target: 0));
+                for j in jumps { self.patchHere(j); }
+                let _ = self.emit(.DeleteElem(dst: dst, obj: obj, key: key, strict: false));
+                self.patchHere(over);
             },
             _ => {
                 try self.compileExpr(argument, dst);

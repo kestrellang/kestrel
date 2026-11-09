@@ -276,6 +276,7 @@ extend VM {
                 return .Ok(self.keyValue(k));
             },
             .ToStr => return self.toStringValue(v),
+            .ToObject => return self.toObject(v),
             .RequireObject => {
                 if v.isNullish { return self.throwType("Cannot destructure '\(if v.isNull { "null" } else { "undefined" })'"); }
                 return .Ok(v);

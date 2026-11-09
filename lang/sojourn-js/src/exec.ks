@@ -22,6 +22,26 @@ extend VM {
                 if self.heap.envs(e).slots(slot).isEmpty { return .Err(self.tdzError(name)); }
                 self.heap.envs(e).slots(slot) = self.reg(fi, src);
             },
+            .WithGet(dst, this, hops, name, target) => {
+                let obj = self.heap.envs(self.envAt(self.frames(fi).env, hops)).slots(0);
+                let has = try self.withHas(obj, name);
+                if has {
+                    if dst >= 0 {
+                        let v = try self.getV(obj, name);
+                        self.setReg(fi, dst, v);
+                    }
+                    if this >= 0 { self.setReg(fi, this, obj); }
+                    self.frames(fi).pc = target;
+                }
+            },
+            .WithSet(hops, name, src, strict, target) => {
+                let obj = self.heap.envs(self.envAt(self.frames(fi).env, hops)).slots(0);
+                let has = try self.withHas(obj, name);
+                if has {
+                    try self.setV(obj, name, self.reg(fi, src), strict);
+                    self.frames(fi).pc = target;
+                }
+            },
             .InitVar(hops, slot, src) => {
                 let e = self.envAt(self.frames(fi).env, hops);
                 self.heap.envs(e).slots(slot) = self.reg(fi, src);
@@ -428,6 +448,16 @@ extend VM {
         if self.hasProperty(self.global, name) { return self.getFrom(self.global, name, self.global); }
         if forTypeof { return .Ok(Value.undefined); }
         .Err(self.makeError(.ReferenceError, "\(self.keyText(name)) is not defined"))
+    }
+
+    /// HasBinding for a `with` object: `name` is on `obj` and its
+    /// @@unscopables doesn't list it.
+    mutating func withHas(obj: Value, name: Key) -> Result[Bool, Value] {
+        if not self.hasProperty(obj, name) { return .Ok(false); }
+        let u = try self.getV(obj, symbolKey(WellKnown.unscopables));
+        if not u.isObject { return .Ok(true); }
+        let blocked = try self.getV(u, name);
+        .Ok(not self.toBoolean(blocked))
     }
 
     mutating func setGlobal(name: Key, v: Value, strict: Bool) -> Result[(), Value] {

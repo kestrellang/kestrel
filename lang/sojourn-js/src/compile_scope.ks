@@ -16,10 +16,13 @@ struct CScope {
     var isFunction: Bool
     /// An arrow function's top scope: `this` and `arguments` come from outside.
     var isArrow: Bool
+    /// A `with` statement's scope: slot 0 holds the object, and names
+    /// resolved past it are looked up on the object first.
+    var isWith: Bool
 }
 
 func newCScope(isFunction: Bool, isArrow: Bool) -> CScope {
-    CScope(slots: [:], consts: Set(), size: 0, isFunction: isFunction, isArrow: isArrow)
+    CScope(slots: [:], consts: Set(), size: 0, isFunction: isFunction, isArrow: isArrow, isWith: false)
 }
 
 extend CScope {

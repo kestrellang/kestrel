@@ -48,6 +48,8 @@ enum UnOp {
     case ToStr
     /// `ToObject`, throwing on null and undefined (for destructuring).
     case RequireObject
+    /// `ToObject`, boxing primitives (for `with`).
+    case ToObject
 }
 
 /// Errors the bytecode itself raises.
@@ -73,6 +75,13 @@ enum Instr {
     case SetVar(hops: Int64, slot: Int64, src: Int64, name: Key)
     /// Initializes a declaration's slot (no TDZ check).
     case InitVar(hops: Int64, slot: Int64, src: Int64)
+    /// Inside `with`: if the object `hops` envs up has `name` (and its
+    /// @@unscopables doesn't hide it), reads it into `dst`, puts the object
+    /// in `this` (unless -1) and jumps to `target`. A `dst` of -1 only
+    /// finds the object.
+    case WithGet(dst: Int64, this: Int64, hops: Int64, name: Key, target: Int64)
+    /// The same lookup for an assignment: stores `src` and jumps.
+    case WithSet(hops: Int64, name: Key, src: Int64, strict: Bool, target: Int64)
     case GetGlobal(dst: Int64, name: Key, forTypeof: Bool)
     case SetGlobal(name: Key, src: Int64, strict: Bool)
     /// Script-level `var`: a global property, left alone if it exists.

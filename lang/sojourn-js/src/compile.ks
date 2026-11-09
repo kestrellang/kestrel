@@ -25,6 +25,9 @@ struct Resolved {
     var hops: Int64
     var slot: Int64
     var isConst: Bool
+    /// Hops to each `with` scope crossed before the binding, innermost
+    /// first: the name is looked up on those objects first.
+    var withHops: [Int64]
 }
 
 /// What kind of function is being compiled.
@@ -92,6 +95,8 @@ extend VM {
             .JumpIfNullish(s, _) => Instr.JumpIfNullish(src: s, target: target),
             .JumpIfUndefined(s, _) => Instr.JumpIfUndefined(src: s, target: target),
             .JumpIfNotUndefined(s, _) => Instr.JumpIfNotUndefined(src: s, target: target),
+            .WithGet(d, t, h, n, _) => Instr.WithGet(dst: d, this: t, hops: h, name: n, target: target),
+            .WithSet(h, n, s, st, _) => Instr.WithSet(hops: h, name: n, src: s, strict: st, target: target),
             .EnterTry(_, e) => Instr.EnterTry(handler: target, exception: e),
             .ForInNext(d, it, _) => Instr.ForInNext(dst: d, iter: it, done: target),
             .IteratorNext(d, it, _) => Instr.IteratorNext(dst: d, iter: it, done: target),
@@ -128,24 +133,26 @@ extend VM {
     /// non-arrow function.
     mutating func resolve(name: String) -> Resolved {
         var hops: Int64 = 0;
+        var withHops: [Int64] = [];
         var fi = self.fns.count - 1;
         while fi >= 0 {
             var si = self.fns(fi).scopes.count - 1;
             while si >= 0 {
                 let sc = self.fns(fi).scopes(si);
                 if let .Some(slot) = sc.slots(name) {
-                    return Resolved(found: true, hops: hops, slot: slot, isConst: sc.consts.contains(name));
+                    return Resolved(found: true, hops: hops, slot: slot, isConst: sc.consts.contains(name), withHops: withHops);
                 }
                 if name == "arguments" and sc.isFunction and not sc.isArrow and not self.fns(fi).isScript {
                     let slot = self.declareArguments(fi, si);
-                    return Resolved(found: true, hops: hops, slot: slot, isConst: false);
+                    return Resolved(found: true, hops: hops, slot: slot, isConst: false, withHops: withHops);
                 }
+                if sc.isWith { withHops.append(hops); }
                 hops = hops + 1;
                 si = si - 1;
             }
             fi = fi - 1;
         }
-        Resolved(found: false, hops: 0, slot: 0, isConst: false)
+        Resolved(found: false, hops: 0, slot: 0, isConst: false, withHops: withHops)
     }
 
     /// Adds an `arguments` binding to function `fi`'s top scope and fills
@@ -163,7 +170,23 @@ extend VM {
 
     /// Reads variable `name` into `dst`.
     mutating func emitGetName(name: String, dst: Int64, forTypeof: Bool) {
+        self.emitGetNameThis(name, dst, -1, forTypeof);
+    }
+
+    /// Reads `name` into `dst`. If a `with` object supplies it, that
+    /// object goes in `this` (unless -1), for calls.
+    mutating func emitGetNameThis(name: String, dst: Int64, this: Int64, forTypeof: Bool) {
         let r = self.resolve(name);
+        var jumps: [Int64] = [];
+        for h in r.withHops {
+            jumps.append(self.emit(.WithGet(dst: dst, this: this, hops: h, name: self.atom(name), target: 0)));
+        }
+        self.emitGetResolved(name, r, dst, forTypeof);
+        for j in jumps { self.patchHere(j); }
+    }
+
+    /// Reads `name` from the binding `resolve` found, or the global object.
+    mutating func emitGetResolved(name: String, r: Resolved, dst: Int64, forTypeof: Bool) {
         if r.found {
             let _ = self.emit(.GetVar(dst: dst, hops: r.hops, slot: r.slot, name: self.atom(name)));
         } else {
@@ -171,9 +194,21 @@ extend VM {
         }
     }
 
-    /// Gives `name` the value in `src`.
+    /// Gives `name` the value in `src`, trying enclosing `with` objects
+    /// first. A `var` initializer inside `with` goes through them too.
     mutating func emitSetName(name: String, src: Int64, mode: BindMode) {
         let r = self.resolve(name);
+        let a = self.atom(name);
+        var jumps: [Int64] = [];
+        for h in r.withHops {
+            jumps.append(self.emit(.WithSet(hops: h, name: a, src: src, strict: self.strict(), target: 0)));
+        }
+        self.emitSetResolved(name, r, src, mode);
+        for j in jumps { self.patchHere(j); }
+    }
+
+    /// Gives the binding `resolve` found (or the global) the value in `src`.
+    mutating func emitSetResolved(name: String, r: Resolved, src: Int64, mode: BindMode) {
         let a = self.atom(name);
         if r.found {
             if mode == BindMode.Declare {
