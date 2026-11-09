@@ -29,11 +29,14 @@ struct CScope {
     var evalSlot: Int64
     /// Holds just a named function expression's own name.
     var isFunctionName: Bool
+    /// Where `var`s go: a function's top scope, or its body scope when
+    /// the parameters have expressions.
+    var isVarScope: Bool
 }
 
 func newCScope(isFunction: Bool, isArrow: Bool) -> CScope {
     CScope(slots: [:], consts: Set(), size: 0, isFunction: isFunction, isArrow: isArrow, isWith: false,
-        lexicals: Set(), hasEvalVars: false, evalSlot: 0, isFunctionName: false)
+        lexicals: Set(), hasEvalVars: false, evalSlot: 0, isFunctionName: false, isVarScope: isFunction)
 }
 
 extend CScope {

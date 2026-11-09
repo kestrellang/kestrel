@@ -22,12 +22,12 @@ extend VM {
     /// Sets up function `fi` (whose body contains a direct eval) so eval
     /// code can see and add to its scope: `arguments` exists, and a
     /// sloppy function gets an eval-vars object.
-    mutating func prepareDirectEval(fi: Int64) {
+    mutating func prepareDirectEval(fi: Int64, si: Int64) {
         let _ = self.resolve("arguments");
         if self.fns(fi).strict { return; }
-        let slot = self.fns(fi).scopes(0).declare("%evalvars");
-        self.fns(fi).scopes(0).hasEvalVars = true;
-        self.fns(fi).scopes(0).evalSlot = slot;
+        let slot = self.fns(fi).scopes(si).declare("%evalvars");
+        self.fns(fi).scopes(si).hasEvalVars = true;
+        self.fns(fi).scopes(si).evalSlot = slot;
         let _ = self.emit(.InitEvalVars(slot: slot));
     }
 
@@ -144,11 +144,11 @@ extend VM {
             while si >= 0 {
                 let sc = f.scopes(si);
                 // Parameter expressions can't see the body's declarations.
-                let hidden = si == 0 and f.inParams;
+                let hidden = sc.isVarScope and f.inParams;
                 if sc.lexicals.contains(name) and not hidden {
                     throw compileError("Identifier '\(name)' has already been declared");
                 }
-                if si == 0 and not (f.isEval and not f.strict) {
+                if sc.isVarScope and not (f.isEval and not f.strict) {
                     if name == "arguments" and f.inParams and not f.isArrow {
                         throw compileError("eval in a parameter list can't declare 'arguments'");
                     }

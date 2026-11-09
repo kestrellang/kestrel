@@ -373,26 +373,22 @@ extend VM {
         self.fns(fi).isGenerator = f.isGenerator;
         self.fns(fi).isAsync = f.isAsync;
 
-        // Declare everything the function's top scope holds.
-        let top = self.fns(fi).scopes.count - 1;
-        for n in boundNames(f.params) {
-            let _ = self.fns(fi).scopes(top).declare(n);
+        // Parameters with expressions get their own scope, so closures in
+        // them don't see the body's declarations; simple ones share it.
+        let separate = not paramsAreSimple(f.params);
+        let params = boundNames(f.params);
+        for n in params {
+            let _ = self.fns(fi).scopes(0).declare(n);
             let _ = self.fns(fi).paramNames.insert(n);
         }
-        var vars: [String] = [];
-        collectVarNames(body, vars);
-        for n in vars { let _ = self.fns(fi).scopes(top).declare(n); }
-        var lexicals: [String] = [];
-        var consts: [String] = [];
-        collectLexicalNames(body, false, lexicals, consts);
-        for n in lexicals {
-            let _ = self.fns(fi).scopes(top).declare(n);
-            let _ = self.fns(fi).scopes(top).lexicals.insert(n);
-        }
-        for n in consts { let _ = self.fns(fi).scopes(top).consts.insert(n); }
-        for fun in hoistedFunctions(body) { let _ = self.fns(fi).scopes(top).declare(fun.id ?? ""); }
         self.fns(fi).isMethod = flags.isMethod or flags.isClassConstructor;
-        if f.hasDirectEval { self.prepareDirectEval(fi); }
+        var lexicals: [String] = [];
+        if not separate {
+            lexicals = self.declareFunctionBody(fi, 0, body);
+            if f.hasDirectEval { self.prepareDirectEval(fi, 0); }
+        } else if f.hasDirectEval {
+            self.prepareDirectEval(fi, 0);
+        }
 
         // An async function's parameters run inside it, so their errors
         // reject its promise.
@@ -403,6 +399,10 @@ extend VM {
         for n in lexicals {
             let r = self.resolve(n);
             let _ = self.emit(.InitVar(hops: r.hops, slot: r.slot, src: t));
+        }
+        // Parameters are in their temporal dead zone until bound.
+        if separate {
+            for n in params { let _ = self.emit(.InitVar(hops: 0, slot: self.fns(fi).scopes(0).slots(n) ?? 0, src: t)); }
         }
         self.fns(fi).inParams = true;
         for i in 0..<f.params.count {
@@ -421,6 +421,7 @@ extend VM {
             self.freeRegs(to: mark);
         }
         self.fns(fi).inParams = false;
+        if separate { try self.enterFunctionBodyScope(fi, f, body, params); }
         for fun in hoistedFunctions(body) {
             let n = fun.id ?? "";
             let code = try self.compileFunction(fun, n, plainFlags());
@@ -447,6 +448,57 @@ extend VM {
             }
         }
         .Ok(self.endFunction(name, expectedArgumentCount(f.params), flags))
+    }
+
+    /// Declares a function body's vars, lexicals and functions in scope
+    /// `si` of function `fi`, returning the lexical names.
+    mutating func declareFunctionBody(fi: Int64, si: Int64, body: Array[Stmt]) -> Array[String] {
+        var vars: [String] = [];
+        collectVarNames(body, vars);
+        for n in vars { let _ = self.fns(fi).scopes(si).declare(n); }
+        var lexicals: [String] = [];
+        var consts: [String] = [];
+        collectLexicalNames(body, false, lexicals, consts);
+        for n in lexicals {
+            let _ = self.fns(fi).scopes(si).declare(n);
+            let _ = self.fns(fi).scopes(si).lexicals.insert(n);
+        }
+        for n in consts { let _ = self.fns(fi).scopes(si).consts.insert(n); }
+        for fun in hoistedFunctions(body) { let _ = self.fns(fi).scopes(si).declare(fun.id ?? ""); }
+        lexicals
+    }
+
+    /// After parameters with expressions: the body's own var scope. Vars
+    /// named like a parameter start with its value; lexicals start in
+    /// their temporal dead zone.
+    mutating func enterFunctionBodyScope(fi: Int64, f: Function, body: Array[Stmt], params: Array[String]) -> Result[(), SyntaxError] {
+        var sc = newCScope(false, false);
+        sc.isVarScope = true;
+        self.pushScope(sc);
+        let si = self.fns(fi).scopes.count - 1;
+        let lexicals = self.declareFunctionBody(fi, si, body);
+        if f.hasDirectEval and not self.fns(fi).strict {
+            let slot = self.fns(fi).scopes(si).declare("%evalvars");
+            self.fns(fi).scopes(si).hasEvalVars = true;
+            self.fns(fi).scopes(si).evalSlot = slot;
+        }
+        let _ = self.emit(.PushEnv(size: self.fns(fi).scopes(si).size));
+        if self.fns(fi).scopes(si).hasEvalVars { let _ = self.emit(.InitEvalVars(slot: self.fns(fi).scopes(si).evalSlot)); }
+        let mark = self.regMark();
+        let t = self.reg();
+        var vars: [String] = [];
+        collectVarNames(body, vars);
+        for n in vars {
+            if not params.contains(n) { continue; }
+            let _ = self.emit(.GetVar(dst: t, hops: 1, slot: self.fns(fi).scopes(0).slots(n) ?? 0, name: self.atom(n)));
+            let _ = self.emit(.InitVar(hops: 0, slot: self.fns(fi).scopes(si).slots(n) ?? 0, src: t));
+        }
+        self.load(t, Value.empty);
+        for n in lexicals {
+            let _ = self.emit(.InitVar(hops: 0, slot: self.fns(fi).scopes(si).slots(n) ?? 0, src: t));
+        }
+        self.freeRegs(to: mark);
+        .Ok(())
     }
 
     // ------------------------------------------------------------------
