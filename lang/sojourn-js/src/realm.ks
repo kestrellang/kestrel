@@ -108,6 +108,10 @@ extend VM {
         self.method(functionProto, "apply", .FunctionApply, 2);
         self.method(functionProto, "bind", .FunctionBind, 1);
         self.method(functionProto, "toString", .FunctionToString, 0);
+        // AddRestrictedFunctionProperties: `caller` and `arguments` throw.
+        let thrower = self.intrinsics.throwTypeError;
+        self.defineAccessorOwn(functionProto.asRef, self.atom("caller"), thrower, thrower, Attr.configurable);
+        self.defineAccessorOwn(functionProto.asRef, self.atom("arguments"), thrower, thrower, Attr.configurable);
         let hasInstance = self.nativeFunction(.FunctionHasInstance, "[Symbol.hasInstance]", 1, false);
         self.defineOwn(functionProto.asRef, symbolKey(WellKnown.hasInstance), hasInstance, 0);
 
@@ -228,6 +232,9 @@ extend VM {
         }
         self.method(symbolProto, "toString", .SymbolToString, 0);
         self.method(symbolProto, "valueOf", .SymbolValueOf, 0);
+        // Symbol.prototype[@@toPrimitive] is thisSymbolValue, like valueOf.
+        let symToPrim = self.nativeFunction(.SymbolValueOf, "[Symbol.toPrimitive]", 1, false);
+        self.defineOwn(symbolProto.asRef, symbolKey(WellKnown.toPrimitive), symToPrim, Attr.configurable);
         self.getter(symbolProto, "description", self.atom("description"), .SymbolDescription);
         let tagSym = self.str("Symbol");
         self.defineOwn(symbolProto.asRef, symbolKey(WellKnown.toStringTag), tagSym, Attr.configurable);

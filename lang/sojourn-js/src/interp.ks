@@ -333,6 +333,12 @@ extend VM {
             let proto = self.newObject();
             self.defineHidden(proto.asRef, self.names.constructor, f);
             self.defineOwn(r, self.names.prototype, proto, Attr.writable);
+            // Plain sloppy functions own `caller` and `arguments` (always
+            // undefined here), shadowing Function.prototype's throwers.
+            if not c.isStrict {
+                self.defineOwn(r, self.atom("caller"), Value.undefined, 0);
+                self.defineOwn(r, self.atom("arguments"), Value.undefined, 0);
+            }
         }
         f
     }
@@ -433,9 +439,15 @@ extend VM {
         }
     }
 
-    /// An unmapped `arguments` object.
+    /// The `arguments` object: mapped to the parameters in sloppy code
+    /// with simple parameters, else unmapped.
     mutating func makeArguments(fi: Int64) -> Value {
-        let a = self.newObjectKind(self.intrinsics.objectProto, .ArgumentsObject);
+        let slots = self.codes(self.frames(fi).code).argumentSlots;
+        var map: [Int64] = [];
+        let argc = self.frames(fi).args.count;
+        for i in 0..<argc { map.append(if i < slots.count { slots(i) } else { -1 }); }
+        let kind = if slots.isEmpty { ObjectKind.ArgumentsObject } else { ObjectKind.MappedArguments(env: self.frames(fi).funcEnv, map: map) };
+        let a = self.newObjectKind(self.intrinsics.objectProto, kind);
         let r = a.asRef;
         let args = self.frames(fi).args;
         for i in 0..<args.count {

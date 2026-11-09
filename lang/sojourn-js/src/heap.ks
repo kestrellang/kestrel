@@ -64,6 +64,9 @@ enum ObjectKind {
     case SymbolBox(Value)
     case BigIntBox(Value)
     case ArgumentsObject
+    /// A sloppy function's `arguments` with simple parameters: index i
+    /// aliases slot `map(i)` of the function's env `env` (-1: unmapped).
+    case MappedArguments(env: Int64, map: [Int64])
     /// A getter/setter pair stored in an accessor property's slot.
     case AccessorPair(getter: Value, setter: Value)
     /// For-in state: the keys left to visit.
@@ -423,6 +426,7 @@ struct Marker {
 /// Pushes the cells an object's internal slots refer to.
 func traceKind(kind: ObjectKind, mutating m: Marker) {
     match kind {
+        .MappedArguments(env, _) => m.envs.append(env),
         .Closure(_, env, home, fields) => {
             m.envs.append(env);
             m.values.append(home);

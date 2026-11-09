@@ -213,6 +213,15 @@ extend VM {
                     return .Some(PropertyRecord(value: Value.int(u.count), attrs: 0));
                 }
             },
+            .MappedArguments(env, map) => {
+                let i = self.indexOfKey(key);
+                if i >= 0 and i < map.count and map(i) >= 0 {
+                    let slot = self.shapeSlot(o.shape, key);
+                    if slot >= 0 and self.shapes(o.shape).attrs(slot) & Attr.accessor == 0 {
+                        return .Some(PropertyRecord(value: self.heap.envs(env).slots(map(i)), attrs: self.shapes(o.shape).attrs(slot)));
+                    }
+                }
+            },
             .TypedArrayObject(d) => {
                 // Numeric keys are elements or nothing, never shape slots.
                 if let .Some(n) = self.canonicalNumeric(key) {
@@ -294,6 +303,7 @@ extend VM {
 
     /// Writes an existing own data property, or an array element.
     mutating func writeOwn(r: Ref, key: Key, value: Value) {
+        self.writeMappedArgument(r, key, value);
         if let .ArrayObject = self.kindAt(r) {
             let i = self.indexOfKey(key);
             if i >= 0 and self.shapeSlot(self.heap.objects(r).shape, key) < 0 and self.isDenseIndex(r, i) {
@@ -375,8 +385,52 @@ extend VM {
         let slot = self.shapeSlot(o.shape, key);
         if slot < 0 { return true; }
         if self.shapes(o.shape).attrs(slot) & Attr.configurable == 0 { return false; }
+        self.unmapArgument(r, key);
         self.reshape(r, key, -1);
         true
+    }
+
+    // ------------------------------------------------------------------
+    // Mapped arguments
+    // ------------------------------------------------------------------
+
+    /// The env slot a mapped `arguments` index aliases, or -1.
+    func mappedArgumentSlot(r: Ref, key: Key) -> Int64 {
+        let kind = self.kindAt(r);
+        match kind {
+            .MappedArguments(_, map) => {
+                let i = self.indexOfKey(key);
+                if i >= 0 and i < map.count { return map(i); }
+                return -1;
+            },
+            _ => return -1
+        }
+    }
+
+    /// Writes through a mapped index to its parameter.
+    mutating func writeMappedArgument(r: Ref, key: Key, value: Value) {
+        let slot = self.mappedArgumentSlot(r, key);
+        if slot < 0 { return; }
+        if let .MappedArguments(env, _) = self.kindAt(r) { self.heap.envs(env).slots(slot) = value; }
+    }
+
+    /// Ends the alias for `key`, first saving the parameter's current
+    /// value in the property.
+    mutating func unmapArgument(r: Ref, key: Key) {
+        let slot = self.mappedArgumentSlot(r, key);
+        if slot < 0 { return; }
+        if let .MappedArguments(env, map) = self.kindAt(r) {
+            // Only a data property takes the parameter's value; an accessor
+            // keeps its getter/setter pair.
+            let shape = self.heap.objects(r).shape;
+            let own = self.shapeSlot(shape, key);
+            if own >= 0 and self.shapes(shape).attrs(own) & Attr.accessor == 0 {
+                self.heap.objects(r).slots(own) = self.heap.envs(env).slots(slot);
+            }
+            var m = map;
+            m(self.indexOfKey(key)) = -1;
+            self.heap.objects(r).kind = .MappedArguments(env: env, map: m);
+        }
     }
 
     /// [[OwnPropertyKeys]]: array indices ascending, then strings in

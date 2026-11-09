@@ -297,7 +297,7 @@ extend VM {
         self.fns.append(FnState(
             instrs: [], scopes: [], nextReg: 1, maxReg: 1, ctl: [], strict: strict,
             isArrow: isArrow, isScript: isScript, pendingLabels: [], chainJumps: [],
-            argumentsAt: 0, usesArguments: false, isDerivedCtor: false, hasFields: false,
+            argumentsAt: 0, argumentSlots: [], usesArguments: false, isDerivedCtor: false, hasFields: false,
             completion: -1, isGenerator: false, isAsync: false, isEval: false, isMethod: false, isFieldInit: false, inParams: false, paramNames: Set()
         ));
         var top = newCScope(true, isArrow);
@@ -321,7 +321,7 @@ extend VM {
             isConstructor: not flags.isArrow and not flags.isMethod and not f.isGenerator and not f.isAsync,
             isClassConstructor: flags.isClassConstructor, isDerived: flags.isDerived,
             isGenerator: f.isGenerator, isAsync: f.isAsync,
-            sourceName: self.sourceName
+            sourceName: self.sourceName, argumentSlots: f.argumentSlots
         );
         self.codes.append(code);
         self.codes.count - 1
@@ -382,6 +382,21 @@ extend VM {
             let _ = self.fns(fi).paramNames.insert(n);
         }
         self.fns(fi).isMethod = flags.isMethod or flags.isClassConstructor;
+        // Sloppy functions with simple parameters alias arguments[i] to
+        // parameter i; with duplicates, the last one wins.
+        if not strict and not separate and not flags.isArrow {
+            var slots: [Int64] = [];
+            var seen: [String] = [];
+            var i = params.count - 1;
+            while i >= 0 {
+                let n = params(i);
+                slots.append(if seen.contains(n) { -1 } else { self.fns(fi).scopes(0).slots(n) ?? -1 });
+                seen.append(n);
+                i = i - 1;
+            }
+            slots.reverse();
+            self.fns(fi).argumentSlots = slots;
+        }
         var lexicals: [String] = [];
         if not separate {
             lexicals = self.declareFunctionBody(fi, 0, body);

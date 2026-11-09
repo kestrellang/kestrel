@@ -256,4 +256,7 @@ struct Code {
     var isAsync: Bool
     /// Where the function line came from, for error messages.
     var sourceName: String
+    /// For a mapped `arguments` object: each argument index's env slot
+    /// (-1 for none). Empty when `arguments` is unmapped.
+    var argumentSlots: [Int64]
 }

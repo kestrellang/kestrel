@@ -128,6 +128,31 @@ extend VM {
     /// ValidateAndApplyPropertyDescriptor: defines or changes `key` on
     /// `r`, returning false when the change isn't allowed.
     mutating func defineProperty(r: Ref, key: Key, d: Descriptor) -> Result[Bool, Value] {
+        if self.mappedArgumentSlot(r, key) >= 0 { return self.defineMappedArgument(r, key, d); }
+        self.ordinaryDefineProperty(r, key, d)
+    }
+
+    /// [[DefineOwnProperty]] for a mapped `arguments` index (§10.4.4.2):
+    /// a new value goes to the parameter too; an accessor or a
+    /// non-writable value ends the alias.
+    mutating func defineMappedArgument(r: Ref, key: Key, d: Descriptor) -> Result[Bool, Value] {
+        var nd = d;
+        let isData = not isAccessorDescriptor(d);
+        if isData and d.value.isNone and d.writable == .Some(false) {
+            if let .Some(p) = self.ownProperty(r, key) { nd.value = .Some(p.value); }
+        }
+        let ok = try self.ordinaryDefineProperty(r, key, nd);
+        if not ok { return .Ok(false); }
+        if not isData {
+            self.unmapArgument(r, key);
+            return .Ok(true);
+        }
+        if let .Some(v) = d.value { self.writeMappedArgument(r, key, v); }
+        if d.writable == .Some(false) { self.unmapArgument(r, key); }
+        .Ok(true)
+    }
+
+    mutating func ordinaryDefineProperty(r: Ref, key: Key, d: Descriptor) -> Result[Bool, Value] {
         if let .ProxyObject(_, _) = self.kindAt(r) { return self.proxyDefine(Value.object(r), key, d); }
         // TypedArray [[DefineOwnProperty]] for numeric keys.
         if let .Some((ta, n)) = self.taKeyIndex(r, key) {
@@ -495,7 +520,7 @@ extend VM {
             .BooleanBox(_) => "Boolean",
             .NumberBox(_) => "Number",
             .StringBox(_) => "String",
-            .ArgumentsObject => "Arguments",
+            .ArgumentsObject or .MappedArguments(_, _) => "Arguments",
             .DateObject(_) => "Date",
             .RegExpObject(_, _, _) => "RegExp",
             _ => if self.isCallable(o) { "Function" } else { "Object" }

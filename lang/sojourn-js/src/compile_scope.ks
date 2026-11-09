@@ -99,6 +99,8 @@ struct FnState {
     var chainJumps: [[Int64]]
     /// Where `arguments` gets created if the body turns out to use it.
     var argumentsAt: Int64
+    /// See `Code.argumentSlots`.
+    var argumentSlots: [Int64]
     var usesArguments: Bool
     var isDerivedCtor: Bool
     /// The class whose constructor this is runs field initializers.
