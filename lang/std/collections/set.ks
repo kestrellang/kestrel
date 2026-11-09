@@ -1262,7 +1262,7 @@ extend Set[T, H]: Formattable where T: Formattable, T: Hashable, H: Hasher, H: D
     /// ```
     /// Set([1, 2, 3]).format();  // "{1, 2, 3}" — order unspecified
     /// Set[Int64]().format();    // "{}"
-    /// "\{Set([1, 2, 3])}";      // "{1, 2, 3}" via interpolation
+    /// "\(Set([1, 2, 3]))";      // "{1, 2, 3}" via interpolation
     /// ```
     public func format(mutating into writer: some Formatter, options: FormatOptions = FormatOptions.default()) {
         writer.append(char: '{');

@@ -287,7 +287,7 @@ public enum Optional[T]: not Copyable where T: not Static {
     ///
     /// ```
     /// getUser(id)
-    ///     .inspect { print("Found: \{it.name}") }
+    ///     .inspect { print("Found: \(it.name)") }
     ///     .map { it.email };
     /// ```
     public consuming func inspect(mutating fn: mutating (T) -> ()) -> Optional[T] {
@@ -737,9 +737,9 @@ extend Optional[T]: FromValue[T] {
 /// # Examples
 ///
 /// ```
-/// "\{Some(42)}";     // "Some(42)"
-/// "\{None}";         // "None"
-/// "\{Some(42):?}";   // "Optional.Some(42)"
+/// "\(Some(42))";     // "Some(42)"
+/// "\(None)";         // "None"
+/// "\(Some(42):?)";   // "Optional.Some(42)"
 /// ```
 extend Optional[T]: Formattable where T: Formattable {
 

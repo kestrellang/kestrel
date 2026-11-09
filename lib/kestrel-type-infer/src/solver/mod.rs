@@ -905,7 +905,18 @@ pub(super) fn carry_reason(r: SolveResult, reason: &Reason) -> SolveResult {
 pub(super) fn try_solve(ctx: &mut InferCtx<'_>, c: Constraint) -> SolveResult {
     ctx.solving_depth += 1;
     kestrel_debug::ktrace!("p5-solve", "d={} {:?}", ctx.solving_depth, c);
+    let site = match &c {
+        Constraint::Member { span, .. }
+        | Constraint::Call { span, .. }
+        | Constraint::OverloadedCall { span, .. } => Some(span.clone()),
+        _ => None,
+    };
+    let outer_site = match site {
+        Some(site) => ctx.formation_site.replace(site),
+        None => ctx.formation_site.clone(),
+    };
     let r = try_solve_inner(ctx, c);
+    ctx.formation_site = outer_site;
     kestrel_debug::ktrace!(
         "p5-solve",
         "  -> {}",
