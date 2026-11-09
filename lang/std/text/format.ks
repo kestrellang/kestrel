@@ -595,7 +595,7 @@ public struct DefaultStringInterpolation: Interpolatable, Cloneable {
     }
 
     /// Formats one interpolation hole directly into the buffer.
-    public mutating func appendInterpolation(value: some Formattable, options: FormatOptions = FormatOptions.default()) {
+    public mutating func appendInterpolation(value: some Formattable and not Static, options: FormatOptions = FormatOptions.default()) {
         value.format(into: self.builder, options);
     }
 

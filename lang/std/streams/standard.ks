@@ -130,13 +130,13 @@ public func standardError() -> StandardError { StandardError() }
 // ============================================================================
 
 /// Writes `value` to standard output.
-public func print(value: some Formattable) -> Result[(), IoError] {
+public func print(value: some Formattable and not Static) -> Result[(), IoError] {
     var out = StandardOutput();
     out.write(formatted: value)
 }
 
 /// Writes `value` and a `"\n"` to standard output.
-public func println(value: some Formattable) -> Result[(), IoError] {
+public func println(value: some Formattable and not Static) -> Result[(), IoError] {
     var out = StandardOutput();
     try out.write(formatted: value);
     out.write(byte: 10)
@@ -149,13 +149,13 @@ public func println() -> Result[(), IoError] {
 }
 
 /// Writes `value` to standard error.
-public func eprint(value: some Formattable) -> Result[(), IoError] {
+public func eprint(value: some Formattable and not Static) -> Result[(), IoError] {
     var err = StandardError();
     err.write(formatted: value)
 }
 
 /// Writes `value` and a `"\n"` to standard error.
-public func eprintln(value: some Formattable) -> Result[(), IoError] {
+public func eprintln(value: some Formattable and not Static) -> Result[(), IoError] {
     var err = StandardError();
     try err.write(formatted: value);
     err.write(byte: 10)
