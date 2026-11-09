@@ -1890,7 +1890,8 @@ impl WorldResolver<'_> {
             // protocol's (`Convertible[From].init(from: From)`): every
             // conformance fixes `From`. Collapsing would pin `I` to a
             // conformance's `From` and reject the call's real argument.
-            if self.generic_where_protocol_param(protocol, c, &proto_param_tys, &concrete_param_tys) {
+            if self.generic_where_protocol_param(protocol, c, &proto_param_tys, &concrete_param_tys)
+            {
                 return None;
             }
         }

@@ -324,7 +324,11 @@ pub(super) fn solve_overloaded_call(
                             .is_none_or(|tp| tp.0.is_empty())
                     })
                     .collect();
-                if concrete.len() == 1 { concrete } else { compatible }
+                if concrete.len() == 1 {
+                    concrete
+                } else {
+                    compatible
+                }
             } else {
                 compatible
             };
