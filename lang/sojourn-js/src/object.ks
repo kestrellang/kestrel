@@ -203,6 +203,14 @@ extend VM {
                     return .Some(PropertyRecord(value: Value.int(u.count), attrs: 0));
                 }
             },
+            .TypedArrayObject(d) => {
+                // Numeric keys are elements or nothing, never shape slots.
+                if let .Some(n) = self.canonicalNumeric(key) {
+                    if not self.taValidIndex(d, n) { return .None; }
+                    let v = self.taGet(d, n.toInt64() ?? 0);
+                    return .Some(PropertyRecord(value: v, attrs: Attr.writable | Attr.enumerable | Attr.configurable));
+                }
+            },
             _ => {}
         }
         let slot = self.shapeSlot(o.shape, key);
@@ -329,6 +337,9 @@ extend VM {
                 let i = self.indexOfKey(key);
                 if (i >= 0 and i < self.units(s).count) or self.isLengthKey(key) { return false; }
             },
+            .TypedArrayObject(d) => {
+                if let .Some(n) = self.canonicalNumeric(key) { return not self.taValidIndex(d, n); }
+            },
             _ => {}
         }
         let slot = self.shapeSlot(o.shape, key);
@@ -353,6 +364,9 @@ extend VM {
             },
             .StringBox(s) => {
                 for i in 0..<self.units(s).count { indices.append(i); }
+            },
+            .TypedArrayObject(d) => {
+                for i in 0..<self.taLength(d) { indices.append(i); }
             },
             _ => {}
         }
@@ -388,6 +402,11 @@ extend VM {
         var cur = obj;
         while cur.isObject {
             let r = cur.asRef;
+            // A typed array's numeric keys never reach its prototype.
+            if let .Some((d, n)) = self.taKeyIndex(r, key) {
+                if not self.taValidIndex(d, n) { return .Ok(Value.undefined); }
+                return .Ok(self.taGet(d, n.toInt64() ?? 0));
+            }
             if let .Some(p) = self.ownPropertyValue(r, key) {
                 if p.attrs & Attr.accessor != 0 {
                     if let .AccessorPair(getter, _) = self.kindAt(p.value.asRef) {
@@ -436,6 +455,15 @@ extend VM {
         var cur = obj;
         while cur.isObject {
             let r = cur.asRef;
+            // TypedArray [[Set]]: write the element when the typed array is
+            // the receiver; an invalid index silently does nothing.
+            if let .Some((d, n)) = self.taKeyIndex(r, key) {
+                if cur.same(receiver) {
+                    try self.taSetElement(d, n, value);
+                    return .Ok(true);
+                }
+                if not self.taValidIndex(d, n) { return .Ok(true); }
+            }
             if let .Some(p) = self.ownProperty(r, key) {
                 if p.attrs & Attr.accessor != 0 {
                     if let .AccessorPair(_, setter) = self.kindAt(p.value.asRef) {
@@ -455,6 +483,12 @@ extend VM {
         }
         if not receiver.isObject { return .Ok(false); }
         let rr = receiver.asRef;
+        // A typed array receiver defines elements through its own [[DefineOwnProperty]].
+        if let .Some((d, n)) = self.taKeyIndex(rr, key) {
+            if not self.taValidIndex(d, n) { return .Ok(false); }
+            try self.taSetElement(d, n, value);
+            return .Ok(true);
+        }
         if let .Some(p) = self.ownProperty(rr, key) {
             if p.attrs & Attr.accessor != 0 or p.attrs & Attr.writable == 0 { return .Ok(false); }
             self.writeOwn(rr, key, value);
@@ -480,6 +514,7 @@ extend VM {
     mutating func hasProperty(obj: Value, key: Key) -> Bool {
         var cur = obj;
         while cur.isObject {
+            if let .Some((d, n)) = self.taKeyIndex(cur.asRef, key) { return self.taValidIndex(d, n); }
             if self.hasOwn(cur.asRef, key) { return true; }
             cur = self.heap.objects(cur.asRef).proto;
         }

@@ -61,6 +61,7 @@ extend VM {
         self.setupPromise();
         self.setupIterator();
         self.setupSetMethods();
+        self.setupTypedArrays();
         let objectCtor = self.ownValue(g.asRef, self.atom("Object"));
         self.method(objectCtor, "groupBy", .ObjectGroupBy, 2);
 

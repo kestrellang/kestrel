@@ -72,6 +72,10 @@ struct Intrinsics {
     var asyncGeneratorProto: Value
     var iteratorHelperProto: Value
     var wrapForValidIteratorProto: Value
+    var arrayBufferProto: Value
+    var typedArrayProto: Value
+    var typedArrayCtor: Value
+    var dataViewProto: Value
 }
 
 /// Well-known symbols, by symbol id.
@@ -154,6 +158,9 @@ struct VM {
     var regexCache: [String: Int64]
     /// Promise jobs waiting to run, oldest first (`runJobs`).
     var jobs: [Job]
+    /// The concrete typed array prototypes and constructors, by TAKind.
+    var typedArrayProtos: [Value]
+    var typedArrayCtors: [Value]
 
     init() {
         self.heap = Heap();
@@ -189,7 +196,8 @@ struct VM {
             regexpStringIteratorProto: u,
             throwTypeError: u, promiseCtor: u, promiseProto: u, asyncFunctionProto: u, aggregateErrorProto: u,
             asyncIteratorProto: u, asyncFromSyncIteratorProto: u, asyncGeneratorFunctionProto: u, asyncGeneratorProto: u,
-            iteratorHelperProto: u, wrapForValidIteratorProto: u
+            iteratorHelperProto: u, wrapForValidIteratorProto: u,
+            arrayBufferProto: u, typedArrayProto: u, typedArrayCtor: u, dataViewProto: u
         );
         self.sourceName = "";
         self.depth = 0;
@@ -197,6 +205,8 @@ struct VM {
         self.regexPrograms = [];
         self.regexCache = [:];
         self.jobs = [];
+        self.typedArrayProtos = [];
+        self.typedArrayCtors = [];
         self.globalEnv = self.heap.allocEnv(Env(slots: [], parent: -1));
         self.names = Names(
             length: self.atom("length"), prototype: self.atom("prototype"), constructor: self.atom("constructor"),
@@ -314,14 +324,18 @@ struct VM {
     /// Every intrinsic, for the GC. A new `Intrinsics` field goes here too.
     func intrinsicValues() -> Array[Value] {
         let i = self.intrinsics;
-        [i.objectProto, i.functionProto, i.arrayProto, i.stringProto, i.numberProto, i.booleanProto,
+        var out: Array[Value] = [i.objectProto, i.functionProto, i.arrayProto, i.stringProto, i.numberProto, i.booleanProto,
          i.symbolProto, i.errorProto, i.typeErrorProto, i.rangeErrorProto, i.referenceErrorProto,
          i.syntaxErrorProto, i.evalErrorProto, i.uriErrorProto, i.iteratorProto,
          i.arrayIteratorProto, i.stringIteratorProto, i.regexpProto, i.mapIteratorProto,
          i.setIteratorProto, i.generatorProto, i.generatorFunctionProto, i.regexpStringIteratorProto,
          i.throwTypeError, i.promiseCtor, i.promiseProto, i.asyncFunctionProto, i.aggregateErrorProto,
          i.asyncIteratorProto, i.asyncFromSyncIteratorProto, i.asyncGeneratorFunctionProto, i.asyncGeneratorProto,
-         i.iteratorHelperProto, i.wrapForValidIteratorProto]
+         i.iteratorHelperProto, i.wrapForValidIteratorProto,
+         i.arrayBufferProto, i.typedArrayProto, i.typedArrayCtor, i.dataViewProto];
+        for v in self.typedArrayProtos { out.append(v); }
+        for v in self.typedArrayCtors { out.append(v); }
+        out
     }
 
     mutating func pushRoot(v: Value) { self.roots.append(v); }

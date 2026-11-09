@@ -155,6 +155,7 @@ extend VM {
                 return self.run(stop + 1);
             },
             .NativeFunction(n) => return self.callNative(n, f, Value.undefined, args, newTarget),
+            .NativeClosure(n, _) => return self.callNative(n, f, Value.undefined, args, newTarget),
             .BoundFunction(target, _, boundArgs) => {
                 var all = boundArgs;
                 for a in args { all.append(a); }

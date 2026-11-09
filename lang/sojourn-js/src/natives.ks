@@ -156,6 +156,57 @@ enum NativeFn {
     case AsyncGeneratorFunctionCtor
     // Set methods
     case SetUnion
+    // Typed arrays
+    case ArrayBufferCtor
+    case ArrayBufferIsView
+    case ArrayBufferByteLength
+    case ArrayBufferSlice
+    case DetachArrayBuffer
+    case TypedArrayCtor
+    case TypedArrayKindCtor
+    case TypedArrayFrom
+    case TypedArrayOf
+    case TABuffer
+    case TAByteLength
+    case TAByteOffset
+    case TALength
+    case TAToStringTag
+    case TAAt
+    case TACopyWithin
+    case TAEntries
+    case TAEvery
+    case TAFill
+    case TAFilter
+    case TAFind
+    case TAFindIndex
+    case TAFindLast
+    case TAFindLastIndex
+    case TAForEach
+    case TAIncludes
+    case TAIndexOf
+    case TAJoin
+    case TAKeys
+    case TALastIndexOf
+    case TAMap
+    case TAReduce
+    case TAReduceRight
+    case TAReverse
+    case TASet
+    case TASlice
+    case TASome
+    case TASort
+    case TASubarray
+    case TAToLocaleString
+    case TAToReversed
+    case TAToSorted
+    case TAValues
+    case TAWith
+    case DataViewCtor
+    case DVBuffer
+    case DVByteLength
+    case DVByteOffset
+    case DVGet
+    case DVSet
     case SetIntersection
     case SetDifference
     case SetSymmetricDifference
@@ -485,6 +536,7 @@ extend VM {
         if let .Some(r) = try self.asyncIterationNative(n, callee, this, args) { return .Ok(r); }
         if let .Some(r) = try self.iteratorNative(n, callee, this, args, newTarget) { return .Ok(r); }
         if let .Some(r) = try self.setMethodsNative(n, this, args) { return .Ok(r); }
+        if let .Some(r) = try self.typedArrayNative(n, callee, this, args, newTarget) { return .Ok(r); }
         self.throwType("built-in not implemented")
     }
 

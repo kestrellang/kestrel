@@ -76,6 +76,15 @@ extend VM {
     /// ValidateAndApplyPropertyDescriptor: defines or changes `key` on
     /// `r`, returning false when the change isn't allowed.
     mutating func defineProperty(r: Ref, key: Key, d: Descriptor) -> Result[Bool, Value] {
+        // TypedArray [[DefineOwnProperty]] for numeric keys.
+        if let .Some((ta, n)) = self.taKeyIndex(r, key) {
+            if not self.taValidIndex(ta, n) { return .Ok(false); }
+            if not (d.configurable ?? true) or not (d.enumerable ?? true) or isAccessorDescriptor(d) or not (d.writable ?? true) {
+                return .Ok(false);
+            }
+            if let .Some(v) = d.value { try self.taSetElement(ta, n, v); }
+            return .Ok(true);
+        }
         let current = self.ownProperty(r, key);
         let isArrayObject = match self.kindAt(r) { .ArrayObject => true, _ => false };
         if isArrayObject and self.isLengthKey(key) {
