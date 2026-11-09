@@ -9,10 +9,10 @@ func main() {
     let len = digits * 10 / 3 + 1;
     var a = Array[Int64](repeating: 2, count: len);
     var out = StringBuilder();
-    var nines: Int64 = 0;
-    var predigit: Int64 = 0;
+    var nines = 0;
+    var predigit = 0;
     for j in 0..<digits {
-        var q: Int64 = 0;
+        var q = 0;
         var i = len;
         while i > 0 {
             let x = 10 * a(i - 1) + q * i;

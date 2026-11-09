@@ -3,7 +3,7 @@
 module Main
 
 func gnomeSort[T](mutating a: Array[T]) where T: Comparable {
-    var i: Int64 = 1;
+    var i = 1;
     while i < a.count {
         if a(i - 1) <= a(i) {
             i = i + 1;

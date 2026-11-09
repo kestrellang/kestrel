@@ -23,7 +23,7 @@ func main() {
     board(0) = 1;
     for move in 2..=64 {
         var bestK: Int64 = -1;
-        var bestDegree: Int64 = 9;
+        var bestDegree = 9;
         for k in 0..<8 {
             let nx = x + dx(k);
             let ny = y + dy(k);

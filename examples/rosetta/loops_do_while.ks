@@ -4,7 +4,7 @@ module Main
 
 @main
 func main() {
-    var value: Int64 = 0;
+    var value = 0;
     loop {
         value = value + 1;
         println(value);

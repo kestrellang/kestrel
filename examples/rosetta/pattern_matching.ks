@@ -51,7 +51,7 @@ func show(t: Tree) -> String {
     match t {
         .Empty => "E",
         .Node(c, l, v, r) => {
-            let tag: String = match c { .Red => "R", .Black => "B" };
+            let tag = match c { .Red => "R", .Black => "B" };
             "(\(tag) \(show(l)) \(v) \(show(r)))"
         },
     }

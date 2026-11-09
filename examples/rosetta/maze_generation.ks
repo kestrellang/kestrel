@@ -18,10 +18,10 @@ func main() {
         let x = cell % w;
         let y = cell / w;
         var options = Array[Int64]();
-        if x > 0 and visited(cell - 1) == false { options.append(cell - 1); }
-        if x < w - 1 and visited(cell + 1) == false { options.append(cell + 1); }
-        if y > 0 and visited(cell - w) == false { options.append(cell - w); }
-        if y < h - 1 and visited(cell + w) == false { options.append(cell + w); }
+        if x > 0 and not visited(cell - 1) { options.append(cell - 1); }
+        if x < w - 1 and not visited(cell + 1) { options.append(cell + 1); }
+        if y > 0 and not visited(cell - w) { options.append(cell - w); }
+        if y < h - 1 and not visited(cell + w) { options.append(cell + w); }
         if options.isEmpty {
             stack.pop();
             continue
@@ -43,8 +43,8 @@ func main() {
         bottom.append("+");
         for x in 0..<w {
             let i = y * w + x;
-            top.append(if right(i) == true { "   |" } else { "    " });
-            bottom.append(if down(i) == true { "---+" } else { "   +" });
+            top.append(if right(i) { "   |" } else { "    " });
+            bottom.append(if down(i) { "---+" } else { "   +" });
         }
         println(top.build());
         println(bottom.build());

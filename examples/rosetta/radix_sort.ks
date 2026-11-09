@@ -7,7 +7,7 @@ func radixSort(input: Array[Int64]) -> Array[Int64] {
     let offset = input.min() ?? 0;
     var a = input.map { it - offset };
     let largest = a.max() ?? 0;
-    var place: Int64 = 1;
+    var place = 1;
     while largest / place > 0 {
         var buckets = Array(of: 10, generatedBy: { (_) in Array[Int64]() });
         for x in a { buckets((x / place) % 10).append(x); }

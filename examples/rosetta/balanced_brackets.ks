@@ -3,7 +3,7 @@
 module Main
 
 func isBalanced(s: String) -> Bool {
-    var depth: Int64 = 0;
+    var depth = 0;
     for c in s.chars {
         depth = depth + (if c == '[' { 1 } else { -1 });
         if depth < 0 { return false }

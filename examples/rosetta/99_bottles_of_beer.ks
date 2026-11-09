@@ -3,7 +3,7 @@
 module Main
 
 func bottles(n: Int64) -> String {
-    let s: String = match n {
+    let s = match n {
         0 => "No more bottles",
         1 => "1 bottle",
         _ => "\(n) bottles",

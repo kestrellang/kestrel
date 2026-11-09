@@ -5,7 +5,7 @@ module Main
 func primeFactors(n: Int64) -> Array[Int64] {
     var factors = Array[Int64]();
     var rest = n;
-    var d: Int64 = 2;
+    var d = 2;
     while d * d <= rest {
         while rest % d == 0 {
             factors.append(d);

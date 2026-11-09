@@ -4,7 +4,7 @@ module Main
 
 // Reverse the first k elements.
 func flip(mutating a: Array[Int64], k: Int64) {
-    var lo: Int64 = 0;
+    var lo = 0;
     var hi = k - 1;
     while lo < hi {
         a.swap(at: lo, with: hi);
@@ -14,11 +14,11 @@ func flip(mutating a: Array[Int64], k: Int64) {
 }
 
 func pancakeSort(mutating a: Array[Int64]) -> Int64 {
-    var flips: Int64 = 0;
+    var flips = 0;
     var size = a.count;
     while size > 1 {
         // Find the largest pancake in the unsorted stack, flip it to the top, then to the bottom.
-        var top: Int64 = 0;
+        var top = 0;
         for i in 1..<size { if a(i) > a(top) { top = i; } }
         if top != size - 1 {
             if top != 0 { flip(a, top + 1); flips = flips + 1; }

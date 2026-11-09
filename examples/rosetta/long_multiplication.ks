@@ -8,7 +8,7 @@ func multiply(a: String, b: String) -> String {
     let y = b.chars.reversed.iter().map { Int64(from: it.digitValue() ?? 0) }.collect();
     var digits = Array[Int64](repeating: 0, count: x.count + y.count);
     for i in 0..<x.count {
-        var carry: Int64 = 0;
+        var carry = 0;
         for j in 0..<y.count {
             let t = digits(i + j) + x(i) * y(j) + carry;
             digits(i + j) = t % 10;

@@ -4,7 +4,7 @@ module Main
 
 func digitSum(n: Int64, base: Int64) -> Int64 {
     var rest = n;
-    var sum: Int64 = 0;
+    var sum = 0;
     while rest > 0 {
         sum = sum + rest % base;
         rest = rest / base;

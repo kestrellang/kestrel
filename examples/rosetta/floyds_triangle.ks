@@ -6,7 +6,7 @@ func floyd(rows: Int64) {
     // Each column is as wide as the number in it on the last row.
     let lastStart = rows * (rows - 1) / 2 + 1;
     let widths = (0..<rows).iter().map { "\(lastStart + it)".chars.count }.collect();
-    var n: Int64 = 1;
+    var n = 1;
     for row in 1..=rows {
         var cells = Array[String]();
         for col in 0..<row {

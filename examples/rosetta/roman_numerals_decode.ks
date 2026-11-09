@@ -13,7 +13,7 @@ func value(of c: Char) -> Int64 {
 // A symbol smaller than the one after it is subtracted (the I in IV).
 func fromRoman(s: String) -> Int64 {
     let digits = s.chars.iter().map { value(of: it) }.collect();
-    var total: Int64 = 0;
+    var total = 0;
     for (i, d) in digits.iter().enumerate() {
         if i + 1 < digits.count and d < digits(i + 1) {
             total = total - d;

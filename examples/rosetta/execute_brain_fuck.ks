@@ -16,8 +16,8 @@ func run(program: String) -> String {
         }
     }
     var tape = Array[UInt8](repeating: 0, count: 30000);
-    var ptr: Int64 = 0;
-    var pc: Int64 = 0;
+    var ptr = 0;
+    var pc = 0;
     var out = Array[UInt8]();
     while pc < code.count {
         match code(pc) {

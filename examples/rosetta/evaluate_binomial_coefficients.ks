@@ -6,7 +6,7 @@ module Main
 func binomial(n: Int64, k: Int64) -> Int64 {
     if k < 0 or k > n { return 0 }
     let kk = if k > n - k { n - k } else { k };
-    var result: Int64 = 1;
+    var result = 1;
     for i in 1..=kk {
         result = result * (n - kk + i) / i;
     }

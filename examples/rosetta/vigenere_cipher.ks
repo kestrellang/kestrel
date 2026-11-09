@@ -5,8 +5,8 @@ module Main
 // Letters only, uppercased; everything else is dropped.
 func letters(s: String) -> Array[Int64] {
     s.uppercased().chars.iter()
-        .filter(where: { it.isAsciiUppercase })
-        .map(as: { Int64(from: it.value() - 'A'.value()) })
+        .filter { it.isAsciiUppercase }
+        .map { Int64(from: it.value() - 'A'.value()) }
         .collect()
 }
 

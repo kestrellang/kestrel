@@ -9,7 +9,7 @@ func shift(c: Char, by key: Int64) -> Char {
 }
 
 func caesar(text: String, key: Int64) -> String {
-    text.chars.iter().map { shift(it, by: key) }.collect().joined("")
+    String(from: text.chars.iter().map { shift(it, by: key) }.collect())
 }
 
 @main

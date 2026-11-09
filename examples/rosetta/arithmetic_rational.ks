@@ -68,7 +68,7 @@ func main() {
 
     for candidate in 2..<(1 << 19) {
         var sum = Rational(1, candidate);
-        var f: Int64 = 2;
+        var f = 2;
         while f * f <= candidate {
             if candidate % f == 0 {
                 sum = sum + Rational(1, f) + Rational(1, candidate / f);

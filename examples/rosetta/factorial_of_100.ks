@@ -9,7 +9,7 @@ struct BigNat {
     init(small n: Int64) { self.limbs = [n]; }
 
     mutating func multiply(by m: Int64) {
-        var carry: Int64 = 0;
+        var carry = 0;
         for i in 0..<self.limbs.count {
             let t = self.limbs(i) * m + carry;
             self.limbs(i) = t % 1000000000;

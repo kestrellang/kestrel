@@ -12,10 +12,10 @@ let scales: Array[String] = ["", " thousand", " million", " billion", " trillion
 func belowThousand(n: Int64) -> String {
     if n < 20 { return small(n) }
     if n < 100 {
-        let rest: String = if n % 10 == 0 { "" } else { "-\(small(n % 10))" };
+        let rest = if n % 10 == 0 { "" } else { "-\(small(n % 10))" };
         return "\(tens(n / 10))\(rest)"
     }
-    let rest: String = if n % 100 == 0 { "" } else { " and \(belowThousand(n % 100))" };
+    let rest = if n % 100 == 0 { "" } else { " and \(belowThousand(n % 100))" };
     "\(small(n / 100)) hundred\(rest)"
 }
 
@@ -24,7 +24,7 @@ func spell(n: Int64) -> String {
     if n < 0 { return "minus \(spell(-n))" }
     var groups = Array[String]();
     var rest = n;
-    var scale: Int64 = 0;
+    var scale = 0;
     while rest > 0 {
         let group = rest % 1000;
         if group != 0 { groups.insert("\(belowThousand(group))\(scales(scale))", at: 0); }

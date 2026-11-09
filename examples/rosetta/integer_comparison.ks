@@ -6,7 +6,7 @@ func compare(a: Int64, b: Int64) {
     if a < b { println("\(a) is less than \(b)"); }
     if a == b { println("\(a) is equal to \(b)"); }
     if a > b { println("\(a) is greater than \(b)"); }
-    let word: String = match a.compare(b) {
+    let word = match a.compare(b) {
         .Less => "Less",
         .Equal => "Equal",
         .Greater => "Greater",

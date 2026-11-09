@@ -10,7 +10,7 @@ func isPalindrome(s: String) -> Bool {
 
 // Inexact version: ignore case and anything that isn't a letter or digit.
 func isPalindromeInexact(s: String) -> Bool {
-    let cleaned = s.chars.iter().filter { it.isAsciiAlphanumeric }.collect().joined("");
+    let cleaned = String(from: s.chars.iter().filter { it.isAsciiAlphanumeric }.collect());
     isPalindrome(cleaned.lowercased())
 }
 

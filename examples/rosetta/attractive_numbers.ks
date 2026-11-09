@@ -4,7 +4,7 @@ module Main
 
 func isPrime(n: Int64) -> Bool {
     if n < 2 { return false }
-    var d: Int64 = 2;
+    var d = 2;
     while d * d <= n {
         if n % d == 0 { return false }
         d = d + 1;
@@ -14,8 +14,8 @@ func isPrime(n: Int64) -> Bool {
 
 func primeFactorCount(n: Int64) -> Int64 {
     var rest = n;
-    var count: Int64 = 0;
-    var d: Int64 = 2;
+    var count = 0;
+    var d = 2;
     while d * d <= rest {
         while rest % d == 0 { rest = rest / d; count = count + 1; }
         d = d + 1;

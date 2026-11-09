@@ -6,9 +6,9 @@ func primes(upTo limit: Int64) -> Array[Int64] {
     var isPrime = Array[Bool](repeating: true, count: limit + 1);
     isPrime(0) = false;
     isPrime(1) = false;
-    var i: Int64 = 2;
+    var i = 2;
     while i * i <= limit {
-        if isPrime(i) == true {
+        if isPrime(i) {
             var j = i * i;
             while j <= limit {
                 isPrime(j) = false;

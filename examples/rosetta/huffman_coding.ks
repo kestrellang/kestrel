@@ -38,7 +38,7 @@ func main() {
     var counts = Dictionary[Char, Int64]();
     for c in text.chars { counts(c, default: 0) += 1; }
     var heap = Heap[Entry]();
-    var order: Int64 = 0;
+    var order = 0;
     for c in counts.keys.iter().collect().sorted() {
         heap.push(Entry(weight: counts(c) ?? 0, order: order, node: .Leaf(c)));
         order = order + 1;
@@ -52,7 +52,7 @@ func main() {
     var codes = Array[(Char, String)]();
     if let some root = heap.pop() { collectCodes(root.node, "", codes); }
     codes.sort(byKey: { it.0 });
-    var bits: Int64 = 0;
+    var bits = 0;
     for (c, code) in codes {
         let n = counts(c) ?? 0;
         bits = bits + n * code.chars.count;

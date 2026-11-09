@@ -5,7 +5,7 @@ module Main
 // Exponentiation by squaring, for integer and floating-point bases.
 // (Overloads must differ in labels, not just parameter types.)
 func power(base: Int64, exponent: Int64) -> Int64 {
-    var result: Int64 = 1;
+    var result = 1;
     var b = base;
     var e = exponent;
     while e > 0 {

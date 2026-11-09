@@ -4,7 +4,7 @@ module Main
 
 // Bubble sort that alternates direction on each pass.
 func cocktailSort[T](mutating a: Array[T]) where T: Comparable {
-    var lo: Int64 = 0;
+    var lo = 0;
     var hi = a.count - 1;
     var swapped = true;
     while swapped {

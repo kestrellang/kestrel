@@ -4,8 +4,8 @@ module Main
 
 func mobius(n: Int64) -> Int64 {
     var rest = n;
-    var sign: Int64 = 1;
-    var p: Int64 = 2;
+    var sign = 1;
+    var p = 2;
     while p * p <= rest {
         if rest % p == 0 {
             rest = rest / p;

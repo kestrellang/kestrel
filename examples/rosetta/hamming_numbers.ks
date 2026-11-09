@@ -5,9 +5,9 @@ module Main
 // Dijkstra's three-pointer merge of 2h, 3h and 5h.
 func hamming(count: Int64) -> Array[Int64] {
     var h: Array[Int64] = [1];
-    var i2: Int64 = 0;
-    var i3: Int64 = 0;
-    var i5: Int64 = 0;
+    var i2 = 0;
+    var i3 = 0;
+    var i5 = 0;
     while h.count < count {
         let next2 = h(i2) * 2;
         let next3 = h(i3) * 3;

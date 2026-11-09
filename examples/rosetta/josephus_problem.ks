@@ -6,7 +6,7 @@ module Main
 func josephus(n: Int64, k: Int64) -> Array[Int64] {
     var circle = Array(of: n, generatedBy: { it });
     var order = Array[Int64]();
-    var i: Int64 = 0;
+    var i = 0;
     while not circle.isEmpty {
         i = (i + k - 1) % circle.count;
         order.append(circle.remove(at: i));

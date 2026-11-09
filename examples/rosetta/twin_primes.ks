@@ -6,9 +6,9 @@ module Main
 func main() {
     let limit: Int64 = 10000000;
     var composite = Array[Bool](repeating: false, count: limit + 3);
-    var i: Int64 = 2;
+    var i = 2;
     while i * i <= limit + 2 {
-        if composite(i) == false {
+        if not composite(i) {
             var j = i * i;
             while j <= limit + 2 {
                 composite(j) = true;
@@ -17,10 +17,10 @@ func main() {
         }
         i = i + 1;
     }
-    var power: Int64 = 10;
-    var count: Int64 = 0;
+    var power = 10;
+    var count = 0;
     for p in 3..<limit {
-        if composite(p) == false and composite(p + 2) == false and p + 2 < power {
+        if not composite(p) and not composite(p + 2) and p + 2 < power {
             count = count + 1;
         }
         if p + 1 == power {

@@ -9,7 +9,7 @@ func isEven(n: Int64) -> Bool { n % 2 == 0 }
 func ethiopian(a: Int64, b: Int64) -> Int64 {
     var left = a;
     var right = b;
-    var total: Int64 = 0;
+    var total = 0;
     while left >= 1 {
         let kept = if isEven(left) { "STRUCK" } else { "KEPT" };
         println("\(left:>4) \(right:>6) \(kept)");

@@ -9,7 +9,7 @@ func encode(bytes: Array[UInt8]) -> String {
     var out = StringBuilder();
     for chunk in bytes.chunks(of: 3).toArray() {
         // Pack up to three bytes into 24 bits, then emit four 6-bit digits.
-        var n: Int64 = 0;
+        var n = 0;
         for i in 0..<3 {
             n = n << 8;
             if i < chunk.count { n = n | Int64(from: chunk(i)); }
@@ -28,8 +28,8 @@ func encode(bytes: Array[UInt8]) -> String {
 func decode(text: String) -> Array[UInt8] {
     let table = alphabet.chars.iter().collect();
     var out = Array[UInt8]();
-    var n: Int64 = 0;
-    var bits: Int64 = 0;
+    var n = 0;
+    var bits = 0;
     for c in text.chars {
         guard let some v = table.firstIndex(of: c) else { continue }
         n = (n << 6) | v;

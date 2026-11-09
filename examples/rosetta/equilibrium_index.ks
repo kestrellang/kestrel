@@ -4,7 +4,7 @@ module Main
 
 func equilibria(a: Array[Int64]) -> Array[Int64] {
     let total = a.iter().sum();
-    var left: Int64 = 0;
+    var left = 0;
     var result = Array[Int64]();
     for (i, x) in a.iter().enumerate() {
         if left == total - left - x { result.append(i); }

@@ -13,5 +13,5 @@ func rot13(c: Char) -> Char {
 @main
 func main() {
     let text = "Why did the chicken cross the road? Gb trg gb gur bgure fvqr!";
-    println(text.chars.iter().map { rot13(it) }.collect().joined(""));
+    println(String(from: text.chars.iter().map { rot13(it) }.collect()));
 }
