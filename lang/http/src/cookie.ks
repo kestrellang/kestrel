@@ -153,8 +153,8 @@ public func parseCookieHeader(headerValue: String) -> Array[(String, String)] {
         let trimmedPart = part.trimmed();
         match trimmedPart.firstIndex(of: "=") {
             .Some(eqIdx) => {
-                let name = trimmedPart.subslice(from: trimmedPart.start, to: eqIdx.value).trimmed().toOwned();
-                let value = trimmedPart.subslice(from: eqIdx.value + 1, to: trimmedPart.end).trimmed().toOwned();
+                let name = trimmedPart.subslice(from: 0, to: eqIdx.value).trimmed().toOwned();
+                let value = trimmedPart.subslice(from: eqIdx.value + 1, to: trimmedPart.bytes.count).trimmed().toOwned();
                 result.append((name, value))
             },
             .None => {}

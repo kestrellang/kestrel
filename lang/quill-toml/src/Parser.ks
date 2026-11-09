@@ -94,8 +94,8 @@ func parseKeyValue(line: String, lineNum: Int64) -> (String, Value) throws TomlP
     }
 
     let lineSlice = line.asSlice();
-    let rawKey = lineSlice.subslice(from: lineSlice.start, to: eqPos).trimmed().toOwned();
-    let rawValue = lineSlice.subslice(from: eqPos + 1, to: lineSlice.end).trimmed().toOwned();
+    let rawKey = lineSlice.subslice(from: 0, to: eqPos).trimmed().toOwned();
+    let rawValue = lineSlice.subslice(from: eqPos + 1, to: lineSlice.bytes.count).trimmed().toOwned();
 
     let value = try parseTomlValue(stripInlineComment(rawValue), lineNum);
     .Ok((parseKey(rawKey), value))

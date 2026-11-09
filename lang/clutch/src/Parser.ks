@@ -56,8 +56,8 @@ public func parseCommand(
 
             match restSlice.firstIndex(of: "=") {
                 .Some(eqPos) => {
-                    let name = restSlice.subslice(from: restSlice.start, to: eqPos.value).toOwned();
-                    let value = restSlice.subslice(from: eqPos.value + 1, to: restSlice.end).toOwned();
+                    let name = restSlice.subslice(from: 0, to: eqPos.value).toOwned();
+                    let value = restSlice.subslice(from: eqPos.value + 1, to: restSlice.bytes.count).toOwned();
                     let argDef = try findByLong(arguments, name);
                     if argDef.isFlag {
                         var msg = String();
@@ -103,7 +103,7 @@ public func parseCommand(
                     charPos = charPos + 1
                 } else {
                     if charPos + 1 < token.bytes.count {
-                        let value = tokenSlice.subslice(from: charPos + 1, to: tokenSlice.end).toOwned();
+                        let value = tokenSlice.subslice(from: charPos + 1, to: tokenSlice.bytes.count).toOwned();
                         matches.setValue(name: argDef.name, value: value);
                         charPos = token.bytes.count
                     } else {

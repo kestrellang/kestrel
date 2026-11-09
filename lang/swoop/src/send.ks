@@ -152,20 +152,20 @@ func readResponse[S](mutating stream: S) -> Response throws SwoopError where S: 
     guard let .Some(firstLineEnd) = headerStr.firstIndex(of: "\r\n") else {
         throw SwoopError.invalidResponse("empty response");
     }
-    let statusLine = hdrSlice.subslice(from: hdrSlice.start, to: firstLineEnd.value).toOwned();
+    let statusLine = hdrSlice.subslice(from: 0, to: firstLineEnd.value).toOwned();
 
     let slSlice = statusLine.asSlice();
     guard let .Some(spaceIdx) = statusLine.firstIndex(of: " ") else {
         throw SwoopError.invalidResponse("malformed status line");
     }
-    let afterVersion = slSlice.subslice(from: spaceIdx.value + 1, to: slSlice.end).toOwned();
+    let afterVersion = slSlice.subslice(from: spaceIdx.value + 1, to: slSlice.bytes.count).toOwned();
     let avSlice = afterVersion.asSlice();
     let statusCode = match afterVersion.firstIndex(of: " ") {
-        .Some(sp2) => parseDecimal(avSlice.subslice(from: avSlice.start, to: sp2.value).toOwned()),
+        .Some(sp2) => parseDecimal(avSlice.subslice(from: 0, to: sp2.value).toOwned()),
         .None => parseDecimal(afterVersion)
     };
 
-    let headerLines = hdrSlice.subslice(from: firstLineEnd.value + 2, to: hdrSlice.end).toOwned();
+    let headerLines = hdrSlice.subslice(from: firstLineEnd.value + 2, to: hdrSlice.bytes.count).toOwned();
     let headers = Headers.parse(from: headerLines);
 
     let bodyStart = headerEnd + 4;

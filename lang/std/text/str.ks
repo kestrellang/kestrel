@@ -274,8 +274,10 @@ extend Str {
     /// Returns the byte index of the first occurrence of `substring`,
     /// or `None` if not found.
     ///
-    /// The empty substring matches at the start. Uses `memmem` for
-    /// efficient byte-level search.
+    /// The index counts from this string's or slice's first byte, so it
+    /// feeds straight into `subslice(from:to:)` and `bytes`. The empty
+    /// substring matches at the start. Uses `memmem` for efficient
+    /// byte-level search.
     ///
     /// # Examples
     ///
@@ -289,7 +291,7 @@ extend Str {
         let subLen = (sub.end - sub.start);
         let myLen = (slice.end - slice.start);
         if subLen == 0 {
-            return .Some(ByteIndex(slice.start))
+            return .Some(ByteIndex(0))
         }
         if subLen > myLen { return .None }
         let base = slice._rawPtr().offset(by: slice.start).asRaw();
@@ -299,7 +301,7 @@ extend Str {
             .None
         } else {
             let diff: lang.i64 = lang.i64_sub(result.address.raw, base.address.raw);
-            .Some(ByteIndex(slice.start + Int64(intLiteral: diff)))
+            .Some(ByteIndex(Int64(intLiteral: diff)))
         }
     }
 
@@ -321,7 +323,7 @@ extend Str {
         let subLen = (sub.end - sub.start);
         let myLen = (slice.end - slice.start);
         if subLen == 0 {
-            return .Some(ByteIndex(slice.end))
+            return .Some(ByteIndex(myLen))
         }
         if subLen > myLen { return .None }
         let myPtr = slice._rawPtr();
@@ -343,7 +345,7 @@ extend Str {
         if lastFound < 0 {
             .None
         } else {
-            .Some(ByteIndex(slice.start + lastFound))
+            .Some(ByteIndex(lastFound))
         }
     }
 
@@ -426,7 +428,7 @@ extend Str {
                 endDone = true
             }
         }
-        slice.subslice(from: slice.start + realStart, to: slice.start + endPos)
+        slice.subslice(from: realStart, to: endPos)
     }
 
     /// Returns a zero-copy slice with leading whitespace removed.
@@ -455,7 +457,7 @@ extend Str {
                 done = true
             }
         }
-        slice.subslice(from: slice.start + realStart, to: slice.end)
+        slice.subslice(from: realStart, to: slice.end - slice.start)
     }
 
     /// Returns a zero-copy slice with trailing whitespace removed.
@@ -485,7 +487,7 @@ extend Str {
                 done = true
             }
         }
-        slice.subslice(from: slice.start, to: slice.start + endPos)
+        slice.subslice(from: 0, to: endPos)
     }
 
     /// Returns a zero-copy slice with leading and trailing code points
@@ -532,7 +534,7 @@ extend Str {
                 i = i + 1
             }
         }
-        slice.subslice(from: slice.start + realStart, to: slice.start + lastNonMatch)
+        slice.subslice(from: realStart, to: lastNonMatch)
     }
 
     /// Returns a zero-copy slice with leading code points matching
@@ -562,7 +564,7 @@ extend Str {
                 done = true
             }
         }
-        slice.subslice(from: slice.start + realStart, to: slice.end)
+        slice.subslice(from: realStart, to: slice.end - slice.start)
     }
 
     /// Returns a zero-copy slice with trailing code points matching
@@ -591,7 +593,7 @@ extend Str {
                 i = i + 1
             }
         }
-        slice.subslice(from: slice.start, to: slice.start + lastNonMatch)
+        slice.subslice(from: 0, to: lastNonMatch)
     }
 
     // -- Case conversion -------------------------------------------------------

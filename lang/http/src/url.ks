@@ -77,8 +77,8 @@ public func parseUrl(raw: String) -> ParsedUrl {
     let rawSlice = raw.asSlice();
     match raw.firstIndex(of: "?") {
         .Some(qIdx) => {
-            path = rawSlice.subslice(from: rawSlice.start, to: qIdx.value).toOwned();
-            queryString = rawSlice.subslice(from: qIdx.value + 1, to: rawSlice.end).toOwned()
+            path = rawSlice.subslice(from: 0, to: qIdx.value).toOwned();
+            queryString = rawSlice.subslice(from: qIdx.value + 1, to: rawSlice.bytes.count).toOwned()
         },
         .None => {}
     }
@@ -115,8 +115,8 @@ public func parseQueryString(qs: String) -> Array[(String, String)] {
     for pair in qs.split("&") {
         match pair.firstIndex(of: "=") {
             .Some(eqIdx) => {
-                let key = percentDecode(pair.subslice(from: pair.start, to: eqIdx.value).toOwned());
-                let val = percentDecode(pair.subslice(from: eqIdx.value + 1, to: pair.end).toOwned());
+                let key = percentDecode(pair.subslice(from: 0, to: eqIdx.value).toOwned());
+                let val = percentDecode(pair.subslice(from: eqIdx.value + 1, to: pair.bytes.count).toOwned());
                 result.append((key, val))
             },
             .None => {

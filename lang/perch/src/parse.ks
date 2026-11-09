@@ -58,14 +58,14 @@ public func parseHttpRequest[S](mutating stream: S) -> Request throws IoError wh
         throw IoError.invalidInput;
     }
     let headerSlice = headerStr.asSlice();
-    let requestLine = headerSlice.subslice(from: headerSlice.start, to: firstLineEnd.value).toOwned();
+    let requestLine = headerSlice.subslice(from: 0, to: firstLineEnd.value).toOwned();
 
     var requestLineParts = requestLine.split(" ").iter();
     guard let .Some(methodSlice) = requestLineParts.next() else { throw IoError.invalidInput; }
     guard let .Some(rawPathSlice) = requestLineParts.next() else { throw IoError.invalidInput; }
     guard let .Some(method) = parseMethod(methodSlice.toOwned()) else { throw IoError.invalidInput; }
 
-    let headerLines = headerSlice.subslice(from: firstLineEnd.value + 2, to: headerSlice.end).toOwned();
+    let headerLines = headerSlice.subslice(from: firstLineEnd.value + 2, to: headerSlice.bytes.count).toOwned();
     let headers = Headers.parse(from: headerLines);
 
     var body = String();
