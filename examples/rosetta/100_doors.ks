@@ -12,6 +12,6 @@ func main() {
             door = door + pass;
         }
     }
-    let openDoors = (1..=100).iter().filter { open(it) == true }.collect();
+    let openDoors = (1..=100).iter().filter { open(it) }.collect();
     println("Open doors: \(openDoors)");
 }

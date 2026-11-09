@@ -21,8 +21,8 @@ extend ParseError: Formattable {
 
 func parseNatural(s: String) -> Int64 throws ParseError {
     if s.isEmpty { throw .Empty }
-    var n: Int64 = 0;
-    var sign: Int64 = 1;
+    var n = 0;
+    var sign = 1;
     for (i, c) in s.chars.iter().enumerate() {
         if i == 0 and c == '-' { sign = -1; continue }
         guard let some d = c.digitValue() else { throw .BadDigit(c) }

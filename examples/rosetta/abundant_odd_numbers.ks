@@ -3,8 +3,8 @@
 module Main
 
 func divisorSum(n: Int64) -> Int64 {
-    var sum: Int64 = 1;
-    var d: Int64 = 3;
+    var sum = 1;
+    var d = 3;
     while d * d <= n {
         if n % d == 0 {
             sum = sum + d;
@@ -17,8 +17,8 @@ func divisorSum(n: Int64) -> Int64 {
 
 @main
 func main() {
-    var n: Int64 = 1;
-    var found: Int64 = 0;
+    var n = 1;
+    var found = 0;
     println("First 25 abundant odd numbers:");
     while found < 25 {
         n = n + 2;

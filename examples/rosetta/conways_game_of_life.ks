@@ -11,11 +11,11 @@ struct Life {
         // The board wraps around at the edges.
         let wx = (x + self.width) % self.width;
         let wy = (y + self.height) % self.height;
-        self.cells(wy * self.width + wx) == true
+        self.cells(wy * self.width + wx)
     }
 
     func neighbours(x: Int64, y: Int64) -> Int64 {
-        var count: Int64 = 0;
+        var count = 0;
         for dy in -1..=1 {
             for dx in -1..=1 {
                 if (dx != 0 or dy != 0) and self.alive(x + dx, y + dy) { count = count + 1; }

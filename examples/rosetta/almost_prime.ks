@@ -5,8 +5,8 @@ module Main
 // Number of prime factors counted with multiplicity.
 func bigOmega(n: Int64) -> Int64 {
     var rest = n;
-    var count: Int64 = 0;
-    var d: Int64 = 2;
+    var count = 0;
+    var d = 2;
     while d * d <= rest {
         while rest % d == 0 {
             rest = rest / d;

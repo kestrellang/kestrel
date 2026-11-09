@@ -5,7 +5,7 @@ module Main
 func isPrime(n: Int64) -> Bool {
     if n < 2 { return false }
     if n % 2 == 0 { return n == 2 }
-    var d: Int64 = 3;
+    var d = 3;
     while d * d <= n {
         if n % d == 0 { return false }
         d = d + 2;
@@ -15,7 +15,7 @@ func isPrime(n: Int64) -> Bool {
 
 func reversed(n: Int64) -> Int64 {
     var rest = n;
-    var r: Int64 = 0;
+    var r = 0;
     while rest > 0 {
         r = r * 10 + rest % 10;
         rest = rest / 10;

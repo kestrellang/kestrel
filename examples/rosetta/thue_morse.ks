@@ -10,7 +10,7 @@ func main() {
     // Or by repeatedly appending the complement.
     var s = "0";
     for _ in 0..<6 {
-        s = s + s.chars.iter().map { if it == '0' { '1' } else { '0' } }.collect().joined("");
+        s = s + String(from: s.chars.iter().map { if it == '0' { '1' } else { '0' } }.collect());
     }
     println(s);
 }

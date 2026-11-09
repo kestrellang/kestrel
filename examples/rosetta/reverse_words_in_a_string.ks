@@ -19,8 +19,8 @@ func main() {
         """;
     for line in text.lines {
         var words = line.split(where: { it.isWhitespace }).iter()
-            .filter(where: { not it.isEmpty })
-            .map(as: { it.toOwned() })
+            .filter { not it.isEmpty }
+            .map { it.toOwned() }
             .collect();
         words.reverse();
         println(words.joined(" "));

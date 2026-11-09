@@ -3,7 +3,7 @@
 module Main
 
 func estimatePi(samples: Int64, mutating rng: Lcg64) -> Float64 {
-    var inside: Int64 = 0;
+    var inside = 0;
     for _ in 0..<samples {
         let x = Float64.random(using: rng);
         let y = Float64.random(using: rng);

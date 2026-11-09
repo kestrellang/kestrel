@@ -11,8 +11,8 @@ func main() {
     for n in 1..=10 {
         println("\(n:>2): \(properDivisors(n))");
     }
-    var best: Int64 = 1;
-    var bestCount: Int64 = 0;
+    var best = 1;
+    var bestCount = 0;
     for n in 1..=20000 {
         let c = properDivisors(n).count;
         if c > bestCount {

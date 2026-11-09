@@ -5,7 +5,7 @@ module Main
 @main
 func main() {
     var seq: Array[Int64] = [1, 1];
-    var i: Int64 = 1;
+    var i = 1;
     while seq.count < 1200 {
         seq.append(seq(i) + seq(i - 1));
         seq.append(seq(i));

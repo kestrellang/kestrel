@@ -5,8 +5,8 @@ module Main
 func modInverse(a: Int64, m: Int64) -> Int64? {
     var oldR = a.modulo(by: m);
     var r = m;
-    var oldS: Int64 = 1;
-    var s: Int64 = 0;
+    var oldS = 1;
+    var s = 0;
     while r != 0 {
         let q = oldR / r;
         let nextR = oldR - q * r;
@@ -22,7 +22,7 @@ func modInverse(a: Int64, m: Int64) -> Int64? {
 
 func crt(residues: Array[Int64], moduli: Array[Int64]) -> Int64? {
     let product = moduli.iter().product();
-    var sum: Int64 = 0;
+    var sum = 0;
     for (r, m) in residues.iter().zip(moduli.iter()) {
         let p = product / m;
         let inv = try modInverse(p, m);

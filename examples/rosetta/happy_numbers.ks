@@ -4,7 +4,7 @@ module Main
 
 func digitSquareSum(n: Int64) -> Int64 {
     var rest = n;
-    var sum: Int64 = 0;
+    var sum = 0;
     while rest > 0 {
         let d = rest % 10;
         sum = sum + d * d;

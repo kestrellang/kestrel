@@ -7,11 +7,11 @@ module Main
 func expand(m: Array[Array[Int64]], sign: Int64) -> Int64 {
     let n = m.count;
     if n == 1 { return m(0)(0) }
-    var total: Int64 = 0;
-    var s: Int64 = 1;
+    var total = 0;
+    var s = 1;
     for col in 0..<n {
         let minor = m.drop(first: 1).map { (row) in
-            row.iter().enumerate().filter(where: { it.0 != col }).map(as: { it.1 }).collect()
+            row.iter().enumerate().filter { it.0 != col }.map { it.1 }.collect()
         };
         total = total + s * m(0)(col) * expand(minor, sign);
         s = s * sign;

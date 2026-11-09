@@ -3,7 +3,7 @@
 module Main
 
 func ordinal(n: Int64) -> String {
-    let suffix: String = if n % 100 >= 11 and n % 100 <= 13 {
+    let suffix = if n % 100 >= 11 and n % 100 <= 13 {
         "th"
     } else {
         match n % 10 {

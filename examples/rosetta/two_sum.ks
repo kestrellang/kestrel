@@ -4,7 +4,7 @@ module Main
 
 // The input is sorted, so walk inwards from both ends.
 func twoSum(a: Array[Int64], target: Int64) -> (Int64, Int64)? {
-    var i: Int64 = 0;
+    var i = 0;
     var j = a.count - 1;
     while i < j {
         let s = a(i) + a(j);

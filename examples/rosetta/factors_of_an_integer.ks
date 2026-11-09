@@ -5,7 +5,7 @@ module Main
 func factors(n: Int64) -> Array[Int64] {
     var small = Array[Int64]();
     var large = Array[Int64]();
-    var d: Int64 = 1;
+    var d = 1;
     while d * d <= n {
         if n % d == 0 {
             small.append(d);

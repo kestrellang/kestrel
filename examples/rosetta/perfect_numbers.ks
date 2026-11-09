@@ -4,8 +4,8 @@ module Main
 
 func isPerfect(n: Int64) -> Bool {
     if n < 2 { return false }
-    var sum: Int64 = 1;
-    var d: Int64 = 2;
+    var sum = 1;
+    var d = 2;
     while d * d <= n {
         if n % d == 0 {
             sum = sum + d;

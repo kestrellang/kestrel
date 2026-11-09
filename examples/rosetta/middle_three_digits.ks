@@ -8,7 +8,7 @@ func middleThree(n: Int64) -> Result[String, String] {
     if len < 3 { return .Err("too short") }
     if len % 2 == 0 { return .Err("even number of digits") }
     let start = (len - 3) / 2;
-    .Ok(digits.chars.iter().skip(start).take(3).collect().joined(""))
+    .Ok(String(from: digits.chars.iter().skip(start).take(3).collect()))
 }
 
 @main

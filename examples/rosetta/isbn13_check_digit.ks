@@ -3,9 +3,9 @@
 module Main
 
 func isValidIsbn13(isbn: String) -> Bool {
-    let digits = isbn.chars.iter().filterMap(as: { it.digitValue() }).collect();
+    let digits = isbn.chars.iter().filterMap { it.digitValue() }.collect();
     if digits.count != 13 { return false }
-    var sum: Int64 = 0;
+    var sum = 0;
     for (i, d) in digits.iter().enumerate() {
         sum = sum + Int64(from: d) * (if i % 2 == 0 { 1 } else { 3 });
     }

@@ -5,7 +5,7 @@ module Main
 func totient(n: Int64) -> Int64 {
     var result = n;
     var rest = n;
-    var p: Int64 = 2;
+    var p = 2;
     while p * p <= rest {
         if rest % p == 0 {
             while rest % p == 0 { rest = rest / p; }

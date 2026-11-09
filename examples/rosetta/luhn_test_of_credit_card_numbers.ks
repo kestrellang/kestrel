@@ -3,7 +3,7 @@
 module Main
 
 func luhn(number: String) -> Bool {
-    var sum: Int64 = 0;
+    var sum = 0;
     for (i, c) in number.chars.reversed.iter().enumerate() {
         let d = Int64(from: c.digitValue() ?? 0);
         if i % 2 == 0 {

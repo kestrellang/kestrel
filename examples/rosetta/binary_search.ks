@@ -3,7 +3,7 @@
 module Main
 
 func binarySearch[T](haystack: Array[T], needle: T) -> Int64? where T: Comparable {
-    var lo: Int64 = 0;
+    var lo = 0;
     var hi = haystack.count - 1;
     while lo <= hi {
         let mid = lo + (hi - lo) / 2;

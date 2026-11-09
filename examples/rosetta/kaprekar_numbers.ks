@@ -5,7 +5,7 @@ module Main
 func isKaprekar(n: Int64) -> Bool {
     if n == 1 { return true }
     let square = n * n;
-    var split: Int64 = 10;
+    var split = 10;
     while split <= square {
         let (left, right) = (square / split, square % split);
         if right > 0 and left + right == n { return true }

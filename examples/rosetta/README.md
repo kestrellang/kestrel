@@ -253,21 +253,23 @@ BLESS=1 examples/rosetta/run.sh new_task     # record new_task.out from its curr
 
 ## What writing these turned up
 
-Every task here compiles and matches its `.out` at `-O0` and `-O2`. Getting there hit the problems below; the programs work around them, and each compiler bug has a test in `lib/kestrel-test-suite/testdata` that fails today.
+Every task here compiles and matches its `.out` at `-O0` and `-O2`.
 
-### Compiler bugs
+### Compiler bugs (all fixed)
 
-| Bug | Test |
-|---|---|
-| A second trailing closure in one chain isn't parsed: `xs.iter().filter { it > 1 }.map { it * 2 }` is E801 "expected `;`, found '{'". `postfix()` in `lib/kestrel-parser/src/grammar/exprs.rs` never calls `trailing_closures` in its `.member` continuation loop. | `expressions/closures/trailing_closure_second_in_chain.ks` |
-| Same root: `.filter { … }` on a continuation line of a multi-line chain. The examples write `.filter(where: { … })` instead. | `expressions/closures/trailing_closure_on_continuation_line.ks` |
-| `if flags(i)` on an `Array[Bool]` is E101 "expected Bool, found &Bool"; `flags(i) == true` works. | `expressions/control_flow/if_condition_bool_array_element.ks` |
-| `match`/`if` branches mixing `"literal"` and `"\(interpolated)"` are E109 unless the binding is annotated `: String`. | `inference/branch_string_literal_and_interpolation.ks` |
-| `String(from:)` on an `Array[Char]` or `ReversedCharsView` resolves to `init(from: CString)` (E109), so the example in its own doc comment doesn't compile. | `stdlib/string/string_from_char_iterable.ks` |
-| An unannotated `var i = 2` used as an array index stays an "integer literal": E105 on the subscript, `!: Multipliable` on `i * i`. | `inference/var_integer_literal_used_as_index.ks` |
-| A `Float64` function ending in `loop { … return x … }` fails Cranelift verification ("result 0 has type i64, must match function signature of f64"). | `codegen/loops/tail_loop_returning_float.ks` |
-| A block match arm with no trailing comma followed by a `.Case =>` arm parses as `{ … }.Case` (E102 "no member 'Nil' on type '() -> ()'"). | `expressions/match/block_arm_then_implicit_member_arm.ks` |
-| A closure inside an interpolation hole infers differently from the same closure in a `let` (E109 "expected Int64 got UInt32"). | `expressions/strings/closure_in_interpolation_hole_infers.ks` |
+Writing the tasks turned up nine compiler bugs. Each one has a regression test in `lib/kestrel-test-suite/testdata`. All of them are fixed on nightly, and the examples no longer work around them.
+
+| Bug | Fixed in | Test |
+|---|---|---|
+| A second trailing closure in a chain (`xs.iter().filter { … }.map { … }`) wasn't parsed. | #263 | `expressions/closures/trailing_closure_second_in_chain.ks` |
+| `.filter { … }` on a continuation line of a multi-line chain wasn't parsed. | #263 | `expressions/closures/trailing_closure_on_continuation_line.ks` |
+| `if flags(i)` on an `Array[Bool]` was E101 "expected Bool, found &Bool". | #263 | `expressions/control_flow/if_condition_bool_array_element.ks` |
+| `match`/`if` branches mixing `"literal"` and `"\(interpolated)"` were E109 without a `: String` annotation. | #263 | `inference/branch_string_literal_and_interpolation.ks` |
+| `String(from:)` on chars resolved to `init(from: CString)`. | #261, #266 | `stdlib/string/string_from_char_iterable.ks` |
+| An unannotated `var i = 2` used with its own operator result (`var j = i + i; j + i`) stayed an "integer literal". | #263 | `inference/var_integer_literal_used_as_index.ks` |
+| A `Float64` function ending in `loop { … return x … }` failed Cranelift/LLVM verification. | #263 | `codegen/loops/tail_loop_returning_float.ks` |
+| A `=> { … }` match arm without a comma, followed by a `.Case =>` arm, parsed as `{ … }.Case`. | #263 | `expressions/match/block_arm_then_implicit_member_arm.ks` |
+| A closure inside an interpolation hole defaulted its literals too early (E109 "expected Int64 got UInt32"). | #263 | `expressions/strings/closure_in_interpolation_hole_infers.ks` |
 
 ### Language and standard library gaps
 

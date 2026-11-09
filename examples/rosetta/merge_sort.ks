@@ -4,8 +4,8 @@ module Main
 
 func merge[T](left: Array[T], right: Array[T]) -> Array[T] where T: Comparable {
     var result = Array[T](capacity: left.count + right.count);
-    var i: Int64 = 0;
-    var j: Int64 = 0;
+    var i = 0;
+    var j = 0;
     while i < left.count and j < right.count {
         if left(i) <= right(j) {
             result.append(left(i));

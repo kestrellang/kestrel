@@ -5,9 +5,9 @@ module Main
 func lookAndSay(s: String) -> String {
     let chars = s.chars.iter().collect();
     var out = StringBuilder();
-    var i: Int64 = 0;
+    var i = 0;
     while i < chars.count {
-        var run: Int64 = 1;
+        var run = 1;
         while i + run < chars.count and chars(i + run) == chars(i) {
             run = run + 1;
         }

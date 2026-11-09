@@ -7,7 +7,7 @@ func lis(a: Array[Int64]) -> Array[Int64] {
     var tails = Array[Int64]();      // index of the smallest tail of each length
     var parent = Array[Int64](repeating: -1, count: a.count);
     for i in 0..<a.count {
-        var lo: Int64 = 0;
+        var lo = 0;
         var hi = tails.count;
         while lo < hi {
             let mid = (lo + hi) / 2;

@@ -5,7 +5,7 @@ module Main
 @main
 func main() {
     let s = "asdf";
-    println(s.chars.reversed.iter().collect().joined(""));
+    println(String(from: s.chars.reversed));
     // Reversing by grapheme keeps combining marks attached to their letters.
     let accented = "as\u{301}df\u{311}";
     var graphemes = accented.graphemes.iter().collect();

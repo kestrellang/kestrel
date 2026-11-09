@@ -20,7 +20,7 @@ func modes(xs: Array[Int64]) -> Array[Int64] {
     var counts = Dictionary[Int64, Int64]();
     for x in xs { counts(x, default: 0) += 1; }
     let top = counts.values.iter().max() ?? 0;
-    counts.filter(where: { (_, c) in c == top }).keys.iter().collect().sorted()
+    counts.filter { (_, c) in c == top }.keys.iter().collect().sorted()
 }
 
 func standardDeviation(xs: Array[Float64]) -> Float64 {

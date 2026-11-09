@@ -4,8 +4,8 @@ module Main
 
 func kolakoski(digits: Array[Int64], length: Int64) -> Array[Int64] {
     var seq = Array[Int64]();
-    var i: Int64 = 0;
-    var d: Int64 = 0;
+    var i = 0;
+    var d = 0;
     while seq.count < length {
         let next = digits(d % digits.count);
         seq.append(next);
@@ -23,7 +23,7 @@ func kolakoski(digits: Array[Int64], length: Int64) -> Array[Int64] {
 func isKolakoski(seq: Array[Int64]) -> Bool {
     // Run-length encode and check it reproduces a prefix of the sequence.
     var runs = Array[Int64]();
-    var i: Int64 = 0;
+    var i = 0;
     while i < seq.count {
         var j = i;
         while j < seq.count and seq(j) == seq(i) { j = j + 1; }

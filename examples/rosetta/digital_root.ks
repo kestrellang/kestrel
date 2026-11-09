@@ -4,7 +4,7 @@ module Main
 
 func digitSum(n: Int64) -> Int64 {
     var rest = n;
-    var sum: Int64 = 0;
+    var sum = 0;
     while rest > 0 {
         sum = sum + rest % 10;
         rest = rest / 10;
@@ -15,7 +15,7 @@ func digitSum(n: Int64) -> Int64 {
 // Returns (additive persistence, digital root).
 func digitalRoot(n: Int64) -> (Int64, Int64) {
     var value = n;
-    var persistence: Int64 = 0;
+    var persistence = 0;
     while value >= 10 {
         value = digitSum(value);
         persistence = persistence + 1;

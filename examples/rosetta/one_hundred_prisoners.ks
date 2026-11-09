@@ -33,8 +33,8 @@ func cycleStrategy(drawers: Array[Int64]) -> Bool {
 func main() {
     var rng = Lcg64(seed: 100);
     let trials = 2000;
-    var randomWins: Int64 = 0;
-    var cycleWins: Int64 = 0;
+    var randomWins = 0;
+    var cycleWins = 0;
     for _ in 0..<trials {
         var drawers = Array(from: 0..<100);
         drawers.shuffle(using: rng);

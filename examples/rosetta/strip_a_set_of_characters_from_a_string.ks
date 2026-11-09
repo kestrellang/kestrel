@@ -4,7 +4,7 @@ module Main
 
 func stripChars(s: String, remove: String) -> String {
     let drop = remove.chars.iter().collect();
-    s.chars.iter().filter { not drop.contains(it) }.collect().joined("")
+    String(from: s.chars.iter().filter { not drop.contains(it) }.collect())
 }
 
 @main

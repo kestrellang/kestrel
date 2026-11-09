@@ -3,7 +3,7 @@
 module Main
 
 func isSquareFree(n: Int64) -> Bool {
-    var d: Int64 = 2;
+    var d = 2;
     while d * d <= n {
         if n % (d * d) == 0 { return false }
         d = d + 1;

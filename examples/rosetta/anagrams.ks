@@ -15,8 +15,8 @@ func main() {
     });
     let largest = groups.values.iter().map { it.count }.max() ?? 0;
     let best = groups.values.iter()
-        .filter(where: { it.count == largest })
-        .map(as: { it.sorted() })
+        .filter { it.count == largest }
+        .map { it.sorted() }
         .collect()
         .sorted(by: { (a, b) in a(0) < b(0) });
     for group in best {

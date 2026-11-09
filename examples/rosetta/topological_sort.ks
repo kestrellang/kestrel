@@ -15,7 +15,7 @@ func topoSort(deps: Array[(String, Array[String])]) -> Result[Array[String], Str
             users(need, default: []).append(item);
         }
     }
-    var ready = indegree.filter(where: { (_, n) in n == 0 }).keys.iter().collect().sorted();
+    var ready = indegree.filter { (_, n) in n == 0 }.keys.iter().collect().sorted();
     var order = Array[String]();
     while not ready.isEmpty {
         let next = ready.remove(at: 0);

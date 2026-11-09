@@ -4,8 +4,8 @@ module Main
 
 func isSemiprime(n: Int64) -> Bool {
     var rest = n;
-    var factors: Int64 = 0;
-    var d: Int64 = 2;
+    var factors = 0;
+    var d = 2;
     while d * d <= rest and factors < 2 {
         while rest % d == 0 {
             rest = rest / d;

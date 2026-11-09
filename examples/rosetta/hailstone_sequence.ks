@@ -16,8 +16,8 @@ func hailstone(start: Int64) -> Array[Int64] {
 func main() {
     let h27 = hailstone(27);
     println("hailstone(27) has \(h27.count) elements, starting \(h27.prefix(4).toArray()) and ending \(h27.suffix(4).toArray())");
-    var best: Int64 = 1;
-    var bestLen: Int64 = 1;
+    var best = 1;
+    var bestLen = 1;
     for n in 1..<100000 {
         let len = hailstone(n).count;
         if len > bestLen {

@@ -4,11 +4,11 @@ module Main
 
 // Kadane's algorithm, tracking where the best run starts and ends.
 func maxSubarray(a: Array[Int64]) -> (Int64, Int64, Int64) {
-    var best: Int64 = 0;
-    var bestStart: Int64 = 0;
-    var bestEnd: Int64 = 0;
-    var current: Int64 = 0;
-    var start: Int64 = 0;
+    var best = 0;
+    var bestStart = 0;
+    var bestEnd = 0;
+    var current = 0;
+    var start = 0;
     for (i, x) in a.iter().enumerate() {
         current = current + x;
         if current < 0 {

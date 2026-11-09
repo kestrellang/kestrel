@@ -4,8 +4,8 @@ module Main
 
 // Iterative: O(n) time, O(1) space.
 func fib(n: Int64) -> Int64 {
-    var a: Int64 = 0;
-    var b: Int64 = 1;
+    var a = 0;
+    var b = 1;
     for _ in 0..<n {
         let next = a + b;
         a = b;

@@ -6,8 +6,8 @@ module Main
 func main() {
     var rng = Lcg64(seed: 3);
     let games = 100000;
-    var stayWins: Int64 = 0;
-    var switchWins: Int64 = 0;
+    var stayWins = 0;
+    var switchWins = 0;
     for _ in 0..<games {
         let car = Int64.random(in: 0..<3, using: rng);
         let pick = Int64.random(in: 0..<3, using: rng);

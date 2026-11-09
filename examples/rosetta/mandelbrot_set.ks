@@ -12,7 +12,7 @@ func main() {
             let cr = -2.2 + Float64(from: col) * 0.035;
             let ci = -1.2 + Float64(from: row) * 0.1;
             var (zr, zi) = (0.0, 0.0);
-            var i: Int64 = 0;
+            var i = 0;
             while i < maxIter and zr * zr + zi * zi <= 4.0 {
                 let t = zr * zr - zi * zi + cr;
                 zi = 2.0 * zr * zi + ci;
