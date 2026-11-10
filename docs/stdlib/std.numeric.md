@@ -1,5 +1,298 @@
 # std.numeric
 
+## struct `ChaCha8`
+
+```kestrel
+public struct ChaCha8 { /* private fields */ }
+```
+
+A fast, seedable generator built on the ChaCha stream cipher with 8
+rounds (Bernstein, 2008). Each block of the keystream gives 8 `UInt64`s.
+
+ChaCha8 is unpredictable without its key and passes every statistical
+test suite, which is why it backs the no-argument conveniences
+(`Int64.random(in:)`, `shuffle()`, ...) through `DefaultRandom`. It's
+also a good seeded generator: `ChaCha8(seed:)` always produces the same
+stream. For keys, tokens and other secrets, use a dedicated crypto
+package rather than a general-purpose generator.
+
+### Examples
+
+```
+var rng = ChaCha8(seed: 42);       // reproducible
+let a = rng.nextUInt64();
+var fresh = ChaCha8();             // keyed from OS entropy
+```
+
+### Representation
+
+The 256-bit key (`k0`…`k7`), a 64-bit block counter, and the current
+block's 8 outputs (`b0`…`b7`) with the index of the next one. No heap
+storage, so it's cheap to copy and to keep in a global.
+
+_Defined in `lang/std/numeric/random.ks`._
+
+### Members
+
+#### initializer `Default`
+
+```kestrel
+public init()
+```
+
+A generator keyed with 32 bytes of OS entropy (`getentropy`).
+
+_Defined in `lang/std/numeric/random.ks`._
+
+#### field `b0`
+
+```kestrel
+var b0: UInt64
+```
+
+_Defined in `lang/std/numeric/random.ks`._
+
+#### field `b1`
+
+```kestrel
+var b1: UInt64
+```
+
+_Defined in `lang/std/numeric/random.ks`._
+
+#### field `b2`
+
+```kestrel
+var b2: UInt64
+```
+
+_Defined in `lang/std/numeric/random.ks`._
+
+#### field `b3`
+
+```kestrel
+var b3: UInt64
+```
+
+_Defined in `lang/std/numeric/random.ks`._
+
+#### field `b4`
+
+```kestrel
+var b4: UInt64
+```
+
+_Defined in `lang/std/numeric/random.ks`._
+
+#### field `b5`
+
+```kestrel
+var b5: UInt64
+```
+
+_Defined in `lang/std/numeric/random.ks`._
+
+#### field `b6`
+
+```kestrel
+var b6: UInt64
+```
+
+_Defined in `lang/std/numeric/random.ks`._
+
+#### field `b7`
+
+```kestrel
+var b7: UInt64
+```
+
+_Defined in `lang/std/numeric/random.ks`._
+
+#### field `counter`
+
+```kestrel
+var counter: UInt64
+```
+
+_Defined in `lang/std/numeric/random.ks`._
+
+#### field `index`
+
+```kestrel
+var index: Int64
+```
+
+_Defined in `lang/std/numeric/random.ks`._
+
+#### initializer `init`
+
+```kestrel
+public init(seed: UInt64)
+```
+
+A reproducible generator: the same `seed` always gives the same
+stream. The seed is expanded to a 256-bit key with SplitMix64.
+
+##### Examples
+
+```
+var a = ChaCha8(seed: 7);
+var b = ChaCha8(seed: 7);
+assert(a.nextUInt64() == b.nextUInt64());
+```
+
+_Defined in `lang/std/numeric/random.ks`._
+
+#### initializer `init`
+
+```kestrel
+public init(keyWords: UInt64, UInt64, UInt64, UInt64)
+```
+
+A generator with an explicit 256-bit key, given as four
+little-endian 64-bit words. The stream starts at block 0.
+
+_Defined in `lang/std/numeric/random.ks`._
+
+#### field `k0`
+
+```kestrel
+var k0: UInt32
+```
+
+_Defined in `lang/std/numeric/random.ks`._
+
+#### field `k1`
+
+```kestrel
+var k1: UInt32
+```
+
+_Defined in `lang/std/numeric/random.ks`._
+
+#### field `k2`
+
+```kestrel
+var k2: UInt32
+```
+
+_Defined in `lang/std/numeric/random.ks`._
+
+#### field `k3`
+
+```kestrel
+var k3: UInt32
+```
+
+_Defined in `lang/std/numeric/random.ks`._
+
+#### field `k4`
+
+```kestrel
+var k4: UInt32
+```
+
+_Defined in `lang/std/numeric/random.ks`._
+
+#### field `k5`
+
+```kestrel
+var k5: UInt32
+```
+
+_Defined in `lang/std/numeric/random.ks`._
+
+#### field `k6`
+
+```kestrel
+var k6: UInt32
+```
+
+_Defined in `lang/std/numeric/random.ks`._
+
+#### field `k7`
+
+```kestrel
+var k7: UInt32
+```
+
+_Defined in `lang/std/numeric/random.ks`._
+
+#### function `refill`
+
+```kestrel
+mutating func refill()
+```
+
+Computes keystream block `counter` (8 rounds = 4 double rounds over
+the 4x4 word state: constants, key, 64-bit counter, zero nonce) into
+`b0`…`b7`, then advances the counter.
+
+_Defined in `lang/std/numeric/random.ks`._
+
+### Implements `RandomNumberGenerator`
+
+#### function `nextUInt64`
+
+```kestrel
+public mutating func nextUInt64() -> UInt64
+```
+
+The next 64 bits of the keystream. Computes a new block every 8
+calls.
+
+_Defined in `lang/std/numeric/random.ks`._
+
+### Implements `Defaultable`
+
+## struct `DefaultRandom`
+
+```kestrel
+public struct DefaultRandom { /* private fields */ }
+```
+
+The generator behind all the no-argument conveniences
+(`Int64.random(in:)`, `Bool.random()`, `shuffle()`, ...). A zero-sized
+handle to one process-wide `ChaCha8` keyed from OS entropy on first use:
+unpredictable, and one system call per process instead of one per
+number. Pass a seeded `ChaCha8` or `Lcg64` to the `using:` overloads when
+you need a reproducible stream.
+
+### Examples
+
+```
+var rng = DefaultRandom();
+let value = rng.nextUInt64();
+```
+
+_Defined in `lang/std/numeric/random.ks`._
+
+### Members
+
+#### initializer `Default`
+
+```kestrel
+public init()
+```
+
+A handle to the process-wide generator. Free to construct.
+
+_Defined in `lang/std/numeric/random.ks`._
+
+### Implements `RandomNumberGenerator`
+
+#### function `nextUInt64`
+
+```kestrel
+public mutating func nextUInt64() -> UInt64
+```
+
+The next value from the process-wide `ChaCha8`.
+
+_Defined in `lang/std/numeric/random.ks`._
+
+### Implements `Defaultable`
+
 ## typealias `Float`
 
 ```kestrel
@@ -67,24 +360,6 @@ Creates the zero value, satisfying `Defaultable`.
 
 _Defined in `lang/std/numeric/float32.ks`._
 
-#### initializer `Float Literal`
-
-```kestrel
-public init(floatLiteral: lang.f64)
-```
-
-Compiler-emitted bridge for floating-point literals via
-`ExpressibleByFloatLiteral`. Rarely called directly.
-
-##### Examples
-
-```
-let x: Float64 = 3.14;                  // implicit
-let y = Float64(floatLiteral: 3.14);    // explicit
-```
-
-_Defined in `lang/std/numeric/float32.ks`._
-
 #### initializer `From Float`
 
 ```kestrel
@@ -132,28 +407,10 @@ Wraps an existing `lang.f32` value. The FFI counterpart of
 
 _Defined in `lang/std/numeric/float32.ks`._
 
-#### initializer `Int Literal`
-
-```kestrel
-public init(intLiteral: lang.i64)
-```
-
-Bridge that lets bare integer literals appear where a float is
-expected. Conversion is exact up to ±2^53; larger magnitudes round.
-
-##### Examples
-
-```
-let x: Float64 = 42;     // 42.0
-let y = 3.14 + 1;        // 4.14 — `1` widened to Float64
-```
-
-_Defined in `lang/std/numeric/float32.ks`._
-
 #### initializer `Parsing`
 
 ```kestrel
-public init(parsing: String)?
+public init[S](parsing: S)? where S: Str, S: not Static
 ```
 
 Parses a `Float32` from a string. Recognises decimal
@@ -626,6 +883,17 @@ True if `self > 0.0`. False for `+0.0`, `-0.0`, `nan`, and negatives.
 
 _Defined in `lang/std/numeric/float32.ks`._
 
+#### field `isSignMinus`
+
+```kestrel
+public var isSignMinus: Bool { get }
+```
+
+True if the sign bit is set: negatives, `-0.0`, and NaNs with the
+sign bit on. Unlike `isNegative`, this tells `-0.0` from `+0.0`.
+
+_Defined in `lang/std/numeric/float32.ks`._
+
 #### field `isSubnormal`
 
 ```kestrel
@@ -760,6 +1028,25 @@ The most positive finite value, ≈ 3.4028235e38.
 
 _Defined in `lang/std/numeric/float32.ks`._
 
+#### function `maximum`
+
+```kestrel
+public func maximum(Float32) -> Float32
+```
+
+The larger of `self` and `other`, as IEEE 754-2019 `maximum`
+defines it: NaN if either is NaN, and `+0.0` above `-0.0`.
+
+##### Examples
+
+```
+(1.0).maximum(2.0);               // 2.0
+(1.0).maximum(Float32.nan);  // nan
+(-0.0).maximum(0.0);              // 0.0
+```
+
+_Defined in `lang/std/numeric/float32.ks`._
+
 #### field `minPositive`
 
 ```kestrel
@@ -778,6 +1065,26 @@ public static var minValue: Float32 { get }
 ```
 
 The most negative finite value, ≈ -3.4028235e38.
+
+_Defined in `lang/std/numeric/float32.ks`._
+
+#### function `minimum`
+
+```kestrel
+public func minimum(Float32) -> Float32
+```
+
+The smaller of `self` and `other`, as IEEE 754-2019 `minimum`
+defines it: NaN if either is NaN, and `-0.0` below `+0.0`.
+For a min that skips NaN instead, compare with `compare`.
+
+##### Examples
+
+```
+(1.0).minimum(2.0);               // 1.0
+(1.0).minimum(Float32.nan);  // nan
+(0.0).minimum(-0.0);              // -0.0
+```
 
 _Defined in `lang/std/numeric/float32.ks`._
 
@@ -886,7 +1193,7 @@ _Defined in `lang/std/numeric/random.ks`._
 public static func random() -> Float32
 ```
 
-Returns a uniform `Float32` in `[0, 1)`, using OS entropy.
+Returns a uniform `Float32` in `[0, 1)`, from `DefaultRandom`.
 
 _Defined in `lang/std/numeric/random.ks`._
 
@@ -1099,10 +1406,12 @@ _Defined in `lang/std/numeric/float32.ks`._
 public func compare(Float32) -> Ordering
 ```
 
-Three-way comparison returning an `Ordering`. NaN is *not* an ordered
-value — comparisons against NaN currently fall through to `.Equal`,
-which is wrong; gate inputs with `isNaN` if you need a well-defined
-answer.
+Three-way comparison returning an `Ordering`. This is a total order,
+so `sort`, `min`/`max` and `binarySearch` stay consistent with NaN in
+the data: every NaN is equal to every other NaN and greater than any
+number, so NaNs sort last. Numbers compare as IEEE 754 does, so
+`-0.0` and `0.0` are `.Equal`. The `<`, `>`, `<=` and `>=` operators
+stay IEEE comparisons, which are all `false` against NaN.
 
 ##### Examples
 
@@ -1110,7 +1419,8 @@ answer.
 (1.0).compare(2.0);              // .Less
 (2.0).compare(2.0);              // .Equal
 (3.0).compare(2.0);              // .Greater
-(1.0).compare(Float64.infinity); // .Less
+(1.0).compare(Float32.infinity); // .Less
+Float32.nan.compare(Float32.infinity); // .Greater
 ```
 
 _Defined in `lang/std/numeric/float32.ks`._
@@ -1209,55 +1519,11 @@ type Output = Bool
 
 _Defined in `lang/std/numeric/float32.ks`._
 
-#### function `lessThan`
-
-```kestrel
-public func lessThan(Float32) -> Bool
-```
-
-Returns true if `self < other` per IEEE 754. Always false when either
-operand is NaN.
-
-_Defined in `lang/std/numeric/float32.ks`._
-
 ### Implements `LessOrEqual`
-
-#### function `lessThanOrEqual`
-
-```kestrel
-public func lessThanOrEqual(Float32) -> Bool
-```
-
-Returns true if `self <= other` per IEEE 754. Always false when either
-operand is NaN.
-
-_Defined in `lang/std/numeric/float32.ks`._
 
 ### Implements `Greater`
 
-#### function `greaterThan`
-
-```kestrel
-public func greaterThan(Float32) -> Bool
-```
-
-Returns true if `self > other` per IEEE 754. Always false when either
-operand is NaN.
-
-_Defined in `lang/std/numeric/float32.ks`._
-
 ### Implements `GreaterOrEqual`
-
-#### function `greaterThanOrEqual`
-
-```kestrel
-public func greaterThanOrEqual(Float32) -> Bool
-```
-
-Returns true if `self >= other` per IEEE 754. Always false when either
-operand is NaN.
-
-_Defined in `lang/std/numeric/float32.ks`._
 
 ### Implements `Formattable`
 
@@ -1278,6 +1544,7 @@ even on the stored binary value, so printed decimals are correct.
 
 ```
 (3.14159).formatted();                                          // "3.14159"
+(3.0).formatted();                                              // "3.0" (a whole float keeps its ".0")
 (3.14159).formatted(.{precision: 2});                  // "3.14"
 (1234.5).formatted(.{floatStyle: .Scientific});        // "1.2345e3"
 (0.756).formatted(.{floatStyle: .Percent});            // "75.6%"
@@ -1384,6 +1651,14 @@ is `+0.0`.
 
 _Defined in `lang/std/numeric/float32.ks`._
 
+### Implements `AddAssign`
+
+### Implements `SubtractAssign`
+
+### Implements `MultiplyAssign`
+
+### Implements `DivideAssign`
+
 ### Implements `ExpressibleByFloatLiteral`
 
 ### Implements `ExpressibleByIntLiteral`
@@ -1449,24 +1724,6 @@ Creates the zero value, satisfying `Defaultable`.
 
 _Defined in `lang/std/numeric/float64.ks`._
 
-#### initializer `Float Literal`
-
-```kestrel
-public init(floatLiteral: lang.f64)
-```
-
-Compiler-emitted bridge for floating-point literals via
-`ExpressibleByFloatLiteral`. Rarely called directly.
-
-##### Examples
-
-```
-let x: Float64 = 3.14;                  // implicit
-let y = Float64(floatLiteral: 3.14);    // explicit
-```
-
-_Defined in `lang/std/numeric/float64.ks`._
-
 #### initializer `From Float`
 
 ```kestrel
@@ -1514,28 +1771,10 @@ Wraps an existing `lang.f64` value. The FFI counterpart of
 
 _Defined in `lang/std/numeric/float64.ks`._
 
-#### initializer `Int Literal`
-
-```kestrel
-public init(intLiteral: lang.i64)
-```
-
-Bridge that lets bare integer literals appear where a float is
-expected. Conversion is exact up to ±2^53; larger magnitudes round.
-
-##### Examples
-
-```
-let x: Float64 = 42;     // 42.0
-let y = 3.14 + 1;        // 4.14 — `1` widened to Float64
-```
-
-_Defined in `lang/std/numeric/float64.ks`._
-
 #### initializer `Parsing`
 
 ```kestrel
-public init(parsing: String)?
+public init[S](parsing: S)? where S: Str, S: not Static
 ```
 
 Parses a `Float64` from a string. Recognises decimal
@@ -2008,6 +2247,17 @@ True if `self > 0.0`. False for `+0.0`, `-0.0`, `nan`, and negatives.
 
 _Defined in `lang/std/numeric/float64.ks`._
 
+#### field `isSignMinus`
+
+```kestrel
+public var isSignMinus: Bool { get }
+```
+
+True if the sign bit is set: negatives, `-0.0`, and NaNs with the
+sign bit on. Unlike `isNegative`, this tells `-0.0` from `+0.0`.
+
+_Defined in `lang/std/numeric/float64.ks`._
+
 #### field `isSubnormal`
 
 ```kestrel
@@ -2142,6 +2392,25 @@ The most positive finite value, ≈ 1.7976931348623157e308.
 
 _Defined in `lang/std/numeric/float64.ks`._
 
+#### function `maximum`
+
+```kestrel
+public func maximum(Float64) -> Float64
+```
+
+The larger of `self` and `other`, as IEEE 754-2019 `maximum`
+defines it: NaN if either is NaN, and `+0.0` above `-0.0`.
+
+##### Examples
+
+```
+(1.0).maximum(2.0);               // 2.0
+(1.0).maximum(Float64.nan);  // nan
+(-0.0).maximum(0.0);              // 0.0
+```
+
+_Defined in `lang/std/numeric/float64.ks`._
+
 #### field `minPositive`
 
 ```kestrel
@@ -2160,6 +2429,26 @@ public static var minValue: Float64 { get }
 ```
 
 The most negative finite value, ≈ -1.7976931348623157e308.
+
+_Defined in `lang/std/numeric/float64.ks`._
+
+#### function `minimum`
+
+```kestrel
+public func minimum(Float64) -> Float64
+```
+
+The smaller of `self` and `other`, as IEEE 754-2019 `minimum`
+defines it: NaN if either is NaN, and `-0.0` below `+0.0`.
+For a min that skips NaN instead, compare with `compare`.
+
+##### Examples
+
+```
+(1.0).minimum(2.0);               // 1.0
+(1.0).minimum(Float64.nan);  // nan
+(0.0).minimum(-0.0);              // -0.0
+```
 
 _Defined in `lang/std/numeric/float64.ks`._
 
@@ -2268,7 +2557,7 @@ _Defined in `lang/std/numeric/random.ks`._
 public static func random() -> Float64
 ```
 
-Returns a uniform `Float64` in `[0, 1)`, using OS entropy.
+Returns a uniform `Float64` in `[0, 1)`, from `DefaultRandom`.
 
 ##### Examples
 
@@ -2295,7 +2584,7 @@ _Defined in `lang/std/numeric/random.ks`._
 public static func random(from: Float64, to: Float64) -> Float64
 ```
 
-Returns a uniform `Float64` in `[from, to)`, using OS entropy.
+Returns a uniform `Float64` in `[from, to)`, from `DefaultRandom`.
 
 ##### Examples
 
@@ -2514,10 +2803,12 @@ _Defined in `lang/std/numeric/float64.ks`._
 public func compare(Float64) -> Ordering
 ```
 
-Three-way comparison returning an `Ordering`. NaN is *not* an ordered
-value — comparisons against NaN currently fall through to `.Equal`,
-which is wrong; gate inputs with `isNaN` if you need a well-defined
-answer.
+Three-way comparison returning an `Ordering`. This is a total order,
+so `sort`, `min`/`max` and `binarySearch` stay consistent with NaN in
+the data: every NaN is equal to every other NaN and greater than any
+number, so NaNs sort last. Numbers compare as IEEE 754 does, so
+`-0.0` and `0.0` are `.Equal`. The `<`, `>`, `<=` and `>=` operators
+stay IEEE comparisons, which are all `false` against NaN.
 
 ##### Examples
 
@@ -2526,6 +2817,7 @@ answer.
 (2.0).compare(2.0);              // .Equal
 (3.0).compare(2.0);              // .Greater
 (1.0).compare(Float64.infinity); // .Less
+Float64.nan.compare(Float64.infinity); // .Greater
 ```
 
 _Defined in `lang/std/numeric/float64.ks`._
@@ -2624,55 +2916,11 @@ type Output = Bool
 
 _Defined in `lang/std/numeric/float64.ks`._
 
-#### function `lessThan`
-
-```kestrel
-public func lessThan(Float64) -> Bool
-```
-
-Returns true if `self < other` per IEEE 754. Always false when either
-operand is NaN.
-
-_Defined in `lang/std/numeric/float64.ks`._
-
 ### Implements `LessOrEqual`
-
-#### function `lessThanOrEqual`
-
-```kestrel
-public func lessThanOrEqual(Float64) -> Bool
-```
-
-Returns true if `self <= other` per IEEE 754. Always false when either
-operand is NaN.
-
-_Defined in `lang/std/numeric/float64.ks`._
 
 ### Implements `Greater`
 
-#### function `greaterThan`
-
-```kestrel
-public func greaterThan(Float64) -> Bool
-```
-
-Returns true if `self > other` per IEEE 754. Always false when either
-operand is NaN.
-
-_Defined in `lang/std/numeric/float64.ks`._
-
 ### Implements `GreaterOrEqual`
-
-#### function `greaterThanOrEqual`
-
-```kestrel
-public func greaterThanOrEqual(Float64) -> Bool
-```
-
-Returns true if `self >= other` per IEEE 754. Always false when either
-operand is NaN.
-
-_Defined in `lang/std/numeric/float64.ks`._
 
 ### Implements `Formattable`
 
@@ -2693,6 +2941,7 @@ even on the stored binary value, so printed decimals are correct.
 
 ```
 (3.14159).formatted();                                          // "3.14159"
+(3.0).formatted();                                              // "3.0" (a whole float keeps its ".0")
 (3.14159).formatted(.{precision: 2});                  // "3.14"
 (1234.5).formatted(.{floatStyle: .Scientific});        // "1.2345e3"
 (0.756).formatted(.{floatStyle: .Percent});            // "75.6%"
@@ -2798,6 +3047,14 @@ IEEE 754 negation — flips the sign bit. `-nan` is still NaN; `-(-0.0)`
 is `+0.0`.
 
 _Defined in `lang/std/numeric/float64.ks`._
+
+### Implements `AddAssign`
+
+### Implements `SubtractAssign`
+
+### Implements `MultiplyAssign`
+
+### Implements `DivideAssign`
 
 ### Implements `ExpressibleByFloatLiteral`
 
@@ -2944,7 +3201,7 @@ _Defined in `lang/std/numeric/int16.ks`._
 #### initializer `From Bytes`
 
 ```kestrel
-public init[S](fromBytes: S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
+public init[S](fromBytes: &S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
 ```
 
 Reassembles a `Int16` from 2 bytes in native byte order.
@@ -2955,7 +3212,7 @@ _Defined in `lang/std/numeric/int16.ks`._
 #### initializer `From Bytes Big Endian`
 
 ```kestrel
-public init[S](fromBytesBigEndian: S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
+public init[S](fromBytesBigEndian: &S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
 ```
 
 Reassembles a `Int16` from 2 bytes in big-endian order.
@@ -2966,7 +3223,7 @@ _Defined in `lang/std/numeric/int16.ks`._
 #### initializer `From Bytes Little Endian`
 
 ```kestrel
-public init[S](fromBytesLittleEndian: S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
+public init[S](fromBytesLittleEndian: &S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
 ```
 
 Reassembles a `Int16` from 2 bytes in little-endian order.
@@ -3085,30 +3342,10 @@ counterpart of `raw`, for values coming back from intrinsics or C.
 
 _Defined in `lang/std/numeric/int16.ks`._
 
-#### initializer `Int Literal`
-
-```kestrel
-public init(intLiteral: lang.i64)
-```
-
-Compiler-emitted bridge that turns an integer literal into a Int16.
-
-You will rarely call this directly — write the literal and let the
-`ExpressibleByIntLiteral` protocol pick it up. For widths smaller than
-64 bits the literal is truncated with `lang.cast_i64_i16`.
-
-##### Examples
-
-```
-let n: Int64 = 42;            // implicit
-```
-
-_Defined in `lang/std/numeric/int16.ks`._
-
 #### initializer `Parsing`
 
 ```kestrel
-public init(parsing: String)?
+public init[S](parsing: S)? where S: Str, S: not Static
 ```
 
 Parses a base-10 integer literal, optionally prefixed with `+` or `-`.
@@ -3128,7 +3365,7 @@ _Defined in `lang/std/numeric/int16.ks`._
 #### initializer `Parsing with Radix`
 
 ```kestrel
-public init(parsing: String, radix: Int64)?
+public init[S](parsing: S, radix: Int64)? where S: Str, S: not Static
 ```
 
 Parses an integer in `radix` (base 2-36 inclusive). Letters a-z are
@@ -3553,6 +3790,19 @@ public func multiplyChecked(Int16) -> Int16?
 
 _Defined in `lang/std/numeric/int16.ks`._
 
+#### function `multiplyFull`
+
+```kestrel
+public func multiplyFull(Int16) -> (Int16, Int16)
+```
+
+The full double-width product `self * other` as `(low, high)`
+halves: `low` is the wrapped product (as from `multiplyWrapping`),
+`high` the bits above it. Compiles to one widening multiply. For
+hashes, RNGs and bignum arithmetic.
+
+_Defined in `lang/std/numeric/int16.ks`._
+
 #### function `multiplyOverflowing`
 
 ```kestrel
@@ -3688,7 +3938,7 @@ _Defined in `lang/std/numeric/random.ks`._
 public static func random() -> Int16
 ```
 
-Returns a uniform value over the full `Int16` range, using OS entropy.
+Returns a uniform value over the full `Int16` range, from `DefaultRandom`.
 
 _Defined in `lang/std/numeric/random.ks`._
 
@@ -3710,7 +3960,7 @@ _Defined in `lang/std/numeric/random.ks`._
 public static func random[R](in: R) -> Int16 where R: RandomBounds[Int64]
 ```
 
-Returns a uniform value in `range`, using OS entropy.
+Returns a uniform value in `range`, from `DefaultRandom`.
 
 _Defined in `lang/std/numeric/random.ks`._
 
@@ -3956,16 +4206,6 @@ _Defined in `lang/std/numeric/int16.ks`._
 
 ### Implements `Matchable`
 
-#### function `matches`
-
-```kestrel
-public func matches(Int16) -> Bool
-```
-
-Pattern-matching hook for `Matchable`. Identical to `isEqual`.
-
-_Defined in `lang/std/numeric/int16.ks`._
-
 ### Implements `Formattable`
 
 #### function `format`
@@ -3999,8 +4239,9 @@ _Defined in `lang/std/numeric/int16.ks`._
 public func hash[H](into: mutating H) where H: Hasher
 ```
 
-Feeds the raw bytes of this value into `hasher`. Endianness-agnostic
-only within a single process — do not persist hashes across builds.
+Feeds this value into `hasher` as one 64-bit word
+(`write(uint64:)`), which `DefaultHasher` mixes in a single round.
+Don't persist hashes across builds.
 
 _Defined in `lang/std/numeric/int16.ks`._
 
@@ -4266,200 +4507,35 @@ _Defined in `lang/std/numeric/int16.ks`._
 
 ### Implements `BitwiseAnd`
 
-#### function `bitwiseAnd`
-
-```kestrel
-public consuming func bitwiseAnd(consuming Int16) -> Int16
-```
-
-Bitwise AND. `0b1010 & 0b1100 == 0b1000`.
-
-_Defined in `lang/std/numeric/int16.ks`._
-
 ### Implements `BitwiseOr`
-
-#### function `bitwiseOr`
-
-```kestrel
-public consuming func bitwiseOr(consuming Int16) -> Int16
-```
-
-Bitwise OR. `0b1010 | 0b1100 == 0b1110`.
-
-_Defined in `lang/std/numeric/int16.ks`._
 
 ### Implements `BitwiseXor`
 
-#### function `bitwiseXor`
-
-```kestrel
-public consuming func bitwiseXor(consuming Int16) -> Int16
-```
-
-Bitwise XOR. `0b1010 ^ 0b1100 == 0b0110`.
-
-_Defined in `lang/std/numeric/int16.ks`._
-
 ### Implements `BitwiseNot`
-
-#### function `bitwiseNot`
-
-```kestrel
-public consuming func bitwiseNot() -> Int16
-```
-
-Bitwise NOT — flips all bits. For signed types this is `-self - 1`.
-
-_Defined in `lang/std/numeric/int16.ks`._
 
 ### Implements `LeftShift`
 
-#### function `shiftLeft`
-
-```kestrel
-public consuming func shiftLeft(by: consuming Int64) -> Int16
-```
-
-Left shift by `count`. The shift count is masked to
-`count % bitWidth` (matching hardware semantics), so
-`count >= bitWidth` wraps around rather than zeroing the value —
-e.g. shifting a `Int16` left by `bitWidth` is a no-op.
-
-_Defined in `lang/std/numeric/int16.ks`._
-
 ### Implements `RightShift`
-
-#### function `shiftRight`
-
-```kestrel
-public consuming func shiftRight(by: consuming Int64) -> Int16
-```
-
-Right shift by `count`. Arithmetic (sign-extending) for signed types,
-logical (zero-filling) for unsigned. The count is masked to
-`count % bitWidth`, same as `shiftLeft`.
-
-_Defined in `lang/std/numeric/int16.ks`._
 
 ### Implements `AddAssign`
 
-#### function `addAssign`
-
-```kestrel
-public mutating func addAssign(Int16)
-```
-
-`self += other`
-
-_Defined in `lang/std/numeric/int16.ks`._
-
 ### Implements `SubtractAssign`
-
-#### function `subtractAssign`
-
-```kestrel
-public mutating func subtractAssign(Int16)
-```
-
-`self -= other`
-
-_Defined in `lang/std/numeric/int16.ks`._
 
 ### Implements `MultiplyAssign`
 
-#### function `multiplyAssign`
-
-```kestrel
-public mutating func multiplyAssign(Int16)
-```
-
-`self *= other`
-
-_Defined in `lang/std/numeric/int16.ks`._
-
 ### Implements `DivideAssign`
-
-#### function `divideAssign`
-
-```kestrel
-public mutating func divideAssign(Int16)
-```
-
-`self /= other`
-
-_Defined in `lang/std/numeric/int16.ks`._
 
 ### Implements `RemainderAssign`
 
-#### function `remainderAssign`
-
-```kestrel
-public mutating func remainderAssign(Int16)
-```
-
-`self %= other`
-
-_Defined in `lang/std/numeric/int16.ks`._
-
 ### Implements `BitwiseAndAssign`
-
-#### function `bitwiseAndAssign`
-
-```kestrel
-public mutating func bitwiseAndAssign(Int16)
-```
-
-`self &= other`
-
-_Defined in `lang/std/numeric/int16.ks`._
 
 ### Implements `BitwiseOrAssign`
 
-#### function `bitwiseOrAssign`
-
-```kestrel
-public mutating func bitwiseOrAssign(Int16)
-```
-
-`self |= other`
-
-_Defined in `lang/std/numeric/int16.ks`._
-
 ### Implements `BitwiseXorAssign`
-
-#### function `bitwiseXorAssign`
-
-```kestrel
-public mutating func bitwiseXorAssign(Int16)
-```
-
-`self ^= other`
-
-_Defined in `lang/std/numeric/int16.ks`._
 
 ### Implements `LeftShiftAssign`
 
-#### function `shiftLeftAssign`
-
-```kestrel
-public mutating func shiftLeftAssign(by: Int64)
-```
-
-`self <<= count`
-
-_Defined in `lang/std/numeric/int16.ks`._
-
 ### Implements `RightShiftAssign`
-
-#### function `shiftRightAssign`
-
-```kestrel
-public mutating func shiftRightAssign(by: Int64)
-```
-
-`self >>= count`
-
-_Defined in `lang/std/numeric/int16.ks`._
 
 ### Implements `ExpressibleByIntLiteral`
 
@@ -4469,63 +4545,13 @@ _Defined in `lang/std/numeric/int16.ks`._
 
 ### Implements `RangeConstructible`
 
-#### function `exclusiveRange`
-
-```kestrel
-public func exclusiveRange(to: Int16) -> Range[Int16]
-```
-
-Builds a half-open range `self..<end`. Sugar for the `..<` operator.
-
-_Defined in `lang/std/numeric/int16.ks`._
-
 ### Implements `ClosedRangeConstructible`
-
-#### function `inclusiveRange`
-
-```kestrel
-public func inclusiveRange(to: Int16) -> ClosedRange[Int16]
-```
-
-Builds a closed range `self..=end`. Sugar for the `..=` operator.
-
-_Defined in `lang/std/numeric/int16.ks`._
 
 ### Implements `RangeFromConstructible`
 
-#### function `rangeFrom`
-
-```kestrel
-public func rangeFrom() -> RangeFrom[Int16]
-```
-
-Builds a partial range `self..` (from self, no upper bound).
-
-_Defined in `lang/std/numeric/int16.ks`._
-
 ### Implements `RangeUpToConstructible`
 
-#### function `rangeUpTo`
-
-```kestrel
-public func rangeUpTo() -> RangeUpTo[Int16]
-```
-
-Builds a partial range `..<self` (up to self, exclusive).
-
-_Defined in `lang/std/numeric/int16.ks`._
-
 ### Implements `RangeThroughConstructible`
-
-#### function `rangeThrough`
-
-```kestrel
-public func rangeThrough() -> RangeThrough[Int16]
-```
-
-Builds a partial range `..=self` (through self, inclusive).
-
-_Defined in `lang/std/numeric/int16.ks`._
 
 ### Implements `Convertible`
 
@@ -4644,7 +4670,7 @@ _Defined in `lang/std/numeric/int32.ks`._
 #### initializer `From Bytes`
 
 ```kestrel
-public init[S](fromBytes: S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
+public init[S](fromBytes: &S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
 ```
 
 Reassembles a `Int32` from 4 bytes in native byte order.
@@ -4655,7 +4681,7 @@ _Defined in `lang/std/numeric/int32.ks`._
 #### initializer `From Bytes Big Endian`
 
 ```kestrel
-public init[S](fromBytesBigEndian: S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
+public init[S](fromBytesBigEndian: &S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
 ```
 
 Reassembles a `Int32` from 4 bytes in big-endian order.
@@ -4666,7 +4692,7 @@ _Defined in `lang/std/numeric/int32.ks`._
 #### initializer `From Bytes Little Endian`
 
 ```kestrel
-public init[S](fromBytesLittleEndian: S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
+public init[S](fromBytesLittleEndian: &S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
 ```
 
 Reassembles a `Int32` from 4 bytes in little-endian order.
@@ -4773,30 +4799,10 @@ counterpart of `raw`, for values coming back from intrinsics or C.
 
 _Defined in `lang/std/numeric/int32.ks`._
 
-#### initializer `Int Literal`
-
-```kestrel
-public init(intLiteral: lang.i64)
-```
-
-Compiler-emitted bridge that turns an integer literal into a Int32.
-
-You will rarely call this directly — write the literal and let the
-`ExpressibleByIntLiteral` protocol pick it up. For widths smaller than
-64 bits the literal is truncated with `lang.cast_i64_i32`.
-
-##### Examples
-
-```
-let n: Int64 = 42;            // implicit
-```
-
-_Defined in `lang/std/numeric/int32.ks`._
-
 #### initializer `Parsing`
 
 ```kestrel
-public init(parsing: String)?
+public init[S](parsing: S)? where S: Str, S: not Static
 ```
 
 Parses a base-10 integer literal, optionally prefixed with `+` or `-`.
@@ -4816,7 +4822,7 @@ _Defined in `lang/std/numeric/int32.ks`._
 #### initializer `Parsing with Radix`
 
 ```kestrel
-public init(parsing: String, radix: Int64)?
+public init[S](parsing: S, radix: Int64)? where S: Str, S: not Static
 ```
 
 Parses an integer in `radix` (base 2-36 inclusive). Letters a-z are
@@ -5219,6 +5225,19 @@ public func multiplyChecked(Int32) -> Int32?
 
 _Defined in `lang/std/numeric/int32.ks`._
 
+#### function `multiplyFull`
+
+```kestrel
+public func multiplyFull(Int32) -> (Int32, Int32)
+```
+
+The full double-width product `self * other` as `(low, high)`
+halves: `low` is the wrapped product (as from `multiplyWrapping`),
+`high` the bits above it. Compiles to one widening multiply. For
+hashes, RNGs and bignum arithmetic.
+
+_Defined in `lang/std/numeric/int32.ks`._
+
 #### function `multiplyOverflowing`
 
 ```kestrel
@@ -5354,7 +5373,7 @@ _Defined in `lang/std/numeric/random.ks`._
 public static func random() -> Int32
 ```
 
-Returns a uniform value over the full `Int32` range, using OS entropy.
+Returns a uniform value over the full `Int32` range, from `DefaultRandom`.
 
 _Defined in `lang/std/numeric/random.ks`._
 
@@ -5376,7 +5395,7 @@ _Defined in `lang/std/numeric/random.ks`._
 public static func random[R](in: R) -> Int32 where R: RandomBounds[Int64]
 ```
 
-Returns a uniform value in `range`, using OS entropy.
+Returns a uniform value in `range`, from `DefaultRandom`.
 
 _Defined in `lang/std/numeric/random.ks`._
 
@@ -5622,16 +5641,6 @@ _Defined in `lang/std/numeric/int32.ks`._
 
 ### Implements `Matchable`
 
-#### function `matches`
-
-```kestrel
-public func matches(Int32) -> Bool
-```
-
-Pattern-matching hook for `Matchable`. Identical to `isEqual`.
-
-_Defined in `lang/std/numeric/int32.ks`._
-
 ### Implements `Formattable`
 
 #### function `format`
@@ -5665,8 +5674,9 @@ _Defined in `lang/std/numeric/int32.ks`._
 public func hash[H](into: mutating H) where H: Hasher
 ```
 
-Feeds the raw bytes of this value into `hasher`. Endianness-agnostic
-only within a single process — do not persist hashes across builds.
+Feeds this value into `hasher` as one 64-bit word
+(`write(uint64:)`), which `DefaultHasher` mixes in a single round.
+Don't persist hashes across builds.
 
 _Defined in `lang/std/numeric/int32.ks`._
 
@@ -5932,200 +5942,35 @@ _Defined in `lang/std/numeric/int32.ks`._
 
 ### Implements `BitwiseAnd`
 
-#### function `bitwiseAnd`
-
-```kestrel
-public consuming func bitwiseAnd(consuming Int32) -> Int32
-```
-
-Bitwise AND. `0b1010 & 0b1100 == 0b1000`.
-
-_Defined in `lang/std/numeric/int32.ks`._
-
 ### Implements `BitwiseOr`
-
-#### function `bitwiseOr`
-
-```kestrel
-public consuming func bitwiseOr(consuming Int32) -> Int32
-```
-
-Bitwise OR. `0b1010 | 0b1100 == 0b1110`.
-
-_Defined in `lang/std/numeric/int32.ks`._
 
 ### Implements `BitwiseXor`
 
-#### function `bitwiseXor`
-
-```kestrel
-public consuming func bitwiseXor(consuming Int32) -> Int32
-```
-
-Bitwise XOR. `0b1010 ^ 0b1100 == 0b0110`.
-
-_Defined in `lang/std/numeric/int32.ks`._
-
 ### Implements `BitwiseNot`
-
-#### function `bitwiseNot`
-
-```kestrel
-public consuming func bitwiseNot() -> Int32
-```
-
-Bitwise NOT — flips all bits. For signed types this is `-self - 1`.
-
-_Defined in `lang/std/numeric/int32.ks`._
 
 ### Implements `LeftShift`
 
-#### function `shiftLeft`
-
-```kestrel
-public consuming func shiftLeft(by: consuming Int64) -> Int32
-```
-
-Left shift by `count`. The shift count is masked to
-`count % bitWidth` (matching hardware semantics), so
-`count >= bitWidth` wraps around rather than zeroing the value —
-e.g. shifting a `Int32` left by `bitWidth` is a no-op.
-
-_Defined in `lang/std/numeric/int32.ks`._
-
 ### Implements `RightShift`
-
-#### function `shiftRight`
-
-```kestrel
-public consuming func shiftRight(by: consuming Int64) -> Int32
-```
-
-Right shift by `count`. Arithmetic (sign-extending) for signed types,
-logical (zero-filling) for unsigned. The count is masked to
-`count % bitWidth`, same as `shiftLeft`.
-
-_Defined in `lang/std/numeric/int32.ks`._
 
 ### Implements `AddAssign`
 
-#### function `addAssign`
-
-```kestrel
-public mutating func addAssign(Int32)
-```
-
-`self += other`
-
-_Defined in `lang/std/numeric/int32.ks`._
-
 ### Implements `SubtractAssign`
-
-#### function `subtractAssign`
-
-```kestrel
-public mutating func subtractAssign(Int32)
-```
-
-`self -= other`
-
-_Defined in `lang/std/numeric/int32.ks`._
 
 ### Implements `MultiplyAssign`
 
-#### function `multiplyAssign`
-
-```kestrel
-public mutating func multiplyAssign(Int32)
-```
-
-`self *= other`
-
-_Defined in `lang/std/numeric/int32.ks`._
-
 ### Implements `DivideAssign`
-
-#### function `divideAssign`
-
-```kestrel
-public mutating func divideAssign(Int32)
-```
-
-`self /= other`
-
-_Defined in `lang/std/numeric/int32.ks`._
 
 ### Implements `RemainderAssign`
 
-#### function `remainderAssign`
-
-```kestrel
-public mutating func remainderAssign(Int32)
-```
-
-`self %= other`
-
-_Defined in `lang/std/numeric/int32.ks`._
-
 ### Implements `BitwiseAndAssign`
-
-#### function `bitwiseAndAssign`
-
-```kestrel
-public mutating func bitwiseAndAssign(Int32)
-```
-
-`self &= other`
-
-_Defined in `lang/std/numeric/int32.ks`._
 
 ### Implements `BitwiseOrAssign`
 
-#### function `bitwiseOrAssign`
-
-```kestrel
-public mutating func bitwiseOrAssign(Int32)
-```
-
-`self |= other`
-
-_Defined in `lang/std/numeric/int32.ks`._
-
 ### Implements `BitwiseXorAssign`
-
-#### function `bitwiseXorAssign`
-
-```kestrel
-public mutating func bitwiseXorAssign(Int32)
-```
-
-`self ^= other`
-
-_Defined in `lang/std/numeric/int32.ks`._
 
 ### Implements `LeftShiftAssign`
 
-#### function `shiftLeftAssign`
-
-```kestrel
-public mutating func shiftLeftAssign(by: Int64)
-```
-
-`self <<= count`
-
-_Defined in `lang/std/numeric/int32.ks`._
-
 ### Implements `RightShiftAssign`
-
-#### function `shiftRightAssign`
-
-```kestrel
-public mutating func shiftRightAssign(by: Int64)
-```
-
-`self >>= count`
-
-_Defined in `lang/std/numeric/int32.ks`._
 
 ### Implements `ExpressibleByIntLiteral`
 
@@ -6135,63 +5980,13 @@ _Defined in `lang/std/numeric/int32.ks`._
 
 ### Implements `RangeConstructible`
 
-#### function `exclusiveRange`
-
-```kestrel
-public func exclusiveRange(to: Int32) -> Range[Int32]
-```
-
-Builds a half-open range `self..<end`. Sugar for the `..<` operator.
-
-_Defined in `lang/std/numeric/int32.ks`._
-
 ### Implements `ClosedRangeConstructible`
-
-#### function `inclusiveRange`
-
-```kestrel
-public func inclusiveRange(to: Int32) -> ClosedRange[Int32]
-```
-
-Builds a closed range `self..=end`. Sugar for the `..=` operator.
-
-_Defined in `lang/std/numeric/int32.ks`._
 
 ### Implements `RangeFromConstructible`
 
-#### function `rangeFrom`
-
-```kestrel
-public func rangeFrom() -> RangeFrom[Int32]
-```
-
-Builds a partial range `self..` (from self, no upper bound).
-
-_Defined in `lang/std/numeric/int32.ks`._
-
 ### Implements `RangeUpToConstructible`
 
-#### function `rangeUpTo`
-
-```kestrel
-public func rangeUpTo() -> RangeUpTo[Int32]
-```
-
-Builds a partial range `..<self` (up to self, exclusive).
-
-_Defined in `lang/std/numeric/int32.ks`._
-
 ### Implements `RangeThroughConstructible`
-
-#### function `rangeThrough`
-
-```kestrel
-public func rangeThrough() -> RangeThrough[Int32]
-```
-
-Builds a partial range `..=self` (through self, inclusive).
-
-_Defined in `lang/std/numeric/int32.ks`._
 
 ### Implements `Convertible`
 
@@ -6288,7 +6083,7 @@ _Defined in `lang/std/numeric/int64.ks`._
 #### initializer `From Bytes`
 
 ```kestrel
-public init[S](fromBytes: S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
+public init[S](fromBytes: &S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
 ```
 
 Reassembles a `Int64` from 8 bytes in native byte order.
@@ -6299,7 +6094,7 @@ _Defined in `lang/std/numeric/int64.ks`._
 #### initializer `From Bytes Big Endian`
 
 ```kestrel
-public init[S](fromBytesBigEndian: S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
+public init[S](fromBytesBigEndian: &S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
 ```
 
 Reassembles a `Int64` from 8 bytes in big-endian order.
@@ -6310,7 +6105,7 @@ _Defined in `lang/std/numeric/int64.ks`._
 #### initializer `From Bytes Little Endian`
 
 ```kestrel
-public init[S](fromBytesLittleEndian: S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
+public init[S](fromBytesLittleEndian: &S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
 ```
 
 Reassembles a `Int64` from 8 bytes in little-endian order.
@@ -6405,30 +6200,10 @@ counterpart of `raw`, for values coming back from intrinsics or C.
 
 _Defined in `lang/std/numeric/int64.ks`._
 
-#### initializer `Int Literal`
-
-```kestrel
-public init(intLiteral: lang.i64)
-```
-
-Compiler-emitted bridge that turns an integer literal into a Int64.
-
-You will rarely call this directly — write the literal and let the
-`ExpressibleByIntLiteral` protocol pick it up. For widths smaller than
-64 bits the literal is truncated with `lang.cast_i64_i64`.
-
-##### Examples
-
-```
-let n: Int64 = 42;            // implicit
-```
-
-_Defined in `lang/std/numeric/int64.ks`._
-
 #### initializer `Parsing`
 
 ```kestrel
-public init(parsing: String)?
+public init[S](parsing: S)? where S: Str, S: not Static
 ```
 
 Parses a base-10 integer literal, optionally prefixed with `+` or `-`.
@@ -6448,7 +6223,7 @@ _Defined in `lang/std/numeric/int64.ks`._
 #### initializer `Parsing with Radix`
 
 ```kestrel
-public init(parsing: String, radix: Int64)?
+public init[S](parsing: S, radix: Int64)? where S: Str, S: not Static
 ```
 
 Parses an integer in `radix` (base 2-36 inclusive). Letters a-z are
@@ -6829,6 +6604,19 @@ public func multiplyChecked(Int64) -> Int64?
 
 _Defined in `lang/std/numeric/int64.ks`._
 
+#### function `multiplyFull`
+
+```kestrel
+public func multiplyFull(Int64) -> (Int64, Int64)
+```
+
+The full double-width product `self * other` as `(low, high)`
+halves: `low` is the wrapped product (as from `multiplyWrapping`),
+`high` the bits above it. Compiles to one widening multiply. For
+hashes, RNGs and bignum arithmetic.
+
+_Defined in `lang/std/numeric/int64.ks`._
+
 #### function `multiplyOverflowing`
 
 ```kestrel
@@ -6964,7 +6752,7 @@ _Defined in `lang/std/numeric/random.ks`._
 public static func random() -> Int64
 ```
 
-Returns a uniform value over the full `Int64` range, using OS entropy.
+Returns a uniform value over the full `Int64` range, from `DefaultRandom`.
 
 ##### Examples
 
@@ -6998,7 +6786,7 @@ _Defined in `lang/std/numeric/random.ks`._
 public static func random[R](in: R) -> Int64 where R: RandomBounds[Int64]
 ```
 
-Returns a uniform value in `range`, using OS entropy.
+Returns a uniform value in `range`, from `DefaultRandom`.
 
 ##### Examples
 
@@ -7250,16 +7038,6 @@ _Defined in `lang/std/numeric/int64.ks`._
 
 ### Implements `Matchable`
 
-#### function `matches`
-
-```kestrel
-public func matches(Int64) -> Bool
-```
-
-Pattern-matching hook for `Matchable`. Identical to `isEqual`.
-
-_Defined in `lang/std/numeric/int64.ks`._
-
 ### Implements `Formattable`
 
 #### function `format`
@@ -7293,8 +7071,9 @@ _Defined in `lang/std/numeric/int64.ks`._
 public func hash[H](into: mutating H) where H: Hasher
 ```
 
-Feeds the raw bytes of this value into `hasher`. Endianness-agnostic
-only within a single process — do not persist hashes across builds.
+Feeds this value into `hasher` as one 64-bit word
+(`write(uint64:)`), which `DefaultHasher` mixes in a single round.
+Don't persist hashes across builds.
 
 _Defined in `lang/std/numeric/int64.ks`._
 
@@ -7560,200 +7339,35 @@ _Defined in `lang/std/numeric/int64.ks`._
 
 ### Implements `BitwiseAnd`
 
-#### function `bitwiseAnd`
-
-```kestrel
-public consuming func bitwiseAnd(consuming Int64) -> Int64
-```
-
-Bitwise AND. `0b1010 & 0b1100 == 0b1000`.
-
-_Defined in `lang/std/numeric/int64.ks`._
-
 ### Implements `BitwiseOr`
-
-#### function `bitwiseOr`
-
-```kestrel
-public consuming func bitwiseOr(consuming Int64) -> Int64
-```
-
-Bitwise OR. `0b1010 | 0b1100 == 0b1110`.
-
-_Defined in `lang/std/numeric/int64.ks`._
 
 ### Implements `BitwiseXor`
 
-#### function `bitwiseXor`
-
-```kestrel
-public consuming func bitwiseXor(consuming Int64) -> Int64
-```
-
-Bitwise XOR. `0b1010 ^ 0b1100 == 0b0110`.
-
-_Defined in `lang/std/numeric/int64.ks`._
-
 ### Implements `BitwiseNot`
-
-#### function `bitwiseNot`
-
-```kestrel
-public consuming func bitwiseNot() -> Int64
-```
-
-Bitwise NOT — flips all bits. For signed types this is `-self - 1`.
-
-_Defined in `lang/std/numeric/int64.ks`._
 
 ### Implements `LeftShift`
 
-#### function `shiftLeft`
-
-```kestrel
-public consuming func shiftLeft(by: consuming Int64) -> Int64
-```
-
-Left shift by `count`. The shift count is masked to
-`count % bitWidth` (matching hardware semantics), so
-`count >= bitWidth` wraps around rather than zeroing the value —
-e.g. shifting a `Int64` left by `bitWidth` is a no-op.
-
-_Defined in `lang/std/numeric/int64.ks`._
-
 ### Implements `RightShift`
-
-#### function `shiftRight`
-
-```kestrel
-public consuming func shiftRight(by: consuming Int64) -> Int64
-```
-
-Right shift by `count`. Arithmetic (sign-extending) for signed types,
-logical (zero-filling) for unsigned. The count is masked to
-`count % bitWidth`, same as `shiftLeft`.
-
-_Defined in `lang/std/numeric/int64.ks`._
 
 ### Implements `AddAssign`
 
-#### function `addAssign`
-
-```kestrel
-public mutating func addAssign(Int64)
-```
-
-`self += other`
-
-_Defined in `lang/std/numeric/int64.ks`._
-
 ### Implements `SubtractAssign`
-
-#### function `subtractAssign`
-
-```kestrel
-public mutating func subtractAssign(Int64)
-```
-
-`self -= other`
-
-_Defined in `lang/std/numeric/int64.ks`._
 
 ### Implements `MultiplyAssign`
 
-#### function `multiplyAssign`
-
-```kestrel
-public mutating func multiplyAssign(Int64)
-```
-
-`self *= other`
-
-_Defined in `lang/std/numeric/int64.ks`._
-
 ### Implements `DivideAssign`
-
-#### function `divideAssign`
-
-```kestrel
-public mutating func divideAssign(Int64)
-```
-
-`self /= other`
-
-_Defined in `lang/std/numeric/int64.ks`._
 
 ### Implements `RemainderAssign`
 
-#### function `remainderAssign`
-
-```kestrel
-public mutating func remainderAssign(Int64)
-```
-
-`self %= other`
-
-_Defined in `lang/std/numeric/int64.ks`._
-
 ### Implements `BitwiseAndAssign`
-
-#### function `bitwiseAndAssign`
-
-```kestrel
-public mutating func bitwiseAndAssign(Int64)
-```
-
-`self &= other`
-
-_Defined in `lang/std/numeric/int64.ks`._
 
 ### Implements `BitwiseOrAssign`
 
-#### function `bitwiseOrAssign`
-
-```kestrel
-public mutating func bitwiseOrAssign(Int64)
-```
-
-`self |= other`
-
-_Defined in `lang/std/numeric/int64.ks`._
-
 ### Implements `BitwiseXorAssign`
-
-#### function `bitwiseXorAssign`
-
-```kestrel
-public mutating func bitwiseXorAssign(Int64)
-```
-
-`self ^= other`
-
-_Defined in `lang/std/numeric/int64.ks`._
 
 ### Implements `LeftShiftAssign`
 
-#### function `shiftLeftAssign`
-
-```kestrel
-public mutating func shiftLeftAssign(by: Int64)
-```
-
-`self <<= count`
-
-_Defined in `lang/std/numeric/int64.ks`._
-
 ### Implements `RightShiftAssign`
-
-#### function `shiftRightAssign`
-
-```kestrel
-public mutating func shiftRightAssign(by: Int64)
-```
-
-`self >>= count`
-
-_Defined in `lang/std/numeric/int64.ks`._
 
 ### Implements `ExpressibleByIntLiteral`
 
@@ -7763,63 +7377,13 @@ _Defined in `lang/std/numeric/int64.ks`._
 
 ### Implements `RangeConstructible`
 
-#### function `exclusiveRange`
-
-```kestrel
-public func exclusiveRange(to: Int64) -> Range[Int64]
-```
-
-Builds a half-open range `self..<end`. Sugar for the `..<` operator.
-
-_Defined in `lang/std/numeric/int64.ks`._
-
 ### Implements `ClosedRangeConstructible`
-
-#### function `inclusiveRange`
-
-```kestrel
-public func inclusiveRange(to: Int64) -> ClosedRange[Int64]
-```
-
-Builds a closed range `self..=end`. Sugar for the `..=` operator.
-
-_Defined in `lang/std/numeric/int64.ks`._
 
 ### Implements `RangeFromConstructible`
 
-#### function `rangeFrom`
-
-```kestrel
-public func rangeFrom() -> RangeFrom[Int64]
-```
-
-Builds a partial range `self..` (from self, no upper bound).
-
-_Defined in `lang/std/numeric/int64.ks`._
-
 ### Implements `RangeUpToConstructible`
 
-#### function `rangeUpTo`
-
-```kestrel
-public func rangeUpTo() -> RangeUpTo[Int64]
-```
-
-Builds a partial range `..<self` (up to self, exclusive).
-
-_Defined in `lang/std/numeric/int64.ks`._
-
 ### Implements `RangeThroughConstructible`
-
-#### function `rangeThrough`
-
-```kestrel
-public func rangeThrough() -> RangeThrough[Int64]
-```
-
-Builds a partial range `..=self` (through self, inclusive).
-
-_Defined in `lang/std/numeric/int64.ks`._
 
 ### Implements `Convertible`
 
@@ -7834,174 +7398,6 @@ type SliceOutput = T
 ```
 
 _Defined in `lang/std/collections/slice.ks`._
-
-#### function `lend`
-
-```kestrel
-public static func lend(consuming Int64, Slice[T]) -> &T
-```
-
-_Defined in `lang/std/collections/slice.ks`._
-
-#### function `lendChecked`
-
-```kestrel
-public static func lendChecked(consuming Int64, Slice[T]) -> Optional[&T]
-```
-
-_Defined in `lang/std/collections/slice.ks`._
-
-#### function `lendMutating`
-
-```kestrel
-public static func lendMutating(consuming Int64, mutating Slice[T]) -> &mutating T
-```
-
-_Defined in `lang/std/collections/slice.ks`._
-
-#### function `lendMutatingChecked`
-
-```kestrel
-public static func lendMutatingChecked(consuming Int64, mutating Slice[T]) -> Optional[&mutating T]
-```
-
-_Defined in `lang/std/collections/slice.ks`._
-
-#### function `lendMutatingUnchecked`
-
-```kestrel
-public static func lendMutatingUnchecked(consuming Int64, mutating Slice[T]) -> &mutating T
-```
-
-_Defined in `lang/std/collections/slice.ks`._
-
-#### function `lendUnchecked`
-
-```kestrel
-public static func lendUnchecked(consuming Int64, Slice[T]) -> &T
-```
-
-_Defined in `lang/std/collections/slice.ks`._
-
-### Implements `SliceClampable`
-
-#### typealias `SliceClampedOutput`
-
-```kestrel
-type SliceClampedOutput = T?
-```
-
-_Defined in `lang/std/collections/slice.ks`._
-
-#### function `lendClamped`
-
-```kestrel
-public static func lendClamped(consuming Int64, Slice[T]) -> T?
-```
-
-_Defined in `lang/std/collections/slice.ks`._
-
-### Implements `SeqIndex`
-
-#### typealias `SeqOutput`
-
-```kestrel
-type SeqOutput = T
-```
-
-_Defined in `lang/std/collections/sliceable.ks`._
-
-#### function `readSeq`
-
-```kestrel
-public func readSeq(from: UnsafeSlice[T]) -> T
-```
-
-_Defined in `lang/std/collections/sliceable.ks`._
-
-#### function `readSeqChecked`
-
-```kestrel
-public func readSeqChecked(from: UnsafeSlice[T]) -> T?
-```
-
-_Defined in `lang/std/collections/sliceable.ks`._
-
-#### function `readSeqUnchecked`
-
-```kestrel
-public func readSeqUnchecked(from: UnsafeSlice[T]) -> T
-```
-
-_Defined in `lang/std/collections/sliceable.ks`._
-
-#### function `writeSeq`
-
-```kestrel
-public func writeSeq(to: UnsafeSlice[T], with: T)
-```
-
-_Defined in `lang/std/collections/sliceable.ks`._
-
-#### function `writeSeqUnchecked`
-
-```kestrel
-public func writeSeqUnchecked(to: UnsafeSlice[T], with: T)
-```
-
-_Defined in `lang/std/collections/sliceable.ks`._
-
-### Implements `SeqClampable`
-
-#### typealias `SeqClampedOutput`
-
-```kestrel
-type SeqClampedOutput = T?
-```
-
-_Defined in `lang/std/collections/sliceable.ks`._
-
-#### function `readSeqClamped`
-
-```kestrel
-public func readSeqClamped(from: UnsafeSlice[T]) -> T?
-```
-
-_Defined in `lang/std/collections/sliceable.ks`._
-
-#### function `writeSeqClamped`
-
-```kestrel
-public func writeSeqClamped(to: UnsafeSlice[T], with: T?)
-```
-
-_Defined in `lang/std/collections/sliceable.ks`._
-
-### Implements `SeqWrappable`
-
-#### typealias `SeqWrappedOutput`
-
-```kestrel
-type SeqWrappedOutput = T?
-```
-
-_Defined in `lang/std/collections/sliceable.ks`._
-
-#### function `readSeqWrapped`
-
-```kestrel
-public func readSeqWrapped(from: UnsafeSlice[T]) -> T?
-```
-
-_Defined in `lang/std/collections/sliceable.ks`._
-
-#### function `writeSeqWrapped`
-
-```kestrel
-public func writeSeqWrapped(to: UnsafeSlice[T], with: T?)
-```
-
-_Defined in `lang/std/collections/sliceable.ks`._
 
 ### Implements `Exitable`
 
@@ -8023,62 +7419,12 @@ type BytesYield = UInt8
 
 _Defined in `lang/std/text/views.ks`._
 
-#### function `readBytes`
-
-```kestrel
-public func readBytes(from: BytesView) -> UInt8
-```
-
-_Defined in `lang/std/text/views.ks`._
-
-#### function `readBytesChecked`
-
-```kestrel
-public func readBytesChecked(from: BytesView) -> UInt8?
-```
-
-_Defined in `lang/std/text/views.ks`._
-
-#### function `readBytesUnchecked`
-
-```kestrel
-public func readBytesUnchecked(from: BytesView) -> UInt8
-```
-
-_Defined in `lang/std/text/views.ks`._
-
-### Implements `BytesClampable`
-
-#### typealias `BytesClampedYield`
-
-```kestrel
-type BytesClampedYield = UInt8?
-```
-
-_Defined in `lang/std/text/views.ks`._
-
-#### function `readBytesClamped`
-
-```kestrel
-public func readBytesClamped(from: BytesView) -> UInt8?
-```
-
-_Defined in `lang/std/text/views.ks`._
-
 ### Implements `BytesWrappable`
 
 #### typealias `BytesWrappedYield`
 
 ```kestrel
 type BytesWrappedYield = UInt8?
-```
-
-_Defined in `lang/std/text/views.ks`._
-
-#### function `readBytesWrapped`
-
-```kestrel
-public func readBytesWrapped(from: BytesView) -> UInt8?
 ```
 
 _Defined in `lang/std/text/views.ks`._
@@ -8093,54 +7439,12 @@ type CharsYield = Char
 
 _Defined in `lang/std/text/views.ks`._
 
-#### function `readChars`
-
-```kestrel
-public func readChars(from: CharsView) -> Char
-```
-
-_Defined in `lang/std/text/views.ks`._
-
-#### function `readCharsChecked`
-
-```kestrel
-public func readCharsChecked(from: CharsView) -> Char?
-```
-
-_Defined in `lang/std/text/views.ks`._
-
-### Implements `CharsClampable`
-
-#### typealias `CharsClampedYield`
-
-```kestrel
-type CharsClampedYield = Char?
-```
-
-_Defined in `lang/std/text/views.ks`._
-
-#### function `readCharsClamped`
-
-```kestrel
-public func readCharsClamped(from: CharsView) -> Char?
-```
-
-_Defined in `lang/std/text/views.ks`._
-
 ### Implements `CharsWrappable`
 
 #### typealias `CharsWrappedYield`
 
 ```kestrel
 type CharsWrappedYield = Char?
-```
-
-_Defined in `lang/std/text/views.ks`._
-
-#### function `readCharsWrapped`
-
-```kestrel
-public func readCharsWrapped(from: CharsView) -> Char?
 ```
 
 _Defined in `lang/std/text/views.ks`._
@@ -8155,54 +7459,12 @@ type GraphemesYield = Grapheme
 
 _Defined in `lang/std/text/views.ks`._
 
-#### function `readGraphemes`
-
-```kestrel
-public func readGraphemes(from: GraphemesView) -> Grapheme
-```
-
-_Defined in `lang/std/text/views.ks`._
-
-#### function `readGraphemesChecked`
-
-```kestrel
-public func readGraphemesChecked(from: GraphemesView) -> Grapheme?
-```
-
-_Defined in `lang/std/text/views.ks`._
-
-### Implements `GraphemesClampable`
-
-#### typealias `GraphemesClampedYield`
-
-```kestrel
-type GraphemesClampedYield = Grapheme?
-```
-
-_Defined in `lang/std/text/views.ks`._
-
-#### function `readGraphemesClamped`
-
-```kestrel
-public func readGraphemesClamped(from: GraphemesView) -> Grapheme?
-```
-
-_Defined in `lang/std/text/views.ks`._
-
 ### Implements `GraphemesWrappable`
 
 #### typealias `GraphemesWrappedYield`
 
 ```kestrel
 type GraphemesWrappedYield = Grapheme?
-```
-
-_Defined in `lang/std/text/views.ks`._
-
-#### function `readGraphemesWrapped`
-
-```kestrel
-public func readGraphemesWrapped(from: GraphemesView) -> Grapheme?
 ```
 
 _Defined in `lang/std/text/views.ks`._
@@ -8217,54 +7479,12 @@ type LinesYield = String
 
 _Defined in `lang/std/text/views.ks`._
 
-#### function `readLines`
-
-```kestrel
-public func readLines(from: LinesView) -> String
-```
-
-_Defined in `lang/std/text/views.ks`._
-
-#### function `readLinesChecked`
-
-```kestrel
-public func readLinesChecked(from: LinesView) -> String?
-```
-
-_Defined in `lang/std/text/views.ks`._
-
-### Implements `LinesClampable`
-
-#### typealias `LinesClampedYield`
-
-```kestrel
-type LinesClampedYield = String?
-```
-
-_Defined in `lang/std/text/views.ks`._
-
-#### function `readLinesClamped`
-
-```kestrel
-public func readLinesClamped(from: LinesView) -> String?
-```
-
-_Defined in `lang/std/text/views.ks`._
-
 ### Implements `LinesWrappable`
 
 #### typealias `LinesWrappedYield`
 
 ```kestrel
 type LinesWrappedYield = String?
-```
-
-_Defined in `lang/std/text/views.ks`._
-
-#### function `readLinesWrapped`
-
-```kestrel
-public func readLinesWrapped(from: LinesView) -> String?
 ```
 
 _Defined in `lang/std/text/views.ks`._
@@ -8416,7 +7636,7 @@ _Defined in `lang/std/numeric/int8.ks`._
 #### initializer `From Bytes`
 
 ```kestrel
-public init[S](fromBytes: S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
+public init[S](fromBytes: &S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
 ```
 
 Reassembles a `Int8` from 1 bytes in native byte order.
@@ -8427,7 +7647,7 @@ _Defined in `lang/std/numeric/int8.ks`._
 #### initializer `From Bytes Big Endian`
 
 ```kestrel
-public init[S](fromBytesBigEndian: S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
+public init[S](fromBytesBigEndian: &S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
 ```
 
 Reassembles a `Int8` from 1 bytes in big-endian order.
@@ -8438,7 +7658,7 @@ _Defined in `lang/std/numeric/int8.ks`._
 #### initializer `From Bytes Little Endian`
 
 ```kestrel
-public init[S](fromBytesLittleEndian: S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
+public init[S](fromBytesLittleEndian: &S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
 ```
 
 Reassembles a `Int8` from 1 bytes in little-endian order.
@@ -8569,30 +7789,10 @@ counterpart of `raw`, for values coming back from intrinsics or C.
 
 _Defined in `lang/std/numeric/int8.ks`._
 
-#### initializer `Int Literal`
-
-```kestrel
-public init(intLiteral: lang.i64)
-```
-
-Compiler-emitted bridge that turns an integer literal into a Int8.
-
-You will rarely call this directly — write the literal and let the
-`ExpressibleByIntLiteral` protocol pick it up. For widths smaller than
-64 bits the literal is truncated with `lang.cast_i64_i8`.
-
-##### Examples
-
-```
-let n: Int64 = 42;            // implicit
-```
-
-_Defined in `lang/std/numeric/int8.ks`._
-
 #### initializer `Parsing`
 
 ```kestrel
-public init(parsing: String)?
+public init[S](parsing: S)? where S: Str, S: not Static
 ```
 
 Parses a base-10 integer literal, optionally prefixed with `+` or `-`.
@@ -8612,7 +7812,7 @@ _Defined in `lang/std/numeric/int8.ks`._
 #### initializer `Parsing with Radix`
 
 ```kestrel
-public init(parsing: String, radix: Int64)?
+public init[S](parsing: S, radix: Int64)? where S: Str, S: not Static
 ```
 
 Parses an integer in `radix` (base 2-36 inclusive). Letters a-z are
@@ -9059,6 +8259,19 @@ public func multiplyChecked(Int8) -> Int8?
 
 _Defined in `lang/std/numeric/int8.ks`._
 
+#### function `multiplyFull`
+
+```kestrel
+public func multiplyFull(Int8) -> (Int8, Int8)
+```
+
+The full double-width product `self * other` as `(low, high)`
+halves: `low` is the wrapped product (as from `multiplyWrapping`),
+`high` the bits above it. Compiles to one widening multiply. For
+hashes, RNGs and bignum arithmetic.
+
+_Defined in `lang/std/numeric/int8.ks`._
+
 #### function `multiplyOverflowing`
 
 ```kestrel
@@ -9194,7 +8407,7 @@ _Defined in `lang/std/numeric/random.ks`._
 public static func random() -> Int8
 ```
 
-Returns a uniform value over the full `Int8` range, using OS entropy.
+Returns a uniform value over the full `Int8` range, from `DefaultRandom`.
 
 _Defined in `lang/std/numeric/random.ks`._
 
@@ -9216,7 +8429,7 @@ _Defined in `lang/std/numeric/random.ks`._
 public static func random[R](in: R) -> Int8 where R: RandomBounds[Int64]
 ```
 
-Returns a uniform value in `range`, using OS entropy.
+Returns a uniform value in `range`, from `DefaultRandom`.
 
 _Defined in `lang/std/numeric/random.ks`._
 
@@ -9462,16 +8675,6 @@ _Defined in `lang/std/numeric/int8.ks`._
 
 ### Implements `Matchable`
 
-#### function `matches`
-
-```kestrel
-public func matches(Int8) -> Bool
-```
-
-Pattern-matching hook for `Matchable`. Identical to `isEqual`.
-
-_Defined in `lang/std/numeric/int8.ks`._
-
 ### Implements `Formattable`
 
 #### function `format`
@@ -9505,8 +8708,9 @@ _Defined in `lang/std/numeric/int8.ks`._
 public func hash[H](into: mutating H) where H: Hasher
 ```
 
-Feeds the raw bytes of this value into `hasher`. Endianness-agnostic
-only within a single process — do not persist hashes across builds.
+Feeds this value into `hasher` as one 64-bit word
+(`write(uint64:)`), which `DefaultHasher` mixes in a single round.
+Don't persist hashes across builds.
 
 _Defined in `lang/std/numeric/int8.ks`._
 
@@ -9772,200 +8976,35 @@ _Defined in `lang/std/numeric/int8.ks`._
 
 ### Implements `BitwiseAnd`
 
-#### function `bitwiseAnd`
-
-```kestrel
-public consuming func bitwiseAnd(consuming Int8) -> Int8
-```
-
-Bitwise AND. `0b1010 & 0b1100 == 0b1000`.
-
-_Defined in `lang/std/numeric/int8.ks`._
-
 ### Implements `BitwiseOr`
-
-#### function `bitwiseOr`
-
-```kestrel
-public consuming func bitwiseOr(consuming Int8) -> Int8
-```
-
-Bitwise OR. `0b1010 | 0b1100 == 0b1110`.
-
-_Defined in `lang/std/numeric/int8.ks`._
 
 ### Implements `BitwiseXor`
 
-#### function `bitwiseXor`
-
-```kestrel
-public consuming func bitwiseXor(consuming Int8) -> Int8
-```
-
-Bitwise XOR. `0b1010 ^ 0b1100 == 0b0110`.
-
-_Defined in `lang/std/numeric/int8.ks`._
-
 ### Implements `BitwiseNot`
-
-#### function `bitwiseNot`
-
-```kestrel
-public consuming func bitwiseNot() -> Int8
-```
-
-Bitwise NOT — flips all bits. For signed types this is `-self - 1`.
-
-_Defined in `lang/std/numeric/int8.ks`._
 
 ### Implements `LeftShift`
 
-#### function `shiftLeft`
-
-```kestrel
-public consuming func shiftLeft(by: consuming Int64) -> Int8
-```
-
-Left shift by `count`. The shift count is masked to
-`count % bitWidth` (matching hardware semantics), so
-`count >= bitWidth` wraps around rather than zeroing the value —
-e.g. shifting a `Int8` left by `bitWidth` is a no-op.
-
-_Defined in `lang/std/numeric/int8.ks`._
-
 ### Implements `RightShift`
-
-#### function `shiftRight`
-
-```kestrel
-public consuming func shiftRight(by: consuming Int64) -> Int8
-```
-
-Right shift by `count`. Arithmetic (sign-extending) for signed types,
-logical (zero-filling) for unsigned. The count is masked to
-`count % bitWidth`, same as `shiftLeft`.
-
-_Defined in `lang/std/numeric/int8.ks`._
 
 ### Implements `AddAssign`
 
-#### function `addAssign`
-
-```kestrel
-public mutating func addAssign(Int8)
-```
-
-`self += other`
-
-_Defined in `lang/std/numeric/int8.ks`._
-
 ### Implements `SubtractAssign`
-
-#### function `subtractAssign`
-
-```kestrel
-public mutating func subtractAssign(Int8)
-```
-
-`self -= other`
-
-_Defined in `lang/std/numeric/int8.ks`._
 
 ### Implements `MultiplyAssign`
 
-#### function `multiplyAssign`
-
-```kestrel
-public mutating func multiplyAssign(Int8)
-```
-
-`self *= other`
-
-_Defined in `lang/std/numeric/int8.ks`._
-
 ### Implements `DivideAssign`
-
-#### function `divideAssign`
-
-```kestrel
-public mutating func divideAssign(Int8)
-```
-
-`self /= other`
-
-_Defined in `lang/std/numeric/int8.ks`._
 
 ### Implements `RemainderAssign`
 
-#### function `remainderAssign`
-
-```kestrel
-public mutating func remainderAssign(Int8)
-```
-
-`self %= other`
-
-_Defined in `lang/std/numeric/int8.ks`._
-
 ### Implements `BitwiseAndAssign`
-
-#### function `bitwiseAndAssign`
-
-```kestrel
-public mutating func bitwiseAndAssign(Int8)
-```
-
-`self &= other`
-
-_Defined in `lang/std/numeric/int8.ks`._
 
 ### Implements `BitwiseOrAssign`
 
-#### function `bitwiseOrAssign`
-
-```kestrel
-public mutating func bitwiseOrAssign(Int8)
-```
-
-`self |= other`
-
-_Defined in `lang/std/numeric/int8.ks`._
-
 ### Implements `BitwiseXorAssign`
-
-#### function `bitwiseXorAssign`
-
-```kestrel
-public mutating func bitwiseXorAssign(Int8)
-```
-
-`self ^= other`
-
-_Defined in `lang/std/numeric/int8.ks`._
 
 ### Implements `LeftShiftAssign`
 
-#### function `shiftLeftAssign`
-
-```kestrel
-public mutating func shiftLeftAssign(by: Int64)
-```
-
-`self <<= count`
-
-_Defined in `lang/std/numeric/int8.ks`._
-
 ### Implements `RightShiftAssign`
-
-#### function `shiftRightAssign`
-
-```kestrel
-public mutating func shiftRightAssign(by: Int64)
-```
-
-`self >>= count`
-
-_Defined in `lang/std/numeric/int8.ks`._
 
 ### Implements `ExpressibleByIntLiteral`
 
@@ -9975,63 +9014,13 @@ _Defined in `lang/std/numeric/int8.ks`._
 
 ### Implements `RangeConstructible`
 
-#### function `exclusiveRange`
-
-```kestrel
-public func exclusiveRange(to: Int8) -> Range[Int8]
-```
-
-Builds a half-open range `self..<end`. Sugar for the `..<` operator.
-
-_Defined in `lang/std/numeric/int8.ks`._
-
 ### Implements `ClosedRangeConstructible`
-
-#### function `inclusiveRange`
-
-```kestrel
-public func inclusiveRange(to: Int8) -> ClosedRange[Int8]
-```
-
-Builds a closed range `self..=end`. Sugar for the `..=` operator.
-
-_Defined in `lang/std/numeric/int8.ks`._
 
 ### Implements `RangeFromConstructible`
 
-#### function `rangeFrom`
-
-```kestrel
-public func rangeFrom() -> RangeFrom[Int8]
-```
-
-Builds a partial range `self..` (from self, no upper bound).
-
-_Defined in `lang/std/numeric/int8.ks`._
-
 ### Implements `RangeUpToConstructible`
 
-#### function `rangeUpTo`
-
-```kestrel
-public func rangeUpTo() -> RangeUpTo[Int8]
-```
-
-Builds a partial range `..<self` (up to self, exclusive).
-
-_Defined in `lang/std/numeric/int8.ks`._
-
 ### Implements `RangeThroughConstructible`
-
-#### function `rangeThrough`
-
-```kestrel
-public func rangeThrough() -> RangeThrough[Int8]
-```
-
-Builds a partial range `..=self` (through self, inclusive).
-
-_Defined in `lang/std/numeric/int8.ks`._
 
 ### Implements `Convertible`
 
@@ -10056,8 +9045,9 @@ public struct Lcg64 { /* private fields */ }
 A 64-bit linear congruential generator. Cheap, allocation-free, and
 adequate for shuffling, fuzz seeds, and simulation noise — *not* for
 cryptographic use, key generation, or anything an adversary observes.
-Reach for `SystemRandom` when you want unpredictable values, and for
-`Lcg64(seed:)` when you want a reproducible stream.
+Its low bits are weak (the helpers on `RandomNumberGenerator` sample the
+high bits). Prefer `ChaCha8(seed:)` for a reproducible stream and
+`DefaultRandom` for unpredictable values.
 
 Constants come from Numerical Recipes and give a full period of `2^64`:
 
@@ -10165,8 +9155,9 @@ helpers on top.
 
 Conformers are free to choose any algorithm they like — the protocol
 makes no statement about cryptographic strength, period, or bias. Pick
-`Lcg64` for cheap reproducible randomness, `SystemRandom` for OS entropy;
-bring your own type for anything stronger.
+`ChaCha8` for a fast, high-quality stream (seeded or OS-keyed),
+`DefaultRandom` for the shared process-wide one, `SystemRandom` to read
+the OS for every value, and `Lcg64` for the cheapest reproducible stream.
 
 ### Examples
 
@@ -10364,10 +9355,9 @@ A random number generator backed by operating-system entropy.
 
 Every `nextUInt64()` call reads 8 fresh bytes from the OS via
 `getentropy(2)` — there is no seed, no internal state, and no way to
-reproduce a stream. This is the generator behind all the no-argument
-conveniences (`Int64.random(in:)`, `Bool.random()`, `shuffle()`, ...);
-pass a seeded `Lcg64` to the `using:` overloads when you need
-reproducibility instead.
+reproduce a stream. One system call per value makes it slow; the
+no-argument conveniences use `DefaultRandom` (a `ChaCha8` keyed once from
+the OS) instead.
 
 Suitable as an entropy source, but see a dedicated crypto package for
 key generation and other adversarial uses.
@@ -10559,7 +9549,7 @@ _Defined in `lang/std/numeric/uint16.ks`._
 #### initializer `From Bytes`
 
 ```kestrel
-public init[S](fromBytes: S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
+public init[S](fromBytes: &S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
 ```
 
 Reassembles a `UInt16` from 2 bytes in native byte order.
@@ -10570,7 +9560,7 @@ _Defined in `lang/std/numeric/uint16.ks`._
 #### initializer `From Bytes Big Endian`
 
 ```kestrel
-public init[S](fromBytesBigEndian: S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
+public init[S](fromBytesBigEndian: &S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
 ```
 
 Reassembles a `UInt16` from 2 bytes in big-endian order.
@@ -10581,7 +9571,7 @@ _Defined in `lang/std/numeric/uint16.ks`._
 #### initializer `From Bytes Little Endian`
 
 ```kestrel
-public init[S](fromBytesLittleEndian: S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
+public init[S](fromBytesLittleEndian: &S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
 ```
 
 Reassembles a `UInt16` from 2 bytes in little-endian order.
@@ -10706,30 +9696,10 @@ counterpart of `raw`, for values coming back from intrinsics or C.
 
 _Defined in `lang/std/numeric/uint16.ks`._
 
-#### initializer `Int Literal`
-
-```kestrel
-public init(intLiteral: lang.i64)
-```
-
-Compiler-emitted bridge that turns an integer literal into a UInt16.
-
-You will rarely call this directly — write the literal and let the
-`ExpressibleByIntLiteral` protocol pick it up. For widths smaller than
-64 bits the literal is truncated with `lang.cast_i64_i16`.
-
-##### Examples
-
-```
-let n: Int64 = 42;            // implicit
-```
-
-_Defined in `lang/std/numeric/uint16.ks`._
-
 #### initializer `Parse`
 
 ```kestrel
-public init(parsing: String)?
+public init[S](parsing: S)? where S: Str, S: not Static
 ```
 
 Parses a base-10 unsigned integer literal, optionally prefixed
@@ -10749,7 +9719,7 @@ _Defined in `lang/std/numeric/uint16.ks`._
 #### initializer `Parse Radix`
 
 ```kestrel
-public init(parsing: String, radix: Int64)?
+public init[S](parsing: S, radix: Int64)? where S: Str, S: not Static
 ```
 
 Parses an unsigned integer in `radix` (base 2-36 inclusive). Letters
@@ -11135,6 +10105,19 @@ Wrapping multiplication that returns `None` on overflow.
 
 _Defined in `lang/std/numeric/uint16.ks`._
 
+#### function `multiplyFull`
+
+```kestrel
+public func multiplyFull(UInt16) -> (UInt16, UInt16)
+```
+
+The full double-width product `self * other` as `(low, high)`
+halves: `low` is the wrapped product (as from `multiplyWrapping`),
+`high` the bits above it. Compiles to one widening multiply. For
+hashes, RNGs and bignum arithmetic.
+
+_Defined in `lang/std/numeric/uint16.ks`._
+
 #### function `multiplyOverflowing`
 
 ```kestrel
@@ -11239,7 +10222,7 @@ _Defined in `lang/std/numeric/random.ks`._
 public static func random() -> UInt16
 ```
 
-Returns a uniform value over the full `UInt16` range, using OS entropy.
+Returns a uniform value over the full `UInt16` range, from `DefaultRandom`.
 
 _Defined in `lang/std/numeric/random.ks`._
 
@@ -11261,7 +10244,7 @@ _Defined in `lang/std/numeric/random.ks`._
 public static func random[R](in: R) -> UInt16 where R: RandomBounds[Int64]
 ```
 
-Returns a uniform value in `range`, using OS entropy.
+Returns a uniform value in `range`, from `DefaultRandom`.
 
 _Defined in `lang/std/numeric/random.ks`._
 
@@ -11498,16 +10481,6 @@ _Defined in `lang/std/numeric/uint16.ks`._
 
 ### Implements `Matchable`
 
-#### function `matches`
-
-```kestrel
-public func matches(UInt16) -> Bool
-```
-
-Pattern-matching hook for `Matchable`. Identical to `isEqual`.
-
-_Defined in `lang/std/numeric/uint16.ks`._
-
 ### Implements `Formattable`
 
 #### function `format`
@@ -11541,8 +10514,9 @@ _Defined in `lang/std/numeric/uint16.ks`._
 public func hash[H](into: mutating H) where H: Hasher
 ```
 
-Feeds the raw bytes of this value into `hasher`. Endianness-agnostic
-only within a single process — do not persist hashes across builds.
+Feeds this value into `hasher` as one 64-bit word
+(`write(uint64:)`), which `DefaultHasher` mixes in a single round.
+Don't persist hashes across builds.
 
 _Defined in `lang/std/numeric/uint16.ks`._
 
@@ -11785,200 +10759,35 @@ _Defined in `lang/std/numeric/uint16.ks`._
 
 ### Implements `BitwiseAnd`
 
-#### function `bitwiseAnd`
-
-```kestrel
-public consuming func bitwiseAnd(consuming UInt16) -> UInt16
-```
-
-Bitwise AND. `0b1010 & 0b1100 == 0b1000`.
-
-_Defined in `lang/std/numeric/uint16.ks`._
-
 ### Implements `BitwiseOr`
-
-#### function `bitwiseOr`
-
-```kestrel
-public consuming func bitwiseOr(consuming UInt16) -> UInt16
-```
-
-Bitwise OR. `0b1010 | 0b1100 == 0b1110`.
-
-_Defined in `lang/std/numeric/uint16.ks`._
 
 ### Implements `BitwiseXor`
 
-#### function `bitwiseXor`
-
-```kestrel
-public consuming func bitwiseXor(consuming UInt16) -> UInt16
-```
-
-Bitwise XOR. `0b1010 ^ 0b1100 == 0b0110`.
-
-_Defined in `lang/std/numeric/uint16.ks`._
-
 ### Implements `BitwiseNot`
-
-#### function `bitwiseNot`
-
-```kestrel
-public consuming func bitwiseNot() -> UInt16
-```
-
-Bitwise NOT — flips all bits. For signed types this is `-self - 1`.
-
-_Defined in `lang/std/numeric/uint16.ks`._
 
 ### Implements `LeftShift`
 
-#### function `shiftLeft`
-
-```kestrel
-public consuming func shiftLeft(by: consuming Int64) -> UInt16
-```
-
-Left shift by `count`. The shift count is masked to
-`count % bitWidth` (matching hardware semantics), so
-`count >= bitWidth` wraps around rather than zeroing the value —
-e.g. shifting a `UInt16` left by `bitWidth` is a no-op.
-
-_Defined in `lang/std/numeric/uint16.ks`._
-
 ### Implements `RightShift`
-
-#### function `shiftRight`
-
-```kestrel
-public consuming func shiftRight(by: consuming Int64) -> UInt16
-```
-
-Right shift by `count`. Arithmetic (sign-extending) for signed types,
-logical (zero-filling) for unsigned. The count is masked to
-`count % bitWidth`, same as `shiftLeft`.
-
-_Defined in `lang/std/numeric/uint16.ks`._
 
 ### Implements `AddAssign`
 
-#### function `addAssign`
-
-```kestrel
-public mutating func addAssign(UInt16)
-```
-
-`self += other`
-
-_Defined in `lang/std/numeric/uint16.ks`._
-
 ### Implements `SubtractAssign`
-
-#### function `subtractAssign`
-
-```kestrel
-public mutating func subtractAssign(UInt16)
-```
-
-`self -= other`
-
-_Defined in `lang/std/numeric/uint16.ks`._
 
 ### Implements `MultiplyAssign`
 
-#### function `multiplyAssign`
-
-```kestrel
-public mutating func multiplyAssign(UInt16)
-```
-
-`self *= other`
-
-_Defined in `lang/std/numeric/uint16.ks`._
-
 ### Implements `DivideAssign`
-
-#### function `divideAssign`
-
-```kestrel
-public mutating func divideAssign(UInt16)
-```
-
-`self /= other`
-
-_Defined in `lang/std/numeric/uint16.ks`._
 
 ### Implements `RemainderAssign`
 
-#### function `remainderAssign`
-
-```kestrel
-public mutating func remainderAssign(UInt16)
-```
-
-`self %= other`
-
-_Defined in `lang/std/numeric/uint16.ks`._
-
 ### Implements `BitwiseAndAssign`
-
-#### function `bitwiseAndAssign`
-
-```kestrel
-public mutating func bitwiseAndAssign(UInt16)
-```
-
-`self &= other`
-
-_Defined in `lang/std/numeric/uint16.ks`._
 
 ### Implements `BitwiseOrAssign`
 
-#### function `bitwiseOrAssign`
-
-```kestrel
-public mutating func bitwiseOrAssign(UInt16)
-```
-
-`self |= other`
-
-_Defined in `lang/std/numeric/uint16.ks`._
-
 ### Implements `BitwiseXorAssign`
-
-#### function `bitwiseXorAssign`
-
-```kestrel
-public mutating func bitwiseXorAssign(UInt16)
-```
-
-`self ^= other`
-
-_Defined in `lang/std/numeric/uint16.ks`._
 
 ### Implements `LeftShiftAssign`
 
-#### function `shiftLeftAssign`
-
-```kestrel
-public mutating func shiftLeftAssign(by: Int64)
-```
-
-`self <<= count`
-
-_Defined in `lang/std/numeric/uint16.ks`._
-
 ### Implements `RightShiftAssign`
-
-#### function `shiftRightAssign`
-
-```kestrel
-public mutating func shiftRightAssign(by: Int64)
-```
-
-`self >>= count`
-
-_Defined in `lang/std/numeric/uint16.ks`._
 
 ### Implements `ExpressibleByIntLiteral`
 
@@ -11988,63 +10797,13 @@ _Defined in `lang/std/numeric/uint16.ks`._
 
 ### Implements `RangeConstructible`
 
-#### function `exclusiveRange`
-
-```kestrel
-public func exclusiveRange(to: UInt16) -> Range[UInt16]
-```
-
-Builds a half-open range `self..<end`. Sugar for the `..<` operator.
-
-_Defined in `lang/std/numeric/uint16.ks`._
-
 ### Implements `ClosedRangeConstructible`
-
-#### function `inclusiveRange`
-
-```kestrel
-public func inclusiveRange(to: UInt16) -> ClosedRange[UInt16]
-```
-
-Builds a closed range `self..=end`. Sugar for the `..=` operator.
-
-_Defined in `lang/std/numeric/uint16.ks`._
 
 ### Implements `RangeFromConstructible`
 
-#### function `rangeFrom`
-
-```kestrel
-public func rangeFrom() -> RangeFrom[UInt16]
-```
-
-Builds a partial range `self..` (from self, no upper bound).
-
-_Defined in `lang/std/numeric/uint16.ks`._
-
 ### Implements `RangeUpToConstructible`
 
-#### function `rangeUpTo`
-
-```kestrel
-public func rangeUpTo() -> RangeUpTo[UInt16]
-```
-
-Builds a partial range `..<self` (up to self, exclusive).
-
-_Defined in `lang/std/numeric/uint16.ks`._
-
 ### Implements `RangeThroughConstructible`
-
-#### function `rangeThrough`
-
-```kestrel
-public func rangeThrough() -> RangeThrough[UInt16]
-```
-
-Builds a partial range `..=self` (through self, inclusive).
-
-_Defined in `lang/std/numeric/uint16.ks`._
 
 ### Implements `Convertible`
 
@@ -12185,7 +10944,7 @@ _Defined in `lang/std/numeric/uint32.ks`._
 #### initializer `From Bytes`
 
 ```kestrel
-public init[S](fromBytes: S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
+public init[S](fromBytes: &S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
 ```
 
 Reassembles a `UInt32` from 4 bytes in native byte order.
@@ -12196,7 +10955,7 @@ _Defined in `lang/std/numeric/uint32.ks`._
 #### initializer `From Bytes Big Endian`
 
 ```kestrel
-public init[S](fromBytesBigEndian: S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
+public init[S](fromBytesBigEndian: &S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
 ```
 
 Reassembles a `UInt32` from 4 bytes in big-endian order.
@@ -12207,7 +10966,7 @@ _Defined in `lang/std/numeric/uint32.ks`._
 #### initializer `From Bytes Little Endian`
 
 ```kestrel
-public init[S](fromBytesLittleEndian: S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
+public init[S](fromBytesLittleEndian: &S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
 ```
 
 Reassembles a `UInt32` from 4 bytes in little-endian order.
@@ -12326,30 +11085,10 @@ counterpart of `raw`, for values coming back from intrinsics or C.
 
 _Defined in `lang/std/numeric/uint32.ks`._
 
-#### initializer `Int Literal`
-
-```kestrel
-public init(intLiteral: lang.i64)
-```
-
-Compiler-emitted bridge that turns an integer literal into a UInt32.
-
-You will rarely call this directly — write the literal and let the
-`ExpressibleByIntLiteral` protocol pick it up. For widths smaller than
-64 bits the literal is truncated with `lang.cast_i64_i32`.
-
-##### Examples
-
-```
-let n: Int64 = 42;            // implicit
-```
-
-_Defined in `lang/std/numeric/uint32.ks`._
-
 #### initializer `Parse`
 
 ```kestrel
-public init(parsing: String)?
+public init[S](parsing: S)? where S: Str, S: not Static
 ```
 
 Parses a base-10 unsigned integer literal, optionally prefixed
@@ -12369,7 +11108,7 @@ _Defined in `lang/std/numeric/uint32.ks`._
 #### initializer `Parse Radix`
 
 ```kestrel
-public init(parsing: String, radix: Int64)?
+public init[S](parsing: S, radix: Int64)? where S: Str, S: not Static
 ```
 
 Parses an unsigned integer in `radix` (base 2-36 inclusive). Letters
@@ -12744,6 +11483,19 @@ Wrapping multiplication that returns `None` on overflow.
 
 _Defined in `lang/std/numeric/uint32.ks`._
 
+#### function `multiplyFull`
+
+```kestrel
+public func multiplyFull(UInt32) -> (UInt32, UInt32)
+```
+
+The full double-width product `self * other` as `(low, high)`
+halves: `low` is the wrapped product (as from `multiplyWrapping`),
+`high` the bits above it. Compiles to one widening multiply. For
+hashes, RNGs and bignum arithmetic.
+
+_Defined in `lang/std/numeric/uint32.ks`._
+
 #### function `multiplyOverflowing`
 
 ```kestrel
@@ -12848,7 +11600,7 @@ _Defined in `lang/std/numeric/random.ks`._
 public static func random() -> UInt32
 ```
 
-Returns a uniform value over the full `UInt32` range, using OS entropy.
+Returns a uniform value over the full `UInt32` range, from `DefaultRandom`.
 
 _Defined in `lang/std/numeric/random.ks`._
 
@@ -12870,7 +11622,7 @@ _Defined in `lang/std/numeric/random.ks`._
 public static func random[R](in: R) -> UInt32 where R: RandomBounds[Int64]
 ```
 
-Returns a uniform value in `range`, using OS entropy.
+Returns a uniform value in `range`, from `DefaultRandom`.
 
 _Defined in `lang/std/numeric/random.ks`._
 
@@ -13107,16 +11859,6 @@ _Defined in `lang/std/numeric/uint32.ks`._
 
 ### Implements `Matchable`
 
-#### function `matches`
-
-```kestrel
-public func matches(UInt32) -> Bool
-```
-
-Pattern-matching hook for `Matchable`. Identical to `isEqual`.
-
-_Defined in `lang/std/numeric/uint32.ks`._
-
 ### Implements `Formattable`
 
 #### function `format`
@@ -13150,8 +11892,9 @@ _Defined in `lang/std/numeric/uint32.ks`._
 public func hash[H](into: mutating H) where H: Hasher
 ```
 
-Feeds the raw bytes of this value into `hasher`. Endianness-agnostic
-only within a single process — do not persist hashes across builds.
+Feeds this value into `hasher` as one 64-bit word
+(`write(uint64:)`), which `DefaultHasher` mixes in a single round.
+Don't persist hashes across builds.
 
 _Defined in `lang/std/numeric/uint32.ks`._
 
@@ -13394,200 +12137,35 @@ _Defined in `lang/std/numeric/uint32.ks`._
 
 ### Implements `BitwiseAnd`
 
-#### function `bitwiseAnd`
-
-```kestrel
-public consuming func bitwiseAnd(consuming UInt32) -> UInt32
-```
-
-Bitwise AND. `0b1010 & 0b1100 == 0b1000`.
-
-_Defined in `lang/std/numeric/uint32.ks`._
-
 ### Implements `BitwiseOr`
-
-#### function `bitwiseOr`
-
-```kestrel
-public consuming func bitwiseOr(consuming UInt32) -> UInt32
-```
-
-Bitwise OR. `0b1010 | 0b1100 == 0b1110`.
-
-_Defined in `lang/std/numeric/uint32.ks`._
 
 ### Implements `BitwiseXor`
 
-#### function `bitwiseXor`
-
-```kestrel
-public consuming func bitwiseXor(consuming UInt32) -> UInt32
-```
-
-Bitwise XOR. `0b1010 ^ 0b1100 == 0b0110`.
-
-_Defined in `lang/std/numeric/uint32.ks`._
-
 ### Implements `BitwiseNot`
-
-#### function `bitwiseNot`
-
-```kestrel
-public consuming func bitwiseNot() -> UInt32
-```
-
-Bitwise NOT — flips all bits. For signed types this is `-self - 1`.
-
-_Defined in `lang/std/numeric/uint32.ks`._
 
 ### Implements `LeftShift`
 
-#### function `shiftLeft`
-
-```kestrel
-public consuming func shiftLeft(by: consuming Int64) -> UInt32
-```
-
-Left shift by `count`. The shift count is masked to
-`count % bitWidth` (matching hardware semantics), so
-`count >= bitWidth` wraps around rather than zeroing the value —
-e.g. shifting a `UInt32` left by `bitWidth` is a no-op.
-
-_Defined in `lang/std/numeric/uint32.ks`._
-
 ### Implements `RightShift`
-
-#### function `shiftRight`
-
-```kestrel
-public consuming func shiftRight(by: consuming Int64) -> UInt32
-```
-
-Right shift by `count`. Arithmetic (sign-extending) for signed types,
-logical (zero-filling) for unsigned. The count is masked to
-`count % bitWidth`, same as `shiftLeft`.
-
-_Defined in `lang/std/numeric/uint32.ks`._
 
 ### Implements `AddAssign`
 
-#### function `addAssign`
-
-```kestrel
-public mutating func addAssign(UInt32)
-```
-
-`self += other`
-
-_Defined in `lang/std/numeric/uint32.ks`._
-
 ### Implements `SubtractAssign`
-
-#### function `subtractAssign`
-
-```kestrel
-public mutating func subtractAssign(UInt32)
-```
-
-`self -= other`
-
-_Defined in `lang/std/numeric/uint32.ks`._
 
 ### Implements `MultiplyAssign`
 
-#### function `multiplyAssign`
-
-```kestrel
-public mutating func multiplyAssign(UInt32)
-```
-
-`self *= other`
-
-_Defined in `lang/std/numeric/uint32.ks`._
-
 ### Implements `DivideAssign`
-
-#### function `divideAssign`
-
-```kestrel
-public mutating func divideAssign(UInt32)
-```
-
-`self /= other`
-
-_Defined in `lang/std/numeric/uint32.ks`._
 
 ### Implements `RemainderAssign`
 
-#### function `remainderAssign`
-
-```kestrel
-public mutating func remainderAssign(UInt32)
-```
-
-`self %= other`
-
-_Defined in `lang/std/numeric/uint32.ks`._
-
 ### Implements `BitwiseAndAssign`
-
-#### function `bitwiseAndAssign`
-
-```kestrel
-public mutating func bitwiseAndAssign(UInt32)
-```
-
-`self &= other`
-
-_Defined in `lang/std/numeric/uint32.ks`._
 
 ### Implements `BitwiseOrAssign`
 
-#### function `bitwiseOrAssign`
-
-```kestrel
-public mutating func bitwiseOrAssign(UInt32)
-```
-
-`self |= other`
-
-_Defined in `lang/std/numeric/uint32.ks`._
-
 ### Implements `BitwiseXorAssign`
-
-#### function `bitwiseXorAssign`
-
-```kestrel
-public mutating func bitwiseXorAssign(UInt32)
-```
-
-`self ^= other`
-
-_Defined in `lang/std/numeric/uint32.ks`._
 
 ### Implements `LeftShiftAssign`
 
-#### function `shiftLeftAssign`
-
-```kestrel
-public mutating func shiftLeftAssign(by: Int64)
-```
-
-`self <<= count`
-
-_Defined in `lang/std/numeric/uint32.ks`._
-
 ### Implements `RightShiftAssign`
-
-#### function `shiftRightAssign`
-
-```kestrel
-public mutating func shiftRightAssign(by: Int64)
-```
-
-`self >>= count`
-
-_Defined in `lang/std/numeric/uint32.ks`._
 
 ### Implements `ExpressibleByIntLiteral`
 
@@ -13597,63 +12175,13 @@ _Defined in `lang/std/numeric/uint32.ks`._
 
 ### Implements `RangeConstructible`
 
-#### function `exclusiveRange`
-
-```kestrel
-public func exclusiveRange(to: UInt32) -> Range[UInt32]
-```
-
-Builds a half-open range `self..<end`. Sugar for the `..<` operator.
-
-_Defined in `lang/std/numeric/uint32.ks`._
-
 ### Implements `ClosedRangeConstructible`
-
-#### function `inclusiveRange`
-
-```kestrel
-public func inclusiveRange(to: UInt32) -> ClosedRange[UInt32]
-```
-
-Builds a closed range `self..=end`. Sugar for the `..=` operator.
-
-_Defined in `lang/std/numeric/uint32.ks`._
 
 ### Implements `RangeFromConstructible`
 
-#### function `rangeFrom`
-
-```kestrel
-public func rangeFrom() -> RangeFrom[UInt32]
-```
-
-Builds a partial range `self..` (from self, no upper bound).
-
-_Defined in `lang/std/numeric/uint32.ks`._
-
 ### Implements `RangeUpToConstructible`
 
-#### function `rangeUpTo`
-
-```kestrel
-public func rangeUpTo() -> RangeUpTo[UInt32]
-```
-
-Builds a partial range `..<self` (up to self, exclusive).
-
-_Defined in `lang/std/numeric/uint32.ks`._
-
 ### Implements `RangeThroughConstructible`
-
-#### function `rangeThrough`
-
-```kestrel
-public func rangeThrough() -> RangeThrough[UInt32]
-```
-
-Builds a partial range `..=self` (through self, inclusive).
-
-_Defined in `lang/std/numeric/uint32.ks`._
 
 ### Implements `Convertible`
 
@@ -13783,7 +12311,7 @@ _Defined in `lang/std/numeric/uint64.ks`._
 #### initializer `From Bytes`
 
 ```kestrel
-public init[S](fromBytes: S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
+public init[S](fromBytes: &S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
 ```
 
 Reassembles a `UInt64` from 8 bytes in native byte order.
@@ -13794,7 +12322,7 @@ _Defined in `lang/std/numeric/uint64.ks`._
 #### initializer `From Bytes Big Endian`
 
 ```kestrel
-public init[S](fromBytesBigEndian: S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
+public init[S](fromBytesBigEndian: &S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
 ```
 
 Reassembles a `UInt64` from 8 bytes in big-endian order.
@@ -13805,7 +12333,7 @@ _Defined in `lang/std/numeric/uint64.ks`._
 #### initializer `From Bytes Little Endian`
 
 ```kestrel
-public init[S](fromBytesLittleEndian: S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
+public init[S](fromBytesLittleEndian: &S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
 ```
 
 Reassembles a `UInt64` from 8 bytes in little-endian order.
@@ -13918,30 +12446,10 @@ counterpart of `raw`, for values coming back from intrinsics or C.
 
 _Defined in `lang/std/numeric/uint64.ks`._
 
-#### initializer `Int Literal`
-
-```kestrel
-public init(intLiteral: lang.i64)
-```
-
-Compiler-emitted bridge that turns an integer literal into a UInt64.
-
-You will rarely call this directly — write the literal and let the
-`ExpressibleByIntLiteral` protocol pick it up. For widths smaller than
-64 bits the literal is truncated with `lang.cast_i64_i64`.
-
-##### Examples
-
-```
-let n: Int64 = 42;            // implicit
-```
-
-_Defined in `lang/std/numeric/uint64.ks`._
-
 #### initializer `Parse`
 
 ```kestrel
-public init(parsing: String)?
+public init[S](parsing: S)? where S: Str, S: not Static
 ```
 
 Parses a base-10 unsigned integer literal, optionally prefixed
@@ -13961,7 +12469,7 @@ _Defined in `lang/std/numeric/uint64.ks`._
 #### initializer `Parse Radix`
 
 ```kestrel
-public init(parsing: String, radix: Int64)?
+public init[S](parsing: S, radix: Int64)? where S: Str, S: not Static
 ```
 
 Parses an unsigned integer in `radix` (base 2-36 inclusive). Letters
@@ -14325,6 +12833,19 @@ Wrapping multiplication that returns `None` on overflow.
 
 _Defined in `lang/std/numeric/uint64.ks`._
 
+#### function `multiplyFull`
+
+```kestrel
+public func multiplyFull(UInt64) -> (UInt64, UInt64)
+```
+
+The full double-width product `self * other` as `(low, high)`
+halves: `low` is the wrapped product (as from `multiplyWrapping`),
+`high` the bits above it. Compiles to one widening multiply. For
+hashes, RNGs and bignum arithmetic.
+
+_Defined in `lang/std/numeric/uint64.ks`._
+
 #### function `multiplyOverflowing`
 
 ```kestrel
@@ -14460,7 +12981,7 @@ _Defined in `lang/std/numeric/random.ks`._
 public static func random[R](in: R) -> UInt64 where R: RandomBounds[Int64]
 ```
 
-Returns a uniform value in `range`, using OS entropy.
+Returns a uniform value in `range`, from `DefaultRandom`.
 
 _Defined in `lang/std/numeric/random.ks`._
 
@@ -14697,16 +13218,6 @@ _Defined in `lang/std/numeric/uint64.ks`._
 
 ### Implements `Matchable`
 
-#### function `matches`
-
-```kestrel
-public func matches(UInt64) -> Bool
-```
-
-Pattern-matching hook for `Matchable`. Identical to `isEqual`.
-
-_Defined in `lang/std/numeric/uint64.ks`._
-
 ### Implements `Formattable`
 
 #### function `format`
@@ -14740,8 +13251,9 @@ _Defined in `lang/std/numeric/uint64.ks`._
 public func hash[H](into: mutating H) where H: Hasher
 ```
 
-Feeds the raw bytes of this value into `hasher`. Endianness-agnostic
-only within a single process — do not persist hashes across builds.
+Feeds this value into `hasher` as one 64-bit word
+(`write(uint64:)`), which `DefaultHasher` mixes in a single round.
+Don't persist hashes across builds.
 
 _Defined in `lang/std/numeric/uint64.ks`._
 
@@ -14984,200 +13496,35 @@ _Defined in `lang/std/numeric/uint64.ks`._
 
 ### Implements `BitwiseAnd`
 
-#### function `bitwiseAnd`
-
-```kestrel
-public consuming func bitwiseAnd(consuming UInt64) -> UInt64
-```
-
-Bitwise AND. `0b1010 & 0b1100 == 0b1000`.
-
-_Defined in `lang/std/numeric/uint64.ks`._
-
 ### Implements `BitwiseOr`
-
-#### function `bitwiseOr`
-
-```kestrel
-public consuming func bitwiseOr(consuming UInt64) -> UInt64
-```
-
-Bitwise OR. `0b1010 | 0b1100 == 0b1110`.
-
-_Defined in `lang/std/numeric/uint64.ks`._
 
 ### Implements `BitwiseXor`
 
-#### function `bitwiseXor`
-
-```kestrel
-public consuming func bitwiseXor(consuming UInt64) -> UInt64
-```
-
-Bitwise XOR. `0b1010 ^ 0b1100 == 0b0110`.
-
-_Defined in `lang/std/numeric/uint64.ks`._
-
 ### Implements `BitwiseNot`
-
-#### function `bitwiseNot`
-
-```kestrel
-public consuming func bitwiseNot() -> UInt64
-```
-
-Bitwise NOT — flips all bits. For signed types this is `-self - 1`.
-
-_Defined in `lang/std/numeric/uint64.ks`._
 
 ### Implements `LeftShift`
 
-#### function `shiftLeft`
-
-```kestrel
-public consuming func shiftLeft(by: consuming Int64) -> UInt64
-```
-
-Left shift by `count`. The shift count is masked to
-`count % bitWidth` (matching hardware semantics), so
-`count >= bitWidth` wraps around rather than zeroing the value —
-e.g. shifting a `UInt64` left by `bitWidth` is a no-op.
-
-_Defined in `lang/std/numeric/uint64.ks`._
-
 ### Implements `RightShift`
-
-#### function `shiftRight`
-
-```kestrel
-public consuming func shiftRight(by: consuming Int64) -> UInt64
-```
-
-Right shift by `count`. Arithmetic (sign-extending) for signed types,
-logical (zero-filling) for unsigned. The count is masked to
-`count % bitWidth`, same as `shiftLeft`.
-
-_Defined in `lang/std/numeric/uint64.ks`._
 
 ### Implements `AddAssign`
 
-#### function `addAssign`
-
-```kestrel
-public mutating func addAssign(UInt64)
-```
-
-`self += other`
-
-_Defined in `lang/std/numeric/uint64.ks`._
-
 ### Implements `SubtractAssign`
-
-#### function `subtractAssign`
-
-```kestrel
-public mutating func subtractAssign(UInt64)
-```
-
-`self -= other`
-
-_Defined in `lang/std/numeric/uint64.ks`._
 
 ### Implements `MultiplyAssign`
 
-#### function `multiplyAssign`
-
-```kestrel
-public mutating func multiplyAssign(UInt64)
-```
-
-`self *= other`
-
-_Defined in `lang/std/numeric/uint64.ks`._
-
 ### Implements `DivideAssign`
-
-#### function `divideAssign`
-
-```kestrel
-public mutating func divideAssign(UInt64)
-```
-
-`self /= other`
-
-_Defined in `lang/std/numeric/uint64.ks`._
 
 ### Implements `RemainderAssign`
 
-#### function `remainderAssign`
-
-```kestrel
-public mutating func remainderAssign(UInt64)
-```
-
-`self %= other`
-
-_Defined in `lang/std/numeric/uint64.ks`._
-
 ### Implements `BitwiseAndAssign`
-
-#### function `bitwiseAndAssign`
-
-```kestrel
-public mutating func bitwiseAndAssign(UInt64)
-```
-
-`self &= other`
-
-_Defined in `lang/std/numeric/uint64.ks`._
 
 ### Implements `BitwiseOrAssign`
 
-#### function `bitwiseOrAssign`
-
-```kestrel
-public mutating func bitwiseOrAssign(UInt64)
-```
-
-`self |= other`
-
-_Defined in `lang/std/numeric/uint64.ks`._
-
 ### Implements `BitwiseXorAssign`
-
-#### function `bitwiseXorAssign`
-
-```kestrel
-public mutating func bitwiseXorAssign(UInt64)
-```
-
-`self ^= other`
-
-_Defined in `lang/std/numeric/uint64.ks`._
 
 ### Implements `LeftShiftAssign`
 
-#### function `shiftLeftAssign`
-
-```kestrel
-public mutating func shiftLeftAssign(by: Int64)
-```
-
-`self <<= count`
-
-_Defined in `lang/std/numeric/uint64.ks`._
-
 ### Implements `RightShiftAssign`
-
-#### function `shiftRightAssign`
-
-```kestrel
-public mutating func shiftRightAssign(by: Int64)
-```
-
-`self >>= count`
-
-_Defined in `lang/std/numeric/uint64.ks`._
 
 ### Implements `ExpressibleByIntLiteral`
 
@@ -15187,63 +13534,13 @@ _Defined in `lang/std/numeric/uint64.ks`._
 
 ### Implements `RangeConstructible`
 
-#### function `exclusiveRange`
-
-```kestrel
-public func exclusiveRange(to: UInt64) -> Range[UInt64]
-```
-
-Builds a half-open range `self..<end`. Sugar for the `..<` operator.
-
-_Defined in `lang/std/numeric/uint64.ks`._
-
 ### Implements `ClosedRangeConstructible`
-
-#### function `inclusiveRange`
-
-```kestrel
-public func inclusiveRange(to: UInt64) -> ClosedRange[UInt64]
-```
-
-Builds a closed range `self..=end`. Sugar for the `..=` operator.
-
-_Defined in `lang/std/numeric/uint64.ks`._
 
 ### Implements `RangeFromConstructible`
 
-#### function `rangeFrom`
-
-```kestrel
-public func rangeFrom() -> RangeFrom[UInt64]
-```
-
-Builds a partial range `self..` (from self, no upper bound).
-
-_Defined in `lang/std/numeric/uint64.ks`._
-
 ### Implements `RangeUpToConstructible`
 
-#### function `rangeUpTo`
-
-```kestrel
-public func rangeUpTo() -> RangeUpTo[UInt64]
-```
-
-Builds a partial range `..<self` (up to self, exclusive).
-
-_Defined in `lang/std/numeric/uint64.ks`._
-
 ### Implements `RangeThroughConstructible`
-
-#### function `rangeThrough`
-
-```kestrel
-public func rangeThrough() -> RangeThrough[UInt64]
-```
-
-Builds a partial range `..=self` (through self, inclusive).
-
-_Defined in `lang/std/numeric/uint64.ks`._
 
 ### Implements `Convertible`
 
@@ -15406,7 +13703,7 @@ _Defined in `lang/std/numeric/uint8.ks`._
 #### initializer `From Bytes`
 
 ```kestrel
-public init[S](fromBytes: S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
+public init[S](fromBytes: &S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
 ```
 
 Reassembles a `UInt8` from 1 bytes in native byte order.
@@ -15417,7 +13714,7 @@ _Defined in `lang/std/numeric/uint8.ks`._
 #### initializer `From Bytes Big Endian`
 
 ```kestrel
-public init[S](fromBytesBigEndian: S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
+public init[S](fromBytesBigEndian: &S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
 ```
 
 Reassembles a `UInt8` from 1 bytes in big-endian order.
@@ -15428,7 +13725,7 @@ _Defined in `lang/std/numeric/uint8.ks`._
 #### initializer `From Bytes Little Endian`
 
 ```kestrel
-public init[S](fromBytesLittleEndian: S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
+public init[S](fromBytesLittleEndian: &S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
 ```
 
 Reassembles a `UInt8` from 1 bytes in little-endian order.
@@ -15559,30 +13856,10 @@ counterpart of `raw`, for values coming back from intrinsics or C.
 
 _Defined in `lang/std/numeric/uint8.ks`._
 
-#### initializer `Int Literal`
-
-```kestrel
-public init(intLiteral: lang.i64)
-```
-
-Compiler-emitted bridge that turns an integer literal into a UInt8.
-
-You will rarely call this directly — write the literal and let the
-`ExpressibleByIntLiteral` protocol pick it up. For widths smaller than
-64 bits the literal is truncated with `lang.cast_i64_i8`.
-
-##### Examples
-
-```
-let n: Int64 = 42;            // implicit
-```
-
-_Defined in `lang/std/numeric/uint8.ks`._
-
 #### initializer `Parse`
 
 ```kestrel
-public init(parsing: String)?
+public init[S](parsing: S)? where S: Str, S: not Static
 ```
 
 Parses a base-10 unsigned integer literal, optionally prefixed
@@ -15602,7 +13879,7 @@ _Defined in `lang/std/numeric/uint8.ks`._
 #### initializer `Parse Radix`
 
 ```kestrel
-public init(parsing: String, radix: Int64)?
+public init[S](parsing: S, radix: Int64)? where S: Str, S: not Static
 ```
 
 Parses an unsigned integer in `radix` (base 2-36 inclusive). Letters
@@ -15999,6 +14276,19 @@ Wrapping multiplication that returns `None` on overflow.
 
 _Defined in `lang/std/numeric/uint8.ks`._
 
+#### function `multiplyFull`
+
+```kestrel
+public func multiplyFull(UInt8) -> (UInt8, UInt8)
+```
+
+The full double-width product `self * other` as `(low, high)`
+halves: `low` is the wrapped product (as from `multiplyWrapping`),
+`high` the bits above it. Compiles to one widening multiply. For
+hashes, RNGs and bignum arithmetic.
+
+_Defined in `lang/std/numeric/uint8.ks`._
+
 #### function `multiplyOverflowing`
 
 ```kestrel
@@ -16103,7 +14393,7 @@ _Defined in `lang/std/numeric/random.ks`._
 public static func random() -> UInt8
 ```
 
-Returns a uniform value over the full `UInt8` range, using OS entropy.
+Returns a uniform value over the full `UInt8` range, from `DefaultRandom`.
 
 _Defined in `lang/std/numeric/random.ks`._
 
@@ -16125,7 +14415,7 @@ _Defined in `lang/std/numeric/random.ks`._
 public static func random[R](in: R) -> UInt8 where R: RandomBounds[Int64]
 ```
 
-Returns a uniform value in `range`, using OS entropy.
+Returns a uniform value in `range`, from `DefaultRandom`.
 
 _Defined in `lang/std/numeric/random.ks`._
 
@@ -16362,16 +14652,6 @@ _Defined in `lang/std/numeric/uint8.ks`._
 
 ### Implements `Matchable`
 
-#### function `matches`
-
-```kestrel
-public func matches(UInt8) -> Bool
-```
-
-Pattern-matching hook for `Matchable`. Identical to `isEqual`.
-
-_Defined in `lang/std/numeric/uint8.ks`._
-
 ### Implements `Formattable`
 
 #### function `format`
@@ -16405,8 +14685,9 @@ _Defined in `lang/std/numeric/uint8.ks`._
 public func hash[H](into: mutating H) where H: Hasher
 ```
 
-Feeds the raw bytes of this value into `hasher`. Endianness-agnostic
-only within a single process — do not persist hashes across builds.
+Feeds this value into `hasher` as one 64-bit word
+(`write(uint64:)`), which `DefaultHasher` mixes in a single round.
+Don't persist hashes across builds.
 
 _Defined in `lang/std/numeric/uint8.ks`._
 
@@ -16649,200 +14930,35 @@ _Defined in `lang/std/numeric/uint8.ks`._
 
 ### Implements `BitwiseAnd`
 
-#### function `bitwiseAnd`
-
-```kestrel
-public consuming func bitwiseAnd(consuming UInt8) -> UInt8
-```
-
-Bitwise AND. `0b1010 & 0b1100 == 0b1000`.
-
-_Defined in `lang/std/numeric/uint8.ks`._
-
 ### Implements `BitwiseOr`
-
-#### function `bitwiseOr`
-
-```kestrel
-public consuming func bitwiseOr(consuming UInt8) -> UInt8
-```
-
-Bitwise OR. `0b1010 | 0b1100 == 0b1110`.
-
-_Defined in `lang/std/numeric/uint8.ks`._
 
 ### Implements `BitwiseXor`
 
-#### function `bitwiseXor`
-
-```kestrel
-public consuming func bitwiseXor(consuming UInt8) -> UInt8
-```
-
-Bitwise XOR. `0b1010 ^ 0b1100 == 0b0110`.
-
-_Defined in `lang/std/numeric/uint8.ks`._
-
 ### Implements `BitwiseNot`
-
-#### function `bitwiseNot`
-
-```kestrel
-public consuming func bitwiseNot() -> UInt8
-```
-
-Bitwise NOT — flips all bits. For signed types this is `-self - 1`.
-
-_Defined in `lang/std/numeric/uint8.ks`._
 
 ### Implements `LeftShift`
 
-#### function `shiftLeft`
-
-```kestrel
-public consuming func shiftLeft(by: consuming Int64) -> UInt8
-```
-
-Left shift by `count`. The shift count is masked to
-`count % bitWidth` (matching hardware semantics), so
-`count >= bitWidth` wraps around rather than zeroing the value —
-e.g. shifting a `UInt8` left by `bitWidth` is a no-op.
-
-_Defined in `lang/std/numeric/uint8.ks`._
-
 ### Implements `RightShift`
-
-#### function `shiftRight`
-
-```kestrel
-public consuming func shiftRight(by: consuming Int64) -> UInt8
-```
-
-Right shift by `count`. Arithmetic (sign-extending) for signed types,
-logical (zero-filling) for unsigned. The count is masked to
-`count % bitWidth`, same as `shiftLeft`.
-
-_Defined in `lang/std/numeric/uint8.ks`._
 
 ### Implements `AddAssign`
 
-#### function `addAssign`
-
-```kestrel
-public mutating func addAssign(UInt8)
-```
-
-`self += other`
-
-_Defined in `lang/std/numeric/uint8.ks`._
-
 ### Implements `SubtractAssign`
-
-#### function `subtractAssign`
-
-```kestrel
-public mutating func subtractAssign(UInt8)
-```
-
-`self -= other`
-
-_Defined in `lang/std/numeric/uint8.ks`._
 
 ### Implements `MultiplyAssign`
 
-#### function `multiplyAssign`
-
-```kestrel
-public mutating func multiplyAssign(UInt8)
-```
-
-`self *= other`
-
-_Defined in `lang/std/numeric/uint8.ks`._
-
 ### Implements `DivideAssign`
-
-#### function `divideAssign`
-
-```kestrel
-public mutating func divideAssign(UInt8)
-```
-
-`self /= other`
-
-_Defined in `lang/std/numeric/uint8.ks`._
 
 ### Implements `RemainderAssign`
 
-#### function `remainderAssign`
-
-```kestrel
-public mutating func remainderAssign(UInt8)
-```
-
-`self %= other`
-
-_Defined in `lang/std/numeric/uint8.ks`._
-
 ### Implements `BitwiseAndAssign`
-
-#### function `bitwiseAndAssign`
-
-```kestrel
-public mutating func bitwiseAndAssign(UInt8)
-```
-
-`self &= other`
-
-_Defined in `lang/std/numeric/uint8.ks`._
 
 ### Implements `BitwiseOrAssign`
 
-#### function `bitwiseOrAssign`
-
-```kestrel
-public mutating func bitwiseOrAssign(UInt8)
-```
-
-`self |= other`
-
-_Defined in `lang/std/numeric/uint8.ks`._
-
 ### Implements `BitwiseXorAssign`
-
-#### function `bitwiseXorAssign`
-
-```kestrel
-public mutating func bitwiseXorAssign(UInt8)
-```
-
-`self ^= other`
-
-_Defined in `lang/std/numeric/uint8.ks`._
 
 ### Implements `LeftShiftAssign`
 
-#### function `shiftLeftAssign`
-
-```kestrel
-public mutating func shiftLeftAssign(by: Int64)
-```
-
-`self <<= count`
-
-_Defined in `lang/std/numeric/uint8.ks`._
-
 ### Implements `RightShiftAssign`
-
-#### function `shiftRightAssign`
-
-```kestrel
-public mutating func shiftRightAssign(by: Int64)
-```
-
-`self >>= count`
-
-_Defined in `lang/std/numeric/uint8.ks`._
 
 ### Implements `ExpressibleByIntLiteral`
 
@@ -16852,63 +14968,13 @@ _Defined in `lang/std/numeric/uint8.ks`._
 
 ### Implements `RangeConstructible`
 
-#### function `exclusiveRange`
-
-```kestrel
-public func exclusiveRange(to: UInt8) -> Range[UInt8]
-```
-
-Builds a half-open range `self..<end`. Sugar for the `..<` operator.
-
-_Defined in `lang/std/numeric/uint8.ks`._
-
 ### Implements `ClosedRangeConstructible`
-
-#### function `inclusiveRange`
-
-```kestrel
-public func inclusiveRange(to: UInt8) -> ClosedRange[UInt8]
-```
-
-Builds a closed range `self..=end`. Sugar for the `..=` operator.
-
-_Defined in `lang/std/numeric/uint8.ks`._
 
 ### Implements `RangeFromConstructible`
 
-#### function `rangeFrom`
-
-```kestrel
-public func rangeFrom() -> RangeFrom[UInt8]
-```
-
-Builds a partial range `self..` (from self, no upper bound).
-
-_Defined in `lang/std/numeric/uint8.ks`._
-
 ### Implements `RangeUpToConstructible`
 
-#### function `rangeUpTo`
-
-```kestrel
-public func rangeUpTo() -> RangeUpTo[UInt8]
-```
-
-Builds a partial range `..<self` (up to self, exclusive).
-
-_Defined in `lang/std/numeric/uint8.ks`._
-
 ### Implements `RangeThroughConstructible`
-
-#### function `rangeThrough`
-
-```kestrel
-public func rangeThrough() -> RangeThrough[UInt8]
-```
-
-Builds a partial range `..=self` (through self, inclusive).
-
-_Defined in `lang/std/numeric/uint8.ks`._
 
 ### Implements `Convertible`
 
@@ -16923,6 +14989,8 @@ consuming func report() -> ExitCode
 ```
 
 _Defined in `lang/std/system/exitable.ks`._
+
+### Implements `ExpressibleByCharLiteral`
 
 ## protocol `UnsignedInteger`
 

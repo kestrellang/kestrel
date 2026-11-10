@@ -75,7 +75,7 @@ internal func native_environ() -> RawPointer
 
 @extern(.C, mangleName: "kestrel_spawn")
 internal func native_spawn(program: RawPointer, argv: RawPointer, envp: RawPointer, cwd: RawPointer,
-                  modes: RawPointer, pidOut: RawPointer, parentFds: RawPointer) -> Int32
+                  modes: RawPointer, paths: RawPointer, pidOut: RawPointer, parentFds: RawPointer) -> Int32
 
 @extern(.C, mangleName: "kestrel_wait")
 internal func native_wait(pid: Int32, nohang: Int32, kind: RawPointer, value: RawPointer) -> Int32

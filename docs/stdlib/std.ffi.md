@@ -190,7 +190,7 @@ if let .Some(log) = hooks.log.function {
 }
 ```
 
-`F` must be a C function type (E646).
+`F` must be a C function type (E647).
 
 _Defined in `lang/std/ffi/nullable_cfunction.ks`._
 
@@ -250,6 +250,32 @@ _Defined in `lang/std/ffi/nullable_cfunction.ks`._
 
 ### Implements `ExpressibleByNullLiteral`
 
+## function `calloc`
+
+```kestrel
+public func calloc(consuming Int64, consuming Int64) -> RawPointer
+```
+
+Wraps `calloc(3)` — allocates `count * size` bytes of zeroed memory.
+
+Returns null on failure (including when `count * size` overflows).
+Large blocks come straight from the kernel already zeroed, so pages
+are only touched when first written. Free with `free`.
+
+### Safety
+
+The returned pointer is raw: pair every successful call with exactly
+one `free`, and stay within `count * size` bytes.
+
+### Examples
+
+```
+let buf = calloc(1024, 1);  // 1 KB of zero bytes
+free(buf);
+```
+
+_Defined in `lang/std/ffi/libc.ks`._
+
 ## function `free`
 
 ```kestrel
@@ -280,8 +306,8 @@ Wraps `malloc(3)` — allocates `size` bytes of uninitialised memory.
 
 Returns a pointer to the start of the block, or null on failure.
 The memory is **uninitialised** — read it only after writing
-every byte you intend to use, or follow up with `memset` /
-`calloc` (not exposed here). Free with `free`.
+every byte you intend to use, or use `calloc` / `memset` for zeroed
+memory. Free with `free`.
 
 ### Safety
 

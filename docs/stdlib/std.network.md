@@ -658,8 +658,31 @@ _Defined in `lang/std/network/tcp.ks`._
 public static func bind(UInt16) -> Result[TcpListener, IoError]
 ```
 
+Listens on `port` on this machine only (`[::1]`, or `127.0.0.1`
+where IPv6 is unavailable), so a dev server isn't reachable from the
+network by accident. Use `bind(anyInterface:)` to accept outside
+connections.
+
+_Defined in `lang/std/network/tcp.ks`._
+
+#### function `bind`
+
+```kestrel
+public static func bind(anyInterface: UInt16) -> Result[TcpListener, IoError]
+```
+
 Listens on `port` on every local address, IPv6 and IPv4 (`[::]`,
-or `0.0.0.0` where IPv6 is unavailable).
+or `0.0.0.0` where IPv6 is unavailable). Reachable from the network.
+
+_Defined in `lang/std/network/tcp.ks`._
+
+#### function `bindDualStack`
+
+```kestrel
+static func bindDualStack(IpAddress, IpAddress, UInt16) -> Result[TcpListener, IoError]
+```
+
+Binds `v6`, falling back to `v4` only when IPv6 itself is missing.
 
 _Defined in `lang/std/network/tcp.ks`._
 
@@ -800,8 +823,8 @@ _Defined in `lang/std/network/tcp.ks`._
 public static func connect(to: SocketAddress, timeout: Duration) -> Result[TcpStream, IoError]
 ```
 
-Connects to `address`, failing with `TimedOut` after
-`timeout`. A negative timeout is `InvalidInput`.
+Connects to `address`, failing with `TimedOut` after `timeout`. A
+negative timeout is `InvalidInput`.
 
 _Defined in `lang/std/network/tcp.ks`._
 

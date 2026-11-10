@@ -11,7 +11,7 @@ func main() -> lang.i64 {
     if Process.parentId.value <= 0 { return 2 }
     if Process.id.isEqual(to: Process.parentId) { return 3 }
     match Process.executablePath() {
-        .Ok(path) => { if not path.starts(with: "/") { return 4 } },
+        .Ok(path) => { if not path.isAbsolute { return 4 } },
         .Err(_) => { return 5 }
     }
     // argv[0] is always there.

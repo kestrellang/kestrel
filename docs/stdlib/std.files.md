@@ -83,7 +83,8 @@ public static func removeAll(Path) -> Result[(), IoError]
 ```
 
 Removes `path` and everything in it (`rm -r`). Symbolic links are
-removed, never followed.
+removed, never followed, and that includes `path` itself: if it's a
+link to a directory, the link goes and the directory stays.
 
 _Defined in `lang/std/files/directory.ks`._
 
@@ -216,6 +217,26 @@ Takes ownership of an open descriptor: the `File` closes it.
 
 _Defined in `lang/std/files/file.ks`._
 
+#### function `appendBytes`
+
+```kestrel
+public static func appendBytes(Path, Slice[UInt8]) -> Result[(), IoError]
+```
+
+Adds `bytes` to the end of the file, creating the file if needed.
+
+_Defined in `lang/std/files/contents.ks`._
+
+#### function `appendText`
+
+```kestrel
+public static func appendText(Path, String) -> Result[(), IoError]
+```
+
+Adds `text` to the end of the file, creating the file if needed.
+
+_Defined in `lang/std/files/contents.ks`._
+
 #### function `close`
 
 ```kestrel
@@ -226,6 +247,21 @@ Closes the file and reports an error from `close`, which dropping
 the file can't.
 
 _Defined in `lang/std/files/file.ks`._
+
+#### function `copy`
+
+```kestrel
+public static func copy(Path, to: Path) -> Result[Int64, IoError]
+```
+
+Copies the file `source` to `destination`, with its permissions.
+Returns the number of bytes copied.
+
+Fails with `InvalidInput` when both name the same file, through the
+same path or a symbolic or hard link: opening the destination
+truncates it, which would empty the source before it's read.
+
+_Defined in `lang/std/files/operations.ks`._
 
 #### function `create`
 
@@ -301,6 +337,58 @@ The descriptor, still owned by this file.
 
 _Defined in `lang/std/files/file.ks`._
 
+#### function `readBytes`
+
+```kestrel
+public static func readBytes(Path) -> Result[Array[UInt8], IoError]
+```
+
+The whole file's bytes.
+
+_Defined in `lang/std/files/contents.ks`._
+
+#### function `readText`
+
+```kestrel
+public static func readText(Path) -> Result[String, IoError]
+```
+
+The whole file as UTF-8 text.
+
+##### Errors
+
+`InvalidData` if the file isn't valid UTF-8.
+
+##### Examples
+
+```
+let config = try File.readText("config.toml");
+```
+
+_Defined in `lang/std/files/contents.ks`._
+
+#### function `remove`
+
+```kestrel
+public static func remove(Path) -> Result[(), IoError]
+```
+
+Removes the file or symbolic link `path`. Use `Directory.remove` for a
+directory.
+
+_Defined in `lang/std/files/operations.ks`._
+
+#### function `rename`
+
+```kestrel
+public static func rename(Path, to: Path) -> Result[(), IoError]
+```
+
+Renames `source` to `destination`, replacing a file already there.
+Both must be on the same file system (`CrossesDevices` otherwise).
+
+_Defined in `lang/std/files/operations.ks`._
+
 #### function `setLength`
 
 ```kestrel
@@ -311,6 +399,16 @@ Cuts the file to `length` bytes, or extends it with zeros.
 
 _Defined in `lang/std/files/file.ks`._
 
+#### function `setPermissions`
+
+```kestrel
+public static func setPermissions(Path, Permissions) -> Result[(), IoError]
+```
+
+Sets the permission bits of `path` (`chmod`).
+
+_Defined in `lang/std/files/operations.ks`._
+
 #### function `sync`
 
 ```kestrel
@@ -320,6 +418,26 @@ public mutating func sync() -> Result[(), IoError]
 Waits until the contents reach the storage device (`fsync`).
 
 _Defined in `lang/std/files/file.ks`._
+
+#### function `writeBytes`
+
+```kestrel
+public static func writeBytes(Path, Slice[UInt8]) -> Result[(), IoError]
+```
+
+Replaces the file's contents with `bytes`, creating the file if needed.
+
+_Defined in `lang/std/files/contents.ks`._
+
+#### function `writeText`
+
+```kestrel
+public static func writeText(Path, String) -> Result[(), IoError]
+```
+
+Replaces the file's contents with `text`, creating the file if needed.
+
+_Defined in `lang/std/files/contents.ks`._
 
 ### Implements `Readable`
 
@@ -486,6 +604,27 @@ When it was last read, in nanoseconds since the Unix epoch.
 
 _Defined in `lang/std/files/metadata.ks`._
 
+#### field `device`
+
+```kestrel
+public var device: UInt64
+```
+
+The device the file system lives on (`st_dev`).
+
+_Defined in `lang/std/files/metadata.ks`._
+
+#### field `inode`
+
+```kestrel
+public var inode: UInt64
+```
+
+The file's number on its device (`st_ino`). Two paths name the same
+file exactly when `device` and `inode` both match.
+
+_Defined in `lang/std/files/metadata.ks`._
+
 #### field `isDirectory`
 
 ```kestrel
@@ -503,6 +642,17 @@ public var isFile: Bool { get }
 ```
 
 `true` for a regular file.
+
+_Defined in `lang/std/files/metadata.ks`._
+
+#### function `isSameFile`
+
+```kestrel
+public func isSameFile(as: Metadata) -> Bool
+```
+
+`true` when both describe the same file: the same inode on the
+same device, whatever paths or links led to them.
 
 _Defined in `lang/std/files/metadata.ks`._
 
@@ -533,6 +683,27 @@ public var modified: Int64
 ```
 
 When its contents last changed, in nanoseconds since the Unix epoch.
+
+_Defined in `lang/std/files/metadata.ks`._
+
+#### function `of`
+
+```kestrel
+public static func of(Path) -> Result[Metadata, IoError]
+```
+
+The metadata of what's at `path`, following symbolic links (`stat`).
+
+_Defined in `lang/std/files/metadata.ks`._
+
+#### function `ofSymbolicLink`
+
+```kestrel
+public static func ofSymbolicLink(Path) -> Result[Metadata, IoError]
+```
+
+The metadata of `path` itself, without following a symbolic link
+(`lstat`).
 
 _Defined in `lang/std/files/metadata.ks`._
 
@@ -733,6 +904,16 @@ _Defined in `lang/std/files/path.ks`._
 
 ### Members
 
+#### initializer `From Bytes`
+
+```kestrel
+public init(bytes: Array[UInt8])
+```
+
+The path made of exactly these bytes, which needn't be UTF-8.
+
+_Defined in `lang/std/files/path.ks`._
+
 #### initializer `From Text`
 
 ```kestrel
@@ -743,13 +924,14 @@ The path `text`, as written.
 
 _Defined in `lang/std/files/path.ks`._
 
-#### initializer `String Literal`
+#### field `bytes`
 
 ```kestrel
-public init(stringLiteral: lang.ptr[lang.i8], lang.i64)
+public var bytes: &Slice[UInt8] { get }
 ```
 
-A path literal, as in `File.open("data.txt")`.
+The path's bytes, exactly, borrowed from the path. Call
+`toOwned()` for an array of your own.
 
 _Defined in `lang/std/files/path.ks`._
 
@@ -764,6 +946,16 @@ The absolute path with every symbolic link, `.` and `..` resolved
 
 _Defined in `lang/std/files/path.ks`._
 
+#### function `componentRanges`
+
+```kestrel
+func componentRanges() -> Array[(Int64, Int64)]
+```
+
+Byte ranges of the components, skipping empty ones and `.`.
+
+_Defined in `lang/std/files/path.ks`._
+
 #### function `components`
 
 ```kestrel
@@ -772,6 +964,14 @@ public func components() -> Array[String]
 
 The components in order. An absolute path starts with `/`; empty
 components and `.` are dropped.
+
+_Defined in `lang/std/files/path.ks`._
+
+#### field `data`
+
+```kestrel
+var data: Array[UInt8]
+```
 
 _Defined in `lang/std/files/path.ks`._
 
@@ -796,6 +996,17 @@ What follows the name's last dot: `gz` for `b.tar.gz`. A leading dot
 
 _Defined in `lang/std/files/path.ks`._
 
+#### function `extensionDot`
+
+```kestrel
+func extensionDot(Int64, Int64) -> Optional[Int64]
+```
+
+The index of the dot that starts the extension of the name in
+`[start, end)`. A dot at the name's first byte (`.profile`) doesn't count.
+
+_Defined in `lang/std/files/path.ks`._
+
 #### field `isAbsolute`
 
 ```kestrel
@@ -813,6 +1024,22 @@ public func isDirectory() -> Bool
 ```
 
 `true` if this path is a directory (following symbolic links).
+
+_Defined in `lang/std/files/path.ks`._
+
+#### function `isDot`
+
+```kestrel
+func isDot(Int64, Int64) -> Bool
+```
+
+_Defined in `lang/std/files/path.ks`._
+
+#### function `isDotDot`
+
+```kestrel
+func isDotDot(Int64, Int64) -> Bool
+```
 
 _Defined in `lang/std/files/path.ks`._
 
@@ -864,7 +1091,17 @@ public var name: Optional[String] { get }
 ```
 
 The last component: `b.tar.gz` for `/a/b.tar.gz`. `None` for `/`,
-the empty path, or a path ending in `..`.
+the empty path, or a path ending in `.` or `..`.
+
+_Defined in `lang/std/files/path.ks`._
+
+#### function `nameRange`
+
+```kestrel
+func nameRange() -> Optional[(Int64, Int64)]
+```
+
+The byte range of the last component, unless it's `.` or `..`.
 
 _Defined in `lang/std/files/path.ks`._
 
@@ -918,25 +1155,29 @@ _Defined in `lang/std/files/path.ks`._
 public var string: String { get }
 ```
 
-The path as text.
+The path as text. Bytes that aren't UTF-8 become U+FFFD, so use
+`bytes` when the exact name matters.
 
 _Defined in `lang/std/files/path.ks`._
 
-#### field `text`
+#### function `toNativePath`
 
 ```kestrel
-var text: String
+public func toNativePath() -> Result[CString, IoError]
 ```
+
+The path as a NUL-terminated C string for a system call;
+`InvalidInput` if it holds a NUL byte. The caller frees it.
 
 _Defined in `lang/std/files/path.ks`._
 
-#### function `trimmed`
+#### function `trimmedCount`
 
 ```kestrel
-func trimmed() -> Array[UInt8]
+func trimmedCount() -> Int64
 ```
 
-The bytes without trailing slashes, except a lone `/`.
+The byte count without trailing slashes, except a lone `/`.
 
 _Defined in `lang/std/files/path.ks`._
 
@@ -985,7 +1226,7 @@ _Defined in `lang/std/files/path.ks`._
 public func format(into: mutating some Formatter, FormatOptions)
 ```
 
-Writes the path as text.
+Writes the path as text (non-UTF-8 bytes as U+FFFD).
 
 _Defined in `lang/std/files/path.ks`._
 
@@ -1085,41 +1326,23 @@ Same bits.
 
 _Defined in `lang/std/files/metadata.ks`._
 
-## function `appendBytes`
+## enum `SymbolicLink`
 
 ```kestrel
-public func appendBytes(Path, Slice[UInt8]) -> Result[(), IoError]
+public enum SymbolicLink
 ```
 
-Adds `bytes` to the end of the file, creating the file if needed.
-
-_Defined in `lang/std/files/contents.ks`._
-
-## function `appendText`
-
-```kestrel
-public func appendText(Path, String) -> Result[(), IoError]
-```
-
-Adds `text` to the end of the file, creating the file if needed.
-
-_Defined in `lang/std/files/contents.ks`._
-
-## function `copy`
-
-```kestrel
-public func copy(Path, to: Path) -> Result[Int64, IoError]
-```
-
-Copies the file `source` to `destination`, with its permissions.
-Returns the number of bytes copied.
+Symbolic links: creating them and reading where they point. Removing one
+is `File.remove`; `Metadata.ofSymbolicLink` describes the link itself.
 
 _Defined in `lang/std/files/operations.ks`._
 
-## function `createSymbolicLink`
+### Members
+
+#### function `create`
 
 ```kestrel
-public func createSymbolicLink(at: Path, to: Path) -> Result[(), IoError]
+public static func create(at: Path, to: Path) -> Result[(), IoError]
 ```
 
 Creates a symbolic link at `link` that points to `target`. `target`
@@ -1127,116 +1350,13 @@ isn't checked; it may not exist.
 
 _Defined in `lang/std/files/operations.ks`._
 
-## function `metadata`
+#### function `read`
 
 ```kestrel
-public func metadata(Path) -> Result[Metadata, IoError]
-```
-
-The metadata of what's at `path`, following symbolic links (`stat`).
-
-_Defined in `lang/std/files/metadata.ks`._
-
-## function `readBytes`
-
-```kestrel
-public func readBytes(Path) -> Result[Array[UInt8], IoError]
-```
-
-The whole file's bytes.
-
-_Defined in `lang/std/files/contents.ks`._
-
-## function `readSymbolicLink`
-
-```kestrel
-public func readSymbolicLink(Path) -> Result[Path, IoError]
+public static func read(Path) -> Result[Path, IoError]
 ```
 
 Where the symbolic link `path` points, as stored in the link.
 
 _Defined in `lang/std/files/operations.ks`._
-
-## function `readText`
-
-```kestrel
-public func readText(Path) -> Result[String, IoError]
-```
-
-The whole file as UTF-8 text.
-
-### Errors
-
-`InvalidData` if the file isn't valid UTF-8.
-
-### Examples
-
-```
-let config = try readText("config.toml");
-```
-
-_Defined in `lang/std/files/contents.ks`._
-
-## function `remove`
-
-```kestrel
-public func remove(Path) -> Result[(), IoError]
-```
-
-Removes the file or symbolic link `path`. Use `Directory.remove` for a
-directory.
-
-_Defined in `lang/std/files/operations.ks`._
-
-## function `rename`
-
-```kestrel
-public func rename(Path, to: Path) -> Result[(), IoError]
-```
-
-Renames `source` to `destination`, replacing a file already there.
-Both must be on the same file system (`CrossesDevices` otherwise).
-
-_Defined in `lang/std/files/operations.ks`._
-
-## function `setPermissions`
-
-```kestrel
-public func setPermissions(Path, Permissions) -> Result[(), IoError]
-```
-
-Sets the permission bits of `path` (`chmod`).
-
-_Defined in `lang/std/files/operations.ks`._
-
-## function `symbolicLinkMetadata`
-
-```kestrel
-public func symbolicLinkMetadata(Path) -> Result[Metadata, IoError]
-```
-
-The metadata of `path` itself, without following a symbolic link
-(`lstat`).
-
-_Defined in `lang/std/files/metadata.ks`._
-
-## function `writeBytes`
-
-```kestrel
-public func writeBytes(Path, Slice[UInt8]) -> Result[(), IoError]
-```
-
-Replaces the file's contents with `bytes`, creating the file if needed.
-
-_Defined in `lang/std/files/contents.ks`._
-
-## function `writeText`
-
-```kestrel
-public func writeText(Path, String) -> Result[(), IoError]
-```
-
-Replaces the file's contents with `text`, creating the file if needed.
-
-_Defined in `lang/std/files/contents.ks`._
 

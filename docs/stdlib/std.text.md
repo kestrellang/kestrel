@@ -88,24 +88,6 @@ _Defined in `lang/std/text/format.ks`._
 
 ### Implements `Matchable`
 
-#### function `matches`
-
-```kestrel
-public func matches(Alignment) -> Bool
-```
-
-Pattern-match form of equality — delegates to `isEqual`.
-
-Lets `Alignment` appear in `match` patterns against another value.
-
-##### Examples
-
-```
-Alignment.Right.matches(.Right);  // true
-```
-
-_Defined in `lang/std/text/format.ks`._
-
 ## struct `ByteIndex`
 
 ```kestrel
@@ -181,36 +163,22 @@ Compares two byte indices by their wrapped offsets.
 
 _Defined in `lang/std/text/views.ks`._
 
+### Implements `Formattable`
+
+#### function `format`
+
+```kestrel
+public func format(into: mutating some Formatter, FormatOptions)
+```
+
+_Defined in `lang/std/text/views.ks`._
+
 ### Implements `BytesIndex`
 
 #### typealias `BytesYield`
 
 ```kestrel
 type BytesYield = UInt8
-```
-
-_Defined in `lang/std/text/views.ks`._
-
-#### function `readBytes`
-
-```kestrel
-public func readBytes(from: BytesView) -> UInt8
-```
-
-_Defined in `lang/std/text/views.ks`._
-
-#### function `readBytesChecked`
-
-```kestrel
-public func readBytesChecked(from: BytesView) -> UInt8?
-```
-
-_Defined in `lang/std/text/views.ks`._
-
-#### function `readBytesUnchecked`
-
-```kestrel
-public func readBytesUnchecked(from: BytesView) -> UInt8
 ```
 
 _Defined in `lang/std/text/views.ks`._
@@ -623,25 +591,6 @@ operate on that integer directly.
 _Defined in `lang/std/text/char.ks`._
 
 ### Members
-
-#### initializer `Char Literal`
-
-```kestrel
-public init(charLiteral: lang.i32)
-```
-
-Compiler-emitted constructor for character literals.
-
-Called when you write `'a'`, `'\n'`, `'\u{1F600}'`. Not intended
-for direct use — `Char(value:)` is the user-facing constructor.
-
-##### Examples
-
-```
-let c: Char = 'a';  // lowers to Char(charLiteral: ...)
-```
-
-_Defined in `lang/std/text/char.ks`._
 
 #### initializer `From Digit`
 
@@ -1133,16 +1082,6 @@ _Defined in `lang/std/text/char.ks`._
 
 ### Implements `Matchable`
 
-#### function `matches`
-
-```kestrel
-public func matches(Char) -> Bool
-```
-
-Pattern-match form of equality — delegates to `isEqual`.
-
-_Defined in `lang/std/text/char.ks`._
-
 ### Implements `ExpressibleByCharLiteral`
 
 ### Implements `Hashable`
@@ -1153,44 +1092,11 @@ _Defined in `lang/std/text/char.ks`._
 public func hash[H](into: mutating H) where H: Hasher
 ```
 
-Hashes this character by writing its 4-byte scalar value to the hasher.
-
-Uses native byte order — fine for in-process hash maps; do not
-use the result for content-addressed storage.
+Hashes this character by writing its scalar value as one word.
 
 _Defined in `lang/std/text/char.ks`._
 
 ### Implements `RangeMatchable`
-
-#### function `isAtLeast`
-
-```kestrel
-public func isAtLeast(Char) -> Bool
-```
-
-Returns true if `self >= bound`. Used by `RangeMatchable` for `case 'a'...'z'`.
-
-_Defined in `lang/std/text/char.ks`._
-
-#### function `isAtMost`
-
-```kestrel
-public func isAtMost(Char) -> Bool
-```
-
-Returns true if `self <= bound`. Used by `RangeMatchable` for `case 'a'...'z'`.
-
-_Defined in `lang/std/text/char.ks`._
-
-#### function `isBelow`
-
-```kestrel
-public func isBelow(Char) -> Bool
-```
-
-Returns true if `self < bound`. Used by `RangeMatchable` for half-open patterns.
-
-_Defined in `lang/std/text/char.ks`._
 
 ### Implements `Formattable`
 
@@ -1276,28 +1182,22 @@ public func compare(CharIndex) -> Ordering
 
 _Defined in `lang/std/text/slice.ks`._
 
+### Implements `Formattable`
+
+#### function `format`
+
+```kestrel
+public func format(into: mutating some Formatter, FormatOptions)
+```
+
+_Defined in `lang/std/text/views.ks`._
+
 ### Implements `CharsIndex`
 
 #### typealias `CharsYield`
 
 ```kestrel
 type CharsYield = Char
-```
-
-_Defined in `lang/std/text/views.ks`._
-
-#### function `readChars`
-
-```kestrel
-public func readChars(from: CharsView) -> Char
-```
-
-_Defined in `lang/std/text/views.ks`._
-
-#### function `readCharsChecked`
-
-```kestrel
-public func readCharsChecked(from: CharsView) -> Char?
 ```
 
 _Defined in `lang/std/text/views.ks`._
@@ -1741,30 +1641,10 @@ _Defined in `lang/std/text/format.ks`._
 
 ### Members
 
-#### initializer `With Capacity`
-
-```kestrel
-public init(literalCapacity: Int64, interpolationCount: Int64)
-```
-
-Constructs an empty accumulator pre-sized from compile-time hints.
-
-`literalCapacity` is the exact byte count of static segments;
-`interpolationCount` estimates ~16 bytes per hole.
-
-##### Examples
-
-```
-var acc = DefaultStringInterpolation(literalCapacity: 0, interpolationCount: 0);
-acc.build();  // ""
-```
-
-_Defined in `lang/std/text/format.ks`._
-
 #### function `appendInterpolation`
 
 ```kestrel
-public mutating func appendInterpolation(some Formattable, FormatOptions)
+public mutating func appendInterpolation(some Formattable and not Static, FormatOptions)
 ```
 
 Formats one interpolation hole directly into the buffer.
@@ -1823,7 +1703,7 @@ public protocol ExpressibleByStringInterpolation
 Marker protocol for types constructible from a completed string interpolation.
 
 Refines `ExpressibleByStringLiteral` so a single conformance covers
-both pure-literal `"abc"` and interpolated `"a\{x}b"` forms. The
+both pure-literal `"abc"` and interpolated `"a\(x)b"` forms. The
 compiler picks `Interpolation` as the accumulator type, drives it via
 `Interpolatable`, then hands it to `init(interpolation:)`.
 
@@ -1834,10 +1714,13 @@ _Defined in `lang/std/text/format.ks`._
 #### initializer `From Interpolation`
 
 ```kestrel
-init(Interpolation)
+init(consuming Interpolation)
 ```
 
 Constructs `Self` from a fully built interpolation accumulator.
+
+Takes the accumulator by value, so an implementation can move its
+buffer out without copying (accumulators need not be `Cloneable`).
 
 _Defined in `lang/std/text/format.ks`._
 
@@ -1957,22 +1840,6 @@ _Defined in `lang/std/text/format.ks`._
 
 ### Implements `Matchable`
 
-#### function `matches`
-
-```kestrel
-public func matches(FloatStyle) -> Bool
-```
-
-Pattern-match form of equality — delegates to `isEqual`.
-
-##### Examples
-
-```
-FloatStyle.Auto.matches(.Auto);  // true
-```
-
-_Defined in `lang/std/text/format.ks`._
-
 ## struct `FormatOptions`
 
 ```kestrel
@@ -1982,7 +1849,7 @@ public struct FormatOptions { /* private fields */ }
 Mutable bag of formatting knobs threaded through every `Formattable.format` call.
 
 `FormatOptions` is the parsed form of the format-spec mini-language.
-String interpolation `"\{expr:spec}"` constructs one of these from the
+String interpolation `"\(expr:spec)"` constructs one of these from the
 trailing spec, then hands it to the formatter for `expr`'s type. Each
 formatter reads only the fields that apply to it: integers ignore
 `floatStyle`, strings ignore `radix`, and so on.
@@ -1999,14 +1866,14 @@ Where `type` is one of:
 ### Examples
 
 ```
-"\{n:>8}";      // right-align, width 8
-"\{n:08x}";     // zero-pad, width 8, hex
-"\{n:#X}";      // hex upper with 0x prefix
-"\{pi:.2}";     // precision 2 decimal places
-"\{pi:.2e}";    // scientific with 2 decimal places
-"\{ratio:%}";   // as percentage (0.5 -> "50%")
-"\{name:^10}";  // center, width 10
-"\{value:?}";   // debug format
+"\(n:>8)";      // right-align, width 8
+"\(n:08x)";     // zero-pad, width 8, hex
+"\(n:#X)";      // hex upper with 0x prefix
+"\(pi:.2)";     // precision 2 decimal places
+"\(pi:.2e)";    // scientific with 2 decimal places
+"\(ratio:%)";   // as percentage (0.5 -> "50%")
+"\(name:^10)";  // center, width 10
+"\(value:?)";   // debug format
 ```
 
 ### Representation
@@ -2215,17 +2082,40 @@ extension calls this under the hood.
 
 _Defined in `lang/std/text/format.ks`._
 
+#### function `format`
+
+```kestrel
+public func format(into: mutating some Formatter, FormatOptions)
+```
+
+`any Formattable`'s `format(into:)`: renders the payload with its
+`formatted(options:)` and appends the result, so the options (width,
+padding, precision) still reach the payload. Concrete conformers
+implement `format(into:)` themselves.
+
+_Defined in `lang/std/text/format.ks`._
+
+#### function `formatted`
+
+```kestrel
+func formatted(FormatOptions) -> String
+```
+
+Returns this value rendered as a `String`.
+
+The default builds the string with `format(into:)`, so conformers
+rarely implement it. It is a requirement, not just an extension
+method, because `any Formattable` formats through it: unlike the
+generic `format(into:)`, it can sit in the existential's function
+table.
+
+_Defined in `lang/std/text/format.ks`._
+
 #### function `formatted`
 
 ```kestrel
 public func formatted(FormatOptions) -> String
 ```
-
-Returns this value rendered as a `String`.
-
-Convenience wrapper: creates a `StringBuilder`, calls
-`format(into:)`, and returns the built string. Uses a distinct
-name to avoid overload-resolution ambiguity with `format(into:)`.
 
 _Defined in `lang/std/text/format.ks`._
 
@@ -2237,7 +2127,7 @@ public protocol Formatter
 
 Protocol for types that can render themselves as a `String` under a `FormatOptions`.
 
-Print routines and string interpolation `"\{expr}"` and `"\{expr:spec}"`
+Print routines and string interpolation `"\(expr)"` and `"\(expr:spec)"`
 both ultimately bottom out in `format`. Implementors should honour
 every `FormatOptions` field that is meaningful for their domain
 (alignment and width are universal; `radix` applies to integers, and to
@@ -2247,11 +2137,11 @@ floats) and silently ignore fields that aren't.
 ### Examples
 
 ```
-"\{name}";         // "Alice"          (default formatting)
-"\{name:>10}";     // "     Alice"     (right-align, width 10)
-"\{n:08x}";        // "0000002a"       (zero-pad, hex, width 8)
-"\{pi:.2}";        // "3.14"           (precision 2)
-"\{value:?}";      // debug representation
+"\(name)";         // "Alice"          (default formatting)
+"\(name:>10)";     // "     Alice"     (right-align, width 10)
+"\(n:08x)";        // "0000002a"       (zero-pad, hex, width 8)
+"\(pi:.2)";        // "3.14"           (precision 2)
+"\(value:?)";      // debug representation
 ```
 Mutable destination for formatted text.
 
@@ -2566,6 +2456,16 @@ public func compare(GraphemeIndex) -> Ordering
 ```
 
 _Defined in `lang/std/text/slice.ks`._
+
+### Implements `Formattable`
+
+#### function `format`
+
+```kestrel
+public func format(into: mutating some Formatter, FormatOptions)
+```
+
+_Defined in `lang/std/text/views.ks`._
 
 ## struct `GraphemesIterator`
 
@@ -3059,13 +2959,16 @@ public protocol Interpolatable
 
 Protocol for the accumulator type that string interpolation builds into.
 
-The compiler lowers `"hello, \{name}!"` to a sequence of
-`appendLiteral` and `appendInterpolation` calls on a fresh value of
-the implementor's type, then reads the final string out (typically
-via a `build()` method on the concrete accumulator). `String` ships
-`DefaultStringInterpolation` as its accumulator; custom string-like
-types can supply their own to intercept literal pieces or coerce
-formatted parts.
+The compiler lowers `"hello, \(name)!"` to a fresh accumulator, an
+`appendLiteral` call per static segment and an `appendInterpolation` call
+per hole, then hands the accumulator to the result type's
+`init(interpolation:)`. `String` ships `DefaultStringInterpolation` as its
+accumulator; custom string-like types supply their own.
+
+`appendInterpolation` is deliberately NOT a requirement: each accumulator
+declares its own overloads, choosing which values a hole accepts (`some
+Formattable`, only `Bindable` values for SQL, …) and whether it takes
+format options. Holes are ordinary method calls on the accumulator.
 
 _Defined in `lang/std/text/format.ks`._
 
@@ -3080,7 +2983,7 @@ init(literalCapacity: Int64, interpolationCount: Int64)
 Constructs an empty accumulator with capacity hints derived from the literal at compile time.
 
 `literalCapacity` is the total byte count of the static segments;
-`interpolationCount` is the number of `\{...}` holes. Implementors
+`interpolationCount` is the number of `\(...)` holes. Implementors
 can use these to preallocate.
 
 _Defined in `lang/std/text/format.ks`._
@@ -3093,7 +2996,7 @@ mutating func appendLiteral(String)
 
 Appends a static literal segment.
 
-Called once per run of literal text between `\{...}` holes. May be
+Called once per run of literal text between `\(...)` holes. May be
 called with the empty string; implementors should be cheap in
 that case.
 
@@ -3214,22 +3117,34 @@ Iterates the lines in the first `length` bytes of `source`, from
 
 _Defined in `lang/std/text/views.ks`._
 
+#### function `collect`
+
+```kestrel
+public consuming func collect() -> Array[String]
+```
+
+Collects the remaining lines as owned strings. (A line borrows the
+source string, so an array of slices can't exist.)
+
+_Defined in `lang/std/text/views.ks`._
+
 ### Implements `Iterator`
 
 #### typealias `Item`
 
 ```kestrel
-type Item = String
+type Item = StringSlice
 ```
 
-The element type yielded by `next()` — always `String`.
+The element type yielded by `next()`: a zero-copy slice of the
+source. Call `toOwned()` to keep a line as a `String`.
 
 _Defined in `lang/std/text/views.ks`._
 
 #### function `next`
 
 ```kestrel
-public mutating func next() -> String?
+public mutating func next() -> StringSlice?
 ```
 
 Returns the next line, or `None` once exhausted.
@@ -3268,8 +3183,8 @@ public struct LinesView { /* private fields */ }
 
 A view over the lines of a `String`, split on `\n`, `\r\n`, or `\r`.
 
-Returned by `String.lines`. The yielded strings (from iteration or
-single-line subscripting) do not include the terminator; a trailing
+Returned by `String.lines`. Iteration yields zero-copy `StringSlice`s and
+single-line subscripting yields a `String`; neither includes the terminator; a trailing
 line without a terminator is still emitted. Range subscripts
 (`lines(0..<n)`) yield a zero-copy `LinesView` sub-view whose
 underlying byte range still includes the original terminators —
@@ -3281,7 +3196,7 @@ iterating the sub-view round-trips the same line strings, and
 ```
 var lines = Array[String]();
 for line in "a\nb\nc".lines {
-    lines.append(line);
+    lines.append(line.toOwned());
 }
 lines.count;  // 3
 
@@ -3483,10 +3398,10 @@ _Defined in `lang/std/text/views.ks`._
 #### typealias `Item`
 
 ```kestrel
-type Item = String
+type Item = StringSlice
 ```
 
-The element type yielded by iteration — always `String`.
+The element type yielded by iteration: a zero-copy `StringSlice`.
 
 _Defined in `lang/std/text/views.ks`._
 
@@ -3786,22 +3701,6 @@ _Defined in `lang/std/text/format.ks`._
 
 ### Implements `Matchable`
 
-#### function `matches`
-
-```kestrel
-public func matches(Sign) -> Bool
-```
-
-Pattern-match form of equality — delegates to `isEqual`.
-
-##### Examples
-
-```
-Sign.Space.matches(.Space);  // true
-```
-
-_Defined in `lang/std/text/format.ks`._
-
 ## struct `SplitView`
 
 ```kestrel
@@ -3826,6 +3725,17 @@ view.collect();          // [StringSlice("a"), StringSlice("b"), StringSlice("c"
 _Defined in `lang/std/text/views.ks`._
 
 ### Members
+
+#### initializer `With Limit`
+
+```kestrel
+public init(slice: StringSlice, separator: StringSlice, limit: Int64)
+```
+
+Splits into at most `limit` pieces (0 = no limit); the last piece
+holds the rest of the source unsplit.
+
+_Defined in `lang/std/text/views.ks`._
 
 #### function `collect`
 
@@ -3935,6 +3845,16 @@ original source buffer.
 _Defined in `lang/std/text/views.ks`._
 
 ### Members
+
+#### initializer `With Limit`
+
+```kestrel
+public init(slice: StringSlice, separator: StringSlice, limit: Int64)
+```
+
+Yields at most `limit` pieces (0 = no limit); the last holds the rest.
+
+_Defined in `lang/std/text/views.ks`._
 
 #### initializer `init`
 
@@ -4343,8 +4263,10 @@ public func firstIndex(of: some Str and not Static) -> ByteIndex?
 Returns the byte index of the first occurrence of `substring`,
 or `None` if not found.
 
-The empty substring matches at the start. Uses `memmem` for
-efficient byte-level search.
+The index counts from this string's or slice's first byte, so it
+feeds straight into `subslice(from:to:)` and `bytes`. The empty
+substring matches at the start. Uses `memmem` for efficient
+byte-level search.
 
 ##### Examples
 
@@ -4536,20 +4458,61 @@ _Defined in `lang/std/text/str.ks`._
 #### function `split`
 
 ```kestrel
-public func split(some Str and not Static) -> SplitView
+public func split(by: some Str and not Static) -> SplitView
 ```
 
 Returns a lazy view that splits on `separator`, yielding
 zero-copy `StringSlice` segments.
 
 The empty separator is special-cased to split per code
-point. Adjacent separators produce empty segments.
+point. Adjacent separators produce empty segments, as does a
+separator at either end. An empty string has no segments.
 
 ##### Examples
 
 ```
 "a,b,c".split(by: ",").collect();   // ["a", "b", "c"]
 "a,,b".split(by: ",").count;        // 3 (empty segment preserved)
+"a,".split(by: ",").count;          // 2 (["a", ""])
+```
+
+_Defined in `lang/std/text/str.ks`._
+
+#### function `split`
+
+```kestrel
+public func split(by: some Str and not Static, limit: Int64) -> SplitView
+```
+
+Like `split(by:)`, but yields at most `limit` pieces: the last one
+holds the rest of the string, separators and all. `limit` must be
+at least 1.
+
+##### Examples
+
+```
+"a,b,c".split(by: ",", limit: 2).collect();  // ["a", "b,c"]
+"a,b,c".split(by: ",", limit: 1).collect();  // ["a,b,c"]
+```
+
+_Defined in `lang/std/text/str.ks`._
+
+#### function `split`
+
+```kestrel
+public func split(once: some Str and not Static) -> (StringSlice, StringSlice)?
+```
+
+Splits at the first occurrence of `separator`, returning the parts
+before and after it, or `.None` when it doesn't occur.
+
+##### Examples
+
+```
+if let .Some((key, value)) = "port=8080".split(once: "=") {
+    // key == "port", value == "8080"
+}
+"no-equals".split(once: "=");  // .None
 ```
 
 _Defined in `lang/std/text/str.ks`._
@@ -4813,6 +4776,23 @@ Unicode case mapping, use `uppercased()`.
 
 _Defined in `lang/std/text/str.ks`._
 
+#### field `words`
+
+```kestrel
+public var words: WordsView { get }
+```
+
+View over the whitespace-separated words. Runs of whitespace act as
+one break and never yield empty words (unlike `split(by: " ")`).
+
+##### Examples
+
+```
+"  a  b\tc ".words.collect();  // ["a", "b", "c"]
+```
+
+_Defined in `lang/std/text/str.ks`._
+
 ### Implements `Iterable`
 
 #### function `iter`
@@ -4912,7 +4892,7 @@ _Defined in `lang/std/text/str.ks`._
 ## struct `String`
 
 ```kestrel
-public struct String { /* private fields */ }
+public struct String[A = GlobalAllocator] where A: Allocator { /* private fields */ }
 ```
 
 A UTF-8 encoded, dynamically sized string with copy-on-write semantics.
@@ -4968,17 +4948,30 @@ _Defined in `lang/std/text/string.ks`._
 
 ### Members
 
+#### initializer `Copying Bytes`
+
+```kestrel
+init(copying: Pointer[UInt8], count: Int64, allocator: A)
+```
+
+Copies `count` bytes from `ptr` into a buffer from `allocator`,
+without UTF-8 validation. Module-internal: the one place a string
+is built from a byte range.
+
+_Defined in `lang/std/text/string.ks`._
+
 #### initializer `Empty`
 
 ```kestrel
-public init()
+public init() where A: Defaultable
 ```
 
 Constructs an empty string.
 
 Allocates no buffer; the empty string is represented by a null
 pointer with zero length and capacity. Required by
-`Defaultable`.
+`Defaultable`. The buffer, once there is one, comes from a
+default-made `A`.
 
 ##### Examples
 
@@ -4990,13 +4983,36 @@ s.bytes.count; // 0
 
 _Defined in `lang/std/text/string.ks`._
 
+#### initializer `Empty With Allocator`
+
+```kestrel
+public init(allocator: A)
+```
+
+An empty string whose buffer will come from `allocator`. Nothing is
+allocated until the first write.
+
+##### Examples
+
+```
+var s = String[ArenaAllocator](allocator: arena);
+s.append("hi");  // the bytes live in `arena`
+```
+
+_Defined in `lang/std/text/string.ks`._
+
 #### initializer `From CString`
 
 ```kestrel
-public init(from: CString)
+public init(from: CString) where A: Defaultable
 ```
 
 Builds a `String` by copying the bytes out of `cstring`, excluding the null terminator.
+
+Bytes that aren't valid UTF-8 become U+FFFD, as with
+`String(fromUtf8Lossy:)`, so the result is always a valid
+`String`: C strings such as file names and environment values are
+often not UTF-8.
 
 O(n) — `cstring.length` walks to the terminator and the byte
 copy is linear. Empty `CString`s (length zero) yield the
@@ -5020,7 +5036,7 @@ _Defined in `lang/std/ffi/cstring.ks`._
 #### initializer `From Char Iterable`
 
 ```kestrel
-public init[I](from: I) where I: Iterable, I: not Static, I.Item == Char
+public init[I](from: I) where I: Iterable, I: not Static, I.Item == Char, A: Defaultable
 ```
 
 Builds a string by encoding each character of `chars` as UTF-8.
@@ -5030,7 +5046,7 @@ Mirrors `Array.init(from:)` and `Set.init(from:)` — accepts any
 result of an iterator chain back into a `String`:
 
 ```
-let upper = String(from: "hello".chars.iter().map { it.toUpper() }.collect());
+let upper = String(from: "hello".chars.iter().map { it.uppercased() }.collect());
 // "HELLO"
 ```
 
@@ -5039,10 +5055,10 @@ _Defined in `lang/std/text/string.ks`._
 #### initializer `From Storage`
 
 ```kestrel
-init(storage: CowBox[StringStorage])
+init(storage: CowBox[StringStorage[A]])
 ```
 
-Wraps an existing `CowBox[StringStorage]` as a new `String`.
+Wraps an existing `CowBox[StringStorage[A]]` as a new `String`.
 
 Module-internal — used by `clone()`, `StringBuilder.build()`,
 and other std.text code that constructs strings from raw storage.
@@ -5052,7 +5068,7 @@ _Defined in `lang/std/text/string.ks`._
 #### initializer `From UTF-8`
 
 ```kestrel
-public init[S](fromUtf8: S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
+public init[S](fromUtf8: &S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized, A: Defaultable
 ```
 
 Constructs a string from validated UTF-8 bytes, returning `null`
@@ -5069,7 +5085,7 @@ _Defined in `lang/std/text/string.ks`._
 #### initializer `From UTF-8 Lossy`
 
 ```kestrel
-public init[S](fromUtf8Lossy: S) where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
+public init[S](fromUtf8Lossy: &S) where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized, A: Defaultable
 ```
 
 Constructs a string from bytes, replacing invalid UTF-8 sequences
@@ -5086,7 +5102,7 @@ _Defined in `lang/std/text/string.ks`._
 #### initializer `From UTF-8 Unchecked`
 
 ```kestrel
-public init[S](fromUtf8Unchecked: S) where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
+public init[S](fromUtf8Unchecked: &S) where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized, A: Defaultable
 ```
 
 Constructs a string by copying bytes without UTF-8 validation.
@@ -5097,29 +5113,10 @@ The caller must ensure the bytes are valid UTF-8.
 
 _Defined in `lang/std/text/string.ks`._
 
-#### initializer `String Literal`
-
-```kestrel
-public init(stringLiteral: lang.ptr[lang.i8], lang.i64)
-```
-
-Compiler-emitted constructor for string literals.
-
-Receives a static byte pointer and length, then memcpys into a
-fresh heap allocation so the resulting `String` owns its bytes
-(and can be mutated independently of the literal pool).
-
-##### Errors
-
-Panics with `"String allocation failed"` if the system
-allocator returns null.
-
-_Defined in `lang/std/text/string.ks`._
-
 #### initializer `With Capacity`
 
 ```kestrel
-public init(capacity: Int64)
+public init(capacity: Int64) where A: Defaultable
 ```
 
 Constructs an empty string with at least `capacity` bytes preallocated.
@@ -5131,8 +5128,8 @@ as zero.
 
 ##### Errors
 
-Panics with `"String allocation failed"` if the system
-allocator returns null.
+Panics with `"String allocation failed"` if the allocator
+returns null.
 
 ##### Examples
 
@@ -5141,6 +5138,22 @@ var s = String(capacity: 64);
 s.bytes.count;  // 0
 s.capacity;   // 64
 ```
+
+_Defined in `lang/std/text/string.ks`._
+
+#### initializer `With Capacity and Allocator`
+
+```kestrel
+public init(capacity: Int64, allocator: A)
+```
+
+An empty string with at least `capacity` bytes preallocated from
+`allocator`. A non-positive `capacity` allocates nothing.
+
+##### Errors
+
+Panics with `"String allocation failed"` if the allocator returns
+null.
 
 _Defined in `lang/std/text/string.ks`._
 
@@ -5177,6 +5190,16 @@ func _bytePtr() -> Pointer[UInt8]
 ```
 
 The current byte buffer, for `StringSlice` reads.
+
+_Defined in `lang/std/text/string.ks`._
+
+#### field `allocator`
+
+```kestrel
+public var allocator: A { get }
+```
+
+The allocator this string's buffer comes from.
 
 _Defined in `lang/std/text/string.ks`._
 
@@ -5284,6 +5307,16 @@ reusing a buffer in a hot loop.
 
 _Defined in `lang/std/text/string.ks`._
 
+#### field `containsNulByte`
+
+```kestrel
+internal var containsNulByte: Bool { get }
+```
+
+`true` when some byte is 0, which no C string can hold.
+
+_Defined in `lang/std/streams/error.ks`._
+
 #### function `fromBytesUnchecked`
 
 ```kestrel
@@ -5379,7 +5412,7 @@ _Defined in `lang/std/text/string.ks`._
 #### function `substringBytes`
 
 ```kestrel
-internal func substringBytes(from: Int64, to: Int64) -> String
+internal func substringBytes(from: Int64, to: Int64) -> String[A]
 ```
 
 Internal substring by byte range. Returns empty for invalid ranges.
@@ -5419,6 +5452,20 @@ cstr.free();
 ```
 
 _Defined in `lang/std/ffi/cstring.ks`._
+
+#### function `toNativeString`
+
+```kestrel
+internal func toNativeString() -> Result[CString, IoError]
+```
+
+This text as a NUL-terminated C string for a system call, or
+`InvalidInput` when it contains a NUL byte. C would stop at that
+byte, so `"data.txt\0.png"` would quietly name `data.txt`. Every
+path, name and argument std passes to the system goes through here.
+The caller frees the result.
+
+_Defined in `lang/std/streams/error.ks`._
 
 #### function `trim`
 
@@ -5577,7 +5624,7 @@ _Defined in `lang/std/text/string.ks`._
 #### function `isEqual`
 
 ```kestrel
-public func isEqual(to: String) -> Bool
+public func isEqual(to: String[A]) -> Bool
 ```
 
 Returns true if both strings have the same byte sequence.
@@ -5631,66 +5678,23 @@ _Defined in `lang/std/text/string.ks`._
 #### typealias `Output`
 
 ```kestrel
-type Output = String
+type Output = String[A] where A: Defaultable
 ```
 
 The output type of `+` (concatenation) — always `String`.
 
 _Defined in `lang/std/text/string.ks`._
 
-#### function `equal`
-
-```kestrel
-public func equal(to: String) -> Bool
-```
-
-_Defined in `lang/std/text/string.ks`._
-
-#### function `equal`
-
-```kestrel
-public func equal(to: StringSlice) -> Bool
-```
-
-_Defined in `lang/std/text/string.ks`._
-
 ### Implements `NotEqual`
 
-#### function `notEqual`
-
-```kestrel
-public func notEqual(to: String) -> Bool
-```
-
-_Defined in `lang/std/text/string.ks`._
-
-#### function `notEqual`
-
-```kestrel
-public func notEqual(to: StringSlice) -> Bool
-```
-
-_Defined in `lang/std/text/string.ks`._
-
 ### Implements `Matchable`
-
-#### function `matches`
-
-```kestrel
-public func matches(String) -> Bool
-```
-
-Pattern-match form of `isEqual`: each `"literal" =>` arm
-dispatches through here, one `O(len)` comparison per arm tried.
-
-_Defined in `lang/std/text/string.ks`._
 
 ### Implements `Comparable`
 
 #### function `compare`
 
 ```kestrel
-public func compare(String) -> Ordering
+public func compare(String[A]) -> Ordering
 ```
 
 Lexicographic byte-wise comparison.
@@ -5716,7 +5720,7 @@ _Defined in `lang/std/text/string.ks`._
 #### function `clone`
 
 ```kestrel
-public func clone() -> String
+public func clone() -> String[A]
 ```
 
 Returns a shallow clone — storage is shared until either side mutates.
@@ -5756,32 +5760,6 @@ opts.alignment = .Center;
 
 _Defined in `lang/std/text/string.ks`._
 
-### Implements `Addable`
-
-#### function `add`
-
-```kestrel
-public consuming func add(consuming String) -> String
-```
-
-Returns the concatenation `self + other`. Required by `Addable`.
-When `self` is uniquely owned (refcount 1), appends in place —
-no allocation. Otherwise builds a fresh string with both halves.
-
-_Defined in `lang/std/text/string.ks`._
-
-#### field `zero`
-
-```kestrel
-public static var zero: String { get }
-```
-
-The additive identity for strings — the empty string `""`.
-
-_Defined in `lang/std/text/string.ks`._
-
-### Implements `ExpressibleByStringLiteral`
-
 ### Implements `Hashable`
 
 #### function `hash`
@@ -5797,14 +5775,60 @@ to choose how to consume it.
 
 _Defined in `lang/std/text/string.ks`._
 
+### Implements `Convertible`
+
+_Conditional: `where A: Defaultable`._
+
+### Implements `ExpressibleByStringInterpolation`
+
+#### typealias `Interpolation`
+
+```kestrel
+public type Interpolation = DefaultStringInterpolation
+```
+
+The accumulator `String` interpolation builds into.
+
+_Defined in `lang/std/text/format.ks`._
+
 ### Implements `Defaultable`
 
-### Implements `Convertible`
+_Conditional: `where A: Defaultable`._
+
+### Implements `ExpressibleByStringLiteral`
+
+_Conditional: `where A: Defaultable`._
+
+### Implements `Addable`
+
+_Conditional: `where A: Defaultable`._
+
+#### function `add`
+
+```kestrel
+public consuming func add(consuming String[A]) -> String[A] where A: Defaultable
+```
+
+Returns the concatenation `self + other`. Required by `Addable`.
+When `self` is uniquely owned (refcount 1), appends in place —
+no allocation. Otherwise builds a fresh string with both halves.
+
+_Defined in `lang/std/text/string.ks`._
+
+#### field `zero`
+
+```kestrel
+public static var zero: String[A] where A: Defaultable { get }
+```
+
+The additive identity for strings — the empty string `""`.
+
+_Defined in `lang/std/text/string.ks`._
 
 ## struct `StringBuilder`
 
 ```kestrel
-public struct StringBuilder { /* private fields */ }
+public struct StringBuilder[A = GlobalAllocator] where A: Allocator { /* private fields */ }
 ```
 
 Write-only buffer for efficient string construction. No COW, no
@@ -5825,7 +5849,7 @@ let s = b.build();   // "hello world", zero-copy
 
 ### Representation
 
-`(ptr: Pointer[UInt8], len: Int64, cap: Int64)`.
+`(ptr: Pointer[UInt8], len: Int64, cap: Int64, allocator: A)`.
 
 ### Memory Model
 
@@ -5840,20 +5864,41 @@ _Defined in `lang/std/text/builder.ks`._
 #### initializer `Empty`
 
 ```kestrel
-public init()
+public init() where A: Defaultable
 ```
 
 Creates an empty builder with no allocation.
 
 _Defined in `lang/std/text/builder.ks`._
 
+#### initializer `Empty With Allocator`
+
+```kestrel
+public init(allocator: A)
+```
+
+Creates an empty builder whose buffer will come from `allocator`.
+
+_Defined in `lang/std/text/builder.ks`._
+
 #### initializer `With Capacity`
 
 ```kestrel
-public init(capacity: Int64)
+public init(capacity: Int64) where A: Defaultable
 ```
 
 Creates an empty builder with at least `capacity` bytes preallocated.
+
+_Defined in `lang/std/text/builder.ks`._
+
+#### initializer `With Capacity and Allocator`
+
+```kestrel
+public init(capacity: Int64, allocator: A)
+```
+
+Creates an empty builder with at least `capacity` bytes preallocated
+from `allocator`.
 
 _Defined in `lang/std/text/builder.ks`._
 
@@ -5880,7 +5925,7 @@ _Defined in `lang/std/text/builder.ks`._
 #### function `build`
 
 ```kestrel
-public mutating func build() -> String
+public mutating func build() -> String[A]
 ```
 
 Transfers the buffer into a new `String` without copying.
@@ -5923,7 +5968,7 @@ _Defined in `lang/std/text/builder.ks`._
 #### function `clone`
 
 ```kestrel
-public func clone() -> StringBuilder
+public func clone() -> StringBuilder[A]
 ```
 
 Returns a copy with its own buffer.
@@ -6015,8 +6060,10 @@ slice.toOwned();               // "hello, world"
 
 ### Representation
 
-`(base: &String, start: Int64, end: Int64)`. `start` and `end` are
-byte offsets into the whole string, not into this slice.
+`(base: &StringBytes, start: Int64, end: Int64)`: a borrow of the
+string's bytes (whatever its allocator). `start` and `end` are
+byte offsets into the whole string; they stay internal to std, and
+every public offset counts from the slice's first byte.
 
 _Defined in `lang/std/text/slice.ks`._
 
@@ -6055,7 +6102,7 @@ _Defined in `lang/std/text/slice.ks`._
 #### field `base`
 
 ```kestrel
-let base: &String
+let base: &StringBytes
 ```
 
 _Defined in `lang/std/text/slice.ks`._
@@ -6063,7 +6110,7 @@ _Defined in `lang/std/text/slice.ks`._
 #### field `end`
 
 ```kestrel
-public let end: Int64
+let end: Int64
 ```
 
 _Defined in `lang/std/text/slice.ks`._
@@ -6081,7 +6128,7 @@ _Defined in `lang/std/text/slice.ks`._
 #### field `start`
 
 ```kestrel
-public let start: Int64
+let start: Int64
 ```
 
 _Defined in `lang/std/text/slice.ks`._
@@ -6092,9 +6139,9 @@ _Defined in `lang/std/text/slice.ks`._
 public func subslice(from: Int64, to: Int64) -> StringSlice
 ```
 
-Returns a sub-slice covering `[newStart, newEnd)` relative to
-the source buffer (absolute byte offsets, not relative to this
-slice's start).
+Returns the sub-slice covering bytes `[from, to)` of this slice.
+Offsets count from this slice's first byte, like every byte
+position std hands out for a slice (`firstIndex(of:)`, `bytes`).
 
 _Defined in `lang/std/text/slice.ks`._
 
@@ -6164,39 +6211,7 @@ type Output = Bool
 
 _Defined in `lang/std/text/slice.ks`._
 
-#### function `equal`
-
-```kestrel
-public func equal(to: StringSlice) -> Bool
-```
-
-_Defined in `lang/std/text/slice.ks`._
-
-#### function `equal`
-
-```kestrel
-public func equal(to: String) -> Bool
-```
-
-_Defined in `lang/std/text/slice.ks`._
-
 ### Implements `NotEqual`
-
-#### function `notEqual`
-
-```kestrel
-public func notEqual(to: StringSlice) -> Bool
-```
-
-_Defined in `lang/std/text/slice.ks`._
-
-#### function `notEqual`
-
-```kestrel
-public func notEqual(to: String) -> Bool
-```
-
-_Defined in `lang/std/text/slice.ks`._
 
 ### Implements `Comparable`
 
@@ -6329,10 +6344,159 @@ The decoded character.
 
 _Defined in `lang/std/text/char.ks`._
 
+## struct `WordsIterator`
+
+```kestrel
+public struct WordsIterator { /* private fields */ }
+```
+
+Iterator over the whitespace-separated words of a string. Runs of
+whitespace count as one break, and leading/trailing whitespace yields
+nothing, so no word is ever empty.
+
+_Defined in `lang/std/text/views.ks`._
+
+### Members
+
+#### initializer `From Slice`
+
+```kestrel
+public init(slice: StringSlice)
+```
+
+Iterates the words of `slice` from its start.
+
+_Defined in `lang/std/text/views.ks`._
+
+### Implements `Iterator`
+
+#### typealias `Item`
+
+```kestrel
+type Item = StringSlice
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+#### function `next`
+
+```kestrel
+public mutating func next() -> StringSlice?
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+### Implements `Cloneable`
+
+#### function `clone`
+
+```kestrel
+public func clone() -> WordsIterator
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+## struct `WordsView`
+
+```kestrel
+public struct WordsView { /* private fields */ }
+```
+
+Lazy view over the whitespace-separated words of a string, each a
+zero-copy `StringSlice`. Unlike `split(by: " ")`, runs of whitespace
+never produce empty pieces.
+
+### Examples
+
+```
+"  a  b\tc ".words.count;   // 3
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+### Members
+
+#### initializer `From Slice`
+
+```kestrel
+public init(slice: StringSlice)
+```
+
+A view over the words of `slice`.
+
+_Defined in `lang/std/text/views.ks`._
+
+#### function `collect`
+
+```kestrel
+public func collect() -> Array[String]
+```
+
+Collects the words into an array of owned strings. (A word borrows
+the source string, so an array of slices can't exist.)
+
+_Defined in `lang/std/text/views.ks`._
+
+#### field `count`
+
+```kestrel
+public var count: Int64 { get }
+```
+
+Number of words. O(n).
+
+_Defined in `lang/std/text/views.ks`._
+
+#### field `isEmpty`
+
+```kestrel
+public var isEmpty: Bool { get }
+```
+
+True when there are no words (the source is empty or all whitespace).
+
+_Defined in `lang/std/text/views.ks`._
+
+### Implements `Iterable`
+
+#### typealias `Item`
+
+```kestrel
+type Item = StringSlice
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+#### typealias `TargetIterator`
+
+```kestrel
+type TargetIterator = WordsIterator
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+#### function `iter`
+
+```kestrel
+public func iter() -> WordsIterator
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+### Implements `Cloneable`
+
+#### function `clone`
+
+```kestrel
+public func clone() -> WordsView
+```
+
+_Defined in `lang/std/text/views.ks`._
+
 ## function `_writePadded`
 
 ```kestrel
-public func _writePadded(into: mutating some Formatter, String, FormatOptions)
+public func _writePadded[A](into: mutating some Formatter, String[A], FormatOptions) where A: Allocator
 ```
 
 Writes `content` into `writer` with width/alignment/fill padding applied.

@@ -14,7 +14,7 @@ import std.numeric.(UInt8)
 @main
 func main() {
     let tmp = Directory.createTemporary(prefix: "kpath").unwrap();
-    var raw = tmp.bytes;
+    var raw = tmp.bytes.toOwned();
     raw.append(47);
     raw.append(255);
     raw.append(97);

@@ -430,16 +430,6 @@ _Defined in `lang/std/core/bool.ks`._
 
 ### Members
 
-#### initializer `Bool Literal`
-
-```kestrel
-public init(boolLiteral: lang.i1)
-```
-
-Builds a `Bool` from the primitive `lang.i1` produced by a literal.
-
-_Defined in `lang/std/core/bool.ks`._
-
 #### function `random`
 
 ```kestrel
@@ -463,7 +453,7 @@ _Defined in `lang/std/numeric/random.ks`._
 public static func random() -> Bool
 ```
 
-Returns `true` or `false` with equal probability, using OS entropy.
+Returns `true` or `false` with equal probability, from `DefaultRandom`.
 
 ##### Examples
 
@@ -486,17 +476,6 @@ Returns `true` if both bits agree. Drives `==` for `Bool`.
 _Defined in `lang/std/core/bool.ks`._
 
 ### Implements `Matchable`
-
-#### function `matches`
-
-```kestrel
-public func matches(Bool) -> Bool
-```
-
-Pattern-match form of `isEqual`: `case true =>` and `case false =>`
-dispatch through here.
-
-_Defined in `lang/std/core/bool.ks`._
 
 ### Implements `Formattable`
 
@@ -526,8 +505,7 @@ _Defined in `lang/std/core/bool.ks`._
 public func hash[H](into: mutating H) where H: Hasher
 ```
 
-Feeds a single `0` or `1` byte into `hasher`. Compatible with how the
-stdlib hashes other primitives — equal `Bool`s always hash equal.
+Feeds `1` or `0` into `hasher` as one word (`write(uint64:)`).
 
 _Defined in `lang/std/core/bool.ks`._
 
@@ -557,56 +535,13 @@ type Output = Bool
 
 _Defined in `lang/std/core/bool.ks`._
 
-#### function `logicalAnd`
-
-```kestrel
-public func logicalAnd(() -> Bool) -> Bool
-```
-
-Short-circuiting `and`: `other` runs only when `self` is `true`.
-The closure form is what the `and` keyword lowers into; users
-typically write `a and b` rather than calling this directly.
-
-_Defined in `lang/std/core/bool.ks`._
-
 ### Implements `Or`
 
-#### function `logicalOr`
-
-```kestrel
-public func logicalOr(() -> Bool) -> Bool
-```
-
-Short-circuiting `or`: `other` runs only when `self` is `false`.
-
-_Defined in `lang/std/core/bool.ks`._
-
 ### Implements `Not`
-
-#### function `logicalNot`
-
-```kestrel
-public func logicalNot() -> Bool
-```
-
-Bit-flip; `not true == false`.
-
-_Defined in `lang/std/core/bool.ks`._
 
 ### Implements `ExpressibleByBoolLiteral`
 
 ### Implements `BooleanConditional`
-
-#### function `boolValue`
-
-```kestrel
-public func boolValue() -> lang.i1
-```
-
-Returns the wrapped `lang.i1` so `if`/`while` can branch on it
-without a redundant `Bool` round-trip.
-
-_Defined in `lang/std/core/bool.ks`._
 
 ### Implements `FFISafe`
 
@@ -823,121 +758,7 @@ type SliceOutput = Slice[T]
 
 _Defined in `lang/std/collections/slice.ks`._
 
-#### function `lend`
-
-```kestrel
-public static func lend(consuming ClosedRange[Int64], Slice[T]) -> &Slice[T]
-```
-
-_Defined in `lang/std/collections/slice.ks`._
-
-#### function `lendChecked`
-
-```kestrel
-public static func lendChecked(consuming ClosedRange[Int64], Slice[T]) -> Optional[&Slice[T]]
-```
-
-_Defined in `lang/std/collections/slice.ks`._
-
-#### function `lendMutating`
-
-```kestrel
-public static func lendMutating(consuming ClosedRange[Int64], mutating Slice[T]) -> &mutating Slice[T]
-```
-
-_Defined in `lang/std/collections/slice.ks`._
-
-#### function `lendMutatingChecked`
-
-```kestrel
-public static func lendMutatingChecked(consuming ClosedRange[Int64], mutating Slice[T]) -> Optional[&mutating Slice[T]]
-```
-
-_Defined in `lang/std/collections/slice.ks`._
-
-#### function `lendMutatingUnchecked`
-
-```kestrel
-public static func lendMutatingUnchecked(consuming ClosedRange[Int64], mutating Slice[T]) -> &mutating Slice[T]
-```
-
-_Defined in `lang/std/collections/slice.ks`._
-
-#### function `lendUnchecked`
-
-```kestrel
-public static func lendUnchecked(consuming ClosedRange[Int64], Slice[T]) -> &Slice[T]
-```
-
-_Defined in `lang/std/collections/slice.ks`._
-
 ### Implements `SliceClampable`
-
-#### typealias `SliceClampedOutput`
-
-```kestrel
-type SliceClampedOutput = &Slice[T]
-```
-
-_Defined in `lang/std/collections/slice.ks`._
-
-#### function `lendClamped`
-
-```kestrel
-public static func lendClamped(consuming ClosedRange[Int64], Slice[T]) -> &Slice[T]
-```
-
-_Defined in `lang/std/collections/slice.ks`._
-
-### Implements `SeqIndex`
-
-#### typealias `SeqOutput`
-
-```kestrel
-type SeqOutput = UnsafeSlice[T]
-```
-
-_Defined in `lang/std/collections/sliceable.ks`._
-
-#### function `readSeq`
-
-```kestrel
-public func readSeq(from: UnsafeSlice[T]) -> UnsafeSlice[T]
-```
-
-_Defined in `lang/std/collections/sliceable.ks`._
-
-#### function `readSeqChecked`
-
-```kestrel
-public func readSeqChecked(from: UnsafeSlice[T]) -> UnsafeSlice[T]?
-```
-
-_Defined in `lang/std/collections/sliceable.ks`._
-
-#### function `readSeqUnchecked`
-
-```kestrel
-public func readSeqUnchecked(from: UnsafeSlice[T]) -> UnsafeSlice[T]
-```
-
-_Defined in `lang/std/collections/sliceable.ks`._
-
-#### function `writeSeq`
-
-```kestrel
-public func writeSeq(to: UnsafeSlice[T], with: UnsafeSlice[T])
-```
-
-_Defined in `lang/std/collections/sliceable.ks`._
-
-#### function `writeSeqUnchecked`
-
-```kestrel
-public func writeSeqUnchecked(to: UnsafeSlice[T], with: UnsafeSlice[T])
-```
-
-_Defined in `lang/std/collections/sliceable.ks`._
 
 ### Implements `SeqRange`
 
@@ -971,44 +792,12 @@ type BytesYield = BytesView
 
 _Defined in `lang/std/text/views.ks`._
 
-#### function `readBytes`
-
-```kestrel
-public func readBytes(from: BytesView) -> BytesView
-```
-
-_Defined in `lang/std/text/views.ks`._
-
-#### function `readBytesChecked`
-
-```kestrel
-public func readBytesChecked(from: BytesView) -> BytesView?
-```
-
-_Defined in `lang/std/text/views.ks`._
-
-#### function `readBytesUnchecked`
-
-```kestrel
-public func readBytesUnchecked(from: BytesView) -> BytesView
-```
-
-_Defined in `lang/std/text/views.ks`._
-
 ### Implements `BytesClampable`
 
 #### typealias `BytesClampedYield`
 
 ```kestrel
 type BytesClampedYield = BytesView
-```
-
-_Defined in `lang/std/text/views.ks`._
-
-#### function `readBytesClamped`
-
-```kestrel
-public func readBytesClamped(from: BytesView) -> BytesView
 ```
 
 _Defined in `lang/std/text/views.ks`._
@@ -1023,23 +812,7 @@ type BytesWrappedYield = BytesView
 
 _Defined in `lang/std/text/views.ks`._
 
-#### function `readBytesWrapped`
-
-```kestrel
-public func readBytesWrapped(from: BytesView) -> BytesView
-```
-
-_Defined in `lang/std/text/views.ks`._
-
 ### Implements `BytesSubstringIndex`
-
-#### function `readBytesSubstring`
-
-```kestrel
-public func readBytesSubstring(from: BytesView) -> String
-```
-
-_Defined in `lang/std/text/views.ks`._
 
 ### Implements `CharsIndex`
 
@@ -1047,22 +820,6 @@ _Defined in `lang/std/text/views.ks`._
 
 ```kestrel
 type CharsYield = CharsView
-```
-
-_Defined in `lang/std/text/views.ks`._
-
-#### function `readChars`
-
-```kestrel
-public func readChars(from: CharsView) -> CharsView
-```
-
-_Defined in `lang/std/text/views.ks`._
-
-#### function `readCharsChecked`
-
-```kestrel
-public func readCharsChecked(from: CharsView) -> CharsView?
 ```
 
 _Defined in `lang/std/text/views.ks`._
@@ -1077,14 +834,6 @@ type CharsClampedYield = CharsView
 
 _Defined in `lang/std/text/views.ks`._
 
-#### function `readCharsClamped`
-
-```kestrel
-public func readCharsClamped(from: CharsView) -> CharsView
-```
-
-_Defined in `lang/std/text/views.ks`._
-
 ### Implements `CharsWrappable`
 
 #### typealias `CharsWrappedYield`
@@ -1095,23 +844,7 @@ type CharsWrappedYield = CharsView
 
 _Defined in `lang/std/text/views.ks`._
 
-#### function `readCharsWrapped`
-
-```kestrel
-public func readCharsWrapped(from: CharsView) -> CharsView
-```
-
-_Defined in `lang/std/text/views.ks`._
-
 ### Implements `CharsSubstringIndex`
-
-#### function `readCharsSubstring`
-
-```kestrel
-public func readCharsSubstring(from: CharsView) -> String
-```
-
-_Defined in `lang/std/text/views.ks`._
 
 ### Implements `GraphemesIndex`
 
@@ -1119,22 +852,6 @@ _Defined in `lang/std/text/views.ks`._
 
 ```kestrel
 type GraphemesYield = GraphemesView
-```
-
-_Defined in `lang/std/text/views.ks`._
-
-#### function `readGraphemes`
-
-```kestrel
-public func readGraphemes(from: GraphemesView) -> GraphemesView
-```
-
-_Defined in `lang/std/text/views.ks`._
-
-#### function `readGraphemesChecked`
-
-```kestrel
-public func readGraphemesChecked(from: GraphemesView) -> GraphemesView?
 ```
 
 _Defined in `lang/std/text/views.ks`._
@@ -1149,14 +866,6 @@ type GraphemesClampedYield = GraphemesView
 
 _Defined in `lang/std/text/views.ks`._
 
-#### function `readGraphemesClamped`
-
-```kestrel
-public func readGraphemesClamped(from: GraphemesView) -> GraphemesView
-```
-
-_Defined in `lang/std/text/views.ks`._
-
 ### Implements `GraphemesWrappable`
 
 #### typealias `GraphemesWrappedYield`
@@ -1167,23 +876,7 @@ type GraphemesWrappedYield = GraphemesView
 
 _Defined in `lang/std/text/views.ks`._
 
-#### function `readGraphemesWrapped`
-
-```kestrel
-public func readGraphemesWrapped(from: GraphemesView) -> GraphemesView
-```
-
-_Defined in `lang/std/text/views.ks`._
-
 ### Implements `GraphemesSubstringIndex`
-
-#### function `readGraphemesSubstring`
-
-```kestrel
-public func readGraphemesSubstring(from: GraphemesView) -> String
-```
-
-_Defined in `lang/std/text/views.ks`._
 
 ### Implements `LinesIndex`
 
@@ -1191,22 +884,6 @@ _Defined in `lang/std/text/views.ks`._
 
 ```kestrel
 type LinesYield = LinesView
-```
-
-_Defined in `lang/std/text/views.ks`._
-
-#### function `readLines`
-
-```kestrel
-public func readLines(from: LinesView) -> LinesView
-```
-
-_Defined in `lang/std/text/views.ks`._
-
-#### function `readLinesChecked`
-
-```kestrel
-public func readLinesChecked(from: LinesView) -> LinesView?
 ```
 
 _Defined in `lang/std/text/views.ks`._
@@ -1221,14 +898,6 @@ type LinesClampedYield = LinesView
 
 _Defined in `lang/std/text/views.ks`._
 
-#### function `readLinesClamped`
-
-```kestrel
-public func readLinesClamped(from: LinesView) -> LinesView
-```
-
-_Defined in `lang/std/text/views.ks`._
-
 ### Implements `LinesWrappable`
 
 #### typealias `LinesWrappedYield`
@@ -1239,23 +908,7 @@ type LinesWrappedYield = LinesView
 
 _Defined in `lang/std/text/views.ks`._
 
-#### function `readLinesWrapped`
-
-```kestrel
-public func readLinesWrapped(from: LinesView) -> LinesView
-```
-
-_Defined in `lang/std/text/views.ks`._
-
 ### Implements `LinesSubstringIndex`
-
-#### function `readLinesSubstring`
-
-```kestrel
-public func readLinesSubstring(from: LinesView) -> String
-```
-
-_Defined in `lang/std/text/views.ks`._
 
 ## protocol `ClosedRangeConstructible`
 
@@ -1306,7 +959,8 @@ computed once via `Steppable.distance` (`O(1)`).
 
 ### Representation
 
-`current` (next value to yield) and `remaining` (elements left).
+`current` (next value to yield), `last` (next value to yield from the
+back) and `remaining` (elements left).
 
 _Defined in `lang/std/core/range.ks`._
 
@@ -1315,11 +969,11 @@ _Defined in `lang/std/core/range.ks`._
 #### initializer `From Bounds`
 
 ```kestrel
-public init(current: T, remaining: Int64)
+public init(current: T, last: T, remaining: Int64)
 ```
 
-Builds an iterator yielding `current` for the next `remaining`
-steps. A `remaining <= 0` value produces an already-exhausted
+Builds an iterator yielding `remaining` values from `current` up to
+`last`. A `remaining <= 0` value produces an already-exhausted
 iterator.
 
 _Defined in `lang/std/core/range.ks`._
@@ -1341,6 +995,20 @@ public mutating func next() -> T?
 ```
 
 Yields the next value, or `.None` once `remaining` reaches zero.
+
+_Defined in `lang/std/core/range.ks`._
+
+### Implements `DoubleEndedIterator`
+
+#### function `nextBack`
+
+```kestrel
+public mutating func nextBack() -> T?
+```
+
+Yields the last remaining value, or `.None` once `remaining` reaches
+zero. Steps `last` back only while values remain, so `a..=T.minValue`
+never calls `predecessor()` past the bound.
 
 _Defined in `lang/std/core/range.ks`._
 
@@ -1471,83 +1139,13 @@ type Output = Bool
 
 _Defined in `lang/std/core/protocols.ks`._
 
-#### function `lessThan`
-
-```kestrel
-public func lessThan(Self) -> Bool
-```
-
-`<` derived from `compare`.
-
-_Defined in `lang/std/core/protocols.ks`._
-
 ### Implements `LessOrEqual`
-
-#### function `lessThanOrEqual`
-
-```kestrel
-public func lessThanOrEqual(Self) -> Bool
-```
-
-`<=` derived from `compare`.
-
-_Defined in `lang/std/core/protocols.ks`._
 
 ### Implements `Greater`
 
-#### function `greaterThan`
-
-```kestrel
-public func greaterThan(Self) -> Bool
-```
-
-`>` derived from `compare`.
-
-_Defined in `lang/std/core/protocols.ks`._
-
 ### Implements `GreaterOrEqual`
 
-#### function `greaterThanOrEqual`
-
-```kestrel
-public func greaterThanOrEqual(Self) -> Bool
-```
-
-`>=` derived from `compare`.
-
-_Defined in `lang/std/core/protocols.ks`._
-
 ### Implements `RangeMatchable`
-
-#### function `isAtLeast`
-
-```kestrel
-public func isAtLeast(Self) -> Bool
-```
-
-`start..` lower-bound check, derived from `compare`.
-
-_Defined in `lang/std/core/protocols.ks`._
-
-#### function `isAtMost`
-
-```kestrel
-public func isAtMost(Self) -> Bool
-```
-
-`..=end` upper-bound check, derived from `compare`.
-
-_Defined in `lang/std/core/protocols.ks`._
-
-#### function `isBelow`
-
-```kestrel
-public func isBelow(Self) -> Bool
-```
-
-`..<end` upper-bound check, derived from `compare`.
-
-_Defined in `lang/std/core/protocols.ks`._
 
 ## protocol `ConsumingIndirection`
 
@@ -1868,27 +1466,7 @@ type Output = Bool
 
 _Defined in `lang/std/core/protocols.ks`._
 
-#### function `equal`
-
-```kestrel
-public func equal(to: Self) -> Bool
-```
-
-Bridges `Equal.equal(to:)` to `Equatable.isEqual(to:)`.
-
-_Defined in `lang/std/core/protocols.ks`._
-
 ### Implements `NotEqual`
-
-#### function `notEqual`
-
-```kestrel
-public func notEqual(to: Self) -> Bool
-```
-
-Default `!=`: delegates to `==` so there's a single source of truth.
-
-_Defined in `lang/std/core/protocols.ks`._
 
 ## protocol `ExpressibleByArrayLiteral`
 
@@ -2310,6 +1888,28 @@ mutating func write(Slice[UInt8])
 ```
 
 Mixes `bytes` into the running hash state.
+
+_Defined in `lang/std/core/protocols.ks`._
+
+#### function `write`
+
+```kestrel
+mutating func write(uint64: UInt64)
+```
+
+Mixes one 64-bit word into the state. Integers, `Bool` and `Char`
+hash through this. The default writes the word's 8 bytes; a hasher
+can mix it in one round instead.
+
+_Defined in `lang/std/core/protocols.ks`._
+
+#### function `write`
+
+```kestrel
+public mutating func write(uint64: UInt64)
+```
+
+Writes the word's 8 bytes (in memory order) through `write(bytes:)`.
 
 _Defined in `lang/std/core/protocols.ks`._
 
@@ -3134,147 +2734,7 @@ type SliceOutput = Slice[T]
 
 _Defined in `lang/std/collections/slice.ks`._
 
-#### function `lend`
-
-```kestrel
-public static func lend(consuming Range[Int64], Slice[T]) -> &Slice[T]
-```
-
-_Defined in `lang/std/collections/slice.ks`._
-
-#### function `lendChecked`
-
-```kestrel
-public static func lendChecked(consuming Range[Int64], Slice[T]) -> Optional[&Slice[T]]
-```
-
-_Defined in `lang/std/collections/slice.ks`._
-
-#### function `lendMutating`
-
-```kestrel
-public static func lendMutating(consuming Range[Int64], mutating Slice[T]) -> &mutating Slice[T]
-```
-
-_Defined in `lang/std/collections/slice.ks`._
-
-#### function `lendMutatingChecked`
-
-```kestrel
-public static func lendMutatingChecked(consuming Range[Int64], mutating Slice[T]) -> Optional[&mutating Slice[T]]
-```
-
-_Defined in `lang/std/collections/slice.ks`._
-
-#### function `lendMutatingUnchecked`
-
-```kestrel
-public static func lendMutatingUnchecked(consuming Range[Int64], mutating Slice[T]) -> &mutating Slice[T]
-```
-
-_Defined in `lang/std/collections/slice.ks`._
-
-#### function `lendUnchecked`
-
-```kestrel
-public static func lendUnchecked(consuming Range[Int64], Slice[T]) -> &Slice[T]
-```
-
-_Defined in `lang/std/collections/slice.ks`._
-
 ### Implements `SliceClampable`
-
-#### typealias `SliceClampedOutput`
-
-```kestrel
-type SliceClampedOutput = &Slice[T]
-```
-
-_Defined in `lang/std/collections/slice.ks`._
-
-#### function `lendClamped`
-
-```kestrel
-public static func lendClamped(consuming Range[Int64], Slice[T]) -> &Slice[T]
-```
-
-_Defined in `lang/std/collections/slice.ks`._
-
-### Implements `SeqIndex`
-
-#### typealias `SeqOutput`
-
-```kestrel
-type SeqOutput = UnsafeSlice[T]
-```
-
-_Defined in `lang/std/collections/sliceable.ks`._
-
-#### function `readSeq`
-
-```kestrel
-public func readSeq(from: UnsafeSlice[T]) -> UnsafeSlice[T]
-```
-
-_Defined in `lang/std/collections/sliceable.ks`._
-
-#### function `readSeqChecked`
-
-```kestrel
-public func readSeqChecked(from: UnsafeSlice[T]) -> UnsafeSlice[T]?
-```
-
-_Defined in `lang/std/collections/sliceable.ks`._
-
-#### function `readSeqUnchecked`
-
-```kestrel
-public func readSeqUnchecked(from: UnsafeSlice[T]) -> UnsafeSlice[T]
-```
-
-_Defined in `lang/std/collections/sliceable.ks`._
-
-#### function `writeSeq`
-
-```kestrel
-public func writeSeq(to: UnsafeSlice[T], with: UnsafeSlice[T])
-```
-
-_Defined in `lang/std/collections/sliceable.ks`._
-
-#### function `writeSeqUnchecked`
-
-```kestrel
-public func writeSeqUnchecked(to: UnsafeSlice[T], with: UnsafeSlice[T])
-```
-
-_Defined in `lang/std/collections/sliceable.ks`._
-
-### Implements `SeqClampable`
-
-#### typealias `SeqClampedOutput`
-
-```kestrel
-type SeqClampedOutput = UnsafeSlice[T]
-```
-
-_Defined in `lang/std/collections/sliceable.ks`._
-
-#### function `readSeqClamped`
-
-```kestrel
-public func readSeqClamped(from: UnsafeSlice[T]) -> UnsafeSlice[T]
-```
-
-_Defined in `lang/std/collections/sliceable.ks`._
-
-#### function `writeSeqClamped`
-
-```kestrel
-public func writeSeqClamped(to: UnsafeSlice[T], with: UnsafeSlice[T])
-```
-
-_Defined in `lang/std/collections/sliceable.ks`._
 
 ### Implements `SeqRange`
 
@@ -3308,44 +2768,12 @@ type BytesYield = BytesView
 
 _Defined in `lang/std/text/views.ks`._
 
-#### function `readBytes`
-
-```kestrel
-public func readBytes(from: BytesView) -> BytesView
-```
-
-_Defined in `lang/std/text/views.ks`._
-
-#### function `readBytesChecked`
-
-```kestrel
-public func readBytesChecked(from: BytesView) -> BytesView?
-```
-
-_Defined in `lang/std/text/views.ks`._
-
-#### function `readBytesUnchecked`
-
-```kestrel
-public func readBytesUnchecked(from: BytesView) -> BytesView
-```
-
-_Defined in `lang/std/text/views.ks`._
-
 ### Implements `BytesClampable`
 
 #### typealias `BytesClampedYield`
 
 ```kestrel
 type BytesClampedYield = BytesView
-```
-
-_Defined in `lang/std/text/views.ks`._
-
-#### function `readBytesClamped`
-
-```kestrel
-public func readBytesClamped(from: BytesView) -> BytesView
 ```
 
 _Defined in `lang/std/text/views.ks`._
@@ -3360,23 +2788,7 @@ type BytesWrappedYield = BytesView
 
 _Defined in `lang/std/text/views.ks`._
 
-#### function `readBytesWrapped`
-
-```kestrel
-public func readBytesWrapped(from: BytesView) -> BytesView
-```
-
-_Defined in `lang/std/text/views.ks`._
-
 ### Implements `BytesSubstringIndex`
-
-#### function `readBytesSubstring`
-
-```kestrel
-public func readBytesSubstring(from: BytesView) -> String
-```
-
-_Defined in `lang/std/text/views.ks`._
 
 ### Implements `CharsIndex`
 
@@ -3384,22 +2796,6 @@ _Defined in `lang/std/text/views.ks`._
 
 ```kestrel
 type CharsYield = CharsView
-```
-
-_Defined in `lang/std/text/views.ks`._
-
-#### function `readChars`
-
-```kestrel
-public func readChars(from: CharsView) -> CharsView
-```
-
-_Defined in `lang/std/text/views.ks`._
-
-#### function `readCharsChecked`
-
-```kestrel
-public func readCharsChecked(from: CharsView) -> CharsView?
 ```
 
 _Defined in `lang/std/text/views.ks`._
@@ -3414,14 +2810,6 @@ type CharsClampedYield = CharsView
 
 _Defined in `lang/std/text/views.ks`._
 
-#### function `readCharsClamped`
-
-```kestrel
-public func readCharsClamped(from: CharsView) -> CharsView
-```
-
-_Defined in `lang/std/text/views.ks`._
-
 ### Implements `CharsWrappable`
 
 #### typealias `CharsWrappedYield`
@@ -3432,23 +2820,7 @@ type CharsWrappedYield = CharsView
 
 _Defined in `lang/std/text/views.ks`._
 
-#### function `readCharsWrapped`
-
-```kestrel
-public func readCharsWrapped(from: CharsView) -> CharsView
-```
-
-_Defined in `lang/std/text/views.ks`._
-
 ### Implements `CharsSubstringIndex`
-
-#### function `readCharsSubstring`
-
-```kestrel
-public func readCharsSubstring(from: CharsView) -> String
-```
-
-_Defined in `lang/std/text/views.ks`._
 
 ### Implements `GraphemesIndex`
 
@@ -3456,22 +2828,6 @@ _Defined in `lang/std/text/views.ks`._
 
 ```kestrel
 type GraphemesYield = GraphemesView
-```
-
-_Defined in `lang/std/text/views.ks`._
-
-#### function `readGraphemes`
-
-```kestrel
-public func readGraphemes(from: GraphemesView) -> GraphemesView
-```
-
-_Defined in `lang/std/text/views.ks`._
-
-#### function `readGraphemesChecked`
-
-```kestrel
-public func readGraphemesChecked(from: GraphemesView) -> GraphemesView?
 ```
 
 _Defined in `lang/std/text/views.ks`._
@@ -3486,14 +2842,6 @@ type GraphemesClampedYield = GraphemesView
 
 _Defined in `lang/std/text/views.ks`._
 
-#### function `readGraphemesClamped`
-
-```kestrel
-public func readGraphemesClamped(from: GraphemesView) -> GraphemesView
-```
-
-_Defined in `lang/std/text/views.ks`._
-
 ### Implements `GraphemesWrappable`
 
 #### typealias `GraphemesWrappedYield`
@@ -3504,23 +2852,7 @@ type GraphemesWrappedYield = GraphemesView
 
 _Defined in `lang/std/text/views.ks`._
 
-#### function `readGraphemesWrapped`
-
-```kestrel
-public func readGraphemesWrapped(from: GraphemesView) -> GraphemesView
-```
-
-_Defined in `lang/std/text/views.ks`._
-
 ### Implements `GraphemesSubstringIndex`
-
-#### function `readGraphemesSubstring`
-
-```kestrel
-public func readGraphemesSubstring(from: GraphemesView) -> String
-```
-
-_Defined in `lang/std/text/views.ks`._
 
 ### Implements `LinesIndex`
 
@@ -3528,22 +2860,6 @@ _Defined in `lang/std/text/views.ks`._
 
 ```kestrel
 type LinesYield = LinesView
-```
-
-_Defined in `lang/std/text/views.ks`._
-
-#### function `readLines`
-
-```kestrel
-public func readLines(from: LinesView) -> LinesView
-```
-
-_Defined in `lang/std/text/views.ks`._
-
-#### function `readLinesChecked`
-
-```kestrel
-public func readLinesChecked(from: LinesView) -> LinesView?
 ```
 
 _Defined in `lang/std/text/views.ks`._
@@ -3558,14 +2874,6 @@ type LinesClampedYield = LinesView
 
 _Defined in `lang/std/text/views.ks`._
 
-#### function `readLinesClamped`
-
-```kestrel
-public func readLinesClamped(from: LinesView) -> LinesView
-```
-
-_Defined in `lang/std/text/views.ks`._
-
 ### Implements `LinesWrappable`
 
 #### typealias `LinesWrappedYield`
@@ -3576,23 +2884,7 @@ type LinesWrappedYield = LinesView
 
 _Defined in `lang/std/text/views.ks`._
 
-#### function `readLinesWrapped`
-
-```kestrel
-public func readLinesWrapped(from: LinesView) -> LinesView
-```
-
-_Defined in `lang/std/text/views.ks`._
-
 ### Implements `LinesSubstringIndex`
-
-#### function `readLinesSubstring`
-
-```kestrel
-public func readLinesSubstring(from: LinesView) -> String
-```
-
-_Defined in `lang/std/text/views.ks`._
 
 ## protocol `RangeConstructible`
 
@@ -3734,121 +3026,7 @@ type SliceOutput = Slice[T]
 
 _Defined in `lang/std/collections/slice.ks`._
 
-#### function `lend`
-
-```kestrel
-public static func lend(consuming RangeFrom[Int64], Slice[T]) -> &Slice[T]
-```
-
-_Defined in `lang/std/collections/slice.ks`._
-
-#### function `lendChecked`
-
-```kestrel
-public static func lendChecked(consuming RangeFrom[Int64], Slice[T]) -> Optional[&Slice[T]]
-```
-
-_Defined in `lang/std/collections/slice.ks`._
-
-#### function `lendMutating`
-
-```kestrel
-public static func lendMutating(consuming RangeFrom[Int64], mutating Slice[T]) -> &mutating Slice[T]
-```
-
-_Defined in `lang/std/collections/slice.ks`._
-
-#### function `lendMutatingChecked`
-
-```kestrel
-public static func lendMutatingChecked(consuming RangeFrom[Int64], mutating Slice[T]) -> Optional[&mutating Slice[T]]
-```
-
-_Defined in `lang/std/collections/slice.ks`._
-
-#### function `lendMutatingUnchecked`
-
-```kestrel
-public static func lendMutatingUnchecked(consuming RangeFrom[Int64], mutating Slice[T]) -> &mutating Slice[T]
-```
-
-_Defined in `lang/std/collections/slice.ks`._
-
-#### function `lendUnchecked`
-
-```kestrel
-public static func lendUnchecked(consuming RangeFrom[Int64], Slice[T]) -> &Slice[T]
-```
-
-_Defined in `lang/std/collections/slice.ks`._
-
 ### Implements `SliceClampable`
-
-#### typealias `SliceClampedOutput`
-
-```kestrel
-type SliceClampedOutput = &Slice[T]
-```
-
-_Defined in `lang/std/collections/slice.ks`._
-
-#### function `lendClamped`
-
-```kestrel
-public static func lendClamped(consuming RangeFrom[Int64], Slice[T]) -> &Slice[T]
-```
-
-_Defined in `lang/std/collections/slice.ks`._
-
-### Implements `SeqIndex`
-
-#### typealias `SeqOutput`
-
-```kestrel
-type SeqOutput = UnsafeSlice[T]
-```
-
-_Defined in `lang/std/collections/sliceable.ks`._
-
-#### function `readSeq`
-
-```kestrel
-public func readSeq(from: UnsafeSlice[T]) -> UnsafeSlice[T]
-```
-
-_Defined in `lang/std/collections/sliceable.ks`._
-
-#### function `readSeqChecked`
-
-```kestrel
-public func readSeqChecked(from: UnsafeSlice[T]) -> UnsafeSlice[T]?
-```
-
-_Defined in `lang/std/collections/sliceable.ks`._
-
-#### function `readSeqUnchecked`
-
-```kestrel
-public func readSeqUnchecked(from: UnsafeSlice[T]) -> UnsafeSlice[T]
-```
-
-_Defined in `lang/std/collections/sliceable.ks`._
-
-#### function `writeSeq`
-
-```kestrel
-public func writeSeq(to: UnsafeSlice[T], with: UnsafeSlice[T])
-```
-
-_Defined in `lang/std/collections/sliceable.ks`._
-
-#### function `writeSeqUnchecked`
-
-```kestrel
-public func writeSeqUnchecked(to: UnsafeSlice[T], with: UnsafeSlice[T])
-```
-
-_Defined in `lang/std/collections/sliceable.ks`._
 
 ### Implements `SeqRange`
 
@@ -3870,44 +3048,12 @@ type BytesYield = BytesView
 
 _Defined in `lang/std/text/views.ks`._
 
-#### function `readBytes`
-
-```kestrel
-public func readBytes(from: BytesView) -> BytesView
-```
-
-_Defined in `lang/std/text/views.ks`._
-
-#### function `readBytesChecked`
-
-```kestrel
-public func readBytesChecked(from: BytesView) -> BytesView?
-```
-
-_Defined in `lang/std/text/views.ks`._
-
-#### function `readBytesUnchecked`
-
-```kestrel
-public func readBytesUnchecked(from: BytesView) -> BytesView
-```
-
-_Defined in `lang/std/text/views.ks`._
-
 ### Implements `BytesClampable`
 
 #### typealias `BytesClampedYield`
 
 ```kestrel
 type BytesClampedYield = BytesView
-```
-
-_Defined in `lang/std/text/views.ks`._
-
-#### function `readBytesClamped`
-
-```kestrel
-public func readBytesClamped(from: BytesView) -> BytesView
 ```
 
 _Defined in `lang/std/text/views.ks`._
@@ -3922,23 +3068,7 @@ type BytesWrappedYield = BytesView
 
 _Defined in `lang/std/text/views.ks`._
 
-#### function `readBytesWrapped`
-
-```kestrel
-public func readBytesWrapped(from: BytesView) -> BytesView
-```
-
-_Defined in `lang/std/text/views.ks`._
-
 ### Implements `BytesSubstringIndex`
-
-#### function `readBytesSubstring`
-
-```kestrel
-public func readBytesSubstring(from: BytesView) -> String
-```
-
-_Defined in `lang/std/text/views.ks`._
 
 ### Implements `CharsIndex`
 
@@ -3946,22 +3076,6 @@ _Defined in `lang/std/text/views.ks`._
 
 ```kestrel
 type CharsYield = CharsView
-```
-
-_Defined in `lang/std/text/views.ks`._
-
-#### function `readChars`
-
-```kestrel
-public func readChars(from: CharsView) -> CharsView
-```
-
-_Defined in `lang/std/text/views.ks`._
-
-#### function `readCharsChecked`
-
-```kestrel
-public func readCharsChecked(from: CharsView) -> CharsView?
 ```
 
 _Defined in `lang/std/text/views.ks`._
@@ -3976,14 +3090,6 @@ type CharsClampedYield = CharsView
 
 _Defined in `lang/std/text/views.ks`._
 
-#### function `readCharsClamped`
-
-```kestrel
-public func readCharsClamped(from: CharsView) -> CharsView
-```
-
-_Defined in `lang/std/text/views.ks`._
-
 ### Implements `CharsWrappable`
 
 #### typealias `CharsWrappedYield`
@@ -3994,23 +3100,7 @@ type CharsWrappedYield = CharsView
 
 _Defined in `lang/std/text/views.ks`._
 
-#### function `readCharsWrapped`
-
-```kestrel
-public func readCharsWrapped(from: CharsView) -> CharsView
-```
-
-_Defined in `lang/std/text/views.ks`._
-
 ### Implements `CharsSubstringIndex`
-
-#### function `readCharsSubstring`
-
-```kestrel
-public func readCharsSubstring(from: CharsView) -> String
-```
-
-_Defined in `lang/std/text/views.ks`._
 
 ### Implements `GraphemesIndex`
 
@@ -4018,22 +3108,6 @@ _Defined in `lang/std/text/views.ks`._
 
 ```kestrel
 type GraphemesYield = GraphemesView
-```
-
-_Defined in `lang/std/text/views.ks`._
-
-#### function `readGraphemes`
-
-```kestrel
-public func readGraphemes(from: GraphemesView) -> GraphemesView
-```
-
-_Defined in `lang/std/text/views.ks`._
-
-#### function `readGraphemesChecked`
-
-```kestrel
-public func readGraphemesChecked(from: GraphemesView) -> GraphemesView?
 ```
 
 _Defined in `lang/std/text/views.ks`._
@@ -4048,14 +3122,6 @@ type GraphemesClampedYield = GraphemesView
 
 _Defined in `lang/std/text/views.ks`._
 
-#### function `readGraphemesClamped`
-
-```kestrel
-public func readGraphemesClamped(from: GraphemesView) -> GraphemesView
-```
-
-_Defined in `lang/std/text/views.ks`._
-
 ### Implements `GraphemesWrappable`
 
 #### typealias `GraphemesWrappedYield`
@@ -4066,23 +3132,7 @@ type GraphemesWrappedYield = GraphemesView
 
 _Defined in `lang/std/text/views.ks`._
 
-#### function `readGraphemesWrapped`
-
-```kestrel
-public func readGraphemesWrapped(from: GraphemesView) -> GraphemesView
-```
-
-_Defined in `lang/std/text/views.ks`._
-
 ### Implements `GraphemesSubstringIndex`
-
-#### function `readGraphemesSubstring`
-
-```kestrel
-public func readGraphemesSubstring(from: GraphemesView) -> String
-```
-
-_Defined in `lang/std/text/views.ks`._
 
 ### Implements `LinesIndex`
 
@@ -4090,22 +3140,6 @@ _Defined in `lang/std/text/views.ks`._
 
 ```kestrel
 type LinesYield = LinesView
-```
-
-_Defined in `lang/std/text/views.ks`._
-
-#### function `readLines`
-
-```kestrel
-public func readLines(from: LinesView) -> LinesView
-```
-
-_Defined in `lang/std/text/views.ks`._
-
-#### function `readLinesChecked`
-
-```kestrel
-public func readLinesChecked(from: LinesView) -> LinesView?
 ```
 
 _Defined in `lang/std/text/views.ks`._
@@ -4120,14 +3154,6 @@ type LinesClampedYield = LinesView
 
 _Defined in `lang/std/text/views.ks`._
 
-#### function `readLinesClamped`
-
-```kestrel
-public func readLinesClamped(from: LinesView) -> LinesView
-```
-
-_Defined in `lang/std/text/views.ks`._
-
 ### Implements `LinesWrappable`
 
 #### typealias `LinesWrappedYield`
@@ -4138,23 +3164,7 @@ type LinesWrappedYield = LinesView
 
 _Defined in `lang/std/text/views.ks`._
 
-#### function `readLinesWrapped`
-
-```kestrel
-public func readLinesWrapped(from: LinesView) -> LinesView
-```
-
-_Defined in `lang/std/text/views.ks`._
-
 ### Implements `LinesSubstringIndex`
-
-#### function `readLinesSubstring`
-
-```kestrel
-public func readLinesSubstring(from: LinesView) -> String
-```
-
-_Defined in `lang/std/text/views.ks`._
 
 ## protocol `RangeFromConstructible`
 
@@ -4281,6 +3291,19 @@ Yields the next value, or `.None` when exhausted.
 
 _Defined in `lang/std/core/range.ks`._
 
+### Implements `DoubleEndedIterator`
+
+#### function `nextBack`
+
+```kestrel
+public mutating func nextBack() -> T?
+```
+
+Yields the last remaining value (`end`'s predecessor), or `.None`
+when the front and back have met.
+
+_Defined in `lang/std/core/range.ks`._
+
 ## protocol `RangeMatchable`
 
 ```kestrel
@@ -4404,121 +3427,7 @@ type SliceOutput = Slice[T]
 
 _Defined in `lang/std/collections/slice.ks`._
 
-#### function `lend`
-
-```kestrel
-public static func lend(consuming RangeThrough[Int64], Slice[T]) -> &Slice[T]
-```
-
-_Defined in `lang/std/collections/slice.ks`._
-
-#### function `lendChecked`
-
-```kestrel
-public static func lendChecked(consuming RangeThrough[Int64], Slice[T]) -> Optional[&Slice[T]]
-```
-
-_Defined in `lang/std/collections/slice.ks`._
-
-#### function `lendMutating`
-
-```kestrel
-public static func lendMutating(consuming RangeThrough[Int64], mutating Slice[T]) -> &mutating Slice[T]
-```
-
-_Defined in `lang/std/collections/slice.ks`._
-
-#### function `lendMutatingChecked`
-
-```kestrel
-public static func lendMutatingChecked(consuming RangeThrough[Int64], mutating Slice[T]) -> Optional[&mutating Slice[T]]
-```
-
-_Defined in `lang/std/collections/slice.ks`._
-
-#### function `lendMutatingUnchecked`
-
-```kestrel
-public static func lendMutatingUnchecked(consuming RangeThrough[Int64], mutating Slice[T]) -> &mutating Slice[T]
-```
-
-_Defined in `lang/std/collections/slice.ks`._
-
-#### function `lendUnchecked`
-
-```kestrel
-public static func lendUnchecked(consuming RangeThrough[Int64], Slice[T]) -> &Slice[T]
-```
-
-_Defined in `lang/std/collections/slice.ks`._
-
 ### Implements `SliceClampable`
-
-#### typealias `SliceClampedOutput`
-
-```kestrel
-type SliceClampedOutput = &Slice[T]
-```
-
-_Defined in `lang/std/collections/slice.ks`._
-
-#### function `lendClamped`
-
-```kestrel
-public static func lendClamped(consuming RangeThrough[Int64], Slice[T]) -> &Slice[T]
-```
-
-_Defined in `lang/std/collections/slice.ks`._
-
-### Implements `SeqIndex`
-
-#### typealias `SeqOutput`
-
-```kestrel
-type SeqOutput = UnsafeSlice[T]
-```
-
-_Defined in `lang/std/collections/sliceable.ks`._
-
-#### function `readSeq`
-
-```kestrel
-public func readSeq(from: UnsafeSlice[T]) -> UnsafeSlice[T]
-```
-
-_Defined in `lang/std/collections/sliceable.ks`._
-
-#### function `readSeqChecked`
-
-```kestrel
-public func readSeqChecked(from: UnsafeSlice[T]) -> UnsafeSlice[T]?
-```
-
-_Defined in `lang/std/collections/sliceable.ks`._
-
-#### function `readSeqUnchecked`
-
-```kestrel
-public func readSeqUnchecked(from: UnsafeSlice[T]) -> UnsafeSlice[T]
-```
-
-_Defined in `lang/std/collections/sliceable.ks`._
-
-#### function `writeSeq`
-
-```kestrel
-public func writeSeq(to: UnsafeSlice[T], with: UnsafeSlice[T])
-```
-
-_Defined in `lang/std/collections/sliceable.ks`._
-
-#### function `writeSeqUnchecked`
-
-```kestrel
-public func writeSeqUnchecked(to: UnsafeSlice[T], with: UnsafeSlice[T])
-```
-
-_Defined in `lang/std/collections/sliceable.ks`._
 
 ### Implements `SeqRange`
 
@@ -4540,44 +3449,12 @@ type BytesYield = BytesView
 
 _Defined in `lang/std/text/views.ks`._
 
-#### function `readBytes`
-
-```kestrel
-public func readBytes(from: BytesView) -> BytesView
-```
-
-_Defined in `lang/std/text/views.ks`._
-
-#### function `readBytesChecked`
-
-```kestrel
-public func readBytesChecked(from: BytesView) -> BytesView?
-```
-
-_Defined in `lang/std/text/views.ks`._
-
-#### function `readBytesUnchecked`
-
-```kestrel
-public func readBytesUnchecked(from: BytesView) -> BytesView
-```
-
-_Defined in `lang/std/text/views.ks`._
-
 ### Implements `BytesClampable`
 
 #### typealias `BytesClampedYield`
 
 ```kestrel
 type BytesClampedYield = BytesView
-```
-
-_Defined in `lang/std/text/views.ks`._
-
-#### function `readBytesClamped`
-
-```kestrel
-public func readBytesClamped(from: BytesView) -> BytesView
 ```
 
 _Defined in `lang/std/text/views.ks`._
@@ -4592,23 +3469,7 @@ type BytesWrappedYield = BytesView
 
 _Defined in `lang/std/text/views.ks`._
 
-#### function `readBytesWrapped`
-
-```kestrel
-public func readBytesWrapped(from: BytesView) -> BytesView
-```
-
-_Defined in `lang/std/text/views.ks`._
-
 ### Implements `BytesSubstringIndex`
-
-#### function `readBytesSubstring`
-
-```kestrel
-public func readBytesSubstring(from: BytesView) -> String
-```
-
-_Defined in `lang/std/text/views.ks`._
 
 ### Implements `CharsIndex`
 
@@ -4616,22 +3477,6 @@ _Defined in `lang/std/text/views.ks`._
 
 ```kestrel
 type CharsYield = CharsView
-```
-
-_Defined in `lang/std/text/views.ks`._
-
-#### function `readChars`
-
-```kestrel
-public func readChars(from: CharsView) -> CharsView
-```
-
-_Defined in `lang/std/text/views.ks`._
-
-#### function `readCharsChecked`
-
-```kestrel
-public func readCharsChecked(from: CharsView) -> CharsView?
 ```
 
 _Defined in `lang/std/text/views.ks`._
@@ -4646,14 +3491,6 @@ type CharsClampedYield = CharsView
 
 _Defined in `lang/std/text/views.ks`._
 
-#### function `readCharsClamped`
-
-```kestrel
-public func readCharsClamped(from: CharsView) -> CharsView
-```
-
-_Defined in `lang/std/text/views.ks`._
-
 ### Implements `CharsWrappable`
 
 #### typealias `CharsWrappedYield`
@@ -4664,23 +3501,7 @@ type CharsWrappedYield = CharsView
 
 _Defined in `lang/std/text/views.ks`._
 
-#### function `readCharsWrapped`
-
-```kestrel
-public func readCharsWrapped(from: CharsView) -> CharsView
-```
-
-_Defined in `lang/std/text/views.ks`._
-
 ### Implements `CharsSubstringIndex`
-
-#### function `readCharsSubstring`
-
-```kestrel
-public func readCharsSubstring(from: CharsView) -> String
-```
-
-_Defined in `lang/std/text/views.ks`._
 
 ### Implements `GraphemesIndex`
 
@@ -4688,22 +3509,6 @@ _Defined in `lang/std/text/views.ks`._
 
 ```kestrel
 type GraphemesYield = GraphemesView
-```
-
-_Defined in `lang/std/text/views.ks`._
-
-#### function `readGraphemes`
-
-```kestrel
-public func readGraphemes(from: GraphemesView) -> GraphemesView
-```
-
-_Defined in `lang/std/text/views.ks`._
-
-#### function `readGraphemesChecked`
-
-```kestrel
-public func readGraphemesChecked(from: GraphemesView) -> GraphemesView?
 ```
 
 _Defined in `lang/std/text/views.ks`._
@@ -4718,14 +3523,6 @@ type GraphemesClampedYield = GraphemesView
 
 _Defined in `lang/std/text/views.ks`._
 
-#### function `readGraphemesClamped`
-
-```kestrel
-public func readGraphemesClamped(from: GraphemesView) -> GraphemesView
-```
-
-_Defined in `lang/std/text/views.ks`._
-
 ### Implements `GraphemesWrappable`
 
 #### typealias `GraphemesWrappedYield`
@@ -4736,23 +3533,7 @@ type GraphemesWrappedYield = GraphemesView
 
 _Defined in `lang/std/text/views.ks`._
 
-#### function `readGraphemesWrapped`
-
-```kestrel
-public func readGraphemesWrapped(from: GraphemesView) -> GraphemesView
-```
-
-_Defined in `lang/std/text/views.ks`._
-
 ### Implements `GraphemesSubstringIndex`
-
-#### function `readGraphemesSubstring`
-
-```kestrel
-public func readGraphemesSubstring(from: GraphemesView) -> String
-```
-
-_Defined in `lang/std/text/views.ks`._
 
 ### Implements `LinesIndex`
 
@@ -4760,22 +3541,6 @@ _Defined in `lang/std/text/views.ks`._
 
 ```kestrel
 type LinesYield = LinesView
-```
-
-_Defined in `lang/std/text/views.ks`._
-
-#### function `readLines`
-
-```kestrel
-public func readLines(from: LinesView) -> LinesView
-```
-
-_Defined in `lang/std/text/views.ks`._
-
-#### function `readLinesChecked`
-
-```kestrel
-public func readLinesChecked(from: LinesView) -> LinesView?
 ```
 
 _Defined in `lang/std/text/views.ks`._
@@ -4790,14 +3555,6 @@ type LinesClampedYield = LinesView
 
 _Defined in `lang/std/text/views.ks`._
 
-#### function `readLinesClamped`
-
-```kestrel
-public func readLinesClamped(from: LinesView) -> LinesView
-```
-
-_Defined in `lang/std/text/views.ks`._
-
 ### Implements `LinesWrappable`
 
 #### typealias `LinesWrappedYield`
@@ -4808,23 +3565,7 @@ type LinesWrappedYield = LinesView
 
 _Defined in `lang/std/text/views.ks`._
 
-#### function `readLinesWrapped`
-
-```kestrel
-public func readLinesWrapped(from: LinesView) -> LinesView
-```
-
-_Defined in `lang/std/text/views.ks`._
-
 ### Implements `LinesSubstringIndex`
-
-#### function `readLinesSubstring`
-
-```kestrel
-public func readLinesSubstring(from: LinesView) -> String
-```
-
-_Defined in `lang/std/text/views.ks`._
 
 ## protocol `RangeThroughConstructible`
 
@@ -4933,121 +3674,7 @@ type SliceOutput = Slice[T]
 
 _Defined in `lang/std/collections/slice.ks`._
 
-#### function `lend`
-
-```kestrel
-public static func lend(consuming RangeUpTo[Int64], Slice[T]) -> &Slice[T]
-```
-
-_Defined in `lang/std/collections/slice.ks`._
-
-#### function `lendChecked`
-
-```kestrel
-public static func lendChecked(consuming RangeUpTo[Int64], Slice[T]) -> Optional[&Slice[T]]
-```
-
-_Defined in `lang/std/collections/slice.ks`._
-
-#### function `lendMutating`
-
-```kestrel
-public static func lendMutating(consuming RangeUpTo[Int64], mutating Slice[T]) -> &mutating Slice[T]
-```
-
-_Defined in `lang/std/collections/slice.ks`._
-
-#### function `lendMutatingChecked`
-
-```kestrel
-public static func lendMutatingChecked(consuming RangeUpTo[Int64], mutating Slice[T]) -> Optional[&mutating Slice[T]]
-```
-
-_Defined in `lang/std/collections/slice.ks`._
-
-#### function `lendMutatingUnchecked`
-
-```kestrel
-public static func lendMutatingUnchecked(consuming RangeUpTo[Int64], mutating Slice[T]) -> &mutating Slice[T]
-```
-
-_Defined in `lang/std/collections/slice.ks`._
-
-#### function `lendUnchecked`
-
-```kestrel
-public static func lendUnchecked(consuming RangeUpTo[Int64], Slice[T]) -> &Slice[T]
-```
-
-_Defined in `lang/std/collections/slice.ks`._
-
 ### Implements `SliceClampable`
-
-#### typealias `SliceClampedOutput`
-
-```kestrel
-type SliceClampedOutput = &Slice[T]
-```
-
-_Defined in `lang/std/collections/slice.ks`._
-
-#### function `lendClamped`
-
-```kestrel
-public static func lendClamped(consuming RangeUpTo[Int64], Slice[T]) -> &Slice[T]
-```
-
-_Defined in `lang/std/collections/slice.ks`._
-
-### Implements `SeqIndex`
-
-#### typealias `SeqOutput`
-
-```kestrel
-type SeqOutput = UnsafeSlice[T]
-```
-
-_Defined in `lang/std/collections/sliceable.ks`._
-
-#### function `readSeq`
-
-```kestrel
-public func readSeq(from: UnsafeSlice[T]) -> UnsafeSlice[T]
-```
-
-_Defined in `lang/std/collections/sliceable.ks`._
-
-#### function `readSeqChecked`
-
-```kestrel
-public func readSeqChecked(from: UnsafeSlice[T]) -> UnsafeSlice[T]?
-```
-
-_Defined in `lang/std/collections/sliceable.ks`._
-
-#### function `readSeqUnchecked`
-
-```kestrel
-public func readSeqUnchecked(from: UnsafeSlice[T]) -> UnsafeSlice[T]
-```
-
-_Defined in `lang/std/collections/sliceable.ks`._
-
-#### function `writeSeq`
-
-```kestrel
-public func writeSeq(to: UnsafeSlice[T], with: UnsafeSlice[T])
-```
-
-_Defined in `lang/std/collections/sliceable.ks`._
-
-#### function `writeSeqUnchecked`
-
-```kestrel
-public func writeSeqUnchecked(to: UnsafeSlice[T], with: UnsafeSlice[T])
-```
-
-_Defined in `lang/std/collections/sliceable.ks`._
 
 ### Implements `SeqRange`
 
@@ -5069,44 +3696,12 @@ type BytesYield = BytesView
 
 _Defined in `lang/std/text/views.ks`._
 
-#### function `readBytes`
-
-```kestrel
-public func readBytes(from: BytesView) -> BytesView
-```
-
-_Defined in `lang/std/text/views.ks`._
-
-#### function `readBytesChecked`
-
-```kestrel
-public func readBytesChecked(from: BytesView) -> BytesView?
-```
-
-_Defined in `lang/std/text/views.ks`._
-
-#### function `readBytesUnchecked`
-
-```kestrel
-public func readBytesUnchecked(from: BytesView) -> BytesView
-```
-
-_Defined in `lang/std/text/views.ks`._
-
 ### Implements `BytesClampable`
 
 #### typealias `BytesClampedYield`
 
 ```kestrel
 type BytesClampedYield = BytesView
-```
-
-_Defined in `lang/std/text/views.ks`._
-
-#### function `readBytesClamped`
-
-```kestrel
-public func readBytesClamped(from: BytesView) -> BytesView
 ```
 
 _Defined in `lang/std/text/views.ks`._
@@ -5121,23 +3716,7 @@ type BytesWrappedYield = BytesView
 
 _Defined in `lang/std/text/views.ks`._
 
-#### function `readBytesWrapped`
-
-```kestrel
-public func readBytesWrapped(from: BytesView) -> BytesView
-```
-
-_Defined in `lang/std/text/views.ks`._
-
 ### Implements `BytesSubstringIndex`
-
-#### function `readBytesSubstring`
-
-```kestrel
-public func readBytesSubstring(from: BytesView) -> String
-```
-
-_Defined in `lang/std/text/views.ks`._
 
 ### Implements `CharsIndex`
 
@@ -5145,22 +3724,6 @@ _Defined in `lang/std/text/views.ks`._
 
 ```kestrel
 type CharsYield = CharsView
-```
-
-_Defined in `lang/std/text/views.ks`._
-
-#### function `readChars`
-
-```kestrel
-public func readChars(from: CharsView) -> CharsView
-```
-
-_Defined in `lang/std/text/views.ks`._
-
-#### function `readCharsChecked`
-
-```kestrel
-public func readCharsChecked(from: CharsView) -> CharsView?
 ```
 
 _Defined in `lang/std/text/views.ks`._
@@ -5175,14 +3738,6 @@ type CharsClampedYield = CharsView
 
 _Defined in `lang/std/text/views.ks`._
 
-#### function `readCharsClamped`
-
-```kestrel
-public func readCharsClamped(from: CharsView) -> CharsView
-```
-
-_Defined in `lang/std/text/views.ks`._
-
 ### Implements `CharsWrappable`
 
 #### typealias `CharsWrappedYield`
@@ -5193,23 +3748,7 @@ type CharsWrappedYield = CharsView
 
 _Defined in `lang/std/text/views.ks`._
 
-#### function `readCharsWrapped`
-
-```kestrel
-public func readCharsWrapped(from: CharsView) -> CharsView
-```
-
-_Defined in `lang/std/text/views.ks`._
-
 ### Implements `CharsSubstringIndex`
-
-#### function `readCharsSubstring`
-
-```kestrel
-public func readCharsSubstring(from: CharsView) -> String
-```
-
-_Defined in `lang/std/text/views.ks`._
 
 ### Implements `GraphemesIndex`
 
@@ -5217,22 +3756,6 @@ _Defined in `lang/std/text/views.ks`._
 
 ```kestrel
 type GraphemesYield = GraphemesView
-```
-
-_Defined in `lang/std/text/views.ks`._
-
-#### function `readGraphemes`
-
-```kestrel
-public func readGraphemes(from: GraphemesView) -> GraphemesView
-```
-
-_Defined in `lang/std/text/views.ks`._
-
-#### function `readGraphemesChecked`
-
-```kestrel
-public func readGraphemesChecked(from: GraphemesView) -> GraphemesView?
 ```
 
 _Defined in `lang/std/text/views.ks`._
@@ -5247,14 +3770,6 @@ type GraphemesClampedYield = GraphemesView
 
 _Defined in `lang/std/text/views.ks`._
 
-#### function `readGraphemesClamped`
-
-```kestrel
-public func readGraphemesClamped(from: GraphemesView) -> GraphemesView
-```
-
-_Defined in `lang/std/text/views.ks`._
-
 ### Implements `GraphemesWrappable`
 
 #### typealias `GraphemesWrappedYield`
@@ -5265,23 +3780,7 @@ type GraphemesWrappedYield = GraphemesView
 
 _Defined in `lang/std/text/views.ks`._
 
-#### function `readGraphemesWrapped`
-
-```kestrel
-public func readGraphemesWrapped(from: GraphemesView) -> GraphemesView
-```
-
-_Defined in `lang/std/text/views.ks`._
-
 ### Implements `GraphemesSubstringIndex`
-
-#### function `readGraphemesSubstring`
-
-```kestrel
-public func readGraphemesSubstring(from: GraphemesView) -> String
-```
-
-_Defined in `lang/std/text/views.ks`._
 
 ### Implements `LinesIndex`
 
@@ -5289,22 +3788,6 @@ _Defined in `lang/std/text/views.ks`._
 
 ```kestrel
 type LinesYield = LinesView
-```
-
-_Defined in `lang/std/text/views.ks`._
-
-#### function `readLines`
-
-```kestrel
-public func readLines(from: LinesView) -> LinesView
-```
-
-_Defined in `lang/std/text/views.ks`._
-
-#### function `readLinesChecked`
-
-```kestrel
-public func readLinesChecked(from: LinesView) -> LinesView?
 ```
 
 _Defined in `lang/std/text/views.ks`._
@@ -5319,14 +3802,6 @@ type LinesClampedYield = LinesView
 
 _Defined in `lang/std/text/views.ks`._
 
-#### function `readLinesClamped`
-
-```kestrel
-public func readLinesClamped(from: LinesView) -> LinesView
-```
-
-_Defined in `lang/std/text/views.ks`._
-
 ### Implements `LinesWrappable`
 
 #### typealias `LinesWrappedYield`
@@ -5337,23 +3812,7 @@ type LinesWrappedYield = LinesView
 
 _Defined in `lang/std/text/views.ks`._
 
-#### function `readLinesWrapped`
-
-```kestrel
-public func readLinesWrapped(from: LinesView) -> LinesView
-```
-
-_Defined in `lang/std/text/views.ks`._
-
 ### Implements `LinesSubstringIndex`
-
-#### function `readLinesSubstring`
-
-```kestrel
-public func readLinesSubstring(from: LinesView) -> String
-```
-
-_Defined in `lang/std/text/views.ks`._
 
 ## protocol `RangeUpToConstructible`
 
@@ -5693,9 +4152,9 @@ Compiler-emitted init taking a raw pointer and count.
 
 Both params are `consuming`: the compiler hands ownership of the
 stack buffer's address (and the count) over to the implementation,
-which stores them in its own storage. This convention is what the
-MIR lowering's structural predicate looks for — implementations
-that deviate will be silently skipped during literal lowering.
+which stores them in its own storage. The compiler calls this
+requirement through the conformance's witness, so the witness is
+whatever init conformance checking matched to it.
 
 _Defined in `lang/std/core/literals.ks`._
 
@@ -5733,9 +4192,8 @@ Compiler-emitted init taking a raw `(Key, Value)` pointer and count.
 
 Both params are `consuming` for the same reason as the array
 bridge: the compiler hands ownership of the stack buffer to the
-implementation. MIR lowering matches on the unwrapped param
-shape, so an impl that deviates from this convention will be
-skipped during literal lowering.
+implementation. Like the array bridge, the compiler calls this
+requirement through the conformance's witness.
 
 _Defined in `lang/std/core/literals.ks`._
 

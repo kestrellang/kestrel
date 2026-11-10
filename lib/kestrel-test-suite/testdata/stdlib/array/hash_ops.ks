@@ -28,19 +28,19 @@ module Test
             let emptyU = empty.unique();
             if emptyU.count != 0 { return 8 }
 
-            // removeDuplicates() - in place
+            // unique() keeps first occurrences
             var arr2 = std.collections.Array[std.numeric.Int64]();
             arr2.append(1); arr2.append(2); arr2.append(1); arr2.append(3); arr2.append(2);
-            arr2.removeDuplicates();
+            arr2 = arr2.unique();
             if arr2.count != 3 { return 9 }
             if arr2(0) != 1 { return 10 }
             if arr2(1) != 2 { return 11 }
             if arr2(2) != 3 { return 12 }
 
-            // removeDuplicates on all same
+            // unique() on all same
             var allSame = std.collections.Array[std.numeric.Int64]();
             allSame.append(5); allSame.append(5); allSame.append(5); allSame.append(5);
-            allSame.removeDuplicates();
+            allSame = allSame.unique();
             if allSame.count != 1 { return 13 }
             if allSame(0) != 5 { return 14 }
 

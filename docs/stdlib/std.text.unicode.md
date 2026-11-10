@@ -184,16 +184,6 @@ _Defined in `lang/std/text/unicode/grapheme_tables.ks`._
 
 ### Implements `Matchable`
 
-#### function `matches`
-
-```kestrel
-public func matches(GraphemeBreakProperty) -> Bool
-```
-
-Match form of `isEqual` for use in pattern matching.
-
-_Defined in `lang/std/text/unicode/grapheme_tables.ks`._
-
 ## function `caseFold`
 
 ```kestrel

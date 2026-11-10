@@ -186,7 +186,7 @@ a chain.
 
 ```
 getUser(id)
-    .inspect { print("Found: \{it.name}") }
+    .inspect { print("Found: \(it.name)") }
     .map { it.email };
 ```
 
@@ -241,7 +241,7 @@ _Defined in `lang/std/result/optional.ks`._
 #### function `iter`
 
 ```kestrel
-public consuming func iter() -> OptionalIterator[T]
+public consuming func iter() -> OptionalIterator[T] where T: Copyable
 ```
 
 Returns an `OptionalIterator` that yields one element if `Some` or
@@ -400,7 +400,7 @@ _Defined in `lang/std/result/optional.ks`._
 #### function `take`
 
 ```kestrel
-public mutating func take(where: (T) -> Bool) -> Optional[T]
+public mutating func take(where: (T) -> Bool) -> Optional[T] where T: Copyable
 ```
 
 Conditional `take` — empties `self` and returns the value only when
@@ -640,53 +640,11 @@ type Residual = ()
 
 _Defined in `lang/std/result/optional.ks`._
 
-#### function `tryExtract`
-
-```kestrel
-public consuming func tryExtract() -> ControlFlow[T, ()]
-```
-
-Drives `try` — `Continue(value)` for `Some`, `Break(())` for `None`.
-
-_Defined in `lang/std/result/optional.ks`._
-
 ### Implements `ForceUnwrap`
-
-#### function `forceUnwrap`
-
-```kestrel
-public consuming func forceUnwrap() -> T
-```
-
-Returns the wrapped value, trapping on `.None`. Backs `value!`.
-
-_Defined in `lang/std/result/optional.ks`._
 
 ### Implements `FromResidual`
 
-#### function `fromResidual`
-
-```kestrel
-public static func fromResidual(consuming ()) -> Optional[T]
-```
-
-Builds `.None` from the residual produced by a `try` short-circuit.
-
-_Defined in `lang/std/result/optional.ks`._
-
 ### Implements `FromValue`
-
-#### function `from`
-
-```kestrel
-public static func from(consuming T) -> Optional[T]
-```
-
-Wraps `value` in `.Some`. Called by the compiler at the promotion
-site, not usually by user code. `consuming` so `value` is moved into
-`.Some` (no clone-and-leak of a borrowed original).
-
-_Defined in `lang/std/result/optional.ks`._
 
 ### Implements `Formattable`
 
@@ -707,18 +665,6 @@ _Defined in `lang/std/result/optional.ks`._
 
 ### Implements `Coalesce`
 
-#### function `coalesce`
-
-```kestrel
-public consuming func coalesce(() -> T) -> T
-```
-
-Returns the wrapped value or evaluates `default()`. The default is
-only invoked on `None`, which is what makes `??` cheap on the
-happy path.
-
-_Defined in `lang/std/result/optional.ks`._
-
 ### Implements `OptionalChain`
 
 #### typealias `Wrapped`
@@ -726,36 +672,6 @@ _Defined in `lang/std/result/optional.ks`._
 ```kestrel
 type Wrapped = T
 ```
-
-_Defined in `lang/std/result/optional.ks`._
-
-#### function `chainBorrow`
-
-```kestrel
-public func chainBorrow() -> Optional[&T]
-```
-
-A borrow of the wrapped value, for read-only chains.
-
-_Defined in `lang/std/result/optional.ks`._
-
-#### function `chainMutate`
-
-```kestrel
-public mutating func chainMutate() -> Optional[&mutating T]
-```
-
-A mutable borrow of the wrapped value, for chains that mutate it.
-
-_Defined in `lang/std/result/optional.ks`._
-
-#### function `chainTake`
-
-```kestrel
-public consuming func chainTake() -> Optional[T]
-```
-
-The wrapped value itself, for chains on a temporary.
 
 _Defined in `lang/std/result/optional.ks`._
 
@@ -966,7 +882,7 @@ assertions inside a chain. Mirror of `Optional.inspect(fn:)`.
 
 ```
 parsePort(input)
-    .inspect { print("port = \{it}") }
+    .inspect { print("port = \(it)") }
     .map { it + 1 };
 ```
 
@@ -986,7 +902,7 @@ for the failure path.
 
 ```
 parsePort(input)
-    .inspectErr { print("failed: \{it}") }
+    .inspectErr { print("failed: \(it)") }
     .mapErr { AppError.Parse(it) };
 ```
 
@@ -1062,7 +978,7 @@ _Defined in `lang/std/result/result.ks`._
 #### function `iter`
 
 ```kestrel
-public consuming func iter() -> ResultIterator[T, E]
+public consuming func iter() -> ResultIterator[T, E] where T: Copyable, E: Copyable
 ```
 
 Returns a `ResultIterator` yielding the success value (one element
@@ -1230,60 +1146,15 @@ type Residual = E
 
 _Defined in `lang/std/result/result.ks`._
 
-#### function `tryExtract`
-
-```kestrel
-public consuming func tryExtract() -> ControlFlow[T, E]
-```
-
-Drives `try` — `Continue(value)` for `.Ok`, `Break(error)` for
-`.Err`.
-
-_Defined in `lang/std/result/result.ks`._
-
 ### Implements `Copyable`
 
 _Conditional: `where T: Copyable, E: Copyable`._
 
 ### Implements `FromResidual`
 
-#### function `fromResidual`
-
-```kestrel
-public static func fromResidual(consuming E) -> Result[T, E]
-```
-
-Builds `.Err(residual)` from the residual produced by a `try`
-short-circuit.
-
-_Defined in `lang/std/result/result.ks`._
-
 ### Implements `FromValue`
 
-#### function `from`
-
-```kestrel
-public static func from(consuming T) -> Result[T, E]
-```
-
-Wraps `value` in `.Ok`. Called by the compiler at the promotion
-site, not usually by user code. `consuming` so `value` is moved into
-`.Ok` (no clone-and-leak of a borrowed original).
-
-_Defined in `lang/std/result/result.ks`._
-
 ### Implements `Coalesce`
-
-#### function `coalesce`
-
-```kestrel
-public consuming func coalesce(() -> T) -> T
-```
-
-Returns the `.Ok` value or evaluates `default()`. The default is
-only invoked on `.Err`; the error value is dropped.
-
-_Defined in `lang/std/result/result.ks`._
 
 ### Implements `OptionalChain`
 
@@ -1292,36 +1163,6 @@ _Defined in `lang/std/result/result.ks`._
 ```kestrel
 type Wrapped = T
 ```
-
-_Defined in `lang/std/result/result.ks`._
-
-#### function `chainBorrow`
-
-```kestrel
-public func chainBorrow() -> Optional[&T]
-```
-
-A borrow of the `.Ok` value, for read-only chains.
-
-_Defined in `lang/std/result/result.ks`._
-
-#### function `chainMutate`
-
-```kestrel
-public mutating func chainMutate() -> Optional[&mutating T]
-```
-
-A mutable borrow of the `.Ok` value, for chains that mutate it.
-
-_Defined in `lang/std/result/result.ks`._
-
-#### function `chainTake`
-
-```kestrel
-public consuming func chainTake() -> Optional[T]
-```
-
-The `.Ok` value itself, for chains on a temporary.
 
 _Defined in `lang/std/result/result.ks`._
 
@@ -1365,12 +1206,12 @@ _Defined in `lang/std/result/result.ks`._
 
 ### Implements `Exitable`
 
-_Conditional: `where T: Exitable, E: Formattable`._
+_Conditional: `where T: Exitable, E: Formattable, E: Copyable`._
 
 #### function `report`
 
 ```kestrel
-consuming func report() -> ExitCode where T: Exitable, E: Formattable
+consuming func report() -> ExitCode where T: Exitable, E: Formattable, E: Copyable
 ```
 
 _Defined in `lang/std/system/exitable.ks`._

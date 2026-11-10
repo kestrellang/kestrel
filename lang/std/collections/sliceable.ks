@@ -902,7 +902,7 @@ extend Sliceable[T] where T: Hashable {
     /// Returns a new array with duplicates removed, preserving
     /// first-occurrence order. O(n) expected: seen elements go in a `Set`.
     ///
-    /// For the mutating variant on `Array`, see `removeDuplicates()`.
+    /// To remove only adjacent repeats, use `dedup()` / `deduped()`.
     ///
     /// # Examples
     ///

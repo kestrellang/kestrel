@@ -714,15 +714,18 @@ _Defined in `lang/std/streams/descriptor.ks`._
 public struct IoError { /* private fields */ }
 ```
 
-A failed I/O call: its `kind`, plus the system error code when the
-system reported one.
+A failed I/O call: its `kind`, the system error code when the system
+reported one, and the path when the call was about a file.
+
+Every `std.files` call that takes a path records it, so the error says
+which file failed.
 
 ### Examples
 
 ```
 match File.open("data.bin") {
     .Ok(file) => use(file),
-    .Err(e) => eprintln("can't open data.bin: \(e)")
+    .Err(e) => eprintln("\(e)")   // "not found: data.bin"
 }
 ```
 
@@ -760,6 +763,16 @@ public static var alreadyExists: IoError { get }
 
 _Defined in `lang/std/streams/error.ks`._
 
+#### function `at`
+
+```kestrel
+public consuming func at(path: String) -> IoError
+```
+
+This error, recording `path` as the one the call was about.
+
+_Defined in `lang/std/streams/error.ks`._
+
 #### field `brokenPipe`
 
 ```kestrel
@@ -787,7 +800,8 @@ public func description() -> String
 ```
 
 A short message: the kind's description, or the system's message
-for an error of kind `.Other`.
+for an error of kind `.Other`, followed by the path when there is
+one (`"not found: data.bin"`).
 
 _Defined in `lang/std/streams/error.ks`._
 
@@ -862,6 +876,16 @@ public static var notFound: IoError { get }
 
 _Defined in `lang/std/streams/error.ks`._
 
+#### field `path`
+
+```kestrel
+public var path: Optional[String]
+```
+
+The path the failed call was about, if it took one.
+
+_Defined in `lang/std/streams/error.ks`._
+
 #### field `permissionDenied`
 
 ```kestrel
@@ -920,7 +944,7 @@ _Defined in `lang/std/streams/error.ks`._
 public func isEqual(to: IoError) -> Bool
 ```
 
-Same kind and same system error code.
+Same kind and same system error code. The path doesn't take part.
 
 _Defined in `lang/std/streams/error.ks`._
 
@@ -949,7 +973,7 @@ still has the system's code.
 ### Examples
 
 ```
-match readText("config.toml") {
+match File.readText("config.toml") {
     .Ok(text) => parse(text),
     .Err(e) if e.kind == .NotFound => defaults(),
     .Err(e) => fail(e)
@@ -1410,6 +1434,10 @@ public mutating func readAll(into: mutating Array[UInt8]) -> Result[Int64, IoErr
 Reads to end of stream, appending to `buf`. Returns the number of
 bytes appended. Retries reads interrupted by a signal.
 
+Reads go straight into `buf`'s spare capacity, which doubles when
+full (in place when the allocator can), so the bytes are written
+once and never zero-filled or copied through a scratch buffer.
+
 _Defined in `lang/std/streams/readable.ks`._
 
 #### function `readByte`
@@ -1664,6 +1692,11 @@ public struct StandardError { /* private fields */ }
 
 The process's standard error. Unbuffered, so diagnostics appear at once.
 
+Each write flushes standard output's buffer first. That keeps the two
+streams in order when they share a pipe or file, and it means the
+output a program printed before a `fatalError` (which writes here and
+then traps, skipping `atexit`) isn't lost.
+
 _Defined in `lang/std/streams/standard.ks`._
 
 ### Members
@@ -1694,7 +1727,7 @@ _Defined in `lang/std/streams/standard.ks`._
 public mutating func write(from: Slice[UInt8]) -> Result[Int64, IoError]
 ```
 
-Writes `buf` to fd 2.
+Flushes standard output, then writes `buf` to fd 2.
 
 _Defined in `lang/std/streams/standard.ks`._
 
@@ -1951,7 +1984,7 @@ _Defined in `lang/std/streams/writable.ks`._
 #### function `write`
 
 ```kestrel
-public mutating func write(formatted: some Formattable) -> Result[(), IoError]
+public mutating func write(formatted: some Formattable and not Static) -> Result[(), IoError]
 ```
 
 Writes `value` formatted with its default options.
