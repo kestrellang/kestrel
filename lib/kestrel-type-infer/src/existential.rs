@@ -247,7 +247,9 @@ pub(crate) fn peel_for_member(
         .entity;
     // Extension methods take the box as `Self` instead
     // ([`self_conformance_member`]).
-    if !kestrel_semantics::is_requirement(ctx.query_ctx, member) {
+    if !kestrel_semantics::is_requirement(ctx.query_ctx, member)
+        || stand_in_default(ctx, &existential, member).is_some()
+    {
         return None;
     }
     if let Some(err) = call_error(ctx, receiver, &existential, member, name, span) {
@@ -460,7 +462,7 @@ pub(crate) fn self_conformance_member(
     args: &[crate::constraint::CallArg],
     protocol_dispatch: bool,
 ) -> Option<crate::resolve::MemberResolution> {
-    as_existential(ctx, receiver)?;
+    let existential = as_existential(ctx, receiver)?;
     let (TyKind::Struct { args: box_args, .. } | TyKind::Enum { args: box_args, .. }) = recv_kind
     else {
         return None;
@@ -469,8 +471,35 @@ pub(crate) fn self_conformance_member(
         return None;
     };
     let res = ctx.resolver.resolve_member(raw_kind, name, args).ok()?;
+    if let Some(default) = stand_in_default(ctx, &existential, res.entity) {
+        return ctx.resolver.resolve_single_member(raw_kind, default).ok();
+    }
     (protocol_dispatch || !kestrel_semantics::is_requirement(ctx.query_ctx, res.entity))
         .then_some(res)
+}
+
+/// The `@existentialOnly` default a call to `member` on this existential
+/// runs instead: `member` is a requirement the table can't hold
+/// (`Formattable.format(into:)` is generic), so the default runs with the
+/// box as `Self`, as the box's witness for it does.
+fn stand_in_default(
+    ctx: &InferCtx<'_>,
+    existential: &Existential,
+    member: Entity,
+) -> Option<Entity> {
+    let q = ctx.query_ctx;
+    if !kestrel_semantics::is_requirement(q, member) {
+        return None;
+    }
+    let bound: Vec<Entity> = existential.bindings.iter().map(|(a, _)| *a).collect();
+    let dispatch = q.query(kestrel_semantics::RequirementDispatch {
+        requirement: member,
+        root: ctx.root,
+    });
+    if dispatch.allowed(&bound) {
+        return None;
+    }
+    kestrel_semantics::existential_default(q, q.parent_of(member)?, member, ctx.root)
 }
 
 /// The type an existential pins for an associated type: on the raw

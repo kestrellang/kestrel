@@ -385,18 +385,31 @@ public protocol Formattable {
     /// extension calls this under the hood.
     @builtin(.FormattableFormatInto)
     func format(mutating into writer: some Formatter, options: FormatOptions = FormatOptions.default())
+
+    /// Returns this value rendered as a `String`.
+    ///
+    /// The default builds the string with `format(into:)`, so conformers
+    /// rarely implement it. It is a requirement, not just an extension
+    /// method, because `any Formattable` formats through it: unlike the
+    /// generic `format(into:)`, it can sit in the existential's function
+    /// table.
+    func formatted(options: FormatOptions = FormatOptions.default()) -> String
 }
 
 extend Formattable {
-    /// Returns this value rendered as a `String`.
-    ///
-    /// Convenience wrapper: creates a `StringBuilder`, calls
-    /// `format(into:)`, and returns the built string. Uses a distinct
-    /// name to avoid overload-resolution ambiguity with `format(into:)`.
     public func formatted(options: FormatOptions = FormatOptions.default()) -> String {
         var b = StringBuilder();
         self.format(into: b, options);
         b.build()
+    }
+
+    /// `any Formattable`'s `format(into:)`: renders the payload with its
+    /// `formatted(options:)` and appends the result, so the options (width,
+    /// padding, precision) still reach the payload. Concrete conformers
+    /// implement `format(into:)` themselves.
+    @existentialOnly
+    public func format(mutating into writer: some Formatter, options: FormatOptions = FormatOptions.default()) {
+        writer.append(self.formatted(options));
     }
 }
 

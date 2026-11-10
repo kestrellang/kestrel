@@ -361,7 +361,10 @@ symbol. Compilation is whole-program, so that address is unique per type.
 
 **When it holds.** The conformance holds **iff** both:
 
-- every requirement of `P` is dispatchable (§5), and
+- every requirement of `P` is dispatchable (§5), or has an
+  `@existentialOnly` default in `extend P` that the box binds as its
+  witness (`Formattable.format(into:)` forwards to the dispatchable
+  `formatted(options:)`), and
 - `B` grants the access level each requirement needs.
 
 For example:

@@ -596,6 +596,7 @@ fn build(def: &AttrDef, args: &Args) -> Option<ParsedAttr> {
         "nonExhaustive" => ParsedAttr::NonExhaustive,
         "observabledrop" => ParsedAttr::ObservableDrop,
         "sugarOnly" => ParsedAttr::SugarOnly,
+        "existentialOnly" => ParsedAttr::ExistentialOnly,
         "export" => ParsedAttr::Export {
             abi: match args.case(0)? {
                 "C" => Abi::C,

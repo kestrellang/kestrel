@@ -14,7 +14,7 @@ pub mod staticness;
 pub use copy_shape::{CopyShape, CopyShapeLayer, ty_copy_semantics};
 pub use existential::{
     Dispatch, ExistentialLayout, Layout, RequirementDispatch, SelfConformance, bound_closure,
-    is_requirement, reachable_protocols, self_conformance,
+    existential_default, is_requirement, reachable_protocols, self_conformance,
 };
 pub use recursive_enum::{IndirectCases, RecursiveCase, RecursiveCases, case_payload_types};
 pub use ref_sources::{HirRefSources, RefShape, RefSourceLayer, may_contain, ref_source_mask};
