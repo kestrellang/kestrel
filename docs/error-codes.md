@@ -166,7 +166,7 @@ let tiny: Int8 = 200  // error[E121]: integer literal out of range for `Int8`
 | E313 | variant '{name}' takes {expected} argument(s), got {got} | Payload pattern arity doesn't match the enum case. |
 | E314 | tuple pattern has {pat} elements but type has {ty} | Tuple pattern arity doesn't match the matched tuple type. |
 | E315 | inconsistent bindings across or-pattern alternatives | Every `|` alternative must bind the same names with the same types. |
-| E316 *(warning)* | match on \`String\` with {n} literal arms does byte-equality per arm | Large string matches are O(arms × len); consider a different dispatch strategy. |
+| E316 | *(retired)* | String-literal matches no longer warn; an `if` chain costs the same per arm. |
 | E317 | only one rest pattern (\`..\`) is allowed per tuple pattern | A tuple pattern can elide one run of elements, not two. |
 | E318 | invalid range bounds: start must be less than or equal to end | A range pattern whose bounds are reversed matches nothing. |
 | E319 | nested @ patterns are not allowed | `a @ (b @ p)` — bind one name per pattern. |

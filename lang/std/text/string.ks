@@ -730,10 +730,8 @@ public struct String[A = GlobalAllocator]: Str, Iterable, Equatable, Equal[Strin
         if self.asSlice().isEqual(to: other) { false } else { true }
     }
 
-    /// Pattern-match form of `isEqual`: each `case "literal" =>` arm
-    /// dispatches through here. Cost is `O(len)` per arm because the
-    /// compiler emits one call per literal — past a handful of arms,
-    /// E316 will suggest an `if/else if` chain instead.
+    /// Pattern-match form of `isEqual`: each `"literal" =>` arm
+    /// dispatches through here, one `O(len)` comparison per arm tried.
     public func matches(other: String[A]) -> Bool {
         self.isEqual(to: other)
     }

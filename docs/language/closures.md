@@ -148,6 +148,18 @@ var total: Int64 = 0;
 [1, 2, 3, 4].iter().forEach { total = total + it };   // total == 10
 ```
 
+In the head of an `if`, `while`, `for` or `match`, a `{` usually starts the
+body. It is a trailing closure only when the body's own `{` still follows
+on the same line:
+
+```kestrel
+match xs.find { it > 1 } {                 // `{ it > 1 }` is the closure
+    .Some(v) => println("\(v)"),
+    .None => {},
+}
+if xs.any { it == 3 } and ready { go() }
+```
+
 ## Closures Over References
 
 A closure can take a reference. Adapters over `refs()` and `mutatingRefs()`

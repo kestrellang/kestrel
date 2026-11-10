@@ -954,3 +954,4 @@ struct RangeIterator: Iterator {
 - [Generics](generics.md) - Generic programming with type parameters and constraints
 - [Enums](enums.md) - Enumerated types that can also conform to protocols
 - [Semantics](semantics.md) - Memory model and type system behavior
+- [Deriving Conformances](derive.md) - `@derive` writes `Equatable`, `Hashable`, `Formattable` and others for you
