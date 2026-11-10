@@ -606,11 +606,14 @@ func floatShortestFixedString(sr: FloatSig) -> String {
         var i: Int64 = 0;
         while i < len { out.appendByte(UInt8(truncating: digits(i) + 48)); i = i + 1 }
     } else if decExp >= len - 1 {
-        // integer, possibly with trailing zeros
+        // integer, possibly with trailing zeros. A whole float still prints
+        // as a float ("3.0", not "3"), so it never reads as an integer.
         var i: Int64 = 0;
         while i < len { out.appendByte(UInt8(truncating: digits(i) + 48)); i = i + 1 };
         var z: Int64 = 0;
-        while z < decExp - (len - 1) { out.appendByte(UInt8(truncating: 48)); z = z + 1 }
+        while z < decExp - (len - 1) { out.appendByte(UInt8(truncating: 48)); z = z + 1 };
+        out.appendByte(UInt8(truncating: 46));   // "."
+        out.appendByte(UInt8(truncating: 48))    // "0"
     } else {
         let intLen = decExp + 1;
         var i: Int64 = 0;

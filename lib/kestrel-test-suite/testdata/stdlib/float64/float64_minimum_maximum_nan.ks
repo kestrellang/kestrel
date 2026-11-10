@@ -1,6 +1,6 @@
 // test: execution
 // stdlib: true
-// expect-stdout: 1 2 true true\ntrue false true\n-0 0 true true\n
+// expect-stdout: 1.0 2.0 true true\ntrue false true\n-0.0 0.0 true true\n
 
 module Test
 

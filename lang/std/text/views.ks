@@ -6,7 +6,7 @@ import std.core.(Bool, Equatable, Comparable, Ordering, Range, ClosedRange, Rang
 import std.numeric.(Int64, UInt8, UInt32)
 import std.result.(Optional)
 import std.iter.(Iterator, Iterable)
-import std.text.(Char, Grapheme, decodeUtf8, String, StringSlice, Str, LineIndex)
+import std.text.(Char, Grapheme, decodeUtf8, String, StringSlice, Str, LineIndex, Formattable, Formatter, FormatOptions)
 import std.text.unicode.(GraphemeBreakProperty, graphemeBreakProperty, shouldBreakBetween)
 import std.memory.(Pointer, UnsafeSlice)
 import std.collections.(Array)
@@ -1101,6 +1101,28 @@ public struct ByteIndex: Equatable, Comparable {
     /// Compares two byte indices by their wrapped offsets.
     public func compare(other: ByteIndex) -> Ordering {
         self.value.compare(other.value)
+    }
+}
+
+/// Prints the wrapped byte offset, honoring width and alignment like an
+/// `Int64` (`"\(i)"` is `"3"`).
+extend ByteIndex: Formattable {
+    public func format(mutating into writer: some Formatter, options: FormatOptions = FormatOptions.default()) {
+        self.value.format(into: writer, options)
+    }
+}
+
+/// Prints the byte offset where the character starts.
+extend CharIndex: Formattable {
+    public func format(mutating into writer: some Formatter, options: FormatOptions = FormatOptions.default()) {
+        self.byteOffset.format(into: writer, options)
+    }
+}
+
+/// Prints the byte offset where the grapheme starts.
+extend GraphemeIndex: Formattable {
+    public func format(mutating into writer: some Formatter, options: FormatOptions = FormatOptions.default()) {
+        self.byteOffset.format(into: writer, options)
     }
 }
 
