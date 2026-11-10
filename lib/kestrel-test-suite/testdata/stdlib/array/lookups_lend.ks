@@ -31,7 +31,7 @@ func main() -> lang.i64 {
     print(" | \(xs.first) \(xs(checked: 9)) \(xs.first.map({ it + 1 })) \(xs.first.isSome) \(xs.first == xs.last)");
     let names = ["ab", "cd"];
     var d = Deque[Int64](from: [7, 8]);
-    d.pushBack(9);
+    d.append(9);
     print(" | \(names.last ?? "") \(show(names.first)) \(d.first ?? 0) \(d.last ?? 0)\n");
     0
 }

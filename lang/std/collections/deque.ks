@@ -192,7 +192,7 @@ public struct DequeIterator[T]: Iterator {
 
 /// A double-ended queue backed by a ring buffer with copy-on-write storage.
 ///
-/// O(1) amortized `pushBack`/`pushFront`/`popBack`/`popFront` and O(1)
+/// O(1) amortized `append`/`prepend`/`popLast`/`popFirst` and O(1)
 /// random access by index. Storage is shared between copies until one
 /// mutates, at which point the COW barrier fires.
 ///
@@ -200,11 +200,11 @@ public struct DequeIterator[T]: Iterator {
 ///
 /// ```
 /// var d = Deque[Int64]();
-/// d.pushBack(1);
-/// d.pushFront(0);
-/// d.pushBack(2);
-/// d.popFront();  // .Some(0)
-/// d.popBack();   // .Some(2)
+/// d.append(1);
+/// d.prepend(0);
+/// d.append(2);
+/// d.popFirst();  // .Some(0)
+/// d.popLast();   // .Some(2)
 /// ```
 ///
 /// # Representation
@@ -220,8 +220,8 @@ public struct DequeIterator[T]: Iterator {
 ///
 /// # Guarantees
 ///
-/// - `pushBack`/`pushFront` are O(1) amortized; growth is geometric.
-/// - `popBack`/`popFront` are O(1).
+/// - `append`/`prepend` are O(1) amortized; growth is geometric.
+/// - `popLast`/`popFirst` are O(1).
 /// - Subscript access is O(1).
 /// - Iteration order is front-to-back.
 public struct Deque[T, A = GlobalAllocator]: Iterable, Cloneable where A: Allocator {
@@ -257,7 +257,7 @@ public struct Deque[T, A = GlobalAllocator]: Iterable, Cloneable where A: Alloca
     /// ```
     /// var arena = ArenaAllocator();
     /// var d = Deque[Int64, ArenaAllocator](allocator: arena);
-    /// d.pushBack(1);  // allocated from the arena
+    /// d.append(1);  // allocated from the arena
     /// ```
     public init(allocator allocator: A) {
         self.storage = CowBox(DequeStorage(
@@ -357,7 +357,7 @@ public struct Deque[T, A = GlobalAllocator]: Iterable, Cloneable where A: Alloca
     ///
     /// If the current capacity already meets or exceeds `minimumCapacity`, this
     /// is a no-op. Otherwise the ring buffer is reallocated and
-    /// linearized. Useful before a burst of `pushBack`/`pushFront` calls
+    /// linearized. Useful before a burst of `append`/`prepend` calls
     /// when the final size is known in advance.
     ///
     /// # Examples
@@ -403,17 +403,17 @@ public struct Deque[T, A = GlobalAllocator]: Iterable, Cloneable where A: Alloca
     /// Appends `element` to the back of the deque. O(1) amortized.
     ///
     /// Grows the ring buffer geometrically when full. The counterpart
-    /// for the front end is `pushFront`.
+    /// for the front end is `prepend`.
     ///
     /// # Examples
     ///
     /// ```
     /// var d = Deque[Int64]();
-    /// d.pushBack(1);
-    /// d.pushBack(2);
-    /// d.popFront();  // .Some(1)
+    /// d.append(1);
+    /// d.append(2);
+    /// d.popFirst();  // .Some(1)
     /// ```
-    public mutating func pushBack(element: T) {
+    public mutating func append(element: T) {
         self.grow(minCapacity: self.len() + 1);
         let s = &mutating self.storage.value;
         var tail = s.head + s.len;
@@ -425,17 +425,17 @@ public struct Deque[T, A = GlobalAllocator]: Iterable, Cloneable where A: Alloca
     /// Prepends `element` to the front of the deque. O(1) amortized.
     ///
     /// Grows the ring buffer geometrically when full. The counterpart
-    /// for the back end is `pushBack`.
+    /// for the back end is `append`.
     ///
     /// # Examples
     ///
     /// ```
     /// var d = Deque[Int64]();
-    /// d.pushFront(1);
-    /// d.pushFront(0);
-    /// d.popFront();  // .Some(0)
+    /// d.prepend(1);
+    /// d.prepend(0);
+    /// d.popFirst();  // .Some(0)
     /// ```
-    public mutating func pushFront(element: T) {
+    public mutating func prepend(element: T) {
         self.grow(minCapacity: self.len() + 1);
         let s = &mutating self.storage.value;
         s.head = s.head - 1;
@@ -451,18 +451,18 @@ public struct Deque[T, A = GlobalAllocator]: Iterable, Cloneable where A: Alloca
     /// Removes and returns the front element, or `.None` if empty. O(1).
     ///
     /// Advances the ring-buffer head by one slot. The non-removing mirror
-    /// is `first()`. The back-end counterpart is `popBack()`.
+    /// is `first`. The back-end counterpart is `popLast()`.
     ///
     /// # Examples
     ///
     /// ```
     /// var d = Deque[Int64](from: [1, 2, 3]);
-    /// d.popFront();  // .Some(1)
-    /// d.popFront();  // .Some(2)
-    /// d.popFront();  // .Some(3)
-    /// d.popFront();  // .None
+    /// d.popFirst();  // .Some(1)
+    /// d.popFirst();  // .Some(2)
+    /// d.popFirst();  // .Some(3)
+    /// d.popFirst();  // .None
     /// ```
-    public mutating func popFront() -> T? {
+    public mutating func popFirst() -> T? {
         if self.len() == 0 { return .None; }
         let s = &mutating self.storage.value;
         // Moved out: the slot leaves the live range, so nothing drops it.
@@ -476,18 +476,18 @@ public struct Deque[T, A = GlobalAllocator]: Iterable, Cloneable where A: Alloca
     /// Removes and returns the back element, or `.None` if empty. O(1).
     ///
     /// Retracts the logical tail by one slot. The non-removing mirror
-    /// is `last()`. The front-end counterpart is `popFront()`.
+    /// is `last`. The front-end counterpart is `popFirst()`.
     ///
     /// # Examples
     ///
     /// ```
     /// var d = Deque[Int64](from: [1, 2, 3]);
-    /// d.popBack();  // .Some(3)
-    /// d.popBack();  // .Some(2)
-    /// d.popBack();  // .Some(1)
-    /// d.popBack();  // .None
+    /// d.popLast();  // .Some(3)
+    /// d.popLast();  // .Some(2)
+    /// d.popLast();  // .Some(1)
+    /// d.popLast();  // .None
     /// ```
-    public mutating func popBack() -> T? {
+    public mutating func popLast() -> T? {
         if self.len() == 0 { return .None; }
         let s = &mutating self.storage.value;
         s.len = s.len - 1;
@@ -503,7 +503,7 @@ public struct Deque[T, A = GlobalAllocator]: Iterable, Cloneable where A: Alloca
 
     /// Lends the front element without removing it, or `.None` if empty.
     ///
-    /// O(1). The removing counterpart is `popFront()`.
+    /// O(1). The removing counterpart is `popFirst()`.
     ///
     /// # Examples
     ///
@@ -520,7 +520,7 @@ public struct Deque[T, A = GlobalAllocator]: Iterable, Cloneable where A: Alloca
 
     /// Lends the back element without removing it, or `.None` if empty.
     ///
-    /// O(1). The removing counterpart is `popBack()`.
+    /// O(1). The removing counterpart is `popLast()`.
     ///
     /// # Examples
     ///
@@ -681,7 +681,7 @@ public struct Deque[T, A = GlobalAllocator]: Iterable, Cloneable where A: Alloca
     /// ```
     /// let d = Deque[Int64](from: [1, 2, 3]);
     /// var d2 = d.clone();
-    /// d2.pushBack(4);
+    /// d2.append(4);
     /// d.count;   // 3 -- original unchanged
     /// d2.count;  // 4
     /// ```
@@ -697,8 +697,8 @@ extend Deque[T, A] where A: Defaultable {
     /// @name Empty
     /// Creates an empty deque with no allocation.
     ///
-    /// No heap memory is allocated until the first `pushBack` or
-    /// `pushFront`. Use `Deque(capacity:)` to pre-allocate when the
+    /// No heap memory is allocated until the first `append` or
+    /// `prepend`. Use `Deque(capacity:)` to pre-allocate when the
     /// expected size is known.
     ///
     /// # Examples
@@ -731,7 +731,7 @@ extend Deque[T, A] where A: Defaultable {
     /// @name From Iterable
     /// Creates a deque by collecting every element from an iterable.
     ///
-    /// Elements are appended via `pushBack`, so iteration order of the
+    /// Elements are appended via `append`, so iteration order of the
     /// source is preserved as front-to-back order in the deque.
     ///
     /// # Examples
@@ -746,7 +746,7 @@ extend Deque[T, A] where A: Defaultable {
         self.init();
         var iter = iterable.iter();
         while let .Some(item) = iter.next() {
-            self.pushBack(item)
+            self.append(item)
         }
     }
 }

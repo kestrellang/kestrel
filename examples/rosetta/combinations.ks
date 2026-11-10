@@ -10,7 +10,7 @@ func combinations(n: Int64, k: Int64, start: Int64, mutating current: Array[Int6
     for i in start..<n {
         current.append(i);
         combinations(n, k, i + 1, current);
-        current.pop();
+        current.popLast();
     }
 }
 

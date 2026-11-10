@@ -9,7 +9,7 @@ struct Stack[T] {
     init() { self.items = Array[T](); }
 
     mutating func push(consuming item: T) { self.items.append(item); }
-    mutating func pop() -> T? { self.items.pop() }
+    mutating func pop() -> T? { self.items.popLast() }
     func peek() -> Optional[&T] { self.items.last }
     var isEmpty: Bool { get { self.items.isEmpty } }
 }

@@ -705,6 +705,20 @@ public struct Array[T, A = GlobalAllocator]: Sliceable[T], Iterable, Cloneable w
         s.len = s.len + 1
     }
 
+    /// Inserts `element` at the front. O(n): every element shifts right by
+    /// one. The mirror of `append`, as `popFirst()` mirrors `popLast()`;
+    /// use a `Deque` when both ends are hot.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// var arr = [2, 3];
+    /// arr.prepend(1);  // [1, 2, 3]
+    /// ```
+    public mutating func prepend(element: T) {
+        self.insert(element, at: 0)
+    }
+
     // ========================================================================
     // REMOVING ELEMENTS
     // ========================================================================
@@ -714,18 +728,18 @@ public struct Array[T, A = GlobalAllocator]: Sliceable[T], Iterable, Cloneable w
     /// O(1). Capacity is retained for reuse — only `len` is decremented.
     /// The mirror operation `popFirst()` is O(n) because it must shift
     /// the remainder. To inspect the last element without removing, use
-    /// `last()`.
+    /// `last`.
     ///
     /// # Examples
     ///
     /// ```
     /// var arr = [1, 2, 3];
-    /// arr.pop();  // Some(3), arr is [1, 2]
-    /// arr.pop();  // Some(2), arr is [1]
-    /// arr.pop();  // Some(1), arr is []
-    /// arr.pop();  // None,    arr is still []
+    /// arr.popLast();  // Some(3), arr is [1, 2]
+    /// arr.popLast();  // Some(2), arr is [1]
+    /// arr.popLast();  // Some(1), arr is []
+    /// arr.popLast();  // None,    arr is still []
     /// ```
-    public mutating func pop() -> T? {
+    public mutating func popLast() -> T? {
         let myLen = self.len();
         if myLen > 0 {
             self.makeUnique();
@@ -743,8 +757,8 @@ public struct Array[T, A = GlobalAllocator]: Sliceable[T], Iterable, Cloneable w
     /// empty.
     ///
     /// O(n) — every following element shifts left by one. If you can
-    /// tolerate it, `pop()` from the back is O(1). For inspection
-    /// without removal, use `first()`.
+    /// tolerate it, `popLast()` from the back is O(1). For inspection
+    /// without removal, use `first`.
     ///
     /// # Examples
     ///

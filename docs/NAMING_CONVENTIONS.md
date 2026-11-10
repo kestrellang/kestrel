@@ -315,6 +315,7 @@ Concrete rules:
 - **Combining closures** always use `by:`.
 - **Mapping closures** always use `as:` (or are unlabeled for trailing closures like `map`, `flatMap`).
 - **State queries** (`isEmpty`, `count`, `capacity`) and **O(1) element views** (`first`, `last`, `reversed`) are always properties on collections, never methods. Iterators are the exception: their `first()`, `last()`, `count()` and `reversed()` advance or consume the iterator, so they stay methods.
+- **Ends of a sequence** are `append`/`popLast` and `prepend`/`popFirst` on every positional collection (Array, Deque). `Heap` keeps `push`/`pop`/`peek`: it has no front or back, only a top.
 - **Searches** are `find(where:)` / `findLast(where:)`, never `first(where:)`, so they don't collide with the `first` property.
 - **Same concept, same name** — if collections call it `find(where:)`, iterators call it `find(where:)` too.
 

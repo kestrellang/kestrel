@@ -17,17 +17,17 @@ module Test
             if d2.capacity < 16 { return 5 }
 
             // Can push into capacity-reserved deque
-            d2.pushBack(10);
-            d2.pushFront(5);
+            d2.append(10);
+            d2.prepend(5);
             if d2.count != 2 { return 6 }
-            if d2.popFront().unwrap() != 5 { return 7 }
-            if d2.popFront().unwrap() != 10 { return 8 }
+            if d2.popFirst().unwrap() != 5 { return 7 }
+            if d2.popFirst().unwrap() != 10 { return 8 }
 
             // Test capacity: 0 is equivalent to empty init
             var d3 = std.collections.Deque[std.numeric.Int64](capacity: 0);
             if d3.count != 0 { return 9 }
-            d3.pushBack(1);
-            if d3.popFront().unwrap() != 1 { return 10 }
+            d3.append(1);
+            if d3.popFirst().unwrap() != 1 { return 10 }
 
             // Test from-iterable init using an array
             var arr = std.collections.Array[std.numeric.Int64]();
@@ -41,11 +41,11 @@ module Test
 
             // Elements should be in the same order as the source
             var d4m = d4.clone();
-            if d4m.popFront().unwrap() != 10 { return 12 }
-            if d4m.popFront().unwrap() != 20 { return 13 }
-            if d4m.popFront().unwrap() != 30 { return 14 }
-            if d4m.popFront().unwrap() != 40 { return 15 }
-            if d4m.popFront().unwrap() != 50 { return 16 }
+            if d4m.popFirst().unwrap() != 10 { return 12 }
+            if d4m.popFirst().unwrap() != 20 { return 13 }
+            if d4m.popFirst().unwrap() != 30 { return 14 }
+            if d4m.popFirst().unwrap() != 40 { return 15 }
+            if d4m.popFirst().unwrap() != 50 { return 16 }
 
             // Test from-iterable with single element
             var single = std.collections.Array[std.numeric.Int64]();
@@ -63,8 +63,8 @@ module Test
             var d7 = std.collections.Deque[std.numeric.Int64]();
             d7.reserveCapacity(100);
             if d7.count != 0 { return 20 }
-            d7.pushBack(7);
-            if d7.popFront().unwrap() != 7 { return 21 }
+            d7.append(7);
+            if d7.popFirst().unwrap() != 7 { return 21 }
 
             0
         }

@@ -122,7 +122,7 @@ public func joinPath(base base: String, rel rel: String) -> String {
     for part in relParts {
         if part == ".." {
             if parts.count > 0 {
-                 parts.pop();
+                 parts.popLast();
             }
         } else if part == "." {
             // skip current dir

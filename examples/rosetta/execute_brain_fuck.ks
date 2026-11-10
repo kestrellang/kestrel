@@ -10,7 +10,7 @@ func run(program: String) -> String {
     for (i, op) in code.iter().enumerate() {
         if op == 91 { stack.append(i); }
         if op == 93 {
-            let open = stack.pop() ?? 0;
+            let open = stack.popLast() ?? 0;
             jump(i) = open;
             jump(open) = i;
         }

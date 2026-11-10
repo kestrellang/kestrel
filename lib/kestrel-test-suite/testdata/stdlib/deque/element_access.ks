@@ -11,13 +11,13 @@ module Test
             if d.last.isSome { return 2 }
 
             // Test first and last with one element
-            d.pushBack(42);
+            d.append(42);
             if d.first.unwrap() != 42 { return 3 }
             if d.last.unwrap() != 42 { return 4 }
 
             // Test first and last with multiple elements
-            d.pushBack(99);
-            d.pushFront(7);
+            d.append(99);
+            d.prepend(7);
             // Deque is [7, 42, 99]
             if d.first.unwrap() != 7 { return 5 }
             if d.last.unwrap() != 99 { return 6 }
@@ -41,28 +41,28 @@ module Test
 
             // Verify all elements after set
             // Deque is now [100, 150, 200]
-            if d.popFront().unwrap() != 100 { return 15 }
-            if d.popFront().unwrap() != 150 { return 16 }
-            if d.popFront().unwrap() != 200 { return 17 }
+            if d.popFirst().unwrap() != 100 { return 15 }
+            if d.popFirst().unwrap() != 150 { return 16 }
+            if d.popFirst().unwrap() != 200 { return 17 }
 
             // Test first/last update after pop operations
-            d.pushBack(1);
-            d.pushBack(2);
-            d.pushBack(3);
-            d.pushBack(4);
+            d.append(1);
+            d.append(2);
+            d.append(3);
+            d.append(4);
             // Deque is [1, 2, 3, 4]
-             d.popFront(); // removes 1
+             d.popFirst(); // removes 1
             if d.first.unwrap() != 2 { return 18 }
             if d.last.unwrap() != 4 { return 19 }
-             d.popBack(); // removes 4
+             d.popLast(); // removes 4
             if d.first.unwrap() != 2 { return 20 }
             if d.last.unwrap() != 3 { return 21 }
 
             // Subscript access on elements pushed from front
             var d2 = std.collections.Deque[std.numeric.Int64]();
-            d2.pushFront(3);
-            d2.pushFront(2);
-            d2.pushFront(1);
+            d2.prepend(3);
+            d2.prepend(2);
+            d2.prepend(1);
             // Logical order is [1, 2, 3]
             if d2(0) != 1 { return 22 }
             if d2(1) != 2 { return 23 }

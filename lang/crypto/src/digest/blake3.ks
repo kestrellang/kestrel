@@ -72,7 +72,7 @@ public struct BLAKE3: Digest {
         var value = chunkValue;
         var count = totalChunks;
         while count & 1 == 0 {
-            let left = self.stack.pop().expect("a set bit below the top means a subtree is waiting");
+            let left = self.stack.popLast().expect("a set bit below the top means a subtree is waiting");
             value = BLAKE3.parent(left, value).chainingValue();
             count = count >> 1;
         }

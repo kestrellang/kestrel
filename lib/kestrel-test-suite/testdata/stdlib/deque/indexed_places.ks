@@ -13,7 +13,7 @@ func total(d: Deque[P]) -> Int64 { d(0).x + d(1).x }
 @main
 func main() -> lang.i64 {
     var d = Deque[Int64](from: [1, 2, 3]);
-    d.pushFront(0);
+    d.prepend(0);
     d(1) = 10;
     d(2) += 5;
     let a = d(checked: 3);

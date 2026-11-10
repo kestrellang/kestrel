@@ -72,8 +72,8 @@ struct Searcher {
         self.stackPcs.append(pc);
         self.stackCaps.append(caps);
         while self.stackPcs.count > 0 {
-            guard let .Some(at) = self.stackPcs.pop() else { return; }
-            guard let .Some(threadCaps) = self.stackCaps.pop() else { return; }
+            guard let .Some(at) = self.stackPcs.popLast() else { return; }
+            guard let .Some(threadCaps) = self.stackCaps.popLast() else { return; }
             if intoFollowing {
                 if self.following.seen(at) == self.following.generation { continue; }
                 self.following.seen(at) = self.following.generation;

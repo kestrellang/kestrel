@@ -46,7 +46,7 @@ public struct StandardInput: Readable {
             return .Ok(.None)
         }
         if bytes.count > 0 and unsafe bytes(unchecked: bytes.count - 1) == 13 {
-            bytes.pop();
+            bytes.popLast();
         }
         .Ok(.Some(String(fromUtf8Lossy: bytes.asSlice())))
     }

@@ -37,9 +37,9 @@ func live(a: Counting) -> Int64 { unsafe a.live.read() }
 
 func useAll(alloc: Counting) {
     var d = Deque[Int64, Counting](allocator: alloc);
-    for i in 0..<5 { d.pushBack(i); }
+    for i in 0..<5 { d.append(i); }
     var d2 = d.clone();
-    d2.pushFront(-1);
+    d2.prepend(-1);
     print("deque \(d2.count) \(live(alloc) >= 2)\n");
 
     var m = Dictionary[Int64, Int64, DefaultHasher, Counting](allocator: alloc);

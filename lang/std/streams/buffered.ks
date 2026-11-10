@@ -101,9 +101,9 @@ public struct BufferedReader[R]: Readable where R: Readable, R: not Copyable, R:
             return .Ok(.None)
         }
         if bytes.count > 0 and unsafe bytes(unchecked: bytes.count - 1) == 10 {
-            bytes.pop();
+            bytes.popLast();
             if bytes.count > 0 and unsafe bytes(unchecked: bytes.count - 1) == 13 {
-                bytes.pop();
+                bytes.popLast();
             }
         }
         .Ok(.Some(String(fromUtf8Lossy: bytes.asSlice())))
