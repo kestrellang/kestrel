@@ -49,6 +49,20 @@ let opt: Int64? = .Some(3);
 "\(opt:?)"      // Some(3)    debug format
 ```
 
+Width and precision can come from a value at runtime. Write a name, or a
+dotted path, in braces where the number would go:
+
+```kestrel
+let w = 6;
+let p = 2;
+"[\(n:>{w})]"             // [    42]
+"\(third:.{p}f)"          // 0.33
+"[\(name:<{self.width})]" // padded to a field's width
+```
+
+The value must be an `Int64`. Only names go in the braces, not
+expressions: bind `w + 1` to a local first (E708 otherwise).
+
 Precision on floats rounds the stored binary value correctly; the *default* float rendering is the shortest string that round-trips, switching to scientific automatically at extreme magnitudes (`\(1.0e20)` → `1e20`).
 
 ## Escape Sequences
@@ -172,6 +186,7 @@ let tagged: BracketString = "Hello, \(name)!";   // builds via BracketString's a
 | E705 | Multi-line opener `"""` not followed by a newline |
 | E706 | Multi-line closer `"""` not on its own line |
 | E707 | Unterminated string literal |
+| E708 | Invalid format spec, including a `{…}` width or precision that isn't a name |
 | — | `invalid expression in string interpolation` — the text inside `\(...)` doesn't parse (e.g. `\(t.0.0)`, where `0.0` lexes as a float) |
 | — | `T !: Formattable` — the interpolated value's type has no `Formattable` conformance |
 

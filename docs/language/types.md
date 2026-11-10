@@ -152,6 +152,23 @@ let nested: ((Int64, Int64), String) = ((1, 2), "pair");
 - **Structural typing:** Two tuple types are equal if they have the same number of elements with the same types in the same order
 - **Positional access:** Elements are accessed by position (`pair.0`, `pair.1`), zero-indexed
 
+### Tuple Assignment
+
+A tuple of places on the left of `=` assigns each part. The whole right side
+is evaluated before any target is written, so a swap or a Fibonacci step
+needs no temporary:
+
+```kestrel
+(a, b) = (b, a);              // swap
+(a, b) = (b, a + b);          // uses the old a and b
+(p.x, xs(0)) = pair();        // fields and subscripts work as targets
+((a, b), c) = ((1, 2), 3);    // nested
+(n, _) = pair();              // `_` discards that part
+```
+
+Each target is checked like a plain assignment: it must be a `var` place
+(E200, E202). A `_` alone in a tuple is only allowed here (E811 elsewhere).
+
 ### Unit as Empty Tuple
 
 The unit type `()` is equivalent to an empty tuple (a tuple with zero elements).

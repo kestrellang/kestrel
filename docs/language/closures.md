@@ -54,6 +54,19 @@ let add: (Int64, Int64) -> Int64 = { (x, y) in x + y };          // inferred
 let f:   (Int64, String) -> Int64 = { (x: Int64, y) in x };      // mixed
 ```
 
+### Shorthand Parameters
+
+Untyped parameters can drop the parentheses. `_` ignores a parameter:
+
+```kestrel
+xs.map { c in c * 10 }
+xs.iter().fold(from: 0) { acc, x in acc + x }
+apply { _ in 7 }                       // the argument is unused
+```
+
+To give a parameter a type, or to destructure it, use the parenthesized
+form: `{ (x: Int64) in … }`, `{ ((a, b)) in … }`.
+
 ## Implicit `it` Parameter
 
 When a closure has exactly one parameter and the expected type is known, use the implicit `it` parameter instead of declaring one:

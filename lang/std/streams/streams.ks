@@ -9,7 +9,7 @@
 // ```
 // var input = Cursor(text: "one\ntwo\n").buffered();
 // while let .Some(line) = try input.readLine() {
-//     try println(line);
+//     println(line);
 // }
 // ```
 

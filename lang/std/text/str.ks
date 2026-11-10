@@ -1032,55 +1032,53 @@ extend Str {
         result
     }
 
-    /// Returns the string padded at the start with `char` so the
-    /// total *code-point* count is at least `length`.
+    /// Returns the string padded with `fill` to at least `width` graphemes.
     ///
-    /// If the string is already at least `length` code points long,
-    /// returns a copy unchanged.
+    /// `side` says where the padding goes: `.Trailing` (the default) after
+    /// the text, `.Leading` before it, or `.Center` on both sides, with the
+    /// extra one after when the padding is odd. Width counts graphemes, so
+    /// `"é"` is one wide whether it is written as one code point or two. A
+    /// string that is already wide enough is returned unchanged.
     ///
     /// # Examples
     ///
     /// ```
-    /// "42".padded(leading: 5, with: '0');  // "00042"
+    /// "ab".padded(toWidth: 5);                           // "ab   "
+    /// "42".padded(toWidth: 5, with: '0', side: .Leading); // "00042"
+    /// "ab".padded(toWidth: 7, with: '*', side: .Center);  // "**ab***"
+    /// "hello".padded(toWidth: 3);                        // "hello"
     /// ```
-    public func padded(leading length: Int64, with char: Char) -> String {
-        let currentLen = self.chars.count;
-        if currentLen >= length {
+    public func padded(toWidth width: Int64, with fill: Char = ' ', side side: PaddingSide = .Trailing) -> String {
+        let padding = width - self.graphemes.count;
+        let slice = self.asSlice();
+        let byteCount = slice.end - slice.start;
+        if padding <= 0 {
             return self.toOwned()
         }
-        let paddingCount = length - currentLen;
-        let slice = self.asSlice();
-        var result = String(capacity: (slice.end - slice.start) + paddingCount * char.utf8Length());
-        for i in 0..<paddingCount {
-            result.append(char: char)
+        let before = match side {
+            .Leading => padding,
+            .Trailing => 0,
+            .Center => padding / 2,
+        };
+        var result = String(capacity: byteCount + padding * fill.utf8Length());
+        for _ in 0..<before {
+            result.append(char: fill)
         }
-        result._appendBytes(slice._rawPtr().offset(by: slice.start), (slice.end - slice.start));
+        result._appendBytes(slice._rawPtr().offset(by: slice.start), byteCount);
+        for _ in 0..<(padding - before) {
+            result.append(char: fill)
+        }
         result
     }
+}
 
-    /// Returns the string padded at the end with `char` so the
-    /// total *code-point* count is at least `length`.
-    ///
-    /// If the string is already at least `length` code points long,
-    /// returns a copy unchanged.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// "42".padded(trailing: 5, with: '.');  // "42..."
-    /// ```
-    public func padded(trailing length: Int64, with char: Char) -> String {
-        let currentLen = self.chars.count;
-        if currentLen >= length {
-            return self.toOwned()
-        }
-        let paddingCount = length - currentLen;
-        let slice = self.asSlice();
-        var result = String(capacity: (slice.end - slice.start) + paddingCount * char.utf8Length());
-        result._appendBytes(slice._rawPtr().offset(by: slice.start), (slice.end - slice.start));
-        for i in 0..<paddingCount {
-            result.append(char: char)
-        }
-        result
-    }
+/// Where `padded(toWidth:with:side:)` puts the padding.
+@derive(Equatable)
+public enum PaddingSide {
+    /// Before the text, so it lines up on the right: `"   42"`.
+    case Leading
+    /// After the text, so it lines up on the left: `"42   "`.
+    case Trailing
+    /// On both sides; the extra one goes after when the padding is odd.
+    case Center
 }

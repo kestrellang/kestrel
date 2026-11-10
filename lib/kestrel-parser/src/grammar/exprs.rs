@@ -554,8 +554,14 @@ fn at_cond_trailing_closure(p: &Parser<'_>) -> bool {
                 None => return false,
             },
             Some(
-                K::Semicolon | K::Comma | K::Equals | K::FatArrow | K::Else | K::RBrace
-                | K::RParen | K::RBracket,
+                K::Semicolon
+                | K::Comma
+                | K::Equals
+                | K::FatArrow
+                | K::Else
+                | K::RBrace
+                | K::RParen
+                | K::RBracket,
             )
             | None => return false,
             Some(_) => i += 1,
@@ -648,7 +654,7 @@ fn primary(p: &mut Parser<'_>) -> Option<Chain> {
 /// chain like any primary. Outside arguments it is E811; the node is still
 /// built so recovery sees one operand.
 fn placeholder_use(p: &mut Parser<'_>) -> ExprInfo {
-    if !p.in_arguments() {
+    if !p.in_arguments() && !at_bare_tuple_element(p) {
         let range = p.range_of(p.token_pos());
         p.push_error(SyntaxError::new(
             codes::MISPLACED_PLACEHOLDER,
@@ -660,6 +666,16 @@ fn placeholder_use(p: &mut Parser<'_>) -> ExprInfo {
     let m = start2(p);
     p.bump(K::Underscore);
     finish2(p, m, K::ExprPlaceholderUse)
+}
+
+/// `_` alone as a tuple element: `(a, _) = pair()` discards that part. Only
+/// an assignment target can say that, which lowering knows and the parser
+/// doesn't, so lowering reports E811 for every other use.
+fn at_bare_tuple_element(p: &Parser<'_>) -> bool {
+    let pos = p.token_pos();
+    let after = p.nth_at(1, K::Comma) || p.nth_at(1, K::RParen);
+    let before = pos > 0 && matches!(p.kind_at(pos - 1), Some(K::LParen | K::Comma));
+    after && before
 }
 
 fn cond_primary(p: &mut Parser<'_>) -> Option<Chain> {
@@ -919,7 +935,7 @@ fn implicit_member(p: &mut Parser<'_>) -> ExprInfo {
     finish2(p, m, K::ExprImplicitMemberAccess)
 }
 
-/// `{ (params) in body }` or `{ body }`.
+/// `{ (params) in body }`, `{ a, b in body }` or `{ body }`.
 /// A closure literal resets the argument depth: `_` in its body is not a
 /// placeholder of an enclosing call (`f({ _.x })` is E811; use `it`).
 pub(super) fn closure(p: &mut Parser<'_>) -> ExprInfo {
@@ -929,11 +945,47 @@ pub(super) fn closure(p: &mut Parser<'_>) -> ExprInfo {
     if p.at(K::LParen) && at_closure_params(p) {
         closure_params(p);
         p.expect(K::In);
+    } else if let Some(count) = bare_closure_param_count(p) {
+        bare_closure_params(p, count);
+        p.bump(K::In);
     }
     blocks::block_items(p, BlockFlavor::Closure);
     p.expect(K::RBrace);
     p.set_arg_depth(depth);
     finish2(p, m, K::ExprClosure)
+}
+
+/// Shorthand parameters without parentheses: `{ c in … }`, `{ a, b in … }`,
+/// `{ _ in … }`. Names and `_` only (types need the parenthesized form).
+/// Returns how many there are when the list ends in `in`.
+fn bare_closure_param_count(p: &Parser<'_>) -> Option<usize> {
+    let mut n = 0;
+    loop {
+        if !p.at_any_nth(2 * n, &[K::Identifier, K::Underscore]) {
+            return None;
+        }
+        n += 1;
+        match p.nth(2 * n - 1) {
+            Some(K::In) => return Some(n),
+            Some(K::Comma) => {},
+            _ => return None,
+        }
+    }
+}
+
+/// `a, b` before `in`, as the same `ClosureParams` node the parenthesized
+/// form builds.
+fn bare_closure_params(p: &mut Parser<'_>, count: usize) {
+    let m = p.start();
+    for i in 0..count {
+        if i > 0 {
+            p.bump(K::Comma);
+        }
+        let param = p.start();
+        param_pattern(p);
+        param.complete(p, K::ClosureParam);
+    }
+    m.complete(p, K::ClosureParams);
 }
 
 /// The `(` at the cursor closes on a `)` that is followed by `in`.

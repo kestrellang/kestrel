@@ -1994,50 +1994,58 @@ _Defined in `lang/std/streams/copy.ks`._
 ## function `eprint`
 
 ```kestrel
-public func eprint(some Formattable) -> Result[(), IoError]
+public func eprint(some Formattable and not Static)
 ```
 
-Writes `value` to standard error.
+Writes `value` to standard error. If the write fails, the process traps:
+there is nowhere left to report the error.
 
 _Defined in `lang/std/streams/standard.ks`._
 
 ## function `eprintln`
 
 ```kestrel
-public func eprintln(some Formattable) -> Result[(), IoError]
+public func eprintln(some Formattable and not Static)
 ```
 
-Writes `value` and a `"\n"` to standard error.
+Writes `value` and a `"\n"` to standard error. Traps if the write fails,
+like `eprint`.
 
 _Defined in `lang/std/streams/standard.ks`._
 
 ## function `print`
 
 ```kestrel
-public func print(some Formattable) -> Result[(), IoError]
+public func print(some Formattable and not Static)
 ```
 
 Writes `value` to standard output.
 
-_Defined in `lang/std/streams/standard.ks`._
-
-## function `println`
-
-```kestrel
-public func println(some Formattable) -> Result[(), IoError]
-```
-
-Writes `value` and a `"\n"` to standard output.
+Printing can't fail quietly: if the write fails (say, standard output is
+a file on a full disk), the process stops with a fatal error. To handle the error
+instead, write through `standardOutput()`.
 
 _Defined in `lang/std/streams/standard.ks`._
 
 ## function `println`
 
 ```kestrel
-public func println() -> Result[(), IoError]
+public func println(some Formattable and not Static)
 ```
 
-Writes a `"\n"` to standard output.
+Writes `value` and a `"\n"` to standard output. Stops the process with a
+fatal error if the write fails, like `print`.
+
+_Defined in `lang/std/streams/standard.ks`._
+
+## function `println`
+
+```kestrel
+public func println()
+```
+
+Writes a `"\n"` to standard output. Stops the process with a fatal error
+if the write fails, like `print`.
 
 _Defined in `lang/std/streams/standard.ks`._
 

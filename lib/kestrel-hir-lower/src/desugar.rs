@@ -1070,6 +1070,29 @@ impl LowerCtx<'_> {
         })
     }
 
+    /// A spec's width or precision: an integer literal, or the value a
+    /// nested hole names, lowered as that path would be in an expression.
+    fn format_count(&mut self, count: &crate::format_spec::Count, span: &Span) -> HirExprId {
+        use crate::format_spec::Count;
+        match count {
+            Count::Literal(n) => self.alloc_expr(HirExpr::Literal {
+                value: HirLiteral::Integer(*n as i128),
+                span: span.clone(),
+            }),
+            Count::Name(path) => {
+                let segments: Vec<crate::syntax::PathSeg> = path
+                    .split('.')
+                    .map(|name| crate::syntax::PathSeg {
+                        name: name.to_string(),
+                        type_args: None,
+                        span: span.clone(),
+                    })
+                    .collect();
+                self.lower_path(&segments, span)
+            },
+        }
+    }
+
     /// Build a FormatOptions expression from a format spec string.
     /// Returns None if the spec can't be parsed or the builtin isn't available.
     ///
@@ -1129,44 +1152,23 @@ impl LowerCtx<'_> {
                 }));
             };
 
-        // width: Int64? — only if specified
-        if let Some(w) = parsed.width {
-            let int_lit = self.alloc_expr(HirExpr::Literal {
-                value: HirLiteral::Integer(w as i128),
-                span: span.clone(),
-            });
+        // width / precision: Int64? — only if specified. A nested hole
+        // (`{w}`) reads the named value at runtime.
+        for (field, count) in [("width", &parsed.width), ("precision", &parsed.precision)] {
+            let Some(count) = count else { continue };
+            let value = self.format_count(count, span);
             let some_val = self.alloc_expr(HirExpr::ImplicitMember {
                 owner: None,
                 name: HirName::name("Some"),
                 args: Some(vec![HirCallArg {
                     trailing_closure: false,
                     label: None,
-                    value: int_lit,
+                    value,
                 }]),
                 requirement: None,
                 span: span.clone(),
             });
-            assign_field(self, &mut stmts, "width", some_val);
-        }
-
-        // precision: Int64? — only if specified
-        if let Some(p) = parsed.precision {
-            let int_lit = self.alloc_expr(HirExpr::Literal {
-                value: HirLiteral::Integer(p as i128),
-                span: span.clone(),
-            });
-            let some_val = self.alloc_expr(HirExpr::ImplicitMember {
-                owner: None,
-                name: HirName::name("Some"),
-                args: Some(vec![HirCallArg {
-                    trailing_closure: false,
-                    label: None,
-                    value: int_lit,
-                }]),
-                requirement: None,
-                span: span.clone(),
-            });
-            assign_field(self, &mut stmts, "precision", some_val);
+            assign_field(self, &mut stmts, field, some_val);
         }
 
         // alignment — only if non-default (Left)

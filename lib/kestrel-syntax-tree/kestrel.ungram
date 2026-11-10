@@ -602,8 +602,10 @@ ExprOptionalChain =
 ExprClosure =
   '{' (ClosureParams 'in')? BlockItem* '}'
 
+// `(a: T, b)`, or the shorthand `a, b` (names and `_` only).
 ClosureParams =
   '(' (ClosureParam (',' ClosureParam)* ','?)? ')'
+| ClosureParam (',' ClosureParam)*
 
 ClosureParam =
   'mutating'? Pattern (':' Ty)?

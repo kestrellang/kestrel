@@ -1287,14 +1287,20 @@ pub(super) static RULES: &[(K, R)] = &[
     (K::ForIterable, R::Kind(K::Expression)),
     (
         K::ClosureParams,
-        R::Seq(&[
-            R::Kind(K::LParen),
-            R::Opt(&R::Seq(&[
+        R::Alt(&[
+            R::Seq(&[
+                R::Kind(K::LParen),
+                R::Opt(&R::Seq(&[
+                    R::Kind(K::ClosureParam),
+                    R::Rep(&R::Seq(&[R::Kind(K::Comma), R::Kind(K::ClosureParam)])),
+                    R::Opt(&R::Kind(K::Comma)),
+                ])),
+                R::Kind(K::RParen),
+            ]),
+            R::Seq(&[
                 R::Kind(K::ClosureParam),
                 R::Rep(&R::Seq(&[R::Kind(K::Comma), R::Kind(K::ClosureParam)])),
-                R::Opt(&R::Kind(K::Comma)),
-            ])),
-            R::Kind(K::RParen),
+            ]),
         ]),
     ),
     (
