@@ -235,7 +235,7 @@ public struct Path: Equatable, Hashable, Cloneable, Formattable, ExpressibleBySt
         let error = IoError.last();
         cpath.free();
         if resolved.isNull {
-            return .Err(error)
+            return .Err(error.at(path: self.string))
         }
         let result = pathFromNative(resolved);
         unsafe free(resolved);

@@ -29,7 +29,7 @@ extend File {
         let error = IoError.last();
         from.free();
         to.free();
-        if r < 0 { .Err(error) } else { .Ok(()) }
+        if r < 0 { .Err(error.at(path: source.string)) } else { .Ok(()) }
     }
 
     /// Copies the file `source` to `destination`, with its permissions.
@@ -78,7 +78,7 @@ extend SymbolicLink {
         let error = IoError.last();
         t.free();
         l.free();
-        if r < 0 { .Err(error) } else { .Ok(()) }
+        if r < 0 { .Err(error.at(path: link.string)) } else { .Ok(()) }
     }
 
     /// Where the symbolic link `path` points, as stored in the link.
@@ -92,7 +92,7 @@ extend SymbolicLink {
             if n < 0 {
                 unsafe free(buffer);
                 cpath.free();
-                return .Err(error)
+                return .Err(error.at(path: path.string))
             }
             if n < capacity {
                 unsafe buffer.cast[UInt8]().offset(by: n).write(0);

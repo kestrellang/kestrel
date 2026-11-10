@@ -109,7 +109,7 @@ internal func readMetadata(path: Path, follow: Bool) -> Result[Metadata, IoError
     let r = unsafe native_path_metadata(cpath.raw.asRaw(), if follow { 1 } else { 0 }, out);
     let error = IoError.last();
     cpath.free();
-    let result = if r < 0 { .Err(error) } else { .Ok(metadataFrom(out)) };
+    let result = if r < 0 { .Err(error.at(path: path.string)) } else { .Ok(metadataFrom(out)) };
     unsafe free(out);
     result
 }

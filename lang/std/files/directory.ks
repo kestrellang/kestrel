@@ -91,7 +91,7 @@ public enum Directory {
         let error = IoError.last();
         cpath.free();
         if dir.isNull {
-            return .Err(error)
+            return .Err(error.at(path: path.string))
         }
         .Ok(DirectoryEntries(dir: dir, base: path.clone()))
     }
