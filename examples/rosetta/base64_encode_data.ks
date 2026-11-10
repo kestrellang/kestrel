@@ -7,7 +7,7 @@ let alphabet: String = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123
 func encode(bytes: Array[UInt8]) -> String {
     let table = alphabet.chars.iter().collect();
     var out = StringBuilder();
-    for chunk in bytes.chunks(of: 3).toArray() {
+    for chunk in bytes.chunks(of: 3).toOwned() {
         // Pack up to three bytes into 24 bits, then emit four 6-bit digits.
         var n = 0;
         for i in 0..<3 {

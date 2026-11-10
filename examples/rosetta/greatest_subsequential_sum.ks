@@ -27,7 +27,7 @@ func maxSubarray(a: Array[Int64]) -> (Int64, Int64, Int64) {
 func main() {
     let a = [-1, -2, 3, 5, 6, -2, -1, 4, -4, 2, -1];
     let (sum, from, to) = maxSubarray(a);
-    println("Max sum \(sum) from \(a(from..<to).toArray())");
+    println("Max sum \(sum) from \(a(from..<to).toOwned())");
     let (s2, _, _) = maxSubarray([-1, -2, -3]);
     println("All negative: \(s2) (the empty subsequence)");
 }

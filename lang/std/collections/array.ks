@@ -965,7 +965,7 @@ public struct Array[T, A = GlobalAllocator]: Sliceable[T], Iterable, Cloneable w
     }
 
     // reversed(): provided by extend Sliceable[T] — returns a lazy ReversedView[T]
-    // (use `arr.reversed().toArray()` if an owned Array is needed).
+    // (use `arr.reversed().toOwned()` if an owned Array is needed).
 
     /// Rotates the elements in place by `amount` positions to the left.
     ///

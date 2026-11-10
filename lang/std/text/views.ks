@@ -143,7 +143,7 @@ public struct BytesView: Iterable, Cloneable {
     /// Reads a single byte (`UInt8`) for `Int64` indexes, or a zero-copy
     /// sub-view (`BytesView`) for `Range[Int64]` / `ClosedRange[Int64]`.
     /// Panics on out-of-bounds. Range slicing does not validate UTF-8
-    /// boundaries — call `.toString()` on the sub-view if you need an
+    /// boundaries — call `.toOwned()` on the sub-view if you need an
     /// owned `String` (which validates).
     public subscript[I](index: I) -> I.BytesYield where I: BytesIndex {
         get { index.readBytes(from: self) }
@@ -211,7 +211,7 @@ public struct BytesView: Iterable, Cloneable {
     /// The bytes are validated as UTF-8: any invalid sequence (e.g.
     /// from a sub-view cut mid-codepoint) is replaced with U+FFFD,
     /// so the result is always a well-formed `String`.
-    public func toString() -> String {
+    public func toOwned() -> String {
         String(fromUtf8Lossy: unsafe UnsafeSlice(
             pointer: self.slice._rawPtr().offset(by: self.slice.start),
             count: self.length
@@ -220,7 +220,7 @@ public struct BytesView: Iterable, Cloneable {
 
     /// Convenience: dispatches to a `BytesSubstringIndex` to produce
     /// an owned `String` covering the requested byte range. Equivalent
-    /// to `self(range).toString()` for both `Range[Int64]` and
+    /// to `self(range).toOwned()` for both `Range[Int64]` and
     /// `ClosedRange[Int64]`.
     public func substring(range: some BytesSubstringIndex) -> String {
         range.readBytesSubstring(from: self)
@@ -310,7 +310,7 @@ public struct CharsIterator: Iterator {
 /// Returned by `String.chars`. Iteration is O(1) per code point but
 /// `count()` is O(n) because UTF-8 is variable-width. Range subscripts
 /// are O(n) (the segment-walk dominates) but yield a zero-copy
-/// `CharsView` sub-view — call `.toString()` to materialize an owned
+/// `CharsView` sub-view — call `.toOwned()` to materialize an owned
 /// `String`. To index in O(1), use `BytesView` and convert byte offsets
 /// back yourself.
 ///
@@ -320,7 +320,7 @@ public struct CharsIterator: Iterator {
 /// let s = "héllo";
 /// s.chars.count;                       // 5 (code points)
 /// s.bytes.count;                       // 6 (bytes — 'é' is 2 bytes)
-/// s.chars(0..<4).toString();           // "héll"
+/// s.chars(0..<4).toOwned();           // "héll"
 /// s.chars.substring(0..<4);            // "héll"
 /// ```
 ///
@@ -463,13 +463,13 @@ public struct CharsView: Iterable, Cloneable {
     }
 
     /// Materializes the view as an owned `String`. O(n) — copies bytes.
-    public func toString() -> String {
+    public func toOwned() -> String {
         _copyByteRange(ptr: self.ptr, startByte: 0, endByte: self.length)
     }
 
     /// Convenience: dispatches to a `CharsSubstringIndex` to produce
     /// an owned `String` covering the requested code-point range.
-    /// Equivalent to `self(range).toString()` for both `Range[Int64]`
+    /// Equivalent to `self(range).toOwned()` for both `Range[Int64]`
     /// and `ClosedRange[Int64]`.
     public func substring(range: some CharsSubstringIndex) -> String {
         range.readCharsSubstring(from: self)
@@ -732,13 +732,13 @@ public struct GraphemesView: Iterable, Cloneable {
     }
 
     /// Materializes the view as an owned `String`. O(n) — copies bytes.
-    public func toString() -> String {
+    public func toOwned() -> String {
         _copyByteRange(ptr: self.ptr, startByte: 0, endByte: self.length)
     }
 
     /// Convenience: dispatches to a `GraphemesSubstringIndex` to
     /// produce an owned `String` covering the requested cluster range.
-    /// Equivalent to `self(range).toString()` for both `Range[Int64]`
+    /// Equivalent to `self(range).toOwned()` for both `Range[Int64]`
     /// and `ClosedRange[Int64]`.
     public func substring(range: some GraphemesSubstringIndex) -> String {
         range.readGraphemesSubstring(from: self)
@@ -881,7 +881,7 @@ public struct LinesIterator: Iterator {
 /// (`lines(0..<n)`) yield a zero-copy `LinesView` sub-view whose
 /// underlying byte range still includes the original terminators —
 /// iterating the sub-view round-trips the same line strings, and
-/// `.toString()` reconstructs the original substring exactly.
+/// `.toOwned()` reconstructs the original substring exactly.
 ///
 /// # Examples
 ///
@@ -893,7 +893,7 @@ public struct LinesIterator: Iterator {
 /// lines.count;  // 3
 ///
 /// // Range subscript preserves terminators in the underlying bytes:
-/// "a\r\nb\nc".lines(0..<2).toString();  // "a\r\nb\n"
+/// "a\r\nb\nc".lines(0..<2).toOwned();  // "a\r\nb\n"
 /// ```
 ///
 /// # Representation
@@ -981,14 +981,14 @@ public struct LinesView: Iterable, Cloneable {
 
     /// Materializes the view as an owned `String` covering the entire
     /// underlying buffer (terminators included). O(n) — copies bytes.
-    public func toString() -> String {
+    public func toOwned() -> String {
         _copyByteRange(ptr: self.ptr, startByte: 0, endByte: self.length)
     }
 
     /// Convenience: dispatches to a `LinesSubstringIndex` to produce
     /// an owned `String` covering the requested line range, with their
     /// original terminators preserved. Equivalent to
-    /// `self(range).toString()` for both `Range[Int64]` and
+    /// `self(range).toOwned()` for both `Range[Int64]` and
     /// `ClosedRange[Int64]`.
     public func substring(range: some LinesSubstringIndex) -> String {
         range.readLinesSubstring(from: self)
@@ -1370,13 +1370,13 @@ public protocol BytesSubstringIndex {
 
 extend Range[Int64]: BytesSubstringIndex {
     public func readBytesSubstring(from view: BytesView) -> String {
-        view(self).toString()
+        view(self).toOwned()
     }
 }
 
 extend ClosedRange[Int64]: BytesSubstringIndex {
     public func readBytesSubstring(from view: BytesView) -> String {
-        view(self).toString()
+        view(self).toOwned()
     }
 }
 
@@ -1434,7 +1434,7 @@ extend RangeFrom[Int64]: BytesWrappable {
 
 extend RangeFrom[Int64]: BytesSubstringIndex {
     public func readBytesSubstring(from view: BytesView) -> String {
-        view(self).toString()
+        view(self).toOwned()
     }
 }
 
@@ -1490,7 +1490,7 @@ extend RangeUpTo[Int64]: BytesWrappable {
 
 extend RangeUpTo[Int64]: BytesSubstringIndex {
     public func readBytesSubstring(from view: BytesView) -> String {
-        view(self).toString()
+        view(self).toOwned()
     }
 }
 
@@ -1547,7 +1547,7 @@ extend RangeThrough[Int64]: BytesWrappable {
 
 extend RangeThrough[Int64]: BytesSubstringIndex {
     public func readBytesSubstring(from view: BytesView) -> String {
-        view(self).toString()
+        view(self).toOwned()
     }
 }
 
@@ -1791,13 +1791,13 @@ public protocol CharsSubstringIndex {
 
 extend Range[Int64]: CharsSubstringIndex {
     public func readCharsSubstring(from view: CharsView) -> String {
-        view(self).toString()
+        view(self).toOwned()
     }
 }
 
 extend ClosedRange[Int64]: CharsSubstringIndex {
     public func readCharsSubstring(from view: CharsView) -> String {
-        view(self).toString()
+        view(self).toOwned()
     }
 }
 
@@ -1865,7 +1865,7 @@ extend RangeFrom[Int64]: CharsWrappable {
 
 extend RangeFrom[Int64]: CharsSubstringIndex {
     public func readCharsSubstring(from view: CharsView) -> String {
-        view(self).toString()
+        view(self).toOwned()
     }
 }
 
@@ -1927,7 +1927,7 @@ extend RangeUpTo[Int64]: CharsWrappable {
 
 extend RangeUpTo[Int64]: CharsSubstringIndex {
     public func readCharsSubstring(from view: CharsView) -> String {
-        view(self).toString()
+        view(self).toOwned()
     }
 }
 
@@ -1990,7 +1990,7 @@ extend RangeThrough[Int64]: CharsWrappable {
 
 extend RangeThrough[Int64]: CharsSubstringIndex {
     public func readCharsSubstring(from view: CharsView) -> String {
-        view(self).toString()
+        view(self).toOwned()
     }
 }
 
@@ -2232,13 +2232,13 @@ public protocol GraphemesSubstringIndex {
 
 extend Range[Int64]: GraphemesSubstringIndex {
     public func readGraphemesSubstring(from view: GraphemesView) -> String {
-        view(self).toString()
+        view(self).toOwned()
     }
 }
 
 extend ClosedRange[Int64]: GraphemesSubstringIndex {
     public func readGraphemesSubstring(from view: GraphemesView) -> String {
-        view(self).toString()
+        view(self).toOwned()
     }
 }
 
@@ -2306,7 +2306,7 @@ extend RangeFrom[Int64]: GraphemesWrappable {
 
 extend RangeFrom[Int64]: GraphemesSubstringIndex {
     public func readGraphemesSubstring(from view: GraphemesView) -> String {
-        view(self).toString()
+        view(self).toOwned()
     }
 }
 
@@ -2368,7 +2368,7 @@ extend RangeUpTo[Int64]: GraphemesWrappable {
 
 extend RangeUpTo[Int64]: GraphemesSubstringIndex {
     public func readGraphemesSubstring(from view: GraphemesView) -> String {
-        view(self).toString()
+        view(self).toOwned()
     }
 }
 
@@ -2431,7 +2431,7 @@ extend RangeThrough[Int64]: GraphemesWrappable {
 
 extend RangeThrough[Int64]: GraphemesSubstringIndex {
     public func readGraphemesSubstring(from view: GraphemesView) -> String {
-        view(self).toString()
+        view(self).toOwned()
     }
 }
 
@@ -2674,13 +2674,13 @@ public protocol LinesSubstringIndex {
 
 extend Range[Int64]: LinesSubstringIndex {
     public func readLinesSubstring(from view: LinesView) -> String {
-        view(self).toString()
+        view(self).toOwned()
     }
 }
 
 extend ClosedRange[Int64]: LinesSubstringIndex {
     public func readLinesSubstring(from view: LinesView) -> String {
-        view(self).toString()
+        view(self).toOwned()
     }
 }
 
@@ -2748,7 +2748,7 @@ extend RangeFrom[Int64]: LinesWrappable {
 
 extend RangeFrom[Int64]: LinesSubstringIndex {
     public func readLinesSubstring(from view: LinesView) -> String {
-        view(self).toString()
+        view(self).toOwned()
     }
 }
 
@@ -2810,7 +2810,7 @@ extend RangeUpTo[Int64]: LinesWrappable {
 
 extend RangeUpTo[Int64]: LinesSubstringIndex {
     public func readLinesSubstring(from view: LinesView) -> String {
-        view(self).toString()
+        view(self).toOwned()
     }
 }
 
@@ -2873,7 +2873,7 @@ extend RangeThrough[Int64]: LinesWrappable {
 
 extend RangeThrough[Int64]: LinesSubstringIndex {
     public func readLinesSubstring(from view: LinesView) -> String {
-        view(self).toString()
+        view(self).toOwned()
     }
 }
 

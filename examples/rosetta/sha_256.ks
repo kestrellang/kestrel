@@ -25,7 +25,7 @@ func sha256(message: Array[UInt8]) -> String {
     while data.count % 64 != 56 { data.append(0); }
     for i in 0..<8 { data.append(UInt8(truncating: bitLength >> (56 - 8 * i))); }
 
-    for block in data.chunks(of: 64).toArray() {
+    for block in data.chunks(of: 64).toOwned() {
         var w = Array[UInt32](repeating: 0, count: 64);
         for t in 0..<16 {
             w(t) = (UInt32(from: block(4 * t)) << 24) | (UInt32(from: block(4 * t + 1)) << 16)

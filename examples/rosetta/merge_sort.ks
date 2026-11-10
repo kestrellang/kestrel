@@ -23,7 +23,7 @@ func merge[T](left: Array[T], right: Array[T]) -> Array[T] where T: Comparable {
 func mergeSort[T](items: Array[T]) -> Array[T] where T: Comparable {
     if items.count <= 1 { return items }
     let mid = items.count / 2;
-    merge(mergeSort(items.prefix(mid).toArray()), mergeSort(items.drop(first: mid).toArray()))
+    merge(mergeSort(items.prefix(mid).toOwned()), mergeSort(items.drop(first: mid).toOwned()))
 }
 
 @main

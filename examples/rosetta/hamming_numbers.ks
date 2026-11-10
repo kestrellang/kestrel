@@ -26,6 +26,6 @@ func hamming(count: Int64) -> Array[Int64] {
 @main
 func main() {
     let h = hamming(1691);
-    println("First 20: \(h.prefix(20).toArray())");
+    println("First 20: \(h.prefix(20).toOwned())");
     println("1691st: \(h(1690))");
 }

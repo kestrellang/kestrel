@@ -27,7 +27,7 @@ func primeFactorCount(n: Int64) -> Int64 {
 func main() {
     let attractive = (1..=120).iter().filter { isPrime(primeFactorCount(it)) }.collect();
     println("Attractive numbers up to 120:");
-    for row in attractive.chunks(of: 20).toArray() {
+    for row in attractive.chunks(of: 20).toOwned() {
         println(row.map { "\(it:>4)" }.joined(by: ""));
     }
 }
