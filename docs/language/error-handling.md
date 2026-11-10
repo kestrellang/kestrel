@@ -82,6 +82,8 @@ func chain(n: Int64) -> Int64 throws ParseError {
 
 `try` binds tightly: `try foo() + bar()` parses as `(try foo()) + bar()`. Inside a closure, `try` returns from the closure, not the outer function.
 
+`try` covers the whole postfix chain after it and unwraps only the chain's final value: `try load().port` is `try (load().port)`, so it fails when `load()` returns a `Result`, because a `Result` has no `port`. To unwrap a step in the middle of a chain, parenthesize it: `(try load()).port`. The same rule keeps `try parse(s).mapErr(f)` meaning "map the error, then try the result".
+
 `try` also works on `Optional` — `.None` propagates:
 
 ```kestrel
