@@ -122,6 +122,10 @@ The rule covers the requirement itself (`t.modAssign(3)` on `T: ModuloAssign`) a
 
 The standard library marks its operator, compound-assignment, comparison, range, `try`, `?.`/`??`/`!`, literal, pattern, interpolation and indexing hooks this way. Hooks that read well as methods stay public: `add`, `subtract`, `multiply`, `divide`, `modulo`, `negate`, `isEqual`, `compare`, `clone`, `next`, `iter`, and `Indirection.value` (the explicit way past auto-deref).
 
+### Existential-Only Defaults
+
+A default in `extend P` marked `@existentialOnly` is used only by `any P`, for a requirement its function table can't hold (a generic one, say). Conforming types don't inherit it and must still implement the requirement. See [Existential-only defaults](existentials.md#existential-only-defaults).
+
 ## Associated Types
 
 Protocols can define associated types that conforming types must specify:

@@ -186,6 +186,12 @@ impl ParsedAttrs {
             .any(|e| matches!(e.attr, ParsedAttr::SugarOnly))
     }
 
+    pub fn is_existential_only(&self) -> bool {
+        self.attrs
+            .iter()
+            .any(|e| matches!(e.attr, ParsedAttr::ExistentialOnly))
+    }
+
     pub fn is_observable_drop(&self) -> bool {
         self.attrs
             .iter()

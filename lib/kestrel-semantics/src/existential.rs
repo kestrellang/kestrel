@@ -265,7 +265,8 @@ pub fn self_conformance(
     for p in bound_closure(ctx, &[protocol], root) {
         let layout = ctx.query(ExistentialLayout { protocol: p, root });
         for (requirement, dispatch) in &layout.requirements {
-            if !dispatch.allowed(bound) {
+            if !dispatch.allowed(bound) && existential_default(ctx, p, *requirement, root).is_none()
+            {
                 out.blocker.get_or_insert(*requirement);
             }
             match ctx
@@ -279,6 +280,36 @@ pub fn self_conformance(
         }
     }
     out
+}
+
+/// The `@existentialOnly` default in `extend protocol` that stands in for
+/// `requirement` on `any P`, when the requirement can't go through the table
+/// (`Formattable.format(into:)` is generic). The box binds it like any other
+/// protocol extension default; concrete conformers ignore it.
+pub fn existential_default(
+    ctx: &QueryContext<'_>,
+    protocol: Entity,
+    requirement: Entity,
+    root: Entity,
+) -> Option<Entity> {
+    use kestrel_name_res::helpers::member_lookup_name;
+    let name = member_lookup_name(ctx, requirement)?;
+    let labels = labels_of(ctx, requirement);
+    ctx.query(ProtocolMembers { protocol, root })
+        .named(name)
+        .filter(|m| m.extension.is_some() && m.declaring_protocol == protocol)
+        .map(|m| m.entity)
+        .find(|&d| {
+            kestrel_ast_builder::attrs::attrs_of(ctx, d).is_existential_only()
+                && labels_of(ctx, d) == labels
+        })
+}
+
+/// Argument labels (`None` for an unlabelled parameter).
+fn labels_of(ctx: &QueryContext<'_>, entity: Entity) -> Vec<Option<String>> {
+    ctx.get::<kestrel_ast_builder::Callable>(entity)
+        .map(|c| c.params.iter().map(|p| p.label.clone()).collect())
+        .unwrap_or_default()
 }
 
 /// The bounds and every protocol they refine, through declared `: Parent`

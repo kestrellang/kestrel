@@ -432,6 +432,19 @@ pub static REGISTRY: &[AttrDef] = &[
         doc: "Marks a protocol requirement that is reached only through its syntax ('+=', 'try', '?.', literals, patterns). Conformers still implement it, but outside the protocol's module no code may call it, or any type's implementation of it, by name.",
     },
     AttrDef {
+        name: "existentialOnly",
+        // Only meaningful on a default in `extend P`; read by
+        // `kestrel_semantics::existential_default`.
+        targets: TargetSet::of(&[T::Method]),
+        params: &[],
+        repeatable: false,
+        phase: AttrPhase::Semantic,
+        conflicts: &[],
+        needs_body: true,
+        repeat_hint: None,
+        doc: "Marks a protocol extension default that only 'any P' uses: it lets the existential satisfy a requirement that can't go through its function table (a generic one, say), while every concrete conformer must still implement the requirement itself.",
+    },
+    AttrDef {
         name: "unavailable",
         targets: USABLE,
         params: &[

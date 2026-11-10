@@ -126,6 +126,8 @@ pub enum ParsedAttr {
     ObservableDrop,
     /// `@sugarOnly` on a protocol requirement.
     SugarOnly,
+    /// `@existentialOnly` on a protocol extension default.
+    ExistentialOnly,
     /// `@derive(P, Q)`: the protocol paths as written.
     Derive(Vec<Vec<String>>),
     /// `@default` on an enum case.

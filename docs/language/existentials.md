@@ -68,7 +68,29 @@ Calling one of these is E145, which names the reason. `mutating` requirements ne
 
 Protocol extension methods run with the existential as `Self`, so they need `any P` to conform to `P` (below). That rules them out on `any[CowBox] P` for now: `P` refines `Cloneable`, and `clone() -> Self` can't be called through an existential (E146).
 
-**`any P` conforms to `P`** when every requirement is dispatchable and the box grants the access each one needs. That lets you pass an existential to generic code (`func f[T](x: T) where T: P`, or a `some P` parameter). E146 names the requirement that blocks it.
+**`any P` conforms to `P`** when every requirement is dispatchable (or has an existential-only default, below) and the box grants the access each one needs. That lets you pass an existential to generic code (`func f[T](x: T) where T: P`, or a `some P` parameter). E146 names the requirement that blocks it.
+
+### Existential-only defaults
+
+A requirement that can't be dispatched can still be met for `any P` by a default marked `@existentialOnly` in `extend P`, written in terms of requirements that can:
+
+```kestrel
+public protocol Formattable {
+    func format(mutating into writer: some Formatter, options: FormatOptions = FormatOptions.default())   // generic
+    func formatted(options: FormatOptions = FormatOptions.default()) -> String                               // dispatchable
+}
+
+extend Formattable {
+    @existentialOnly
+    public func format(mutating into writer: some Formatter, options: FormatOptions = FormatOptions.default()) {
+        writer.append(self.formatted(options));
+    }
+}
+```
+
+The default runs with the existential as `Self`: it is the existential's witness for the requirement, and a direct call (`x.format(into: b)` on an `any Formattable`) runs it too. Concrete conformers don't see it, so they still have to implement the requirement (E454). That keeps two defaults that call each other from turning a type that implements neither into infinite recursion. `@existentialOnly` anywhere else is E910.
+
+This is how `any Formattable` prints: `"\(x)"`, `println(x)` and `Array[any Formattable]` elements format through the payload's `formatted(options:)`, so width, alignment and precision still apply. Printing a boxed value builds one intermediate `String`.
 
 On an existential, the protocol's members are found before the box's own: `RcBox.isUnique` can't hide a requirement of the same name.
 

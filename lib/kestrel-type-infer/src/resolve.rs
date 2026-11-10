@@ -1314,6 +1314,24 @@ impl WorldResolver<'_> {
                 TypeMemberSource::ProtocolExtension { .. } => { /* fallback */ },
             }
         }
+        // On a protocol's abstract `Self`, a member of `extend P` with a
+        // requirement's labels is that requirement's default: call the
+        // requirement, which dispatches to the conformer's witness (as on a
+        // `T: P` param), rather than tie with it.
+        if self.ctx.get::<NodeKind>(*entity) == Some(&NodeKind::Protocol) {
+            let required: crate::collections::HashSet<_> = type_members
+                .iter()
+                .filter(|tm| matches!(tm.source, TypeMemberSource::Direct))
+                .map(|tm| self.label_signature(tm.entity))
+                .collect();
+            let defaults: crate::collections::HashSet<Entity> = candidate_extensions
+                .iter()
+                .map(|(c, _)| *c)
+                .filter(|&c| required.contains(&self.label_signature(c)))
+                .collect();
+            all_candidates.retain(|c| !defaults.contains(c));
+            candidate_extensions.retain(|(c, _)| !defaults.contains(c));
+        }
 
         // `extensions` is still needed downstream for the "exists but hidden"
         // probe (visibility error reporting) and for the init/subscript

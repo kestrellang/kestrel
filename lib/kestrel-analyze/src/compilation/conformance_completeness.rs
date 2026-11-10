@@ -336,6 +336,11 @@ fn check_protocol_requirements(
             let Some(extension) = member.extension else {
                 return false;
             };
+            // An `@existentialOnly` default serves `any P` alone: a concrete
+            // conformer still has to implement the requirement.
+            if kestrel_ast_builder::attrs::attrs_of(cx.query, member.entity).is_existential_only() {
+                return false;
+            }
             let subs = subs_cache
                 .entry(member.declaring_protocol)
                 .or_insert_with(|| {
