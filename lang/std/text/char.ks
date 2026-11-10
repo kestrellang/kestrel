@@ -969,3 +969,23 @@ public func encodeUtf8(c: Char, ptr: lang.ptr[lang.i8], at index: Int64) -> Int6
         4
     }
 }
+
+/// A byte can be written as an ASCII character literal: `b == '#'`,
+/// `let sep: UInt8 = ','`. The literal must be ASCII (`'\0'`...`'\x7F'`):
+/// a wider character is several UTF-8 bytes, so the compiler rejects it
+/// (E122) rather than keep one of them.
+///
+/// # Examples
+///
+/// ```
+/// let bytes = "a,b".bytes;
+/// bytes(1) == ','           // true
+/// let hash: UInt8 = '#';    // 35
+/// ```
+extend UInt8: ExpressibleByCharLiteral {
+    /// @name Char Literal
+    /// Builds the byte for an ASCII character literal.
+    public init(charLiteral value: lang.i32) {
+        self.raw = lang.cast_i32_i8(value)
+    }
+}

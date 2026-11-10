@@ -1,5 +1,7 @@
 //! # Integer Literal Range Analyzer
 //!
+//! Also checks character literals typed as integers (E120).
+//!
 //! Rejects integer literals whose value does not fit the fixed-width integer
 //! type they resolved to. Without this check an out-of-range literal silently
 //! truncates/wraps at codegen (`let a: Int8 = 200` runs as `-56`,
@@ -25,6 +27,24 @@
 //!   - Span source: `util::expr_span` on the literal `HirExprId`, or on the
 //!     `negate` `ProtocolCall` `HirExprId` when the literal is negated
 //!   - Message: "{value} is not in the range {min}...{max}"
+//!
+//! **Notes:** (none)
+//!
+//! ### E120 — `char_literal_not_ascii` (Error, Correctness)
+//!
+//! A character literal typed as an integer (`let b: UInt8 = '#'`) is a
+//! byte, so it must be ASCII. A wider character is several UTF-8 bytes;
+//! truncating it to one would silently keep the wrong byte.
+//!
+//! **Message:** "character literal '{char}' is not ASCII, so it is not one `{type}` byte"
+//!
+//! **Labels:**
+//! - Primary: the character literal
+//!   - Span source: `util::expr_span` on the literal `HirExprId`
+//!   - Message: "U+{scalar} is outside '\\0'...'\\x7F'"
+//!
+//! **Notes:**
+//! - "write the bytes as integers, or use `\"...\".bytes` for its UTF-8 encoding"
 
 use crate::context::BodyContext;
 use crate::diagnostic::*;
@@ -35,12 +55,20 @@ use kestrel_hir::body::*;
 use kestrel_type_infer::result::ResolvedTy;
 use std::collections::HashSet;
 
-static DESCRIPTORS: &[DiagnosticDescriptor] = &[DiagnosticDescriptor {
-    id: "E121",
-    name: "integer_literal_out_of_range",
-    default_severity: Severity::Error,
-    category: Category::Correctness,
-}];
+static DESCRIPTORS: &[DiagnosticDescriptor] = &[
+    DiagnosticDescriptor {
+        id: "E121",
+        name: "integer_literal_out_of_range",
+        default_severity: Severity::Error,
+        category: Category::Correctness,
+    },
+    DiagnosticDescriptor {
+        id: "E120",
+        name: "char_literal_not_ascii",
+        default_severity: Severity::Error,
+        category: Category::Correctness,
+    },
+];
 
 pub struct IntegerLiteralRangeAnalyzer;
 
@@ -88,20 +116,21 @@ impl BodyCheck for IntegerLiteralRangeAnalyzer {
             }
         }
 
-        // Pass 2: every other integer literal → check the literal value.
+        // Pass 2: every other integer literal → check the literal value;
+        // a character literal typed as an integer → it must be ASCII.
         for (id, expr) in cx.hir.exprs.iter() {
-            if negated.contains(&id) {
-                continue;
-            }
-            let HirExpr::Literal {
-                value: HirLiteral::Integer(v),
-                ..
-            } = expr
-            else {
+            let HirExpr::Literal { value, .. } = expr else {
                 continue;
             };
-            if let Some(ty) = cx.typed.expr_types.get(&id) {
-                check_range(cx, *v, ty, id, &mut diags);
+            let Some(ty) = cx.typed.expr_types.get(&id) else {
+                continue;
+            };
+            match value {
+                HirLiteral::Integer(v) if !negated.contains(&id) => {
+                    check_range(cx, *v, ty, id, &mut diags)
+                },
+                HirLiteral::Char { value: c, .. } => check_byte_char(cx, *c, ty, id, &mut diags),
+                _ => {},
             }
         }
 
@@ -134,6 +163,40 @@ fn check_range(
             is_primary: true,
         }],
         notes: vec![],
+    });
+}
+
+/// Emit E120 if a character literal resolved to an integer type is not
+/// ASCII. Non-integer types (`Char`, user conformers) are ignored.
+fn check_byte_char(
+    cx: &BodyContext<'_>,
+    scalar: u32,
+    ty: &ResolvedTy,
+    site: HirExprId,
+    diags: &mut Vec<AnalyzeDiagnostic>,
+) {
+    if scalar <= 0x7F {
+        return;
+    }
+    let Some((_, _, type_name)) = int_type_bounds(cx, ty) else {
+        return;
+    };
+    let shown = char::from_u32(scalar).map_or_else(|| "?".into(), |c| c.escape_debug().to_string());
+    diags.push(AnalyzeDiagnostic {
+        descriptor_id: DESCRIPTORS[1].id,
+        severity: DESCRIPTORS[1].default_severity,
+        message: format!(
+            "character literal '{}' is not ASCII, so it is not one `{}` byte",
+            shown, type_name
+        ),
+        labels: vec![DiagLabel {
+            span: util::expr_span(cx.hir, site),
+            message: format!("U+{:04X} is outside '\\0'...'\\x7F'", scalar),
+            is_primary: true,
+        }],
+        notes: vec![
+            "write the bytes as integers, or use `\"...\".bytes` for its UTF-8 encoding".into(),
+        ],
     });
 }
 
