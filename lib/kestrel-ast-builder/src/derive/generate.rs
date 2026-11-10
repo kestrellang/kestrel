@@ -59,7 +59,7 @@ impl Header {
                     .params
                     .iter()
                     .filter(|p| slots.iter().any(|s| s.idents.contains(p)))
-                    .map(|p| format!("{p}: {protocol}"))
+                    .map(|p| format!("{p}: {}", kind.field_bound_name().unwrap_or(protocol)))
                     .collect();
                 constraints.extend(shape.where_constraints.iter().cloned());
                 if !constraints.is_empty() {
@@ -114,6 +114,7 @@ pub(crate) fn extension(
         DeriveKind::Comparable => comparable(shape),
         DeriveKind::Formattable => formattable(shape),
         DeriveKind::Defaultable => defaultable(shape)?,
+        DeriveKind::Cloneable => cloneable(shape)?,
     };
     Some(format!(
         "{} {{\n{body}}}\n\n",
@@ -409,4 +410,72 @@ fn defaultable(shape: &Shape) -> Option<String> {
         },
     };
     Some(format!("    public init() {{\n        {body}\n    }}\n"))
+}
+
+// ===== Cloneable =====
+
+/// A clone copies every field or payload. Each copy is implicit, so a
+/// `Cloneable` field runs its own `clone()` and a `Copyable` one is copied
+/// bitwise.
+///
+/// The copies happen in a private helper, not in `clone()` itself: inside a
+/// type's own `clone()` the compiler doesn't expand copies into clones (that
+/// would recurse), so copying a payload there would alias it. The helper
+/// takes `other` borrowed, so calling it doesn't copy `self` either. Structs
+/// build through an init, so private fields and custom inits don't matter.
+fn cloneable(shape: &Shape) -> Option<String> {
+    let (helper, call) = match &shape.body {
+        ShapeBody::Struct(fields) => {
+            let assigns: String = fields
+                .iter()
+                .map(|f| {
+                    let name = f.label.as_deref().unwrap_or_default();
+                    format!("self.{name} = other.{name}; ")
+                })
+                .collect();
+            (
+                format!(
+                    "    private init(derivedCloneOf other: Self) {{\n        {assigns}\n    }}\n"
+                ),
+                "Self(derivedCloneOf: self)",
+            )
+        },
+        // A case-less enum has no value to clone; DeriveSite reports it.
+        ShapeBody::Enum(cases) if cases.is_empty() => return None,
+        ShapeBody::Enum(cases) => {
+            let mut arms = "match other {\n".to_string();
+            for case in cases {
+                let rebuilt = match case.payload.is_empty() {
+                    true => format!(".{}", case.name),
+                    false => {
+                        let args: Vec<String> = case
+                            .payload
+                            .iter()
+                            .enumerate()
+                            .map(|(i, p)| match &p.label {
+                                Some(l) => format!("{l}: a{i}"),
+                                None => format!("a{i}"),
+                            })
+                            .collect();
+                        format!(".{}({})", case.name, args.join(", "))
+                    },
+                };
+                let _ = writeln!(
+                    arms,
+                    "            {} => {rebuilt},",
+                    case_pattern(case, Some("a"))
+                );
+            }
+            arms.push_str("        }");
+            (
+                format!(
+                    "    private static func derivedClone(of other: Self) -> Self {{\n        {arms}\n    }}\n"
+                ),
+                "Self.derivedClone(of: self)",
+            )
+        },
+    };
+    Some(format!(
+        "    public func clone() -> Self {{\n        {call}\n    }}\n{helper}"
+    ))
 }

@@ -105,7 +105,21 @@ struct Document {
 // Document is implicitly Cloneable; `let b = a;` clones `title`, copies `pages`.
 ```
 
-Declare the conformance explicitly **only when you want to hand-write `clone()`** — and then you must implement it (a bare `struct Document: Cloneable { ... }` without a `clone()` body is a missing-requirement error, E454):
+That synthesized clone runs on implicit copies only. To call `clone()` by name, or to pass the type where a `Cloneable` bound is required, derive the conformance:
+
+```kestrel
+@derive(Cloneable)
+struct Document {
+    var title: String
+    var pages: Int64
+}
+
+let b = a.clone();        // clones `title`, copies `pages`
+```
+
+A derived `clone()` copies every field or payload the same way, so each field must be `Copyable` (a `Cloneable` field is cloned by that copy). A type parameter a field mentions gets a `Copyable` bound, so `Box[Int64]` and `Box[String]` are both `Cloneable`. A `not Copyable` type can't derive it.
+
+Otherwise, declare the conformance explicitly **only when you want to hand-write `clone()`** — and then you must implement it (a bare `struct Document: Cloneable { ... }` without a `clone()` body is a missing-requirement error, E454):
 
 ```kestrel
 struct Snapshot: Cloneable {

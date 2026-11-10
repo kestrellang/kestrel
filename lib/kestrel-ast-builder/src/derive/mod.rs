@@ -55,15 +55,17 @@ pub enum DeriveKind {
     Comparable,
     Formattable,
     Defaultable,
+    Cloneable,
 }
 
 impl DeriveKind {
-    pub const ALL: [DeriveKind; 5] = [
+    pub const ALL: [DeriveKind; 6] = [
         DeriveKind::Equatable,
         DeriveKind::Hashable,
         DeriveKind::Comparable,
         DeriveKind::Formattable,
         DeriveKind::Defaultable,
+        DeriveKind::Cloneable,
     ];
 
     /// The deriver for a protocol named `name` (a path's last segment).
@@ -84,6 +86,7 @@ impl DeriveKind {
             Self::Comparable => "Comparable",
             Self::Formattable => "Formattable",
             Self::Defaultable => "Defaultable",
+            Self::Cloneable => "Cloneable",
         }
     }
 
@@ -95,6 +98,26 @@ impl DeriveKind {
             Self::Comparable => Builtin::ComparableProtocol,
             Self::Formattable => Builtin::FormattableProtocol,
             Self::Defaultable => Builtin::DefaultableProtocol,
+            Self::Cloneable => Builtin::Cloneable,
+        }
+    }
+
+    /// The protocol each field (and each type parameter a field mentions)
+    /// needs. A derived `clone()` copies every field, so fields need only
+    /// `Copyable`: a `Cloneable` field is cloned by that copy.
+    pub fn field_bound(self) -> Builtin {
+        match self {
+            Self::Cloneable => Builtin::Copyable,
+            _ => self.builtin(),
+        }
+    }
+
+    /// The spelling of [`Self::field_bound`] in generated `where` clauses, or
+    /// `None` when it is the derived protocol itself (spelled as written).
+    pub(crate) fn field_bound_name(self) -> Option<&'static str> {
+        match self {
+            Self::Cloneable => Some("Copyable"),
+            _ => None,
         }
     }
 }
