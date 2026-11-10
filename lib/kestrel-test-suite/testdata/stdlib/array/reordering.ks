@@ -26,7 +26,7 @@ module Test
             if unsafe arr(unchecked: 2) != 30 { return 7 }
 
             // Test reversed (returns ReversedView; subscript for indexed access)
-            let rev = arr.reversed();
+            let rev = arr.reversed;
             if rev(0) != 30 { return 8 }
             if rev(1) != 20 { return 9 }
             if rev(2) != 10 { return 10 }

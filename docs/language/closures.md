@@ -1023,7 +1023,7 @@ func applyTwice(f: (Int64) -> Int64, x: Int64) -> Int64 {
 applyTwice({ (x) in x + 10 }, 22)  // 42
 ```
 
-That split is the stdlib's rule of thumb too: eager operations (`fold`, `sorted(by:)`, `any(where:)`, `first(where:)`) take normal closures; lazy builders that store the callback (`Iterator.map`, `filter`, `filterMap`, `scan`, `Str.split(where:)`) take `escaping` ones.
+That split is the stdlib's rule of thumb too: eager operations (`fold`, `sorted(by:)`, `any(where:)`, `find(where:)`) take normal closures; lazy builders that store the callback (`Iterator.map`, `filter`, `filterMap`, `scan`, `Str.split(where:)`) take `escaping` ones.
 
 ## Common Patterns
 

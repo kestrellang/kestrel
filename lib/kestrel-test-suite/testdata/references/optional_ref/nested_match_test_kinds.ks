@@ -29,7 +29,7 @@ func main() -> lang.i64 {
     boxes.insert(1, Box(shape: .Square(4), on: true));
     let b = match boxes(1) { some Box { shape: .Square(s), on: true } => s, some _ => -1, .None => -2 };
     var xs = [Shape.Circle(2), Shape.Square(3)];
-    let c = match xs.last() { some .Square(s) => s, _ => 0 };
+    let c = match xs.last { some .Square(s) => s, _ => 0 };
     print("\(f) \(n) \(b) \(c)\n");
     0
 }

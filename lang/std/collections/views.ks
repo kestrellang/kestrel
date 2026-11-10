@@ -426,11 +426,11 @@ extend Slice[T] where T: Copyable {
     /// Multi-pass lazy view that reads back to front.
     ///
     /// ```
-    /// let v = [1, 2, 3].reversed();
+    /// let v = [1, 2, 3].reversed;
     /// v(0);           // 3
     /// v.toOwned();    // [3, 2, 1]
     /// ```
-    public func reversed() -> ReversedView[T] {
+    public var reversed: ReversedView[T] {
         let s = &self;
         ReversedView(slice: s)
     }
@@ -461,8 +461,8 @@ extend Array[T, A] {
     public func chunks(of size: Int64) -> ChunksView[T] { self.asSlice().chunks(of: size) }
     /// See `Slice.windows(of:)`.
     public func windows(of size: Int64) -> WindowsView[T] { self.asSlice().windows(of: size) }
-    /// See `Slice.reversed()`.
-    public func reversed() -> ReversedView[T] { self.asSlice().reversed() }
+    /// See `Slice.reversed`.
+    public var reversed: ReversedView[T] { self.asSlice().reversed }
     /// See `Slice.split(where:)`.
     public func split(consuming where predicate: escaping (T) -> Bool) -> ArraySplitWhereView[T] {
         let s = &self.asSlice();

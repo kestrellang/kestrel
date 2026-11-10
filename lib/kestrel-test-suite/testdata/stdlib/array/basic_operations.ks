@@ -18,8 +18,8 @@ module Test
             if arr.isEmpty { return 3 }
 
             // Test first and last
-            if arr.first().unwrap() != 10 { return 4 }
-            if arr.last().unwrap() != 30 { return 5 }
+            if arr.first.unwrap() != 10 { return 4 }
+            if arr.last.unwrap() != 30 { return 5 }
 
             // Test pop
             let popped = arr.pop();

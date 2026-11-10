@@ -35,7 +35,7 @@ func main() -> lang.i64 {
     if unsafe windows(2)(unchecked: 2) != 5 { return 10 }
 
     // ReversedView keeps the source intact.
-    let rev = arr.reversed();
+    let rev = arr.reversed;
     if rev.count != 5 { return 11 }
     if rev(0) != 5 { return 12 }
     if rev(4) != 1 { return 13 }

@@ -3573,7 +3573,7 @@ back-to-front without allocating.
 
 ```
 let view = "abc".chars.reversed;
-view.first();    // Some('c')
+view.first;    // Some('c')
 view.count;      // 3
 ```
 
@@ -3768,7 +3768,7 @@ for targeted access.
 
 ```
 let view = "a,b,c".asSlice().split(by: ",");
-view.first();            // Some("a")
+view.first;            // Some("a")
 view.count;              // 3
 view.collect();          // [StringSlice("a"), StringSlice("b"), StringSlice("c")]
 ```
@@ -3935,7 +3935,7 @@ matching a predicate. The matching characters are excluded from segments.
 
 ```
 let view = "hello world".asSlice().split { (c) in c == Char(" ") };
-view.first();    // Some("hello")
+view.first;    // Some("hello")
 view.count;      // 2
 ```
 

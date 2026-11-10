@@ -66,7 +66,7 @@ func main() -> lang.i32 {
 
     // The stdlib shape that makes this a build-stopper for debug compilers.
     let words = ["alpha", "beta", "gamma"];
-    if let found = words.first(where: { it == "beta" }) {
+    if let found = words.find(where: { it == "beta" }) {
         if found != "beta" { return 30 }
     } else {
         return 40

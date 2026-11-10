@@ -15,7 +15,7 @@ func chunksOfLocal() -> ChunksView[Int64] {
 
 func reversedOfLocal() -> ReversedView[Int64] {
     let xs = [1, 2, 3];
-    xs.reversed() // ERROR(E494)
+    xs.reversed // ERROR(E494)
 }
 
 func refsOfLocal() -> ArrayRefsIterator[Int64] {

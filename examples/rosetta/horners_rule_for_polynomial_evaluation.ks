@@ -4,7 +4,7 @@ module Main
 
 // Coefficients from the constant term up.
 func horner(coefficients: Array[Int64], x: Int64) -> Int64 {
-    coefficients.reversed().iter().fold(from: 0, by: { (acc, c) in acc * x + c })
+    coefficients.reversed.iter().fold(from: 0, by: { (acc, c) in acc * x + c })
 }
 
 @main

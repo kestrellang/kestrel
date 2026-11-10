@@ -17,7 +17,7 @@ func lis(a: Array[Int64]) -> Array[Int64] {
         if lo == tails.count { tails.append(i); } else { tails(lo) = i; }
     }
     var out = Array[Int64]();
-    var k = tails.last() ?? -1;
+    var k = tails.last ?? -1;
     while k >= 0 {
         out.insert(a(k), at: 0);
         k = parent(k);

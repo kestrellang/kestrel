@@ -19,12 +19,12 @@ module Test
             if s.contains(where: { (x) in x > 10 }) { return 2 }
 
             // Test first(where:) - found
-            let found = s.first(where: { (x) in x > 4 });
+            let found = s.find(where: { (x) in x > 4 });
             if found.isNone { return 3 }
             if found.unwrap() != 5 { return 4 }
 
             // Test first(where:) - not found
-            let notFound = s.first(where: { (x) in x > 100 });
+            let notFound = s.find(where: { (x) in x > 100 });
             if notFound.isSome { return 5 }
 
             // Test all(where:) - true

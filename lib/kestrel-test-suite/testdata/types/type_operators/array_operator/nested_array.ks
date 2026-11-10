@@ -12,6 +12,6 @@ func main() -> lang.i64 {
     inner.append(2);
     outer.append(inner);
      println(outer.count);
-     println(outer.first().unwrap().count);
+     println(outer.first.unwrap().count);
     0
 }
