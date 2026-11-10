@@ -151,15 +151,18 @@ public enum IoErrorKind: Equatable, Formattable {
 // ERROR
 // ============================================================================
 
-/// A failed I/O call: its `kind`, plus the system error code when the
-/// system reported one.
+/// A failed I/O call: its `kind`, the system error code when the system
+/// reported one, and the path when the call was about a file.
+///
+/// Every `std.files` call that takes a path records it, so the error says
+/// which file failed.
 ///
 /// # Examples
 ///
 /// ```
 /// match File.open("data.bin") {
 ///     .Ok(file) => use(file),
-///     .Err(e) => eprintln("can't open data.bin: \(e)")
+///     .Err(e) => eprintln("\(e)")   // "not found: data.bin"
 /// }
 /// ```
 public struct IoError: Equatable, Formattable {
@@ -167,12 +170,15 @@ public struct IoError: Equatable, Formattable {
     public var kind: IoErrorKind
     /// The system error code, or -1 for an error std made itself.
     var code: Int32
+    /// The path the failed call was about, if it took one.
+    public var path: Optional[String]
 
     /// @name From Kind
     /// An error of `kind` with no system error code.
     public init(kind kind: IoErrorKind) {
         self.kind = kind;
         self.code = -1;
+        self.path = .None;
     }
 
     /// @name From Errno
@@ -180,6 +186,14 @@ public struct IoError: Equatable, Formattable {
     public init(errno code: Int32) {
         self.kind = IoErrorKind.of(errno: code);
         self.code = code;
+        self.path = .None;
+    }
+
+    /// This error, recording `path` as the one the call was about.
+    public consuming func at(path path: String) -> IoError {
+        var error = self;
+        error.path = .Some(path);
+        error
     }
 
     /// The error for the calling thread's current `errno`. Call it right
@@ -194,16 +208,22 @@ public struct IoError: Equatable, Formattable {
     }
 
     /// A short message: the kind's description, or the system's message
-    /// for an error of kind `.Other`.
+    /// for an error of kind `.Other`, followed by the path when there is
+    /// one (`"not found: data.bin"`).
     public func description() -> String {
-        if self.code >= 0 and self.kind == .Other {
+        let reason = if self.code >= 0 and self.kind == .Other {
             let text = String(from: CString(raw: unsafe native_strerror(self.code).cast[UInt8]()));
-            return "\(text) (errno \(self.code))"
+            "\(text) (errno \(self.code))"
+        } else {
+            self.kind.description()
+        };
+        match self.path {
+            .Some(p) => "\(reason): \(p)",
+            .None => reason,
         }
-        self.kind.description()
     }
 
-    /// Same kind and same system error code.
+    /// Same kind and same system error code. The path doesn't take part.
     public func isEqual(to other: IoError) -> Bool {
         self.kind == other.kind and self.code == other.code
     }

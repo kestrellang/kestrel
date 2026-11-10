@@ -82,5 +82,5 @@ internal func withNativePath(path: Path, body: (RawPointer) -> Int32) -> Result[
     let r = body(cpath.raw.asRaw());
     let error = IoError.last();
     cpath.free();
-    if r < 0 { .Err(error) } else { .Ok(()) }
+    if r < 0 { .Err(error.at(path: path.string)) } else { .Ok(()) }
 }

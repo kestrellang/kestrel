@@ -29,7 +29,7 @@ func main() -> lang.i64 {
     let segments = arr.split(where: { (x) in x == marker });
     marker = 0;
     if segments.count != 3 { return 6 }
-    let segs = segments.toArray();
+    let segs = segments.toOwned();
     if segs.count != 3 { return 7 }
     if unsafe segs(unchecked: 0).count != 1 { return 8 }
     if unsafe segs(unchecked: 1).count != 2 { return 9 }

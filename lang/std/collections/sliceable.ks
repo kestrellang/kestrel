@@ -950,4 +950,33 @@ extend Sliceable[T] where T: Formattable {
         }
         writer.append(char: ']')
     }
+
+    /// Concatenates each element's string representation, separated by
+    /// `separator`.
+    ///
+    /// Each element is rendered with its `format()` method using default
+    /// `FormatOptions`. The default `separator` is empty (raw
+    /// concatenation). An empty collection produces `""`. Works on arrays
+    /// and on slices of them alike. For the bracketed debug form
+    /// (`"[1, 2, 3]"`), use `format()` directly.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// [1, 2, 3].joined(by: ", ");          // "1, 2, 3"
+    /// [1, 2, 3].joined();                   // "123"
+    /// ["a", "b", "c"](1..<3).joined(by: "-");  // "b-c"
+    /// ```
+    public func joined(by separator: String = "") -> String {
+        let s = self.asUnsafeSlice();
+        let myPtr = s.pointer;
+        var b = StringBuilder();
+        for i in 0..<s.count {
+            if i > 0 {
+                b.append(separator)
+            }
+            unsafe myPtr.offset(by: i).read().format(into: b)
+        }
+        b.build()
+    }
 }

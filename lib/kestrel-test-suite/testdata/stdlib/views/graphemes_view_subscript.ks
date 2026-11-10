@@ -42,10 +42,10 @@ module Test
             // ---- range subscripts yield GraphemesView ----
             // Range[Int64]
             let sub = s.graphemes(std.core.Range[std.numeric.Int64](0, 3));
-            if sub.toString().isEqual(to: "abc") == false { return 11 }
+            if sub.toOwned().isEqual(to: "abc") == false { return 11 }
 
             let subMid = s.graphemes(std.core.Range[std.numeric.Int64](1, 4));
-            if subMid.toString().isEqual(to: "bcd") == false { return 12 }
+            if subMid.toOwned().isEqual(to: "bcd") == false { return 12 }
 
             // graphemes.substring convenience (Range)
             if s.graphemes.substring(std.core.Range[std.numeric.Int64](1, 4)).isEqual(to: "bcd") == false { return 13 }
@@ -56,7 +56,7 @@ module Test
             // checked range - valid
             let subChecked = s.graphemes(checked: std.core.Range[std.numeric.Int64](0, 5));
             if subChecked.isNone { return 14 }
-            if subChecked.unwrap().toString().isEqual(to: "abcde") == false { return 15 }
+            if subChecked.unwrap().toOwned().isEqual(to: "abcde") == false { return 15 }
 
             // checked range - out of bounds
             let subOob = s.graphemes(checked: std.core.Range[std.numeric.Int64](0, 100));
@@ -68,11 +68,11 @@ module Test
 
             // clamped range
             let subClamp = s.graphemes(within: std.core.Range[std.numeric.Int64](-5, 100));
-            if subClamp.toString().isEqual(to: "abcde") == false { return 18 }
+            if subClamp.toOwned().isEqual(to: "abcde") == false { return 18 }
 
             // ClosedRange[Int64]
             let subClosed = s.graphemes(std.core.ClosedRange[std.numeric.Int64](1, 3));
-            if subClosed.toString().isEqual(to: "bcd") == false { return 19 }
+            if subClosed.toOwned().isEqual(to: "bcd") == false { return 19 }
 
             0
         }

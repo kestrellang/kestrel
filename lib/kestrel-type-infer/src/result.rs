@@ -105,6 +105,11 @@ pub struct TypedBody {
     /// existential box when well-typed; analyzers report E152 otherwise).
     pub type_tests: HashMap<kestrel_hir::body::HirPatId, ResolvedTy>,
 
+    /// Every literal and range pattern, with the type of the value it
+    /// matches, so analyzers range-check pattern literals (E120, E121)
+    /// exactly as they check expression literals.
+    pub literal_pat_types: HashMap<kestrel_hir::body::HirPatId, ResolvedTy>,
+
     /// The mode each `?.` bind settled on, keyed by its scrutinee
     /// `ProtocolCall` (optional-chaining design §2). Overrides the
     /// provisional requirement HIR lowering tagged; MIR lowering and the
@@ -219,6 +224,7 @@ impl Hash for TypedBody {
             ref_return_calls,
             existential_conversions,
             type_tests,
+            literal_pat_types,
             chain_modes,
         } = self;
         hash_sorted(expr_types, state);
@@ -245,6 +251,7 @@ impl Hash for TypedBody {
         hash_sorted(ref_return_calls, state);
         hash_sorted(existential_conversions, state);
         hash_sorted(type_tests, state);
+        hash_sorted(literal_pat_types, state);
         hash_sorted(chain_modes, state);
     }
 }
@@ -552,6 +559,11 @@ pub fn build_result(ctx: &InferCtx<'_>) -> TypedBody {
             .collect(),
         type_tests: ctx
             .type_tests
+            .iter()
+            .map(|(&pat, &tv)| (pat, resolve_to_concrete(ctx, tv)))
+            .collect(),
+        literal_pat_types: ctx
+            .literal_pats
             .iter()
             .map(|(&pat, &tv)| (pat, resolve_to_concrete(ctx, tv)))
             .collect(),
@@ -1134,6 +1146,7 @@ mod tests {
             ref_return_calls: HashMap::default(),
             existential_conversions: HashMap::default(),
             type_tests: HashMap::default(),
+            literal_pat_types: HashMap::default(),
             chain_modes: HashMap::default(),
         }
     }

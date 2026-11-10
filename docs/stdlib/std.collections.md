@@ -1811,10 +1811,10 @@ public var isEmpty: Bool { get }
 
 _Defined in `lang/std/collections/views.ks`._
 
-#### function `toArray`
+#### function `toOwned`
 
 ```kestrel
-public func toArray() -> Array[Array[T]]
+public func toOwned() -> Array[Array[T]]
 ```
 
 Copies every segment into an owned array.
@@ -1904,10 +1904,10 @@ public var isEmpty: Bool { get }
 
 _Defined in `lang/std/collections/views.ks`._
 
-#### function `toArray`
+#### function `toOwned`
 
 ```kestrel
-public func toArray() -> Array[Array[T]]
+public func toOwned() -> Array[Array[T]]
 ```
 
 Copies every segment into an owned array.
@@ -2043,10 +2043,10 @@ Chunk `index`. Panics when out of range.
 
 _Defined in `lang/std/collections/views.ks`._
 
-#### function `toArray`
+#### function `toOwned`
 
 ```kestrel
-public func toArray() -> Array[Array[T]]
+public func toOwned() -> Array[Array[T]]
 ```
 
 Copies every chunk into an owned array.
@@ -4615,10 +4615,10 @@ Element `index` counted from the back. Panics when out of range.
 
 _Defined in `lang/std/collections/views.ks`._
 
-#### function `toArray`
+#### function `toOwned`
 
 ```kestrel
-public func toArray() -> Array[T]
+public func toOwned() -> Array[T]
 ```
 
 Copies the elements, back to front, into an owned array.
@@ -6239,7 +6239,7 @@ Multi-pass lazy view that reads back to front.
 ```
 let v = [1, 2, 3].reversed();
 v(0);           // 3
-v.toArray();    // [3, 2, 1]
+v.toOwned();    // [3, 2, 1]
 ```
 
 _Defined in `lang/std/collections/views.ks`._
@@ -6331,7 +6331,7 @@ Multi-pass lazy view over the segments between occurrences of
 `separator`. `toArray()` copies them into owned arrays.
 
 ```
-[1, 0, 2, 0, 3].split(by: 0).toArray();   // [[1], [2], [3]]
+[1, 0, 2, 0, 3].split(by: 0).toOwned();   // [[1], [2], [3]]
 ```
 
 _Defined in `lang/std/collections/views.ks`._

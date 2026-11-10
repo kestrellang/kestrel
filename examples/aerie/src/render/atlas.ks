@@ -30,7 +30,7 @@ struct Atlas {
         let tileBytes = tileSize * tileSize * 4;
         for layer in 0..<layers {
             let start = layer * tileBytes;
-            device.write(texture: texture, data: image.bytes(start..<(start + tileBytes)).toArray(), layer: layer);
+            device.write(texture: texture, data: image.bytes(start..<(start + tileBytes)).toOwned(), layer: layer);
         }
         device.generateMipmaps(texture);
         texture

@@ -73,7 +73,8 @@ the type checker, and the code is assigned in one place,
 | E110 | duplicate binding '{name}' in parameter pattern | The same name is bound twice in one parameter's destructuring pattern. |
 | E111 | tuple pattern has {n} elements but type has {m} | A tuple-destructuring parameter doesn't match the tuple type's arity. |
 | E112 | tuple pattern used with non-tuple type | A parameter uses tuple destructuring but its type is not a tuple. |
-| E121 | integer literal out of range for \`{type}\` | The literal cannot be represented by the resolved integer type; it would silently wrap. |
+| E120 | character literal '{c}' is not ASCII, so it is not one \`{type}\` byte | A character literal typed as an integer (`let b: UInt8 = 'é'`) must be ASCII; a wider character is several UTF-8 bytes. Patterns are checked too. |
+| E121 | integer literal out of range for \`{type}\` | The literal cannot be represented by the resolved integer type; it would silently wrap. Pattern literals and range bounds are checked against the matched type. |
 | E122 | unsupported unary operator '{op}' | The operator's protocol lang item (`@builtin(.…OperatorProtocol)`) is missing — usually the standard library is not imported. |
 | E124 | unsupported postfix operator '{op}' | Same, for a postfix operator. |
 | E125 | unsupported binary operator '{op}' | Same, for a binary operator. |
@@ -659,9 +660,9 @@ See `docs/plans/attributes/attributes-design.md`.
 | E913 | '{name}' is unavailable[: {message}][; use '{replacement}' instead] | A use of an `@unavailable` declaration. Reported everywhere, including inside other unavailable code. An unavailable protocol requirement needs no witness. |
 | E914 *(warning)* | '.{old}' is the old spelling; write '.{New}' | `@platform(.linux)` / `.darwin`: accepted for one release, renamed to `.Linux` / `.Darwin` in 0.18. |
 | E950 | cannot find protocol '{P}' | A `@derive` argument doesn't resolve, or resolves to something that isn't a protocol (`'Point' in '@derive' is not a protocol`). |
-| E951 | '{P}' cannot be derived; the derivable protocols are Equatable, Hashable, Comparable, Formattable and Defaultable | The protocol has no built-in deriver. `Copyable` and `Cloneable` say why instead: `'Cloneable' is not derived: whether 'Doc' is Cloneable follows from its fields`. |
-| E952 | cannot derive '{P}' for '{S}': field '{f}' has type '{T}', which is not '{P}' | A field (or enum payload: `payload 'radius' of case 'Circle'`) doesn't conform. For a generic type the derived bound `T: P` is assumed. `Defaultable` skips fields with an initializer and reads only the `@default` case. |
+| E951 | '{P}' cannot be derived; the derivable protocols are Equatable, Hashable, Comparable, Formattable, Defaultable and Cloneable | The protocol has no built-in deriver. `Copyable` says why instead: `'Copyable' is not derived: whether 'Plain' is Copyable follows from its fields`. |
+| E952 | cannot derive '{P}' for '{S}': field '{f}' has type '{T}', which is not '{P}' | A field (or enum payload: `payload 'radius' of case 'Circle'`) doesn't conform. For a generic type the derived bound `T: P` is assumed. `Defaultable` skips fields with an initializer and reads only the `@default` case. `Cloneable` needs only `Copyable` fields (`which is not 'Copyable'`), since its `clone()` copies each one. |
 | E953 | '{S}' already declares '{P}' | The type also declares the protocol itself, or a member written for it implements a requirement (`'Point' derives 'Equatable' but also implements 'isEqual'; remove one`), or `@derive` names the protocol twice. |
-| E954 | '@derive' on an extension needs a type declared in this module | `@derive` on an extension of another module's type, or (0.18) of a type declared in another file; also `cannot derive 'P' for 'S': its last field is unsized`. |
+| E954 | '@derive' on an extension needs a type declared in this module | `@derive` on an extension of another module's type, or (0.18) of a type declared in another file; also `cannot derive 'P' for 'S': its last field is unsized`, and `cannot derive 'Cloneable' for 'S': it opts out of 'Copyable'`. |
 | E957 | cannot derive 'Defaultable' for '{E}': mark exactly one case '@default' | An enum derives `Defaultable` by building its one `@default` case. |
 | E958 | deriving '{P}' requires '{S}' to be '{Q}'; add '{Q}' to '@derive' | A parent protocol doesn't hold. Parents are never derived implicitly: derive them alongside, declare them, or derive them in another `@derive`. |

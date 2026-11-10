@@ -50,7 +50,7 @@ public struct File: Readable, Writable, Seekable, not Copyable {
         let error = IoError.last();
         cpath.free();
         if fd < 0 {
-            return .Err(error)
+            return .Err(error.at(path: path.string))
         }
         .Ok(File(unsafeDescriptor: FileDescriptor(fd)))
     }

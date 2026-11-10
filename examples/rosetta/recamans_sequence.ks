@@ -24,7 +24,7 @@ func main() {
         seq.append(next);
         n = n + 1;
     }
-    println("First 15: \(seq.prefix(15).toArray())");
+    println("First 15: \(seq.prefix(15).toOwned())");
     println("First duplicate: \(firstDuplicate ?? -1)");
     println("Terms needed to cover 0..1000: \(seq.count - 1)");
 }

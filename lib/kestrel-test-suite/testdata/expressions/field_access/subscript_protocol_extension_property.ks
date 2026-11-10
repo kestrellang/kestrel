@@ -32,6 +32,6 @@ func main() -> Int64 {
     // The stdlib case that found it: `bytes` on a StringSlice comes from `extend Str`.
     let slice = "port=80".trimmed();
     if slice.bytes(0) != 112 { return 2 }
-    if slice.bytes(5..).toString() != "80" { return 3 }
+    if slice.bytes(5..).toOwned() != "80" { return 3 }
     0
 }

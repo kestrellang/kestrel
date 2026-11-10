@@ -50,15 +50,17 @@ impl IsVisibleFrom {
         match effective_vis(ctx, self.target) {
             Vis::Public => true,
             Vis::Private => {
-                // Visible within the parent scope and all its descendants
+                // Visible within the parent scope and all its descendants.
+                // A derived member's scope is the type, like its context.
                 let Some(scope) = ctx.parent_of(self.target) else {
                     return true;
                 };
-                is_ancestor_of(ctx, scope, context)
+                is_ancestor_of(ctx, derived_context(ctx, scope), context)
             },
             Vis::Fileprivate => {
-                // Visible within the same file
-                let target_file = find_file_id(ctx, self.target);
+                // Visible within the same file; a derived member counts as
+                // written in its type's file.
+                let target_file = find_file_id(ctx, derived_context(ctx, self.target));
                 let context_file = find_file_id(ctx, context);
                 match (target_file, context_file) {
                     (Some(t), Some(c)) => t == c,
@@ -120,7 +122,9 @@ pub fn effective_vis(ctx: &QueryContext<'_>, target: Entity) -> Vis {
 
 /// Code `@derive` generated reads the type's private fields, so it sees
 /// what code written inside the type would: the context inside a
-/// `DerivedFrom` extension is the type itself.
+/// `DerivedFrom` extension is the type itself. The same mapping places a
+/// derived member's own scope, so a `private` helper the deriver writes
+/// (`Cloneable`'s init) is visible to the rest of that derived code.
 fn derived_context(ctx: &QueryContext<'_>, context: Entity) -> Entity {
     let mut current = context;
     loop {

@@ -14,7 +14,7 @@ func isSquareFree(n: Int64) -> Bool {
 @main
 func main() {
     let upTo145 = (1..=145).iter().filter { isSquareFree(it) }.collect();
-    for row in upTo145.chunks(of: 20).toArray() {
+    for row in upTo145.chunks(of: 20).toOwned() {
         println(row.map { "\(it:>4)" }.joined(by: ""));
     }
     for limit in [100, 1000, 10000, 100000] {

@@ -21,9 +21,9 @@ func ludics(upTo limit: Int64) -> Array[Int64] {
 @main
 func main() {
     let l = ludics(upTo: 22000);
-    println("First 25: \(l.prefix(25).toArray())");
+    println("First 25: \(l.prefix(25).toOwned())");
     println("Ludic numbers <= 1000: \(l.iter().filter { it <= 1000 }.count())");
-    println("2000th..2005th: \(l(1999..<2005).toArray())");
+    println("2000th..2005th: \(l(1999..<2005).toOwned())");
     let triplets = l.iter().filter { (x) in x + 6 < 250 and l.contains(x + 2) and l.contains(x + 6) }.collect();
     println("Triplets below 250: \(triplets.map { "(\(it), \(it + 2), \(it + 6))" }.joined(by: " "))");
 }

@@ -9,7 +9,7 @@ func main() {
     for i in 3..=n {
         q(i) = q(i - q(i - 1)) + q(i - q(i - 2));
     }
-    println("First ten: \(q(1..<11).toArray())");
+    println("First ten: \(q(1..<11).toOwned())");
     println("1000th: \(q(1000))");
     let drops = (2..=n).iter().filter { q(it) < q(it - 1) }.count();
     println("Terms less than their predecessor up to 100000: \(drops)");

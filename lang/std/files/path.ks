@@ -37,7 +37,7 @@ public struct Path: Equatable, Hashable, Cloneable, Formattable, ExpressibleBySt
     /// @name From Text
     /// The path `text`, as written.
     public init(text: String) {
-        self.data = text.asByteSlice().toArray()
+        self.data = text.asByteSlice().toOwned()
     }
 
     /// @name From Bytes
@@ -49,7 +49,7 @@ public struct Path: Equatable, Hashable, Cloneable, Formattable, ExpressibleBySt
     /// @name String Literal
     /// A path literal, as in `File.open("data.txt")`.
     public init(stringLiteral ptr: lang.ptr[lang.i8], length: lang.i64) {
-        self.data = String(stringLiteral: ptr, length).asByteSlice().toArray()
+        self.data = String(stringLiteral: ptr, length).asByteSlice().toOwned()
     }
 
     /// The path as text. Bytes that aren't UTF-8 become U+FFFD, so use
@@ -86,7 +86,7 @@ public struct Path: Equatable, Hashable, Cloneable, Formattable, ExpressibleBySt
         if end == 0 {
             return .Some(Path("/"))
         }
-        .Some(Path(bytes: b(0..<end).toArray()))
+        .Some(Path(bytes: b(0..<end).toOwned()))
     }
 
     /// The last component: `b.tar.gz` for `/a/b.tar.gz`. `None` for `/`,
@@ -235,7 +235,7 @@ public struct Path: Equatable, Hashable, Cloneable, Formattable, ExpressibleBySt
         let error = IoError.last();
         cpath.free();
         if resolved.isNull {
-            return .Err(error)
+            return .Err(error.at(path: self.string))
         }
         let result = pathFromNative(resolved);
         unsafe free(resolved);
@@ -367,5 +367,5 @@ internal func textFromNative(raw: RawPointer) -> String {
 internal func pathFromNative(raw: RawPointer) -> Path {
     let ptr = raw.cast[UInt8]();
     let count = CString(raw: ptr).length;
-    Path(bytes: unsafe Slice.lend(start: ptr, count: count).toArray())
+    Path(bytes: unsafe Slice.lend(start: ptr, count: count).toOwned())
 }

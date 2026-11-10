@@ -66,12 +66,12 @@ public struct ChunksView[T]: Iterable {
     }
 
     /// Copies every chunk into an owned array.
-    public func toArray() -> Array[Array[T]] {
+    public func toOwned() -> Array[Array[T]] {
         var result = Array[Array[T]]();
         let n = self.count;
         result.reserveCapacity(n);
         for i in 0..<n {
-            result.append(self(i).toArray())
+            result.append(self(i).toOwned())
         }
         result
     }
@@ -149,12 +149,12 @@ public struct WindowsView[T]: Iterable {
     }
 
     /// Copies every window into an owned array.
-    public func toArray() -> Array[Array[T]] {
+    public func toOwned() -> Array[Array[T]] {
         var result = Array[Array[T]]();
         let n = self.count;
         result.reserveCapacity(n);
         for i in 0..<n {
-            result.append(self(i).toArray())
+            result.append(self(i).toOwned())
         }
         result
     }
@@ -218,7 +218,7 @@ public struct ReversedView[T]: Iterable {
     }
 
     /// Copies the elements, back to front, into an owned array.
-    public func toArray() -> Array[T] {
+    public func toOwned() -> Array[T] {
         var result = Array[T]();
         let n = self.slice.count;
         result.reserveCapacity(n);
@@ -277,10 +277,10 @@ public struct ArraySplitView[T]: Iterable where T: Equatable {
     }
 
     /// Copies every segment into an owned array.
-    public func toArray() -> Array[Array[T]] {
+    public func toOwned() -> Array[Array[T]] {
         var result = Array[Array[T]]();
         for segment in self {
-            result.append(segment.toArray())
+            result.append(segment.toOwned())
         }
         result
     }
@@ -348,10 +348,10 @@ public struct ArraySplitWhereView[T]: Iterable {
     }
 
     /// Copies every segment into an owned array.
-    public func toArray() -> Array[Array[T]] {
+    public func toOwned() -> Array[Array[T]] {
         var result = Array[Array[T]]();
         for segment in self {
-            result.append(segment.toArray())
+            result.append(segment.toOwned())
         }
         result
     }
@@ -428,7 +428,7 @@ extend Slice[T] where T: Copyable {
     /// ```
     /// let v = [1, 2, 3].reversed();
     /// v(0);           // 3
-    /// v.toArray();    // [3, 2, 1]
+    /// v.toOwned();    // [3, 2, 1]
     /// ```
     public func reversed() -> ReversedView[T] {
         let s = &self;
@@ -445,10 +445,10 @@ extend Slice[T] where T: Copyable {
 
 extend Slice[T] where T: Equatable, T: Copyable {
     /// Multi-pass lazy view over the segments between occurrences of
-    /// `separator`. `toArray()` copies them into owned arrays.
+    /// `separator`. `toOwned()` copies them into owned arrays.
     ///
     /// ```
-    /// [1, 0, 2, 0, 3].split(by: 0).toArray();   // [[1], [2], [3]]
+    /// [1, 0, 2, 0, 3].split(by: 0).toOwned();   // [[1], [2], [3]]
     /// ```
     public func split(by separator: T) -> ArraySplitView[T] {
         let s = &self;

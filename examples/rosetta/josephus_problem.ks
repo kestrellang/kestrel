@@ -17,6 +17,6 @@ func josephus(n: Int64, k: Int64) -> Array[Int64] {
 @main
 func main() {
     let order = josephus(41, 3);
-    println("Execution order: \(order.drop(last: 1).toArray().joined(by: " "))");
+    println("Execution order: \(order.drop(last: 1).toOwned().joined(by: " "))");
     println("Survivor: \(order(order.count - 1))");
 }

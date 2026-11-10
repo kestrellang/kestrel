@@ -965,7 +965,7 @@ public struct Array[T, A = GlobalAllocator]: Sliceable[T], Iterable, Cloneable w
     }
 
     // reversed(): provided by extend Sliceable[T] — returns a lazy ReversedView[T]
-    // (use `arr.reversed().toArray()` if an owned Array is needed).
+    // (use `arr.reversed().toOwned()` if an owned Array is needed).
 
     /// Rotates the elements in place by `amount` positions to the left.
     ///
@@ -1890,38 +1890,6 @@ extend Array[T, A] where T: Iterable {
             }
         }
         result
-    }
-}
-
-/// String-joining for arrays whose elements are `Formattable`.
-extend Array[T, A] where T: Formattable {
-    /// Concatenates each element's string representation, separated by
-    /// `separator`.
-    ///
-    /// Each element is rendered with its `format()` method using default
-    /// `FormatOptions`. The default `separator` is empty (raw
-    /// concatenation). Empty arrays produce `""`. For the bracketed
-    /// debug form (`"[1, 2, 3]"`), use `format()` directly.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// [1, 2, 3].joined(by: ", ");  // "1, 2, 3"
-    /// [1, 2, 3].joined();           // "123"
-    /// ["a", "b"].joined(by: "-");   // "a-b"
-    /// [].joined(by: ", ");          // ""
-    /// ```
-    public func joined(by separator: String = "") -> String {
-        if self.count == 0 {
-            return ""
-        }
-        var b = StringBuilder();
-        unsafe self(unchecked: 0).format(into: b);
-        for i in 1..<self.count {
-            b.append(separator);
-            unsafe self(unchecked: i).format(into: b)
-        }
-        b.build()
     }
 }
 

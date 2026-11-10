@@ -76,6 +76,13 @@ let letter: Char = 'k';
 
 Strings support interpolation with `\(expr)` — see [String Interpolation](string-interpolation.md).
 
+A character literal can also be a `UInt8` byte, so bytes compare against characters directly. The literal must be ASCII: a wider character is several UTF-8 bytes, so `let b: UInt8 = 'é'` is a compile error (E120). An untyped character literal is still a `Char`.
+
+```kestrel
+let comma: UInt8 = ',';          // 44
+"a,b".bytes(1) == ','            // true
+```
+
 ### Unit Type
 
 The unit type `()` represents the absence of a meaningful value:

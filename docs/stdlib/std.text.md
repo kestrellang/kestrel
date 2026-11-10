@@ -388,7 +388,7 @@ public subscript[I](I) -> I.BytesYield where I: BytesIndex { get }
 Reads a single byte (`UInt8`) for `Int64` indexes, or a zero-copy
 sub-view (`BytesView`) for `Range[Int64]` / `ClosedRange[Int64]`.
 Panics on out-of-bounds. Range slicing does not validate UTF-8
-boundaries — call `.toString()` on the sub-view if you need an
+boundaries — call `.toOwned()` on the sub-view if you need an
 owned `String` (which validates).
 
 _Defined in `lang/std/text/views.ks`._
@@ -526,15 +526,15 @@ public func substring(some BytesSubstringIndex) -> String
 
 Convenience: dispatches to a `BytesSubstringIndex` to produce
 an owned `String` covering the requested byte range. Equivalent
-to `self(range).toString()` for both `Range[Int64]` and
+to `self(range).toOwned()` for both `Range[Int64]` and
 `ClosedRange[Int64]`.
 
 _Defined in `lang/std/text/views.ks`._
 
-#### function `toString`
+#### function `toOwned`
 
 ```kestrel
-public func toString() -> String
+public func toOwned() -> String
 ```
 
 Materializes the view as an owned `String`. Copies all bytes
@@ -1408,7 +1408,7 @@ A view over the Unicode code points in a `String`.
 Returned by `String.chars`. Iteration is O(1) per code point but
 `count()` is O(n) because UTF-8 is variable-width. Range subscripts
 are O(n) (the segment-walk dominates) but yield a zero-copy
-`CharsView` sub-view — call `.toString()` to materialize an owned
+`CharsView` sub-view — call `.toOwned()` to materialize an owned
 `String`. To index in O(1), use `BytesView` and convert byte offsets
 back yourself.
 
@@ -1418,7 +1418,7 @@ back yourself.
 let s = "héllo";
 s.chars.count;                       // 5 (code points)
 s.bytes.count;                       // 6 (bytes — 'é' is 2 bytes)
-s.chars(0..<4).toString();           // "héll"
+s.chars(0..<4).toOwned();           // "héll"
 s.chars.substring(0..<4);            // "héll"
 ```
 
@@ -1651,15 +1651,15 @@ public func substring(some CharsSubstringIndex) -> String
 
 Convenience: dispatches to a `CharsSubstringIndex` to produce
 an owned `String` covering the requested code-point range.
-Equivalent to `self(range).toString()` for both `Range[Int64]`
+Equivalent to `self(range).toOwned()` for both `Range[Int64]`
 and `ClosedRange[Int64]`.
 
 _Defined in `lang/std/text/views.ks`._
 
-#### function `toString`
+#### function `toOwned`
 
 ```kestrel
-public func toString() -> String
+public func toOwned() -> String
 ```
 
 Materializes the view as an owned `String`. O(n) — copies bytes.
@@ -2876,15 +2876,15 @@ public func substring(some GraphemesSubstringIndex) -> String
 
 Convenience: dispatches to a `GraphemesSubstringIndex` to
 produce an owned `String` covering the requested cluster range.
-Equivalent to `self(range).toString()` for both `Range[Int64]`
+Equivalent to `self(range).toOwned()` for both `Range[Int64]`
 and `ClosedRange[Int64]`.
 
 _Defined in `lang/std/text/views.ks`._
 
-#### function `toString`
+#### function `toOwned`
 
 ```kestrel
-public func toString() -> String
+public func toOwned() -> String
 ```
 
 Materializes the view as an owned `String`. O(n) — copies bytes.
@@ -3274,7 +3274,7 @@ line without a terminator is still emitted. Range subscripts
 (`lines(0..<n)`) yield a zero-copy `LinesView` sub-view whose
 underlying byte range still includes the original terminators —
 iterating the sub-view round-trips the same line strings, and
-`.toString()` reconstructs the original substring exactly.
+`.toOwned()` reconstructs the original substring exactly.
 
 ### Examples
 
@@ -3286,7 +3286,7 @@ for line in "a\nb\nc".lines {
 lines.count;  // 3
 
 // Range subscript preserves terminators in the underlying bytes:
-"a\r\nb\nc".lines(0..<2).toString();  // "a\r\nb\n"
+"a\r\nb\nc".lines(0..<2).toOwned();  // "a\r\nb\n"
 ```
 
 ### Representation
@@ -3462,15 +3462,15 @@ public func substring(some LinesSubstringIndex) -> String
 Convenience: dispatches to a `LinesSubstringIndex` to produce
 an owned `String` covering the requested line range, with their
 original terminators preserved. Equivalent to
-`self(range).toString()` for both `Range[Int64]` and
+`self(range).toOwned()` for both `Range[Int64]` and
 `ClosedRange[Int64]`.
 
 _Defined in `lang/std/text/views.ks`._
 
-#### function `toString`
+#### function `toOwned`
 
 ```kestrel
-public func toString() -> String
+public func toOwned() -> String
 ```
 
 Materializes the view as an owned `String` covering the entire

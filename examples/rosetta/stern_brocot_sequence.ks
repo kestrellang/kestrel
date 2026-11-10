@@ -11,7 +11,7 @@ func main() {
         seq.append(seq(i));
         i = i + 1;
     }
-    println("First 15: \(seq.prefix(15).toArray())");
+    println("First 15: \(seq.prefix(15).toOwned())");
     for n in [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 100] {
         println("first \(n:>3) at index \((seq.firstIndex(of: n) ?? -2) + 1)");
     }

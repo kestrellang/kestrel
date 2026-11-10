@@ -290,7 +290,7 @@ The prefix signals cost at the call site.
 
 ```
 // to* — allocates a new independent value
-toArray()
+toOwned()      // borrowed view or slice -> owned copy (String, Array)
 toAddress()
 
 // as* — borrows or reinterprets existing storage, cheap
@@ -298,6 +298,11 @@ asPointer()
 asSlice()
 asRaw()
 ```
+
+`toOwned()` is the one verb for "copy this borrowed thing into an owned
+value": text views and `StrSlice` give a `String`, slices and collection
+views give an `Array`. `toString()` / `toArray()` stay for conversions
+between different types (`Char.toString()`, `Set.toArray()`).
 
 ## 13. Cross-library consistency
 

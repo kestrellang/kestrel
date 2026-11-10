@@ -177,7 +177,7 @@ extend Slice[T] where T: Copyable {
     }
 
     /// An owned copy of the elements.
-    public func toArray() -> Array[T] {
+    public func toOwned() -> Array[T] {
         var out: Array[T] = [];
         out.reserveCapacity(self.count);
         for x in self.asUnsafeSlice() {
