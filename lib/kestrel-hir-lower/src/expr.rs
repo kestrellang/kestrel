@@ -255,6 +255,9 @@ impl LowerCtx<'_> {
             },
             SyntaxKind::ExprAssignment => {
                 let (lhs, rhs) = self.operands(node, &span);
+                if let Some(target) = crate::tuple_assign::tuple_target(&lhs) {
+                    return self.lower_tuple_assign(&target, &rhs, &span);
+                }
                 // `a?.b = v`: the assignment is the chain's tail, so `v` is
                 // evaluated only when the chain reaches its target.
                 if let Some(chain) = optional_chain_node(&lhs) {
@@ -383,7 +386,7 @@ impl LowerCtx<'_> {
             SyntaxKind::ExprMatch => self.lower_match(node, &span),
             SyntaxKind::ExprCast => self.desugar_cast(node, &span),
             SyntaxKind::ExprTypeTest => self.desugar_type_test(node, &span),
-            SyntaxKind::ExprPlaceholderUse => self.lower_placeholder_use(&span),
+            SyntaxKind::ExprPlaceholderUse => self.lower_placeholder_use(node, &span),
             SyntaxKind::ExprOptionalChain => {
                 self.lower_optional_chain(node, &span, |this, inner| this.lower_expr_src(inner))
             },
@@ -512,7 +515,7 @@ impl LowerCtx<'_> {
         current
     }
 
-    fn lower_path(&mut self, segments: &[PathSeg], span: &Span) -> HirExprId {
+    pub(crate) fn lower_path(&mut self, segments: &[PathSeg], span: &Span) -> HirExprId {
         // Consume the callee-position marker up front so the nested
         // `lower_path` calls this function makes (and any path lowered inside
         // a callee expression) are checked as ordinary values.

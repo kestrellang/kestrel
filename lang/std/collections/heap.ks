@@ -146,11 +146,11 @@ public struct Heap[T, A = GlobalAllocator]: Iterable, Cloneable where T: Compara
         if self.data.isEmpty { return .None; }
         let n = self.data.count;
         if n == 1 {
-            return self.data.pop()
+            return self.data.popLast()
         }
         // Swap the minimum to the end and pop it: a move, not a copy.
         self.data.swap(at: 0, with: n - 1);
-        let min = self.data.pop();
+        let min = self.data.popLast();
         self.siftDown(0);
         min
     }

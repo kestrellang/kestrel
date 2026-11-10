@@ -235,7 +235,7 @@ extend Sliceable[T] {
     /// O(1).
     ///
     /// Read-only — to remove the last element from an `Array`, use
-    /// `pop()`.
+    /// `popLast()`.
     ///
     /// # Examples
     ///

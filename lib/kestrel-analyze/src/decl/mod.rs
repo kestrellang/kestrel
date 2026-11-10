@@ -30,7 +30,6 @@ pub mod import_target;
 pub mod lazy;
 pub mod observer;
 pub mod opaque_cycle;
-pub mod parent_protocol_conformance;
 pub mod place_accessor;
 pub mod protocol_field_conformance;
 pub mod protocol_method;

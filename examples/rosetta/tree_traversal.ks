@@ -37,12 +37,12 @@ func postorder(t: Tree, mutating out: Array[Int64]) {
 func levelOrder(t: Tree) -> Array[Int64] {
     var out = Array[Int64]();
     var queue = Deque[Tree]();
-    queue.pushBack(t);
-    while let some next = queue.popFront() {
+    queue.append(t);
+    while let some next = queue.popFirst() {
         if let .Node(v, l, r) = next {
             out.append(v);
-            queue.pushBack(l);
-            queue.pushBack(r);
+            queue.append(l);
+            queue.append(r);
         }
     }
     out

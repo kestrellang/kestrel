@@ -1,6 +1,6 @@
 // test: execution
 // stdlib: true
-// expect-stdout: 12\n
+// expect-stdout: 12.0\n
 
 // A Float64-returning function whose body ends in a `loop` that only exits by
 // `return`. Today Cranelift (-O0) rejects the function: "result 0 has type

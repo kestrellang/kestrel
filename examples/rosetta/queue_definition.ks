@@ -8,8 +8,8 @@ struct Queue[T] {
 
     init() { self.items = Deque[T](); }
 
-    mutating func push(consuming item: T) { self.items.pushBack(item); }
-    mutating func pop() -> T? { self.items.popFront() }
+    mutating func push(consuming item: T) { self.items.append(item); }
+    mutating func pop() -> T? { self.items.popFirst() }
     var isEmpty: Bool { get { self.items.isEmpty } }
 }
 

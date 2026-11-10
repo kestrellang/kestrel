@@ -169,7 +169,7 @@ public struct Path: Equatable, Hashable, Cloneable, Formattable, ExpressibleBySt
                 if kept.count > 0 {
                     let (ls, le) = unsafe kept(unchecked: kept.count - 1);
                     if not self.isDotDot(ls, le) {
-                        kept.pop();
+                        kept.popLast();
                         continue
                     }
                 }

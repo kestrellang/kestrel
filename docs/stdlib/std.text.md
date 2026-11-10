@@ -3520,6 +3520,56 @@ public func clone() -> LinesView
 
 _Defined in `lang/std/text/views.ks`._
 
+## enum `PaddingSide`
+
+```kestrel
+public enum PaddingSide
+```
+
+Where `padded(toWidth:with:side:)` puts the padding.
+
+_Defined in `lang/std/text/str.ks`._
+
+### Members
+
+#### case `Center`
+
+```kestrel
+case Center
+```
+
+On both sides; the extra one goes after when the padding is odd.
+
+_Defined in `lang/std/text/str.ks`._
+
+#### case `Leading`
+
+```kestrel
+case Leading
+```
+
+Before the text, so it lines up on the right: `"   42"`.
+
+_Defined in `lang/std/text/str.ks`._
+
+#### case `Trailing`
+
+```kestrel
+case Trailing
+```
+
+After the text, so it lines up on the left: `"42   "`.
+
+_Defined in `lang/std/text/str.ks`._
+
+### Implements `Equatable`
+
+#### function `isEqual`
+
+```kestrel
+public func isEqual(to: Self) -> Bool
+```
+
 ## struct `ReversedCharsIterator`
 
 ```kestrel
@@ -4419,39 +4469,24 @@ _Defined in `lang/std/text/str.ks`._
 #### function `padded`
 
 ```kestrel
-public func padded(leading: Int64, with: Char) -> String
+public func padded(toWidth: Int64, with: Char, side: PaddingSide) -> String
 ```
 
-Returns the string padded at the start with `char` so the
-total *code-point* count is at least `length`.
+Returns the string padded with `fill` to at least `width` graphemes.
 
-If the string is already at least `length` code points long,
-returns a copy unchanged.
+`side` says where the padding goes: `.Trailing` (the default) after
+the text, `.Leading` before it, or `.Center` on both sides, with the
+extra one after when the padding is odd. Width counts graphemes, so
+`"é"` is one wide whether it is written as one code point or two. A
+string that is already wide enough is returned unchanged.
 
 ##### Examples
 
 ```
-"42".padded(leading: 5, with: '0');  // "00042"
-```
-
-_Defined in `lang/std/text/str.ks`._
-
-#### function `padded`
-
-```kestrel
-public func padded(trailing: Int64, with: Char) -> String
-```
-
-Returns the string padded at the end with `char` so the
-total *code-point* count is at least `length`.
-
-If the string is already at least `length` code points long,
-returns a copy unchanged.
-
-##### Examples
-
-```
-"42".padded(trailing: 5, with: '.');  // "42..."
+"ab".padded(toWidth: 5);                           // "ab   "
+"42".padded(toWidth: 5, with: '0', side: .Leading); // "00042"
+"ab".padded(toWidth: 7, with: '*', side: .Center);  // "**ab***"
+"hello".padded(toWidth: 3);                        // "hello"
 ```
 
 _Defined in `lang/std/text/str.ks`._
@@ -5645,10 +5680,8 @@ _Defined in `lang/std/text/string.ks`._
 public func matches(String) -> Bool
 ```
 
-Pattern-match form of `isEqual`: each `case "literal" =>` arm
-dispatches through here. Cost is `O(len)` per arm because the
-compiler emits one call per literal — past a handful of arms,
-E316 will suggest an `if/else if` chain instead.
+Pattern-match form of `isEqual`: each `"literal" =>` arm
+dispatches through here, one `O(len)` comparison per arm tried.
 
 _Defined in `lang/std/text/string.ks`._
 

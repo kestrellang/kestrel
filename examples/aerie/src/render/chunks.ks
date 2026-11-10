@@ -223,7 +223,7 @@ struct ChunkPass: not Copyable {
         guard faces.count > 0 else {
             return;
         }
-        let slot = self.freeSlots.pop() ?? fatalError("more chunks loaded than maxChunkSlots");
+        let slot = self.freeSlots.popLast() ?? fatalError("more chunks loaded than maxChunkSlots");
         let size = Float32(from: chunkSize);
         var data = [Vec4(x: Float32(from: cx) * size, y: Float32(from: cy) * size, z: Float32(from: cz) * size, w: Float32(from: lights.count))];
         data.append(contentsOf: lights);

@@ -1,6 +1,6 @@
 // test: execution
 // stdlib: true
-// expect-stdout: [-1, 0.5, 2, NaN, NaN]\ntrue\nSome(NaN) Some(-1)\ntrue true true\nfalse false false\n[-1, 0.5, 2, NaN]\n
+// expect-stdout: [-1.0, 0.5, 2.0, NaN, NaN]\ntrue\nSome(NaN) Some(-1.0)\ntrue true true\nfalse false false\n[-1.0, 0.5, 2.0, NaN]\n
 
 module Test
 

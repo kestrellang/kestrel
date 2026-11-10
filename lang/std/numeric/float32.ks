@@ -1172,6 +1172,7 @@ public struct Float32:
     ///
     /// ```
     /// (3.14159).formatted();                                          // "3.14159"
+    /// (3.0).formatted();                                              // "3.0" (a whole float keeps its ".0")
     /// (3.14159).formatted(.{precision: 2});                  // "3.14"
     /// (1234.5).formatted(.{floatStyle: .Scientific});        // "1.2345e3"
     /// (0.756).formatted(.{floatStyle: .Percent});            // "75.6%"

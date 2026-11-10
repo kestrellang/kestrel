@@ -19,7 +19,7 @@ func toRpn(infix: String) -> String {
         if token == "(" {
             ops.append(token);
         } else if token == ")" {
-            while let some top = ops.pop() {
+            while let some top = ops.popLast() {
                 if top == "(" { break }
                 output.append(top);
             }
@@ -29,7 +29,7 @@ func toRpn(infix: String) -> String {
                 let p = precedence(top);
                 let q = precedence(token);
                 if p > q or (p == q and token != "^") {
-                    output.append(ops.pop() ?? "");
+                    output.append(ops.popLast() ?? "");
                 } else {
                     break
                 }
@@ -39,7 +39,7 @@ func toRpn(infix: String) -> String {
             output.append(token);
         }
     }
-    while let some op = ops.pop() { output.append(op); }
+    while let some op = ops.popLast() { output.append(op); }
     output.joined(by: " ")
 }
 

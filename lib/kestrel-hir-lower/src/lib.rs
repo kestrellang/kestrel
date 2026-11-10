@@ -25,6 +25,7 @@ pub mod source_map;
 mod stmt;
 pub(crate) mod string_token;
 pub(crate) mod syntax;
+mod tuple_assign;
 pub mod ty;
 
 use std::sync::Arc;

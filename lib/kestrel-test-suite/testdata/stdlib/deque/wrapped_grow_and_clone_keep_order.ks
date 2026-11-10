@@ -20,21 +20,21 @@ func show(d: Deque[Int64]) {
 func main() {
     // Capacity 4: pushes at the front and back wrap the ring before it grows.
     var d = Deque[Int64](capacity: 4);
-    d.pushBack(2); d.pushBack(3); d.pushFront(1); d.pushFront(0);
-    for i in 4..<10 { d.pushBack(i); }
+    d.append(2); d.append(3); d.prepend(1); d.prepend(0);
+    for i in 4..<10 { d.append(i); }
     show(d);
 
     var w = Deque[Int64](capacity: 8);
-    for i in 4..<10 { w.pushBack(i); }
-    for i in 0..<4 { w.pushFront(3 - i); }
+    for i in 4..<10 { w.append(i); }
+    for i in 0..<4 { w.prepend(3 - i); }
     var copy = w;
-    copy.pushBack(99);
+    copy.append(99);
     show(copy);
 
     var s = Deque[String](capacity: 4);
-    s.pushBack("c"); s.pushBack("d"); s.pushFront("b"); s.pushFront("a");
+    s.append("c"); s.append("d"); s.prepend("b"); s.prepend("a");
     var s2 = s;
-    s2.pushBack("e"); s2.pushBack("f");
+    s2.append("e"); s2.append("f");
     var first = true;
     for x in s2 { if not first { print(" ") } print(x); first = false; }
     print("\n");

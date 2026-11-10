@@ -18,32 +18,32 @@ module Test
             let r1x = s1.repeated(1);
             if r1x.isEqual(to: "ab") == false { return 3 }
 
-            // ---- padded(leading:with:) ----
+            // ---- padded(toWidth:with:side: .Leading) ----
             let s2: std.text.String = "hi";
-            let ps = s2.padded(leading: 5, with: '0');
+            let ps = s2.padded(toWidth: 5, with: '0', side: .Leading);
             if ps.isEqual(to: "000hi") == false { return 4 }
 
             // Pad when already long enough
             let s3: std.text.String = "hello";
-            let ps2 = s3.padded(leading: 3, with: '0');
+            let ps2 = s3.padded(toWidth: 3, with: '0', side: .Leading);
             if ps2.isEqual(to: "hello") == false { return 5 }
 
-            // ---- padded(trailing:with:) ----
-            let pe = s2.padded(trailing: 5, with: '.');
+            // ---- padded(toWidth:with:) ----
+            let pe = s2.padded(toWidth: 5, with: '.');
             if pe.isEqual(to: "hi...") == false { return 6 }
 
             // Pad end when already long enough
-            let pe2 = s3.padded(trailing: 3, with: '.');
+            let pe2 = s3.padded(toWidth: 3, with: '.');
             if pe2.isEqual(to: "hello") == false { return 7 }
 
             // Pad start with space
             let s4: std.text.String = "42";
-            let padded = s4.padded(leading: 6, with: ' ');
+            let padded = s4.padded(toWidth: 6, with: ' ', side: .Leading);
             if padded.isEqual(to: "    42") == false { return 8 }
             if padded.bytes.count != 6 { return 9 }
 
             // Pad end with space
-            let padded2 = s4.padded(trailing: 6, with: ' ');
+            let padded2 = s4.padded(toWidth: 6, with: ' ');
             if padded2.isEqual(to: "42    ") == false { return 10 }
             if padded2.bytes.count != 6 { return 11 }
 

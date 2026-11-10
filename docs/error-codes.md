@@ -166,7 +166,7 @@ let tiny: Int8 = 200  // error[E121]: integer literal out of range for `Int8`
 | E313 | variant '{name}' takes {expected} argument(s), got {got} | Payload pattern arity doesn't match the enum case. |
 | E314 | tuple pattern has {pat} elements but type has {ty} | Tuple pattern arity doesn't match the matched tuple type. |
 | E315 | inconsistent bindings across or-pattern alternatives | Every `|` alternative must bind the same names with the same types. |
-| E316 *(warning)* | match on \`String\` with {n} literal arms does byte-equality per arm | Large string matches are O(arms × len); consider a different dispatch strategy. |
+| E316 | *(retired)* | String-literal matches no longer warn; an `if` chain costs the same per arm. |
 | E317 | only one rest pattern (\`..\`) is allowed per tuple pattern | A tuple pattern can elide one run of elements, not two. |
 | E318 | invalid range bounds: start must be less than or equal to end | A range pattern whose bounds are reversed matches nothing. |
 | E319 | nested @ patterns are not allowed | `a @ (b @ p)` — bind one name per pattern. |
@@ -206,7 +206,7 @@ func unwrap(opt: Int64?) -> Int64 {
 | E418 | '{name}' cannot be static in this context | `static` is not allowed at module level. |
 | E419 | @builtin(.{feature}) must be a marker protocol (no required methods or types) | Builtin language-feature protocols cannot declare requirements. |
 | E420 | fields of '{type_name}' do not conform to '{protocol}' | A field-checked conformance (e.g. `FFISafe`) requires every stored field to conform too. |
-| E421 | '{type_name}' conforms to '{child_protocol}' but not its parent '{parent_protocol}' | Conforming to a child protocol requires conforming to the protocols it inherits from. |
+| E421 | *(retired)* | Conforming to a child protocol now conforms to its parents; a missing parent requirement is E454. |
 | E422 | enum '{enum_name}' cannot conform to protocol '{protocol_name}' | This protocol is restricted to non-enum types. |
 | E423 | cannot conform to \`{protocol_name}\` and opt out of \`Copyable\` | A conformance that requires `Copyable` conflicts with `: not Copyable`. |
 | E424 | '{name}' is not a language feature protocol | `not P` (negative conformance) is only allowed for language-feature protocols like `Copyable`. |

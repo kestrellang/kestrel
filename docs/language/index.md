@@ -15,6 +15,7 @@ Welcome to the Kestrel programming language documentation.
 - **[Functions](functions.md)** - Function declarations, parameters, and methods
 - **[Closures](closures.md)** - First-class functions, captures, and the four closure kinds
 - **[Protocols](protocols.md)** - Traits and interfaces
+- **[Deriving Conformances](derive.md)** - `@derive(Equatable, Hashable, ...)`
 - **[Generics](generics.md)** - Parametric polymorphism
 - **[Opaque Types](opaque-types.md)** - `some Protocol` return types
 - **[Pattern Matching](pattern-matching.md)** - Destructuring and matching

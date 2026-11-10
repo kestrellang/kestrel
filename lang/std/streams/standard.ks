@@ -6,6 +6,7 @@ import std.numeric.(Int64, UInt8)
 import std.result.(Result, Optional)
 import std.collections.(Array, Slice)
 import std.text.(String, Formattable)
+import std.core.(fatalError)
 
 // ============================================================================
 // STANDARD INPUT
@@ -46,7 +47,7 @@ public struct StandardInput: Readable {
             return .Ok(.None)
         }
         if bytes.count > 0 and unsafe bytes(unchecked: bytes.count - 1) == 13 {
-            bytes.pop();
+            bytes.popLast();
         }
         .Ok(.Some(String(fromUtf8Lossy: bytes.asSlice())))
     }
@@ -130,35 +131,58 @@ public func standardError() -> StandardError { StandardError() }
 // ============================================================================
 
 /// Writes `value` to standard output.
-public func print(value: some Formattable and not Static) -> Result[(), IoError] {
+///
+/// Printing can't fail quietly: if the write fails (say, standard output is
+/// a file on a full disk), the process stops with a fatal error. To handle the error
+/// instead, write through `standardOutput()`.
+public func print(value: some Formattable and not Static) {
     var out = StandardOutput();
-    out.write(formatted: value)
+    expectPrinted(out.write(formatted: value));
 }
 
-/// Writes `value` and a `"\n"` to standard output.
-public func println(value: some Formattable and not Static) -> Result[(), IoError] {
+/// Writes `value` and a `"\n"` to standard output. Stops the process with a
+/// fatal error if the write fails, like `print`.
+public func println(value: some Formattable and not Static) {
     var out = StandardOutput();
-    try out.write(formatted: value);
-    out.write(byte: 10)
+    expectPrinted(out.write(formatted: value));
+    expectPrinted(out.write(byte: 10));
 }
 
-/// Writes a `"\n"` to standard output.
-public func println() -> Result[(), IoError] {
+/// Writes a `"\n"` to standard output. Stops the process with a fatal error
+/// if the write fails, like `print`.
+public func println() {
     var out = StandardOutput();
-    out.write(byte: 10)
+    expectPrinted(out.write(byte: 10));
 }
 
-/// Writes `value` to standard error.
-public func eprint(value: some Formattable and not Static) -> Result[(), IoError] {
+/// Writes `value` to standard error. If the write fails, the process traps:
+/// there is nowhere left to report the error.
+public func eprint(value: some Formattable and not Static) {
     var err = StandardError();
-    err.write(formatted: value)
+    expectReported(err.write(formatted: value));
 }
 
-/// Writes `value` and a `"\n"` to standard error.
-public func eprintln(value: some Formattable and not Static) -> Result[(), IoError] {
+/// Writes `value` and a `"\n"` to standard error. Traps if the write fails,
+/// like `eprint`.
+public func eprintln(value: some Formattable and not Static) {
     var err = StandardError();
-    try err.write(formatted: value);
-    err.write(byte: 10)
+    expectReported(err.write(formatted: value));
+    expectReported(err.write(byte: 10));
+}
+
+/// Stops the process when a print to standard output failed.
+fileprivate func expectPrinted(result: Result[(), IoError]) {
+    if let .Err(e) = result {
+        fatalError("failed printing to standard output: \(e)")
+    }
+}
+
+/// Traps when a write to standard error failed. `fatalError` would write
+/// to standard error again, so this traps without a message.
+fileprivate func expectReported(result: Result[(), IoError]) {
+    if result.isErr {
+        lang.panic()
+    }
 }
 
 /// Reads a line from standard input. `None` at end of input.

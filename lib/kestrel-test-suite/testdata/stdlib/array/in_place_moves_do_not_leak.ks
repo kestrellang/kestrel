@@ -34,7 +34,7 @@ func report(label: String) {
 func swapCase() { var xs = make([1, 2]); xs.swap(at: 0, with: 1); }
 func reverseCase() { var xs = make([1, 2, 3]); xs.reverse(); }
 func insertCase() { var xs = make([1, 2, 3]); xs.insert(Tracked(n: 0), at: 0); }
-func popCase() { var xs = make([1, 2, 3]); let _ = xs.pop(); }
+func popCase() { var xs = make([1, 2, 3]); let _ = xs.popLast(); }
 func removeSubrangeCase() { var xs = make([1, 2, 3, 4]); xs.removeSubrange(1..<3); }
 func replaceShrinkCase() { var xs = make([1, 2, 3, 4]); xs.replaceSubrange(1..<3, with: make([9])); }
 func replaceGrowCase() { var xs = make([1, 2, 3, 4]); xs.replaceSubrange(1..<2, with: make([8, 9, 10])); }

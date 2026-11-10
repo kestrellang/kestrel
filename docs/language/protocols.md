@@ -692,7 +692,7 @@ struct Handle: Disposable {
 
 ### Inherited Protocol Requirements
 
-When conforming to a child protocol, must also explicitly conform to parent protocols:
+Conforming to a child protocol conforms to its parents too; they don't need to be listed again. Their requirements still have to be implemented (E454 otherwise):
 
 ```kestrel
 protocol Drawable {
@@ -703,18 +703,16 @@ protocol Shape: Drawable {
     func area() -> Int
 }
 
-struct Circle: Shape {
+struct Circle: Shape {      // also a Drawable
     func draw() { }
     func area() -> Int { 42 }
 }
-// Error: conforms to 'Shape' but not its parent protocol 'Drawable'
 
-// Correct:
-struct Circle: Drawable, Shape {
-    func draw() { }
-    func area() -> Int { 42 }
-}
+func render[T](x: T) where T: Drawable { x.draw() }
+render(Circle());           // OK
 ```
+
+Listing a parent anyway (`struct Circle: Drawable, Shape`) is allowed and means the same thing.
 
 ### Associated Type Conflicts
 
@@ -774,7 +772,6 @@ Common protocol-related errors:
 | Wrong parameter count | "does not implement method 'methodName'" |
 | Wrong label | "does not implement method 'methodName'" |
 | Receiver kind mismatch | "receiver kind mismatch" |
-| Missing parent conformance | "conforms to 'Child' but not its parent protocol 'Parent'" |
 | Conflicting associated type | "conflicting associated type 'TypeName'" |
 | Duplicate protocol method | "ambiguous method 'methodName'" |
 | Missing associated type | "does not provide associated type 'TypeName'" |
@@ -957,3 +954,4 @@ struct RangeIterator: Iterator {
 - [Generics](generics.md) - Generic programming with type parameters and constraints
 - [Enums](enums.md) - Enumerated types that can also conform to protocols
 - [Semantics](semantics.md) - Memory model and type system behavior
+- [Deriving Conformances](derive.md) - `@derive` writes `Equatable`, `Hashable`, `Formattable` and others for you

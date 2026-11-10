@@ -355,7 +355,17 @@ fn postfix(p: &mut Parser<'_>, cond: bool) -> Option<ExprInfo> {
     let mut binds = false;
     let info = if cond {
         let chain = cond_primary(p)?;
-        let chain = tight_ops(p, chain, true, &mut binds);
+        let mut chain = tight_ops(p, chain, true, &mut binds);
+        // A condition's `{` is normally its body; it is a trailing closure
+        // only when the body brace still follows: `match xs.find { … } {`.
+        while at_cond_trailing_closure(p) {
+            let before = p.token_pos();
+            chain = trailing_closures(p, chain, at_cond_trailing_closure);
+            if p.token_pos() == before {
+                break; // this operand takes no closure (`5 { … } {`)
+            }
+            chain = tight_ops(p, chain, true, &mut binds);
+        }
         close(p, chain)
     } else if at_stmt_like(p) {
         let info = stmt_like(p);
@@ -367,7 +377,7 @@ fn postfix(p: &mut Parser<'_>, cond: bool) -> Option<ExprInfo> {
         // Each link of a `.member` chain, on this line or a later one, may
         // take trailing closures: `xs.filter { … }.map { … }`.
         loop {
-            chain = trailing_closures(p, chain);
+            chain = trailing_closures(p, chain, at_trailing_closure);
             // A `.` on a later line never continues a bare `{ … }`: in a
             // match it starts the next arm's pattern (`=> { … }` then `.Nil =>`).
             if !p.at(K::Dot) || matches!(chain, Chain::Done(_, K::ExprClosure)) {
@@ -524,11 +534,47 @@ fn at_trailing_closure(p: &Parser<'_>) -> bool {
         && !p.nth_nl_before(2)
 }
 
+/// In a condition (`if`/`while`/`match`/`for` head), a same-line `{ … }` is
+/// a trailing closure only if the head goes on, on that line, to another
+/// `{` — the body. Anything that ends an expression first (`;`, `,`, `=`,
+/// `=>`, `else`, a closer, a line break) means this `{` is the body.
+fn at_cond_trailing_closure(p: &Parser<'_>) -> bool {
+    if !p.at(K::LBrace) || p.nl_before() {
+        return false;
+    }
+    let Some(close) = p.closer_of(p.token_pos()) else {
+        return false;
+    };
+    let mut i = close + 1;
+    while !p.nl_before_at(i) {
+        match p.kind_at(i) {
+            Some(K::LBrace) => return true,
+            Some(K::LParen | K::LBracket) => match p.closer_of(i) {
+                Some(c) => i = c + 1,
+                None => return false,
+            },
+            Some(
+                K::Semicolon
+                | K::Comma
+                | K::Equals
+                | K::FatArrow
+                | K::Else
+                | K::RBrace
+                | K::RParen
+                | K::RBracket,
+            )
+            | None => return false,
+            Some(_) => i += 1,
+        }
+    }
+    false
+}
+
 /// Attach trailing closures. They join an open call's argument list (after
 /// its `)`, in source order) or turn a path into a call; other operands take
-/// none.
-fn trailing_closures(p: &mut Parser<'_>, chain: Chain) -> Chain {
-    if !at_trailing_closure(p) {
+/// none. `at` says whether the cursor starts one.
+fn trailing_closures(p: &mut Parser<'_>, chain: Chain, at: fn(&Parser<'_>) -> bool) -> Chain {
+    if !at(p) {
         return chain;
     }
     let (call, args) = match chain {
@@ -539,7 +585,7 @@ fn trailing_closures(p: &mut Parser<'_>, chain: Chain) -> Chain {
             (info.cm.precede(p), p.start())
         },
     };
-    while at_trailing_closure(p) {
+    while at(p) {
         let a = p.start();
         if p.at(K::Identifier) {
             p.bump(K::Identifier);
@@ -608,7 +654,7 @@ fn primary(p: &mut Parser<'_>) -> Option<Chain> {
 /// chain like any primary. Outside arguments it is E811; the node is still
 /// built so recovery sees one operand.
 fn placeholder_use(p: &mut Parser<'_>) -> ExprInfo {
-    if !p.in_arguments() {
+    if !p.in_arguments() && !at_bare_tuple_element(p) {
         let range = p.range_of(p.token_pos());
         p.push_error(SyntaxError::new(
             codes::MISPLACED_PLACEHOLDER,
@@ -620,6 +666,16 @@ fn placeholder_use(p: &mut Parser<'_>) -> ExprInfo {
     let m = start2(p);
     p.bump(K::Underscore);
     finish2(p, m, K::ExprPlaceholderUse)
+}
+
+/// `_` alone as a tuple element: `(a, _) = pair()` discards that part. Only
+/// an assignment target can say that, which lowering knows and the parser
+/// doesn't, so lowering reports E811 for every other use.
+fn at_bare_tuple_element(p: &Parser<'_>) -> bool {
+    let pos = p.token_pos();
+    let after = p.nth_at(1, K::Comma) || p.nth_at(1, K::RParen);
+    let before = pos > 0 && matches!(p.kind_at(pos - 1), Some(K::LParen | K::Comma));
+    after && before
 }
 
 fn cond_primary(p: &mut Parser<'_>) -> Option<Chain> {
@@ -879,7 +935,7 @@ fn implicit_member(p: &mut Parser<'_>) -> ExprInfo {
     finish2(p, m, K::ExprImplicitMemberAccess)
 }
 
-/// `{ (params) in body }` or `{ body }`.
+/// `{ (params) in body }`, `{ a, b in body }` or `{ body }`.
 /// A closure literal resets the argument depth: `_` in its body is not a
 /// placeholder of an enclosing call (`f({ _.x })` is E811; use `it`).
 pub(super) fn closure(p: &mut Parser<'_>) -> ExprInfo {
@@ -889,11 +945,47 @@ pub(super) fn closure(p: &mut Parser<'_>) -> ExprInfo {
     if p.at(K::LParen) && at_closure_params(p) {
         closure_params(p);
         p.expect(K::In);
+    } else if let Some(count) = bare_closure_param_count(p) {
+        bare_closure_params(p, count);
+        p.bump(K::In);
     }
     blocks::block_items(p, BlockFlavor::Closure);
     p.expect(K::RBrace);
     p.set_arg_depth(depth);
     finish2(p, m, K::ExprClosure)
+}
+
+/// Shorthand parameters without parentheses: `{ c in … }`, `{ a, b in … }`,
+/// `{ _ in … }`. Names and `_` only (types need the parenthesized form).
+/// Returns how many there are when the list ends in `in`.
+fn bare_closure_param_count(p: &Parser<'_>) -> Option<usize> {
+    let mut n = 0;
+    loop {
+        if !p.at_any_nth(2 * n, &[K::Identifier, K::Underscore]) {
+            return None;
+        }
+        n += 1;
+        match p.nth(2 * n - 1) {
+            Some(K::In) => return Some(n),
+            Some(K::Comma) => {},
+            _ => return None,
+        }
+    }
+}
+
+/// `a, b` before `in`, as the same `ClosureParams` node the parenthesized
+/// form builds.
+fn bare_closure_params(p: &mut Parser<'_>, count: usize) {
+    let m = p.start();
+    for i in 0..count {
+        if i > 0 {
+            p.bump(K::Comma);
+        }
+        let param = p.start();
+        param_pattern(p);
+        param.complete(p, K::ClosureParam);
+    }
+    m.complete(p, K::ClosureParams);
 }
 
 /// The `(` at the cursor closes on a `)` that is followed by `in`.

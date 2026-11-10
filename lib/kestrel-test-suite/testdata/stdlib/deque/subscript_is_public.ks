@@ -8,9 +8,9 @@ module Test
 @main
 func main() -> lang.i64 {
     var d = std.collections.Deque[std.numeric.Int64]();
-    d.pushBack(20);
-    d.pushBack(30);
-    d.pushFront(10);
+    d.append(20);
+    d.append(30);
+    d.prepend(10);
     if d(0) != 10 { return 1 }
     if d(1) != 20 { return 2 }
     if d(2) != 30 { return 3 }

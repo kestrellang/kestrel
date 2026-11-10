@@ -22,7 +22,7 @@ module Test
             if arr.last.unwrap() != 30 { return 5 }
 
             // Test pop
-            let popped = arr.pop();
+            let popped = arr.popLast();
             if popped.unwrap() != 30 { return 6 }
             if arr.count != 2 { return 7 }
 

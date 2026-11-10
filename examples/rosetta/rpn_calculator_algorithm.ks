@@ -10,8 +10,8 @@ func evaluate(expr: String) -> Float64 {
         if let some x = Float64(parsing: token) {
             stack.append(x);
         } else {
-            let b = stack.pop() ?? 0.0;
-            let a = stack.pop() ?? 0.0;
+            let b = stack.popLast() ?? 0.0;
+            let a = stack.popLast() ?? 0.0;
             let r: Float64 = match token {
                 "+" => a + b,
                 "-" => a - b,
@@ -24,7 +24,7 @@ func evaluate(expr: String) -> Float64 {
         }
         println("\(token:<6) \(stack)");
     }
-    stack.pop() ?? 0.0
+    stack.popLast() ?? 0.0
 }
 
 @main

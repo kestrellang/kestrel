@@ -10,7 +10,7 @@ func floyd(rows: Int64) {
     for row in 1..=rows {
         var cells = Array[String]();
         for col in 0..<row {
-            cells.append("\(n)".padded(leading: widths(col), with: ' '));
+            cells.append("\(n)".padded(toWidth: widths(col), side: .Leading));
             n = n + 1;
         }
         println(cells.joined(by: " "));

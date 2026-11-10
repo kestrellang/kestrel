@@ -23,7 +23,7 @@ func main() {
         if y > 0 and not visited(cell - w) { options.append(cell - w); }
         if y < h - 1 and not visited(cell + w) { options.append(cell + w); }
         if options.isEmpty {
-            stack.pop();
+            stack.popLast();
             continue
         }
         let next = options(Int64.random(in: 0..<options.count, using: rng));
