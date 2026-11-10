@@ -1580,6 +1580,7 @@ fn gen_pat(
         HirPat::Literal { value, span, .. } => {
             let lit_tv = literal_to_tyvar(ctx, value);
             ctx.equal(lit_tv, scrutinee_tv, span.clone());
+            ctx.literal_pats.insert(pat_id, scrutinee_tv);
         },
 
         HirPat::Tuple {
@@ -1681,8 +1682,10 @@ fn gen_pat(
 
         HirPat::Range { span, .. } => {
             // Range patterns constrain the scrutinee to be the literal type
-            // For now, just accept — range pattern types are validated later
+            // For now, just accept — range pattern types are validated later.
+            // Its bounds are range-checked against the scrutinee's type.
             let _ = span;
+            ctx.literal_pats.insert(pat_id, scrutinee_tv);
         },
 
         HirPat::At {

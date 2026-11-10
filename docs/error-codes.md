@@ -73,8 +73,8 @@ the type checker, and the code is assigned in one place,
 | E110 | duplicate binding '{name}' in parameter pattern | The same name is bound twice in one parameter's destructuring pattern. |
 | E111 | tuple pattern has {n} elements but type has {m} | A tuple-destructuring parameter doesn't match the tuple type's arity. |
 | E112 | tuple pattern used with non-tuple type | A parameter uses tuple destructuring but its type is not a tuple. |
-| E120 | character literal '{c}' is not ASCII, so it is not one \`{type}\` byte | A character literal typed as an integer (`let b: UInt8 = 'é'`) must be ASCII; a wider character is several UTF-8 bytes. Pattern position isn't checked yet. |
-| E121 | integer literal out of range for \`{type}\` | The literal cannot be represented by the resolved integer type; it would silently wrap. |
+| E120 | character literal '{c}' is not ASCII, so it is not one \`{type}\` byte | A character literal typed as an integer (`let b: UInt8 = 'é'`) must be ASCII; a wider character is several UTF-8 bytes. Patterns are checked too. |
+| E121 | integer literal out of range for \`{type}\` | The literal cannot be represented by the resolved integer type; it would silently wrap. Pattern literals and range bounds are checked against the matched type. |
 | E122 | unsupported unary operator '{op}' | The operator's protocol lang item (`@builtin(.…OperatorProtocol)`) is missing — usually the standard library is not imported. |
 | E124 | unsupported postfix operator '{op}' | Same, for a postfix operator. |
 | E125 | unsupported binary operator '{op}' | Same, for a binary operator. |

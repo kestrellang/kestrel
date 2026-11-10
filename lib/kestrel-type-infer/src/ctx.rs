@@ -401,6 +401,10 @@ pub struct InferCtx<'a> {
     /// Surfaced on `TypedBody.type_tests`.
     pub(crate) type_tests: HashMap<kestrel_hir::body::HirPatId, TyVar>,
 
+    /// Literal and range patterns, keyed by pattern, with the type of the
+    /// value they match. Surfaced on `TypedBody.literal_pat_types`.
+    pub(crate) literal_pats: HashMap<kestrel_hir::body::HirPatId, TyVar>,
+
     /// HirExprIds of closure-*literal* expressions, recorded during constraint
     /// generation. `solve_call` uses this to gate the no-annotation `MutBorrow`
     /// convention upgrade to literals only — a named function value's
@@ -578,6 +582,7 @@ impl<'a> InferCtx<'a> {
             field_callee_types: HashMap::default(),
             existential_conversions: HashMap::default(),
             type_tests: HashMap::default(),
+            literal_pats: HashMap::default(),
             closure_literal_exprs: HashSet::default(),
             never_fallback_targets: HashSet::default(),
             expectation: None,

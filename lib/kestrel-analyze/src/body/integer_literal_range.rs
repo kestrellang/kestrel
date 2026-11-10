@@ -25,7 +25,9 @@
 //! **Labels:**
 //! - Primary: the literal expression (or the `-literal` operator expression)
 //!   - Span source: `util::expr_span` on the literal `HirExprId`, or on the
-//!     `negate` `ProtocolCall` `HirExprId` when the literal is negated
+//!     `negate` `ProtocolCall` `HirExprId` when the literal is negated;
+//!     `util::pat_span` on a literal / range `HirPatId` (types from
+//!     `TypedBody::literal_pat_types`)
 //!   - Message: "{value} is not in the range {min}...{max}"
 //!
 //! **Notes:** (none)
@@ -40,7 +42,8 @@
 //!
 //! **Labels:**
 //! - Primary: the character literal
-//!   - Span source: `util::expr_span` on the literal `HirExprId`
+//!   - Span source: `util::expr_span` on the literal `HirExprId`, or
+//!     `util::pat_span` on a literal / range `HirPatId`
 //!   - Message: "U+{scalar} is outside '\\0'...'\\x7F'"
 //!
 //! **Notes:**
@@ -52,6 +55,7 @@ use crate::traits::{AnalyzerId, BodyCheck, Describe};
 use crate::util;
 use kestrel_ast_builder::Name;
 use kestrel_hir::body::*;
+use kestrel_span::Span;
 use kestrel_type_infer::result::ResolvedTy;
 use std::collections::HashSet;
 
@@ -112,7 +116,13 @@ impl BodyCheck for IntegerLiteralRangeAnalyzer {
             };
             negated.insert(*receiver);
             if let Some(ty) = cx.typed.expr_types.get(receiver) {
-                check_range(cx, v.wrapping_neg(), ty, call_id, &mut diags);
+                check_range(
+                    cx,
+                    v.wrapping_neg(),
+                    ty,
+                    util::expr_span(cx.hir, call_id),
+                    &mut diags,
+                );
             }
         }
 
@@ -127,14 +137,49 @@ impl BodyCheck for IntegerLiteralRangeAnalyzer {
             };
             match value {
                 HirLiteral::Integer(v) if !negated.contains(&id) => {
-                    check_range(cx, *v, ty, id, &mut diags)
+                    check_range(cx, *v, ty, util::expr_span(cx.hir, id), &mut diags)
                 },
-                HirLiteral::Char { value: c, .. } => check_byte_char(cx, *c, ty, id, &mut diags),
+                HirLiteral::Char { .. } => {
+                    check_literal(cx, value, ty, util::expr_span(cx.hir, id), &mut diags)
+                },
                 _ => {},
             }
         }
 
+        // Pass 3: literal and range patterns, against the type of the value
+        // they match (`match b { 'ü' => .. }` on a `UInt8`). A pattern's
+        // `-1` is already a negative literal, so no negate pass is needed.
+        for (&pat_id, ty) in &cx.typed.literal_pat_types {
+            let span = util::pat_span(cx.hir, pat_id);
+            match &cx.hir.pats[pat_id] {
+                HirPat::Literal { value, .. } => check_literal(cx, value, ty, span, &mut diags),
+                HirPat::Range { start, end, .. } => {
+                    for bound in [start, end].into_iter().flatten() {
+                        check_literal(cx, bound, ty, span.clone(), &mut diags);
+                    }
+                },
+                _ => {},
+            }
+        }
+        // Pattern ids come from a HashMap; report in source order.
+        diags.sort_by_key(|d| d.labels.first().map(|l| (l.span.start, l.span.end)));
+
         diags
+    }
+}
+
+/// Range-check one integer or character literal against `ty`.
+fn check_literal(
+    cx: &BodyContext<'_>,
+    value: &HirLiteral,
+    ty: &ResolvedTy,
+    span: Span,
+    diags: &mut Vec<AnalyzeDiagnostic>,
+) {
+    match value {
+        HirLiteral::Integer(v) => check_range(cx, *v, ty, span, diags),
+        HirLiteral::Char { value: c, .. } => check_byte_char(cx, *c, ty, span, diags),
+        _ => {},
     }
 }
 
@@ -144,7 +189,7 @@ fn check_range(
     cx: &BodyContext<'_>,
     value: i128,
     ty: &ResolvedTy,
-    site: HirExprId,
+    span: Span,
     diags: &mut Vec<AnalyzeDiagnostic>,
 ) {
     let Some((min, max, type_name)) = int_type_bounds(cx, ty) else {
@@ -158,7 +203,7 @@ fn check_range(
         severity: DESCRIPTORS[0].default_severity,
         message: format!("integer literal out of range for `{}`", type_name),
         labels: vec![DiagLabel {
-            span: util::expr_span(cx.hir, site),
+            span,
             message: format!("{} is not in the range {}...{}", value, min, max),
             is_primary: true,
         }],
@@ -172,7 +217,7 @@ fn check_byte_char(
     cx: &BodyContext<'_>,
     scalar: u32,
     ty: &ResolvedTy,
-    site: HirExprId,
+    span: Span,
     diags: &mut Vec<AnalyzeDiagnostic>,
 ) {
     if scalar <= 0x7F {
@@ -190,7 +235,7 @@ fn check_byte_char(
             shown, type_name
         ),
         labels: vec![DiagLabel {
-            span: util::expr_span(cx.hir, site),
+            span,
             message: format!("U+{:04X} is outside '\\0'...'\\x7F'", scalar),
             is_primary: true,
         }],
