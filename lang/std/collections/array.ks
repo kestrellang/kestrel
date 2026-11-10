@@ -1893,38 +1893,6 @@ extend Array[T, A] where T: Iterable {
     }
 }
 
-/// String-joining for arrays whose elements are `Formattable`.
-extend Array[T, A] where T: Formattable {
-    /// Concatenates each element's string representation, separated by
-    /// `separator`.
-    ///
-    /// Each element is rendered with its `format()` method using default
-    /// `FormatOptions`. The default `separator` is empty (raw
-    /// concatenation). Empty arrays produce `""`. For the bracketed
-    /// debug form (`"[1, 2, 3]"`), use `format()` directly.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// [1, 2, 3].joined(by: ", ");  // "1, 2, 3"
-    /// [1, 2, 3].joined();           // "123"
-    /// ["a", "b"].joined(by: "-");   // "a-b"
-    /// [].joined(by: ", ");          // ""
-    /// ```
-    public func joined(by separator: String = "") -> String {
-        if self.count == 0 {
-            return ""
-        }
-        var b = StringBuilder();
-        unsafe self(unchecked: 0).format(into: b);
-        for i in 1..<self.count {
-            b.append(separator);
-            unsafe self(unchecked: i).format(into: b)
-        }
-        b.build()
-    }
-}
-
 /// Renders as `"[e1, e2, ...]"`, so arrays work in string interpolation and
 /// `print`. The `format` witness comes from `extend Sliceable[T] where
 /// T: Formattable`.
