@@ -206,7 +206,7 @@ func unwrap(opt: Int64?) -> Int64 {
 | E418 | '{name}' cannot be static in this context | `static` is not allowed at module level. |
 | E419 | @builtin(.{feature}) must be a marker protocol (no required methods or types) | Builtin language-feature protocols cannot declare requirements. |
 | E420 | fields of '{type_name}' do not conform to '{protocol}' | A field-checked conformance (e.g. `FFISafe`) requires every stored field to conform too. |
-| E421 | '{type_name}' conforms to '{child_protocol}' but not its parent '{parent_protocol}' | Conforming to a child protocol requires conforming to the protocols it inherits from. |
+| E421 | *(retired)* | Conforming to a child protocol now conforms to its parents; a missing parent requirement is E454. |
 | E422 | enum '{enum_name}' cannot conform to protocol '{protocol_name}' | This protocol is restricted to non-enum types. |
 | E423 | cannot conform to \`{protocol_name}\` and opt out of \`Copyable\` | A conformance that requires `Copyable` conflicts with `: not Copyable`. |
 | E424 | '{name}' is not a language feature protocol | `not P` (negative conformance) is only allowed for language-feature protocols like `Copyable`. |

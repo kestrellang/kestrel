@@ -108,7 +108,6 @@ pub fn default_analyzers() -> AnalyzerRegistry {
     r.add_decl_check(decl::recursive_enum::RecursiveEnumAnalyzer);
     r.add_decl_check(decl::opaque_cycle::OpaqueCycleAnalyzer);
     r.add_decl_check(decl::unsafe_field::UnsafeFieldAnalyzer);
-    r.add_decl_check(decl::parent_protocol_conformance::ParentProtocolConformanceAnalyzer);
     r.add_decl_check(decl::protocol_field_conformance::ProtocolFieldConformanceAnalyzer);
     r.add_decl_check(decl::generics::GenericsAnalyzer);
     r.add_decl_check(decl::generics::TypeArgArityAnalyzer);
