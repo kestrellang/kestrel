@@ -1608,8 +1608,7 @@ extend Array[T, A] where T: Equatable {
     ///
     /// Only adjacent duplicates collapse — non-adjacent equal values are
     /// kept. To deduplicate globally, `sort()` first or, for `Hashable`
-    /// elements, use the `unique()` / `removeDuplicates()` extension
-    /// methods. The non-mutating variant is `deduped()`.
+    /// elements, use `unique()`. The non-mutating variant is `deduped()`.
     ///
     /// # Examples
     ///
@@ -1752,26 +1751,6 @@ extend Array[T, A]: Hashable where T: Hashable {
         for i in 0..<self.count {
             unsafe self(unchecked: i).hash(into: hasher);
         }
-    }
-}
-
-extend Array[T, A] where T: Hashable {
-    /// Removes every duplicate in place, keeping the first occurrence.
-    ///
-    /// Implemented by replacing storage with the result of `unique()`,
-    /// so it's O(n) expected. The non-mutating mirror is `unique()`.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// var arr = [1, 2, 1, 3, 2];
-    /// arr.removeDuplicates();  // [1, 2, 3]
-    /// ```
-    public mutating func removeDuplicates() {
-        // Refill in place so the array keeps its own allocator.
-        let kept = self.unique();
-        self.clear();
-        self.append(contentsOf: kept)
     }
 }
 

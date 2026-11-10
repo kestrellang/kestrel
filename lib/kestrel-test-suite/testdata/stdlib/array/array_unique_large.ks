@@ -14,7 +14,6 @@ func main() {
     for i in 0..<100000 { big.append(i % 50000) }
     let u = big.unique();
     println("\(u.count) \(u(0)) \(u(49999))");
-    var r = [7, 7, 7];
-    r.removeDuplicates();
-    println(r);
+    let r = [7, 7, 7];
+    println(r.unique());
 }

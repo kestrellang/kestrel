@@ -194,7 +194,7 @@ func handleCheck() -> lang.i32 {
 }
 
 func handleInit(lib lib: Bool) -> lang.i32 {
-    let cwd = Environment.currentDirectory().unwrap(or: String());
+    let cwd = Environment.currentDirectory().map { p in p.string }.unwrap(or: String());
     let manifestPath = joinPath(base: cwd, rel: "flock.toml");
 
     if Path(manifestPath).exists() {
@@ -273,7 +273,7 @@ func sanitizeModuleName(name name: String) -> String {
 }
 
 func handlePublish() -> lang.i32 {
-    let cwd = Environment.currentDirectory().unwrap(or: String());
+    let cwd = Environment.currentDirectory().map { p in p.string }.unwrap(or: String());
     let manifestPath = joinPath(base: cwd, rel: "flock.toml");
 
     if not Path(manifestPath).exists() {
@@ -402,7 +402,7 @@ func handlePublish() -> lang.i32 {
 }
 
 func handleUpdate() -> lang.i32 {
-    let cwd = Environment.currentDirectory().unwrap(or: String());
+    let cwd = Environment.currentDirectory().map { p in p.string }.unwrap(or: String());
     let lockPath = joinPath(base: cwd, rel: "flock.lock");
 
     // Delete existing lock file to force re-resolution
@@ -482,7 +482,7 @@ func handleInstall(target target: String?, binFlag binFlag: String?, force force
 /// registry package `<org>/<pkg>[@version]`, or a local directory path.
 func resolveInstallRoot(target target: String?) -> ResolvedPackage throws FlockError {
     match target {
-        .None => loadLocalPackage(rootDir: Environment.currentDirectory().unwrap(or: String())),
+        .None => loadLocalPackage(rootDir: Environment.currentDirectory().map { p in p.string }.unwrap(or: String())),
         .Some(t) => {
             if not isRegistryName(name: t) {
                 // A bare (non-`org/pkg`) target is treated as a local path.
@@ -513,7 +513,7 @@ func resolveInstallRoot(target target: String?) -> ResolvedPackage throws FlockE
             }
             let regUrl = resolveRegistryUrl(projectUrl: .None);
             let regSrc = RegistrySource(config: RegistryConfig(url: regUrl));
-            regSrc.resolve(name: name, spec: DependencySpec.Registry(constraint), baseDir: Environment.currentDirectory().unwrap(or: String()))
+            regSrc.resolve(name: name, spec: DependencySpec.Registry(constraint), baseDir: Environment.currentDirectory().map { p in p.string }.unwrap(or: String()))
         }
     }
 }
@@ -799,7 +799,7 @@ func writeLockFile(cwd cwd: String, rootName rootName: String, nodes nodes: Arra
 /// Reads the current package, resolves + discovers everything, writes the lock
 /// file, and returns the build set (shared sources + binary targets).
 func resolveAndDiscover() -> ResolvedBuild throws FlockError {
-    let cwd = Environment.currentDirectory().unwrap(or: String());
+    let cwd = Environment.currentDirectory().map { p in p.string }.unwrap(or: String());
     match loadLocalPackage(rootDir: cwd) {
         .Err(e) => throw e,
         .Ok(root) => {

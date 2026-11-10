@@ -144,7 +144,8 @@ _Defined in `lang/std/system/process.ks`._
 mutating func finish(Optional[Int64]) -> Result[ExitStatus, IoError]
 ```
 
-`wait()`, or a timed wait that kills the child when time runs out.
+`wait()`, or a timed wait that kills the child when time runs out
+and reports `.TimedOut`.
 
 _Defined in `lang/std/system/process.ks`._
 
@@ -173,6 +174,16 @@ public mutating func kill() -> Result[(), IoError]
 ```
 
 Stops the child at once (`SIGKILL`). It can't be caught or ignored.
+
+_Defined in `lang/std/system/process.ks`._
+
+#### function `killForTimeout`
+
+```kestrel
+mutating func killForTimeout()
+```
+
+Kills and reaps a child that outlived its timeout.
 
 _Defined in `lang/std/system/process.ks`._
 
@@ -288,8 +299,8 @@ public mutating func wait(for: Duration) -> Result[Optional[ExitStatus], IoError
 ```
 
 Waits up to `duration` for the child to exit, as in
-`child.wait(for: .seconds(1))`. `None` if it is
-still running when the time is up; the child is left running.
+`child.wait(for: .seconds(1))`. `None` if it is still running when
+the time is up; the child is left running.
 
 _Defined in `lang/std/system/process.ks`._
 
@@ -301,6 +312,16 @@ public mutating func waitForOutput() -> Result[Output, IoError]
 
 Reads all of standard output and error (whichever were piped) and
 waits for the child to exit.
+
+_Defined in `lang/std/system/process.ks`._
+
+#### function `waitMilliseconds`
+
+```kestrel
+mutating func waitMilliseconds(Int64) -> Result[Optional[ExitStatus], IoError]
+```
+
+`wait(for:)` in whole milliseconds, for std's own deadlines.
 
 _Defined in `lang/std/system/process.ks`._
 
@@ -367,8 +388,6 @@ _Defined in `lang/std/system/process.ks`._
 func childEnvironment() -> Optional[NativeStringArray]
 ```
 
-The child's `envp`, or `None` to inherit this process's unchanged.
-
 _Defined in `lang/std/system/process.ks`._
 
 #### function `clearEnvironment`
@@ -393,7 +412,7 @@ _Defined in `lang/std/system/process.ks`._
 #### function `directory`
 
 ```kestrel
-public mutating func directory(String) -> &mutating Command
+public mutating func directory(Path) -> &mutating Command
 ```
 
 Runs the child in `path` instead of the current directory.
@@ -435,6 +454,18 @@ public static func find(String) -> Optional[String]
 The path `program` resolves to on `PATH`, or `None` if no executable
 by that name is found. A name containing `/` is returned as-is when
 that file is executable.
+
+_Defined in `lang/std/system/process.ks`._
+
+#### function `hasNulByte`
+
+```kestrel
+func hasNulByte() -> Bool
+```
+
+The child's `envp`, or `None` to inherit this process's unchanged.
+`true` when the program, an argument, the working directory or an
+environment change holds a NUL byte.
 
 _Defined in `lang/std/system/process.ks`._
 
@@ -515,9 +546,9 @@ Runs the command with inherited stdio and waits for it.
 
 ##### Errors
 
-`NotFound` if the program doesn't exist, `PermissionDenied` if it
-isn't executable, or a timeout error if `timeout` was set and hit.
-A program that runs and fails is still `Ok`; check `isSuccess`.
+`NotFound` if the program doesn't exist, or `PermissionDenied` if it
+isn't executable. A program that runs and fails, or outlives its
+`timeout` (status `.TimedOut`), is still `Ok`; check `isSuccess`.
 
 _Defined in `lang/std/system/process.ks`._
 
@@ -590,8 +621,9 @@ public mutating func timeout(Duration) -> &mutating Command
 ```
 
 Kills the child if `run` or `output` is still waiting on it after
-`duration`, as in `.timeout(.seconds(5))`. The call still succeeds, with status `.TimedOut`;
-`output()` keeps what the child wrote before it was killed.
+`duration`, as in `.timeout(.seconds(5))`. The call still succeeds,
+with status `.TimedOut`; `output()` keeps what the child wrote before
+it was killed.
 
 _Defined in `lang/std/system/process.ks`._
 
@@ -606,7 +638,7 @@ _Defined in `lang/std/system/process.ks`._
 #### field `workingDirectory`
 
 ```kestrel
-var workingDirectory: Optional[String]
+var workingDirectory: Optional[Path]
 ```
 
 _Defined in `lang/std/system/process.ks`._
@@ -676,7 +708,7 @@ _Defined in `lang/std/system/environment.ks`._
 #### function `currentDirectory`
 
 ```kestrel
-public static func currentDirectory() -> Result[String, IoError]
+public static func currentDirectory() -> Result[Path, IoError]
 ```
 
 The process's current working directory, as an absolute path.
@@ -701,7 +733,7 @@ _Defined in `lang/std/system/environment.ks`._
 #### function `homeDirectory`
 
 ```kestrel
-public static func homeDirectory() -> Optional[String]
+public static func homeDirectory() -> Optional[Path]
 ```
 
 The current user's home directory: `$HOME` if set and non-empty,
@@ -726,7 +758,7 @@ _Defined in `lang/std/system/environment.ks`._
 #### function `setCurrentDirectory`
 
 ```kestrel
-public static func setCurrentDirectory(to: String) -> Result[(), IoError]
+public static func setCurrentDirectory(to: Path) -> Result[(), IoError]
 ```
 
 Changes the process's working directory. Affects every thread.
@@ -758,7 +790,7 @@ _Defined in `lang/std/system/environment.ks`._
 #### function `temporaryDirectory`
 
 ```kestrel
-public static func temporaryDirectory() -> String
+public static func temporaryDirectory() -> Path
 ```
 
 The directory for temporary files: `$TMPDIR` if set and non-empty,
@@ -839,17 +871,6 @@ Builds an exit code from a byte. `exit(-1)`-style codes are spelled
 
 _Defined in `lang/std/system/exitable.ks`._
 
-#### initializer `init`
-
-```kestrel
-public init(intLiteral: lang.i64)
-```
-
-`exit(2)` takes a literal. Only the low 8 bits are kept, as
-`WEXITSTATUS` does.
-
-_Defined in `lang/std/system/exitable.ks`._
-
 #### field `isSuccess`
 
 ```kestrel
@@ -927,10 +948,12 @@ _Defined in `lang/std/system/process.ks`._
 #### case `Terminated`
 
 ```kestrel
-case Terminated
+case Terminated(signal: Int32)
 ```
 
-It was ended from outside, by a signal such as `SIGKILL`.
+It was ended by a signal: `signal` is its number (9 for `SIGKILL`,
+11 for `SIGSEGV`, 2 for `SIGINT`), so a crash and a kill are told
+apart.
 
 _Defined in `lang/std/system/process.ks`._
 
@@ -951,7 +974,7 @@ _Defined in `lang/std/system/process.ks`._
 public var code: Optional[ExitCode] { get }
 ```
 
-The exit code, or `None` if it was terminated.
+The exit code, or `None` if it was terminated or timed out.
 
 _Defined in `lang/std/system/process.ks`._
 
@@ -983,7 +1006,7 @@ _Defined in `lang/std/system/process.ks`._
 public func format(into: mutating some Formatter, FormatOptions)
 ```
 
-Prints `exit code 3` or `terminated`.
+Prints `exit code 3`, `terminated by signal 9` or `timed out`.
 
 _Defined in `lang/std/system/process.ks`._
 
@@ -1081,6 +1104,16 @@ macOS, iOS and the other Apple systems.
 
 _Defined in `lang/std/system/platform.ks`._
 
+#### case `Emscripten`
+
+```kestrel
+case Emscripten
+```
+
+WebAssembly in a browser, via Emscripten.
+
+_Defined in `lang/std/system/platform.ks`._
+
 #### case `Linux`
 
 ```kestrel
@@ -1097,7 +1130,7 @@ _Defined in `lang/std/system/platform.ks`._
 public var name: String { get }
 ```
 
-The lowercase name used in target triples: `darwin`, `linux`.
+The lowercase name used in target triples: `darwin`, `linux`, `emscripten`.
 
 _Defined in `lang/std/system/platform.ks`._
 
@@ -1371,7 +1404,7 @@ _Defined in `lang/std/system/process.ks`._
 #### function `executablePath`
 
 ```kestrel
-public static func executablePath() -> Result[String, IoError]
+public static func executablePath() -> Result[Path, IoError]
 ```
 
 The absolute path of the running executable, with symbolic links
@@ -1450,6 +1483,18 @@ Where a child's standard input, output or error goes.
 _Defined in `lang/std/system/process.ks`._
 
 ### Members
+
+#### case `File`
+
+```kestrel
+case File(Path)
+```
+
+Connect the file at this path: standard input reads it, and
+standard output or error writes it, creating it if missing and
+truncating it otherwise.
+
+_Defined in `lang/std/system/process.ks`._
 
 #### case `Inherit`
 

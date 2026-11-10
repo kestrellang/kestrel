@@ -1209,7 +1209,7 @@ Pairs each element with its zero-based position.
 
 ```
 for (i, item) in arr.iter().enumerate() {
-    print("Index \{i}: \{item}")
+    print("Index \(i): \(item)")
 };
 ```
 
@@ -1407,9 +1407,9 @@ instrumenting an adapter chain mid-pipeline.
 
 ```
 [1, 2, 3].iter()
-    .inspect { print("before filter: \{it}") }
+    .inspect { print("before filter: \(it)") }
     .filter { it > 1 }
-    .inspect { print("after filter: \{it}") }
+    .inspect { print("after filter: \(it)") }
     .collect();
 ```
 
@@ -1567,7 +1567,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `max`
 
 ```kestrel
-public consuming func max[K](byKey: (Item) -> K) -> Item? where K: Comparable, Item: Comparable
+public consuming func max[K](byKey: (Item) -> K) -> Item? where K: Comparable
 ```
 
 The element with the largest `key(element)`. Mirror of `min(byKey:)`.
@@ -1595,7 +1595,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `min`
 
 ```kestrel
-public consuming func min[K](byKey: (Item) -> K) -> Item? where K: Comparable, Item: Comparable
+public consuming func min[K](byKey: (Item) -> K) -> Item? where K: Comparable
 ```
 
 The element with the smallest `key(element)`. Ties go to the

@@ -3,7 +3,7 @@
 ## struct `Array`
 
 ```kestrel
-public struct Array[T] { /* private fields */ }
+public struct Array[T, A = GlobalAllocator] where A: Allocator { /* private fields */ }
 ```
 
 A dynamic, growable, contiguous-buffer array with copy-on-write storage.
@@ -35,7 +35,7 @@ let pivot = names.partition(by: { (n) in n.count > 3 });
 
 The default subscript `arr(i)` panics on out-of-bounds. Variants exist
 for every common policy, each an in-place place: `arr(checked: i)` is
-`.None` when out of range, `arr(unchecked: i)` skips the bounds check
+`.None` when out of range, `unsafe arr(unchecked: i)` skips the bounds check
 (UB on OOB), `arr(wrapped: i)` wraps with modulo (negative indices count
 from the end), and `arr(clamped: i)` saturates into `[0, count-1]`.
 Ranges take `arr(0..<3)`, `arr(checked: r)` and `arr(unchecked: r)`,
@@ -51,7 +51,7 @@ doubles (starting from 4 if previously zero). Use
 
 ### Representation
 
-Holds a single `CowBox[ArrayStorage[T]]` field. The storage is a
+Holds a single `CowBox[ArrayStorage[T, A]]` field. The storage is a
 `(ptr, len, cap)` triple over a heap-allocated buffer.
 
 ### Memory Model
@@ -75,33 +75,10 @@ _Defined in `lang/std/collections/array.ks`._
 
 ### Members
 
-#### initializer `Array Literal`
-
-```kestrel
-public init(arrayLiteral: LiteralSlice[T])
-```
-
-Creates an array containing every element of the supplied literal
-slice.
-
-Allocates a buffer sized exactly to the literal's element count
-(so `capacity == count` after construction) and copies the
-elements over. An empty slice yields an empty unallocated array.
-Panics if allocation fails.
-
-##### Examples
-
-```
-// Triggered by the array-literal syntax:
-let arr: Array[Int64] = [10, 20, 30];
-```
-
-_Defined in `lang/std/collections/array.ks`._
-
 #### initializer `Empty`
 
 ```kestrel
-public init()
+public init() where A: Defaultable
 ```
 
 Creates an empty array with no allocation.
@@ -123,7 +100,7 @@ _Defined in `lang/std/collections/array.ks`._
 #### initializer `From Generator`
 
 ```kestrel
-public init(of: Int64, generatedBy: (Int64) -> T)
+public init(of: Int64, generatedBy: (Int64) -> T) where A: Defaultable
 ```
 
 Creates an array of `count` elements computed by a per-index closure.
@@ -146,7 +123,7 @@ _Defined in `lang/std/collections/array.ks`._
 #### initializer `From Iterable`
 
 ```kestrel
-public init[I](from: I) where I: Iterable, I: not Static, I.Item == T
+public init[I](from: I) where I: Iterable, I: not Static, I.Item == T, A: Defaultable
 ```
 
 Creates an array by collecting every element produced by an iterable.
@@ -170,7 +147,7 @@ _Defined in `lang/std/collections/array.ks`._
 #### initializer `From Storage`
 
 ```kestrel
-init(storage: CowBox[ArrayStorage[T]])
+init(storage: CowBox[ArrayStorage[T, A]])
 ```
 
 Wraps an existing storage box in a new `Array`.
@@ -181,35 +158,10 @@ storage.
 
 _Defined in `lang/std/collections/array.ks`._
 
-#### initializer `Literal Bridge`
-
-```kestrel
-public init(_arrayLiteralPointer: consuming lang.ptr[T], _arrayLiteralCount: consuming lang.i64)
-```
-
-Compiler-emitted bridge initializer for `[a, b, c]` array literals.
-
-Not called by user code directly — the parser lowers literal
-expressions into a `(ptr, count)` pair which this constructor wraps
-in a `LiteralSlice` and forwards to `init(arrayLiteral:)`.
-
-##### Safety
-
-The compiler guarantees `_arrayLiteralPointer` points to exactly
-`_arrayLiteralCount` initialized elements of `T`.
-
-##### Examples
-
-```
-let arr = [1, 2, 3];   // emitted by the compiler as a call to this init
-```
-
-_Defined in `lang/std/collections/array.ks`._
-
 #### initializer `Repeating Value`
 
 ```kestrel
-public init(repeating: T, count: Int64)
+public init(repeating: T, count: Int64) where A: Defaultable
 ```
 
 Creates an array of `count` identical copies of `value`.
@@ -229,10 +181,50 @@ let pad   = Array(repeating: " ", count: 3);  // [" ", " ", " "]
 
 _Defined in `lang/std/collections/array.ks`._
 
+#### initializer `Repeating Value With Allocator`
+
+```kestrel
+public init(repeating: T, count: Int64, allocator: A)
+```
+
+`count` copies of `value`, allocated from `allocator`.
+
+When `value` is copied byte for byte and its bytes are all zero, the
+buffer comes from `allocator.allocateZeroed` and nothing is written:
+zeroed memory already holds the copies.
+
+##### Examples
+
+```
+var arena = ArenaAllocator();
+let zeros = Array[Int64, ArenaAllocator](repeating: 0, count: 4, allocator: arena);
+```
+
+_Defined in `lang/std/collections/array.ks`._
+
+#### initializer `With Allocator`
+
+```kestrel
+public init(allocator: A)
+```
+
+An empty array whose buffer will come from `allocator`. Nothing is
+allocated until the first insert.
+
+##### Examples
+
+```
+var arena = ArenaAllocator();
+var xs = Array[Int64, ArenaAllocator](allocator: arena);
+xs.append(1);  // allocated from the arena
+```
+
+_Defined in `lang/std/collections/array.ks`._
+
 #### initializer `With Capacity`
 
 ```kestrel
-public init(capacity: Int64)
+public init(capacity: Int64) where A: Defaultable
 ```
 
 Creates an empty array with at least the requested capacity reserved.
@@ -248,6 +240,27 @@ var arr = Array[Int64](capacity: 1000);
 arr.count;     // 0
 arr.capacity;  // >= 1000 — no reallocation for first 1000 appends
 ```
+
+_Defined in `lang/std/collections/array.ks`._
+
+#### initializer `With Capacity And Allocator`
+
+```kestrel
+public init(capacity: Int64, allocator: A)
+```
+
+An empty array with room for `capacity` elements, allocated from
+`allocator`. Panics on allocation failure.
+
+_Defined in `lang/std/collections/array.ks`._
+
+#### field `allocator`
+
+```kestrel
+public var allocator: A { get }
+```
+
+The allocator this array's buffer comes from.
 
 _Defined in `lang/std/collections/array.ks`._
 
@@ -277,7 +290,7 @@ _Defined in `lang/std/collections/array.ks`._
 #### function `append`
 
 ```kestrel
-public mutating func append(contentsOf: some Sliceable[T] and not Sized)
+public mutating func append(contentsOf: &some Sliceable[T] and not Static and not Copyable and not Sized)
 ```
 
 Appends every element of `other` to the end of this array.
@@ -383,8 +396,7 @@ Removes runs of consecutive equal elements, in place.
 
 Only adjacent duplicates collapse — non-adjacent equal values are
 kept. To deduplicate globally, `sort()` first or, for `Hashable`
-elements, use the `unique()` / `removeDuplicates()` extension
-methods. The non-mutating variant is `deduped()`.
+elements, use `unique()`. The non-mutating variant is `deduped()`.
 
 ##### Examples
 
@@ -398,7 +410,7 @@ _Defined in `lang/std/collections/array.ks`._
 #### function `deduped`
 
 ```kestrel
-public func deduped() -> Array[T] where T: Equatable
+public func deduped() -> Array[T, A] where T: Equatable
 ```
 
 Returns a new array with consecutive duplicates removed; original
@@ -504,7 +516,7 @@ _Defined in `lang/std/collections/array.ks`._
 #### function `iterRange`
 
 ```kestrel
-internal func iterRange(start: Int64, count: Int64) -> ArrayIterator[T]
+internal func iterRange(start: Int64, count: Int64) -> ArrayIterator[T, A]
 ```
 
 Iterator over elements `[start, start + count)`, sharing the storage
@@ -512,35 +524,10 @@ Iterator over elements `[start, start + count)`, sharing the storage
 
 _Defined in `lang/std/collections/array.ks`._
 
-#### function `joined`
-
-```kestrel
-public func joined(String) -> String where T: Formattable
-```
-
-Concatenates each element's string representation, separated by
-`separator`.
-
-Each element is rendered with its `format()` method using default
-`FormatOptions`. The default `separator` is empty (raw
-concatenation). Empty arrays produce `""`. For the bracketed
-debug form (`"[1, 2, 3]"`), use `format()` directly.
-
-##### Examples
-
-```
-[1, 2, 3].joined(by: ", ");  // "1, 2, 3"
-[1, 2, 3].joined();       // "123"
-["a", "b"].joined(by: "-");   // "a-b"
-[].joined(by: ", ");          // ""
-```
-
-_Defined in `lang/std/collections/array.ks`._
-
 #### function `mutatingRefs`
 
 ```kestrel
-public mutating func mutatingRefs() -> ArrayMutatingRefsIterator[T]
+public mutating func mutatingRefs() -> ArrayMutatingRefsIterator[T, A]
 ```
 
 Iterator over MUTABLE REFERENCES (`&mutating T`) to the elements,
@@ -608,6 +595,29 @@ let (evens, odds) = [1, 2, 3, 4, 5].partitioned(by: { (x) in x % 2 == 0 });
 
 _Defined in `lang/std/collections/array.ks`._
 
+#### function `popFirst`
+
+```kestrel
+public mutating func popFirst() -> T?
+```
+
+Removes and returns the first element, or `None` if the array is
+empty.
+
+O(n) — every following element shifts left by one. If you can
+tolerate it, `popLast()` from the back is O(1). For inspection
+without removal, use `first`.
+
+##### Examples
+
+```
+var arr = [1, 2, 3];
+arr.popFirst();  // Some(1), arr is [2, 3]
+arr.popFirst();  // Some(2), arr is [3]
+```
+
+_Defined in `lang/std/collections/array.ks`._
+
 #### function `popLast`
 
 ```kestrel
@@ -633,29 +643,6 @@ arr.popLast();  // None,    arr is still []
 
 _Defined in `lang/std/collections/array.ks`._
 
-#### function `popFirst`
-
-```kestrel
-public mutating func popFirst() -> T?
-```
-
-Removes and returns the first element, or `None` if the array is
-empty.
-
-O(n) — every following element shifts left by one. If you can
-tolerate it, `popLast()` from the back is O(1). For inspection
-without removal, use `first()`.
-
-##### Examples
-
-```
-var arr = [1, 2, 3];
-arr.popFirst();  // Some(1), arr is [2, 3]
-arr.popFirst();  // Some(2), arr is [3]
-```
-
-_Defined in `lang/std/collections/array.ks`._
-
 #### function `prefix`
 
 ```kestrel
@@ -666,10 +653,29 @@ See `Slice.prefix(count:)`.
 
 _Defined in `lang/std/collections/slice.ks`._
 
+#### function `prepend`
+
+```kestrel
+public mutating func prepend(T)
+```
+
+Inserts `element` at the front. O(n): every element shifts right by
+one. The mirror of `append`, as `popFirst()` mirrors `popLast()`;
+use a `Deque` when both ends are hot.
+
+##### Examples
+
+```
+var arr = [2, 3];
+arr.prepend(1);  // [1, 2, 3]
+```
+
+_Defined in `lang/std/collections/array.ks`._
+
 #### function `refs`
 
 ```kestrel
-public func refs() -> ArrayRefsIterator[T]
+public func refs() -> ArrayRefsIterator[T, A]
 ```
 
 Iterator over SHARED REFERENCES (`&T`) to the elements, in place —
@@ -781,27 +787,6 @@ arr.removeAll(2);  // [1, 3, 4]
 
 _Defined in `lang/std/collections/array.ks`._
 
-#### function `removeDuplicates`
-
-```kestrel
-public mutating func removeDuplicates() where T: Hashable
-```
-
-Removes every duplicate in place, keeping the first occurrence.
-
-Implemented by replacing storage with the result of `unique()`,
-so the same O(n²) caveat applies. The non-mutating mirror is
-`unique()`.
-
-##### Examples
-
-```
-var arr = [1, 2, 1, 3, 2];
-arr.removeDuplicates();  // [1, 2, 3]
-```
-
-_Defined in `lang/std/collections/array.ks`._
-
 #### function `removeSubrange`
 
 ```kestrel
@@ -833,7 +818,7 @@ _Defined in `lang/std/collections/array.ks`._
 #### function `replaceSubrange`
 
 ```kestrel
-public mutating func replaceSubrange[R](R, with: Array[T]) where R: SeqRange
+public mutating func replaceSubrange[R, B](R, with: Array[T, B]) where R: SeqRange, B: Allocator
 ```
 
 Replaces the elements in `range` with the elements of `replacement`.
@@ -962,6 +947,22 @@ arr.rotate(by:  7);  // same as rotate(by: 2) for count == 5
 
 _Defined in `lang/std/collections/array.ks`._
 
+#### function `setCount`
+
+```kestrel
+public mutating func setCount(Int64)
+```
+
+Sets `count` without touching any element: claims slots filled
+through `spareCapacity`, or forgets trailing ones without dropping
+them. Panics when `newCount` is negative or above `capacity`.
+
+##### Safety
+
+Every slot below `newCount` must hold an initialized element.
+
+_Defined in `lang/std/collections/array.ks`._
+
 #### function `shrinkToFit`
 
 ```kestrel
@@ -1034,7 +1035,7 @@ _Defined in `lang/std/collections/array.ks`._
 #### function `shuffled`
 
 ```kestrel
-public func shuffled(using: mutating some RandomNumberGenerator) -> Array[T]
+public func shuffled(using: mutating some RandomNumberGenerator) -> Array[T, A]
 ```
 
 Returns a new array shuffled with `rng`. The original is unchanged.
@@ -1056,7 +1057,7 @@ _Defined in `lang/std/collections/array.ks`._
 #### function `shuffled`
 
 ```kestrel
-public func shuffled() -> Array[T]
+public func shuffled() -> Array[T, A]
 ```
 
 Returns a new array shuffled with a default RNG. Original unchanged.
@@ -1138,7 +1139,7 @@ _Defined in `lang/std/collections/array.ks`._
 #### function `sorted`
 
 ```kestrel
-public func sorted(by: (T, T) -> Bool) -> Array[T]
+public func sorted(by: (T, T) -> Bool) -> Array[T, A]
 ```
 
 Returns a new array sorted by a custom comparator. Original unchanged.
@@ -1155,7 +1156,7 @@ _Defined in `lang/std/collections/array.ks`._
 #### function `sorted`
 
 ```kestrel
-public func sorted[K](byKey: consuming (T) -> K) -> Array[T] where K: Comparable
+public func sorted[K](byKey: consuming (T) -> K) -> Array[T, A] where K: Comparable
 ```
 
 Returns a new array sorted by an extracted `Comparable` key;
@@ -1166,6 +1167,32 @@ original unchanged.
 ```
 let words = ["hi", "hello", "hey"];
 let byLen = words.sorted(byKey: { (w) in w.count });
+```
+
+_Defined in `lang/std/collections/array.ks`._
+
+#### function `spareCapacity`
+
+```kestrel
+public mutating func spareCapacity() -> &mutating Slice[T]
+```
+
+The `capacity - count` slots past the last element, for filling in
+place (a stream `read` straight into the array, say); `setCount`
+then claims the filled ones. Grow first with `reserveCapacity`.
+
+##### Safety
+
+The slots are uninitialized: nothing may be read from one before
+it is written, and only slots that were written may be claimed.
+
+##### Examples
+
+```
+var bytes = Array[UInt8]();
+bytes.reserveCapacity(4096);
+let n = try input.read(into: unsafe bytes.spareCapacity());
+unsafe bytes.setCount(bytes.count + n);
 ```
 
 _Defined in `lang/std/collections/array.ks`._
@@ -1183,10 +1210,10 @@ _Defined in `lang/std/collections/views.ks`._
 #### function `split`
 
 ```kestrel
-public func split(T) -> ArraySplitView[T] where T: Equatable
+public func split(by: T) -> ArraySplitView[T] where T: Equatable
 ```
 
-See `Slice.split(separator:)`.
+See `Slice.split(by:)`.
 
 _Defined in `lang/std/collections/views.ks`._
 
@@ -1215,8 +1242,11 @@ _Defined in `lang/std/collections/array.ks`._
 public subscript[I](unchecked: I) -> I.SliceOutput where I: SliceIndex[T] { ref mutating ref }
 ```
 
-Like `xs(index)`, without the bounds check (undefined behavior when
-out of range).
+Like `xs(index)`, without the bounds check.
+
+##### Safety
+
+`index` must be in range. Out of range is undefined behavior.
 
 _Defined in `lang/std/collections/array.ks`._
 
@@ -1340,7 +1370,7 @@ _Defined in `lang/std/collections/array.ks`._
 #### typealias `TargetIterator`
 
 ```kestrel
-type TargetIterator = ArrayIterator[T]
+type TargetIterator = ArrayIterator[T, A]
 ```
 
 `Iterable` iterator type — the concrete iterator returned by `iter()`.
@@ -1350,7 +1380,7 @@ _Defined in `lang/std/collections/array.ks`._
 #### function `iter`
 
 ```kestrel
-public func iter() -> ArrayIterator[T]
+public func iter() -> ArrayIterator[T, A]
 ```
 
 Returns a forward iterator over the array's elements, as they are now:
@@ -1359,37 +1389,12 @@ first and the iteration is unaffected.
 
 _Defined in `lang/std/collections/array.ks`._
 
-### Implements `ExpressibleByArrayLiteral`
-
-### Implements `_ExpressibleByArrayLiteral`
-
-#### typealias `Element`
-
-```kestrel
-type Element = T
-```
-
-Pattern-matching element type — used by `ArrayMatchable` for
-`[a, b, ..rest]` patterns.
-
-_Defined in `lang/std/collections/array.ks`._
-
-#### typealias `Element`
-
-```kestrel
-type Element = T
-```
-
-`ArrayMatchable` element type — what the pattern bindings extract.
-
-_Defined in `lang/std/collections/array.ks`._
-
 ### Implements `Cloneable`
 
 #### function `clone`
 
 ```kestrel
-public func clone() -> Array[T]
+public func clone() -> Array[T, A]
 ```
 
 Returns an `Array[T]` sharing the same storage; the deep copy is
@@ -1410,7 +1415,37 @@ b.append(4);        // b deep-copies here; a is unchanged
 
 _Defined in `lang/std/collections/array.ks`._
 
+### Implements `ExpressibleByArrayLiteral`
+
+_Conditional: `where A: Defaultable`._
+
+### Implements `_ExpressibleByArrayLiteral`
+
+_Conditional: `where A: Defaultable`._
+
+#### typealias `Element`
+
+```kestrel
+type Element = T where A: Defaultable
+```
+
+Array-literal element type.
+
+_Defined in `lang/std/collections/array.ks`._
+
+#### typealias `Element`
+
+```kestrel
+type Element = T
+```
+
+`ArrayMatchable` element type — what the pattern bindings extract.
+
+_Defined in `lang/std/collections/array.ks`._
+
 ### Implements `Defaultable`
+
+_Conditional: `where A: Defaultable`._
 
 ### Implements `Equatable`
 
@@ -1425,49 +1460,6 @@ type Rest = &Slice[T]
 ```
 
 `..rest` binds a slice of the array's elements.
-
-_Defined in `lang/std/collections/array.ks`._
-
-#### function `matchGet`
-
-```kestrel
-public func matchGet(Int64) -> T
-```
-
-Pattern-matcher hook reading the element at `index` (no bounds
-check).
-
-##### Safety
-
-The matcher only calls this with indices it has already validated
-against `matchLength()`, so the unchecked read is safe in that
-context.
-
-_Defined in `lang/std/collections/array.ks`._
-
-#### function `matchLength`
-
-```kestrel
-public func matchLength() -> Int64
-```
-
-Pattern-matcher hook returning the array's `count`.
-
-Used by the matcher to decide whether the scrutinee has enough
-elements for a fixed-arity pattern.
-
-_Defined in `lang/std/collections/array.ks`._
-
-#### function `matchSlice`
-
-```kestrel
-public func matchSlice(Int64, Int64) -> &Slice[T]
-```
-
-Pattern-matcher hook returning the half-open `[from, to)` slice.
-
-Used to bind `..rest` segments. The matcher guarantees the
-indices are in range.
 
 _Defined in `lang/std/collections/array.ks`._
 
@@ -1498,10 +1490,14 @@ let digest = h.finish();
 
 _Defined in `lang/std/collections/array.ks`._
 
+### Implements `Formattable`
+
+_Conditional: `where T: Formattable`._
+
 ## struct `ArrayBuilder`
 
 ```kestrel
-public struct ArrayBuilder[T] { /* private fields */ }
+public struct ArrayBuilder[T, A = GlobalAllocator] where A: Allocator { /* private fields */ }
 ```
 
 Write-only buffer for efficient array construction. No COW, no
@@ -1539,21 +1535,43 @@ _Defined in `lang/std/collections/builder.ks`._
 #### initializer `Empty`
 
 ```kestrel
-public init()
+public init() where A: Defaultable
 ```
 
 Creates an empty builder with no allocation.
 
 _Defined in `lang/std/collections/builder.ks`._
 
+#### initializer `With Allocator`
+
+```kestrel
+public init(allocator: A)
+```
+
+An empty builder whose buffer (and the built array's) comes from
+`allocator`. Nothing is allocated until the first append.
+
+_Defined in `lang/std/collections/builder.ks`._
+
 #### initializer `With Capacity`
 
 ```kestrel
-public init(capacity: Int64)
+public init(capacity: Int64) where A: Defaultable
 ```
 
 Creates an empty builder with at least `capacity` elements
 preallocated.
+
+_Defined in `lang/std/collections/builder.ks`._
+
+#### initializer `With Capacity And Allocator`
+
+```kestrel
+public init(capacity: Int64, allocator: A)
+```
+
+An empty builder with room for `capacity` elements, allocated from
+`allocator`. Panics on allocation failure.
 
 _Defined in `lang/std/collections/builder.ks`._
 
@@ -1591,7 +1609,7 @@ _Defined in `lang/std/collections/builder.ks`._
 #### function `build`
 
 ```kestrel
-public mutating func build() -> Array[T]
+public mutating func build() -> Array[T, A]
 ```
 
 Transfers the buffer into a new `Array[T]` without copying. The
@@ -1642,7 +1660,7 @@ _Defined in `lang/std/collections/builder.ks`._
 ## struct `ArrayIterator`
 
 ```kestrel
-public struct ArrayIterator[T] { /* private fields */ }
+public struct ArrayIterator[T, A = GlobalAllocator] where A: Allocator { /* private fields */ }
 ```
 
 Forward iterator over an `Array[T]`: an `UnsafeSliceIterator[T]` cursor plus
@@ -1680,12 +1698,24 @@ Yields the next element, or `.None` at the end.
 
 _Defined in `lang/std/collections/array.ks`._
 
+### Implements `DoubleEndedIterator`
+
+#### function `nextBack`
+
+```kestrel
+public mutating func nextBack() -> Optional[T]
+```
+
+Yields the last remaining element, or `.None` at the end.
+
+_Defined in `lang/std/collections/array.ks`._
+
 ### Implements `Cloneable`
 
 #### function `clone`
 
 ```kestrel
-public func clone() -> ArrayIterator[T]
+public func clone() -> ArrayIterator[T, A]
 ```
 
 An independent cursor at the same position, holding its own share.
@@ -1695,7 +1725,7 @@ _Defined in `lang/std/collections/array.ks`._
 ## struct `ArrayMutatingRefsIterator`
 
 ```kestrel
-public struct ArrayMutatingRefsIterator[T] { /* private fields */ }
+public struct ArrayMutatingRefsIterator[T, A = GlobalAllocator] where A: Allocator { /* private fields */ }
 ```
 
 Iterator over `&mutating T` references to an array's elements, for
@@ -1727,7 +1757,7 @@ _Defined in `lang/std/collections/slice_algorithms.ks`._
 ## struct `ArrayRefsIterator`
 
 ```kestrel
-public struct ArrayRefsIterator[T] { /* private fields */ }
+public struct ArrayRefsIterator[T, A = GlobalAllocator] where A: Allocator { /* private fields */ }
 ```
 
 Iterator over `&T` references to a range of an array's elements.
@@ -1943,7 +1973,7 @@ _Defined in `lang/std/collections/views.ks`._
 ## typealias `ArrayTypeOperator`
 
 ```kestrel
-public type ArrayTypeOperator[T] = Array[T]
+public type ArrayTypeOperator[T] = Array[T, GlobalAllocator]
 ```
 
 Compiler-recognized type alias that lets `[T]` desugar to `Array[T]`.
@@ -2085,64 +2115,53 @@ _Defined in `lang/std/collections/views.ks`._
 public struct DefaultHasher { /* private fields */ }
 ```
 
-The standard `Hasher` implementation, backed by a wyhash-derived
-per-byte mixer.
+SipHash-1-3 (Aumasson & Bernstein): a keyed hash, so without the key an
+attacker can't predict which inputs collide. This is what Rust and Swift
+hash tables use by default, and it's the `Hasher` behind `Dictionary` and
+`Set` unless they name another.
 
-Used by `Dictionary` and `Set` whenever the user doesn't pick a
-specific hasher. Each byte folds into a 64-bit running state via
-`state = (state ^ byte) * MULT`; `finish()` runs Murmur3's fmix64
-finalizer to scramble the result so every input bit avalanches
-across the output.
-
-**Not adversarially safe.** The mixer is unkeyed, so an attacker
-who can choose keys can craft collisions. For HashDoS resistance,
-swap in a keyed hasher (planned: `SipHasher13`) by spelling out
-`Dictionary[K, V, SipHasher13]` directly. For non-adversarial
-workloads — internal IDs, parser symbols, config values — this
-hasher is faster and has better distribution than FNV-1a.
+`DefaultHasher()` uses a random per-process key; `DefaultHasher(key0:key1:)`
+takes an explicit 128-bit key and gives the reference SipHash-1-3 value
+of the bytes written. It streams (split writes hash the same as one
+write) and integers go through `write(uint64:)` as one word. It's
+slower than `FastHasher`; pick that for trusted keys when hashing is
+the bottleneck.
 
 ### Examples
 
 ```
 var h = DefaultHasher();
 "hello".hash(into: h);
-let hash = h.finish();  // 64-bit hash of "hello"
-
-// Used implicitly through the dictionary type alias:
-let d: [String: Int64] = ["a": 1];   // DefaultHasher under the hood
+let hash = h.finish();  // stable within a run, varies between runs
 ```
-
-### Algorithm
-
-Initialization seeds `state` with the wyhash secret
-`0x9e3779b97f4a7c15` (the "golden ratio" constant SplitMix64 uses).
-Each byte updates the state with `state = (state ^ byte) *
-0x100000001b3`, which combines wyhash's mixing constant with
-FNV-1a's prime so every bit of the byte propagates across the
-64-bit state. `finish()` runs Murmur3's `fmix64` finalizer
-(xor-shift-multiply twice) so consecutive integer keys produce
-non-clustered hashes.
 
 ### Representation
 
-One `UInt64` field, `state`, holding the running digest.
+The four SipHash state words, up to 7 pending bytes (`tail`,
+little-endian) and the total byte count.
 
 _Defined in `lang/std/collections/hashing.ks`._
 
 ### Members
 
-#### initializer `Empty`
+#### initializer `Default`
 
 ```kestrel
 public init()
 ```
 
-Creates a fresh hasher seeded with the SplitMix64 golden-ratio
-constant `0x9e3779b97f4a7c15`.
+A hasher keyed with this process's random key.
 
-The same input fed to two new hashers always produces the same
-`finish()` value — this hasher is deterministic across runs (no
-random seeding).
+_Defined in `lang/std/collections/hashing.ks`._
+
+#### initializer `init`
+
+```kestrel
+public init(key0: UInt64, key1: UInt64)
+```
+
+A hasher with an explicit 128-bit key (`key0` is its first 8 bytes,
+little-endian).
 
 _Defined in `lang/std/collections/hashing.ks`._
 
@@ -2154,18 +2173,8 @@ _Defined in `lang/std/collections/hashing.ks`._
 public mutating func finish() -> UInt64
 ```
 
-Returns the finalized 64-bit digest.
-
-Runs Murmur3's `fmix64` finalizer over the running state — two
-rounds of xor-shift-multiply that avalanche every input bit
-across the output. Consecutive integer keys (a common bucket
-query pattern) emerge well-distributed despite the simple
-mixer, which would otherwise leak the input's low-bit
-regularity into the bucket index.
-
-`finish()` mutates `state`; calling it twice on the same hasher
-is undefined — construct a fresh `DefaultHasher()` per logical
-hash.
+The last block (pending bytes, with the length's low byte on top),
+then three finalization rounds.
 
 _Defined in `lang/std/collections/hashing.ks`._
 
@@ -2175,20 +2184,19 @@ _Defined in `lang/std/collections/hashing.ks`._
 public mutating func write(Slice[UInt8])
 ```
 
-Folds every byte of `bytes` into the running hash state.
+Tops up the pending word, compresses whole 8-byte little-endian
+words straight from `bytes`, and keeps the remainder pending.
 
-May be called any number of times before `finish()`; the result
-is identical to having received all the bytes in a single call.
-Safe to call with an empty slice (no-op).
+_Defined in `lang/std/collections/hashing.ks`._
 
-##### Examples
+#### function `write`
 
+```kestrel
+public mutating func write(uint64: UInt64)
 ```
-var h = DefaultHasher();
-h.write("hello".asByteSlice());
-h.write(" world".asByteSlice());
-// Equivalent to a single write of "hello world".asByteSlice()
-```
+
+The same as writing the value's 8 little-endian bytes: one
+compression when no partial word is pending.
 
 _Defined in `lang/std/collections/hashing.ks`._
 
@@ -2197,7 +2205,7 @@ _Defined in `lang/std/collections/hashing.ks`._
 ## struct `Deque`
 
 ```kestrel
-public struct Deque[T] { /* private fields */ }
+public struct Deque[T, A = GlobalAllocator] where A: Allocator { /* private fields */ }
 ```
 
 A double-ended queue backed by a ring buffer with copy-on-write storage.
@@ -2242,7 +2250,7 @@ _Defined in `lang/std/collections/deque.ks`._
 #### initializer `Empty`
 
 ```kestrel
-public init()
+public init() where A: Defaultable
 ```
 
 Creates an empty deque with no allocation.
@@ -2263,7 +2271,7 @@ _Defined in `lang/std/collections/deque.ks`._
 #### initializer `From Iterable`
 
 ```kestrel
-public init[I](from: I) where I: Iterable, I: not Static, I.Item == T
+public init[I](from: I) where I: Iterable, I: not Static, I.Item == T, A: Defaultable
 ```
 
 Creates a deque by collecting every element from an iterable.
@@ -2311,10 +2319,29 @@ d(1);  // 99
 
 _Defined in `lang/std/collections/deque.ks`._
 
+#### initializer `With Allocator`
+
+```kestrel
+public init(allocator: A)
+```
+
+An empty deque whose buffer will come from `allocator`. Nothing is
+allocated until the first push.
+
+##### Examples
+
+```
+var arena = ArenaAllocator();
+var d = Deque[Int64, ArenaAllocator](allocator: arena);
+d.append(1);  // allocated from the arena
+```
+
+_Defined in `lang/std/collections/deque.ks`._
+
 #### initializer `With Capacity`
 
 ```kestrel
-public init(capacity: Int64)
+public init(capacity: Int64) where A: Defaultable
 ```
 
 Creates an empty deque with at least `capacity` slots reserved.
@@ -2328,6 +2355,49 @@ needing to grow. Passing 0 is equivalent to `Deque()`.
 var d = Deque[Int64](capacity: 100);
 d.count;  // 0
 d.capacity;  // 100
+```
+
+_Defined in `lang/std/collections/deque.ks`._
+
+#### initializer `With Capacity And Allocator`
+
+```kestrel
+public init(capacity: Int64, allocator: A)
+```
+
+An empty deque with room for `capacity` elements, allocated from
+`allocator`. Panics on allocation failure.
+
+_Defined in `lang/std/collections/deque.ks`._
+
+#### field `allocator`
+
+```kestrel
+public var allocator: A { get }
+```
+
+The allocator this deque's buffer comes from.
+
+_Defined in `lang/std/collections/deque.ks`._
+
+#### function `append`
+
+```kestrel
+public mutating func append(T)
+```
+
+Appends `element` to the back of the deque. O(1) amortized.
+
+Grows the ring buffer geometrically when full. The counterpart
+for the front end is `prepend`.
+
+##### Examples
+
+```
+var d = Deque[Int64]();
+d.append(1);
+d.append(2);
+d.popFirst();  // .Some(1)
 ```
 
 _Defined in `lang/std/collections/deque.ks`._
@@ -2471,29 +2541,6 @@ Deque[Int64]().last;  // .None
 
 _Defined in `lang/std/collections/deque.ks`._
 
-#### function `popLast`
-
-```kestrel
-public mutating func popLast() -> T?
-```
-
-Removes and returns the back element, or `.None` if empty. O(1).
-
-Retracts the logical tail by one slot. The non-removing mirror
-is `last`. The front-end counterpart is `popFirst()`.
-
-##### Examples
-
-```
-var d = Deque[Int64](from: [1, 2, 3]);
-d.popLast();  // .Some(3)
-d.popLast();  // .Some(2)
-d.popLast();  // .Some(1)
-d.popLast();  // .None
-```
-
-_Defined in `lang/std/collections/deque.ks`._
-
 #### function `popFirst`
 
 ```kestrel
@@ -2517,24 +2564,25 @@ d.popFirst();  // .None
 
 _Defined in `lang/std/collections/deque.ks`._
 
-#### function `append`
+#### function `popLast`
 
 ```kestrel
-public mutating func append(T)
+public mutating func popLast() -> T?
 ```
 
-Appends `element` to the back of the deque. O(1) amortized.
+Removes and returns the back element, or `.None` if empty. O(1).
 
-Grows the ring buffer geometrically when full. The counterpart
-for the front end is `prepend`.
+Retracts the logical tail by one slot. The non-removing mirror
+is `last`. The front-end counterpart is `popFirst()`.
 
 ##### Examples
 
 ```
-var d = Deque[Int64]();
-d.append(1);
-d.append(2);
-d.popFirst();  // .Some(1)
+var d = Deque[Int64](from: [1, 2, 3]);
+d.popLast();  // .Some(3)
+d.popLast();  // .Some(2)
+d.popLast();  // .Some(1)
+d.popLast();  // .None
 ```
 
 _Defined in `lang/std/collections/deque.ks`._
@@ -2653,7 +2701,7 @@ _Defined in `lang/std/collections/deque.ks`._
 #### function `clone`
 
 ```kestrel
-public func clone() -> Deque[T]
+public func clone() -> Deque[T, A]
 ```
 
 Returns a shallow copy of this deque. O(1).
@@ -2747,7 +2795,7 @@ _Defined in `lang/std/collections/deque.ks`._
 ## struct `Dictionary`
 
 ```kestrel
-public struct Dictionary[K, V, H = DefaultHasher] where K: Hashable, H: Hasher, H: Defaultable { /* private fields */ }
+public struct Dictionary[K, V, H = DefaultHasher, A = GlobalAllocator] where K: Hashable, H: Hasher, H: Defaultable, A: Allocator { /* private fields */ }
 ```
 
 An unordered hash map keyed by any `K: Hashable`, parameterized over the
@@ -2778,10 +2826,12 @@ let sum = ages.values.iter().sum();
 
 ### Hashing
 
-The hash for each key is cached in its bucket so resizes don't
-recompute it. Replacing the hasher (`H`) lets you swap in
-`SipHasher`, `FxHasher`, etc.; the default is `DefaultHasher` and
-resolves through the `[K: V]` shorthand.
+Each slot's control byte keeps 7 bits of its key's hash, so a probe
+compares keys only on a tag match. Resizes rehash the keys. The
+default hasher, `DefaultHasher`, is SipHash-1-3 with
+a random per-process key, so iteration order differs between runs. For
+trusted keys, `Dictionary[K, V, FastHasher]` is faster and has the same
+order on every run.
 
 ### Capacity & Reallocation
 
@@ -2792,24 +2842,24 @@ resizes (doubling capacity, starting from 8) once `count` reaches
 
 ### Representation
 
-One field: an `RcBox[DictionaryStorage[K, V, H]]` holding
-`(buckets, len, cap)` over a heap bucket array.
+One field: a `CowBox[DictionaryStorage[K, V, A]]` over one heap block
+of entry slots and control bytes (see TABLE LAYOUT).
 
 ### Memory Model
 
 Reference-counted storage with copy-on-write *value* semantics.
-Copying a `Dictionary` is O(1) and shares the bucket array; the
+Copying a `Dictionary` is O(1) and shares the table; the
 next mutation on a shared dictionary triggers `makeUnique()`,
 which deep-clones via `DictionaryStorage.clone()` so the mutation
 is invisible to other copies.
 
 ### Guarantees
 
-- Every key satisfies `K: Hashable`. The cached hash is computed once
-  per insert and reused on resize.
+- Every key satisfies `K: Hashable`. A lookup or insert hashes the
+  key once; a resize hashes every live key again.
 - `count <= capacity * 3 / 4` after every mutation (the resize
   threshold).
-- Removing a key leaves a `.Deleted` tombstone; lookups still
+- Removing a key leaves a tombstone; lookups still
   work but tombstones reduce effective capacity until the next
   resize.
 - Iteration order is **not** specified.
@@ -2818,37 +2868,16 @@ _Defined in `lang/std/collections/dictionary.ks`._
 
 ### Members
 
-#### initializer `Dictionary Literal`
-
-```kestrel
-public init(dictionaryLiteral: std.memory.LiteralSlice[(K, V)]) where K: Hashable, H: Hasher, H: Defaultable
-```
-
-Creates a dictionary by inserting every `(K, V)` pair from a
-literal slice in order.
-
-Last-write-wins on duplicate keys (same as `init(from:)`). An
-empty literal yields an empty unallocated dictionary.
-
-##### Examples
-
-```
-// Triggered by the dictionary-literal syntax:
-let dict: [String: Int64] = ["a": 1, "b": 2];
-```
-
-_Defined in `lang/std/collections/dictionary.ks`._
-
 #### initializer `Empty`
 
 ```kestrel
-public init()
+public init() where A: Defaultable
 ```
 
 Creates an empty dictionary with no allocation.
 
 Capacity starts at zero; the first insert allocates the smallest
-bucket array (currently 8 slots). For pre-sized creation use
+table (currently 8 slots). For pre-sized creation use
 `init(capacity:)`.
 
 ##### Examples
@@ -2864,7 +2893,7 @@ _Defined in `lang/std/collections/dictionary.ks`._
 #### initializer `From Pairs`
 
 ```kestrel
-public init[I](from: I) where I: Iterable, I: not Static, I.Item == (K, V)
+public init[I](from: I) where I: Iterable, I: not Static, I.Item == (K, V), A: Defaultable
 ```
 
 Creates a dictionary by inserting every `(key, value)` pair
@@ -2888,7 +2917,7 @@ _Defined in `lang/std/collections/dictionary.ks`._
 #### initializer `Grouping`
 
 ```kestrel
-public init[I, E](grouping: I, by: (E) -> K) where I: Iterable, I: not Static, I.Item == E, V == Array[E]
+public init[I, E](grouping: I, by: (E) -> K) where I: Iterable, I: not Static, I.Item == E, V == Array[E], A: Defaultable
 ```
 
 Buckets each element of an iterable into an array under the key
@@ -2913,38 +2942,19 @@ let parity = Dictionary(grouping: nums) { (n) in n % 2 };
 
 _Defined in `lang/std/collections/dictionary.ks`._
 
-#### initializer `Literal Bridge`
-
-```kestrel
-public init(consuming lang.ptr[(K, V)], consuming lang.i64) where K: Hashable, H: Hasher, H: Defaultable
-```
-
-Compiler-emitted bridge for `[k: v, ...]` literals.
-
-Not called by user code directly — the parser lowers literal
-expressions into a `(ptr, count)` pair which this constructor
-wraps in a `LiteralSlice` and forwards to
-`init(dictionaryLiteral:)`.
-
-##### Safety
-
-The compiler guarantees `_dictionaryLiteralPointer` points to
-exactly `_dictionaryLiteralCount` initialized `(K, V)` pairs.
-
-_Defined in `lang/std/collections/dictionary.ks`._
-
 #### subscript `Lookup`
 
 ```kestrel
-public subscript(K) -> V? { ref mutating ref }
+public subscript(K) -> V? { ref set mutating ref }
 ```
 
 The value stored for `key`, in place, or `.None` when absent.
 
 Reads lend `Optional[&V]` (a binding copies it out); a `&mutating`
 payload binder updates the stored value in place with one lookup.
-The place never inserts or removes: use `insert(key, value)`,
-`remove(key)`, or `dict(key, default: v)` to insert when missing.
+Assigning a value inserts or replaces it, and assigning `null`
+removes the key. Compound assignment (`dict(k) += 1`) is rejected,
+since the key may be missing: use `dict(key, default: v) += 1`.
 
 ##### Examples
 
@@ -2952,6 +2962,8 @@ The place never inserts or removes: use `insert(key, value)`,
 var dict = ["a": 1, "b": 2];
 dict("a");           // Some(1)
 dict("z");           // None
+dict("z") = 26;      // inserts "z": 26
+dict("b") = null;    // removes "b"
 if let .Some(&mutating v) = dict("a") { v += 10; }  // "a": 11
 ```
 
@@ -2960,7 +2972,7 @@ _Defined in `lang/std/collections/dictionary.ks`._
 #### initializer `Unique Keys`
 
 ```kestrel
-public init[I](uniquePairs: I) where I: Iterable, I: not Static, I.Item == (K, V)
+public init[I](uniquePairs: I) where I: Iterable, I: not Static, I.Item == (K, V), A: Defaultable
 ```
 
 Creates a dictionary from key-value pairs, panicking on any
@@ -3014,10 +3026,29 @@ dict(unwrap: "z");       // PANIC: key not found
 
 _Defined in `lang/std/collections/dictionary.ks`._
 
+#### initializer `With Allocator`
+
+```kestrel
+public init(allocator: A)
+```
+
+An empty dictionary whose table will come from `allocator`. Nothing
+is allocated until the first insert.
+
+##### Examples
+
+```
+var arena = ArenaAllocator();
+var d = Dictionary[String, Int64, DefaultHasher, ArenaAllocator](allocator: arena);
+d.insert("a", 1);  // allocated from the arena
+```
+
+_Defined in `lang/std/collections/dictionary.ks`._
+
 #### initializer `With Capacity`
 
 ```kestrel
-public init(capacity: Int64)
+public init(capacity: Int64) where A: Defaultable
 ```
 
 Creates an empty dictionary sized to hold at least the requested
@@ -3034,6 +3065,17 @@ var d = Dictionary[String, Int64](capacity: 100);
 d.capacity;   // 128 (next power of two)
 d.count;      // 0
 ```
+
+_Defined in `lang/std/collections/dictionary.ks`._
+
+#### initializer `With Capacity And Allocator`
+
+```kestrel
+public init(capacity: Int64, allocator: A)
+```
+
+An empty dictionary with room for at least `capacity` entries before
+growing, allocated from `allocator`.
 
 _Defined in `lang/std/collections/dictionary.ks`._
 
@@ -3101,6 +3143,16 @@ matches.
 
 _Defined in `lang/std/collections/dictionary.ks`._
 
+#### field `allocator`
+
+```kestrel
+public var allocator: A { get }
+```
+
+The allocator this dictionary's table comes from.
+
+_Defined in `lang/std/collections/dictionary.ks`._
+
 #### function `any`
 
 ```kestrel
@@ -3128,7 +3180,7 @@ _Defined in `lang/std/collections/dictionary.ks`._
 public var capacity: Int64 { get }
 ```
 
-Total slots in the bucket array — always `>= count`. Read-only.
+Total slots in the table — always `>= count`. Read-only.
 
 Resizes (doubling) trigger when `count` reaches 75% of
 `capacity`. Tombstones count against the threshold even though
@@ -3150,8 +3202,8 @@ _Defined in `lang/std/collections/dictionary.ks`._
 public mutating func clear()
 ```
 
-Removes every entry, leaving the bucket array allocated and
-reset to all-`.Empty`.
+Removes every entry, leaving the table allocated and every slot
+empty.
 
 O(capacity). The buffer is kept so subsequent inserts don't
 reallocate; follow with `shrinkToFit()` to release it.
@@ -3258,7 +3310,7 @@ _Defined in `lang/std/collections/dictionary.ks`._
 public var count: Int64 { get }
 ```
 
-Number of live (`.Occupied`) entries. Read-only; O(1).
+Number of live entries. Read-only; O(1).
 
 Excludes tombstones — `count` only reflects what
 `iter()`/`contains(...)` would see.
@@ -3297,7 +3349,7 @@ _Defined in `lang/std/collections/dictionary.ks`._
 #### function `deepClone`
 
 ```kestrel
-public func deepClone() -> Dictionary[K, V, H] where K: Hashable, H: Hasher, H: Defaultable
+public func deepClone() -> Dictionary[K, V, H, A] where K: Hashable, H: Hasher, H: Defaultable
 ```
 
 Returns a fully-detached copy of the dictionary, with no shared
@@ -3321,7 +3373,7 @@ _Defined in `lang/std/collections/dictionary.ks`._
 #### function `filter`
 
 ```kestrel
-public func filter(where: (K, V) -> Bool) -> Dictionary[K, V, H]
+public func filter(where: (K, V) -> Bool) -> Dictionary[K, V, H, A]
 ```
 
 Returns a new dictionary containing only entries for which
@@ -3433,7 +3485,7 @@ _Defined in `lang/std/collections/dictionary.ks`._
 internal func keyAt(consuming Int64) -> Optional[&K]
 ```
 
-Lends the key in bucket `slot`, or `.None` for an empty or deleted
+Lends the key in slot `slot`, or `.None` for an empty or deleted
 slot, or one out of range.
 
 _Defined in `lang/std/collections/dictionary.ks`._
@@ -3441,16 +3493,15 @@ _Defined in `lang/std/collections/dictionary.ks`._
 #### field `keys`
 
 ```kestrel
-public var keys: KeysView[K, V] { get }
+public var keys: KeysView[K, V, A] { get }
 ```
 
 Lazy view of the dictionary's keys, iterable in unspecified
 order.
 
-Constructing the view is O(1) — it shares the bucket pointer
-and skips empty/deleted slots during iteration. The view is
-invalidated by any mutation that may reallocate (insertion past
-the load threshold, `reserveCapacity`, `shrinkToFit`).
+Constructing the view is O(1) — it holds a share of the storage
+and skips empty/deleted slots during iteration. Like `iter()`,
+it sees the keys as they were when the view was made.
 
 ##### Examples
 
@@ -3488,7 +3539,7 @@ _Defined in `lang/std/collections/dictionary.ks`._
 #### function `merge`
 
 ```kestrel
-public mutating func merge(Dictionary[K, V, H], uniquingKeysWith: (V, V) -> V)
+public mutating func merge(Dictionary[K, V, H, A], uniquingKeysWith: (V, V) -> V)
 ```
 
 Merges every entry of `other` into `self`, calling `combine`
@@ -3536,7 +3587,7 @@ _Defined in `lang/std/collections/dictionary.ks`._
 #### function `merging`
 
 ```kestrel
-public func merging(Dictionary[K, V, H], uniquingKeysWith: (V, V) -> V) -> Dictionary[K, V, H]
+public func merging(Dictionary[K, V, H, A], uniquingKeysWith: (V, V) -> V) -> Dictionary[K, V, H, A]
 ```
 
 Returns a new dictionary that is `self` merged with `other`,
@@ -3565,7 +3616,7 @@ public mutating func remove(K) -> V?
 
 Removes `key` and returns its value, or `None` if absent.
 
-Replaces the bucket with a `.Deleted` tombstone so existing
+Leaves a tombstone in the key's slot so existing
 probe chains stay intact. Tombstones are reclaimed by the next
 resize. Triggers COW only when an entry is actually removed.
 
@@ -3630,7 +3681,7 @@ _Defined in `lang/std/collections/dictionary.ks`._
 public mutating func reserveCapacity(Int64)
 ```
 
-Grows the bucket array so at least `minimumCapacity` entries
+Grows the table so at least `minimumCapacity` entries
 fit without resizing.
 
 No-op when current capacity already suffices. The actual new
@@ -3656,8 +3707,8 @@ public mutating func retain(where: (K, V) -> Bool)
 
 Keeps only entries for which `predicate(key, value)` is true.
 
-Two-pass implementation: collects keys to remove, then deletes
-them. Each removal leaves a tombstone — call `shrinkToFit()`
+One pass over the slots, dropping entries in place. Each removal
+leaves a tombstone — call `shrinkToFit()`
 afterwards if you've removed a large fraction. The mirror is
 `removeAll(where:)`.
 
@@ -3700,7 +3751,7 @@ _Defined in `lang/std/collections/dictionary.ks`._
 internal var slotCount: Int64 { get }
 ```
 
-Number of bucket slots, for slot-wise key scans (`Set`).
+Number of slots, for slot-wise key scans (`Set`).
 
 _Defined in `lang/std/collections/dictionary.ks`._
 
@@ -3728,16 +3779,16 @@ _Defined in `lang/std/collections/dictionary.ks`._
 #### field `values`
 
 ```kestrel
-public var values: ValuesView[K, V] { get }
+public var values: ValuesView[K, V, A] { get }
 ```
 
 Lazy view of the dictionary's values, iterable in unspecified
 order.
 
 Same iteration order as `keys` — the two views walk the
-buckets in lockstep, so `zip(dict.keys, dict.values)` yields
-pairs equivalent to `dict.iter()`. Invalidated by any
-mutation that may reallocate.
+slots in lockstep, so `zip(dict.keys, dict.values)` yields
+pairs equivalent to `dict.iter()`. Holds a share of the
+storage, like `keys`.
 
 ##### Examples
 
@@ -3764,7 +3815,7 @@ _Defined in `lang/std/collections/dictionary.ks`._
 #### typealias `TargetIterator`
 
 ```kestrel
-type TargetIterator = DictionaryIterator[K, V]
+type TargetIterator = DictionaryIterator[K, V, A]
 ```
 
 Concrete iterator type returned by `iter()`.
@@ -3774,15 +3825,16 @@ _Defined in `lang/std/collections/dictionary.ks`._
 #### function `iter`
 
 ```kestrel
-public func iter() -> DictionaryIterator[K, V]
+public func iter() -> DictionaryIterator[K, V, A]
 ```
 
-Returns a `DictionaryIterator[K, V]` over the live entries.
+Returns a `DictionaryIterator[K, V, A]` over the live entries.
 
 Order is unspecified and may change between mutations. The
-iterator borrows the bucket array; do not mutate the
-dictionary while iterating. For key- or value-only iteration,
-use `keys.iter()` / `values.iter()`.
+iterator holds a share of the storage, so it sees the entries as
+they were when `iter()` was called; mutating the dictionary while
+iterating copies the table first. For key- or value-only
+iteration, use `keys.iter()` / `values.iter()`.
 
 ##### Examples
 
@@ -3798,7 +3850,7 @@ _Defined in `lang/std/collections/dictionary.ks`._
 #### function `clone`
 
 ```kestrel
-public func clone() -> Dictionary[K, V, H]
+public func clone() -> Dictionary[K, V, H, A]
 ```
 
 Returns a `Dictionary` sharing the same storage; the deep copy
@@ -3854,7 +3906,7 @@ _Conditional: `where K: Hashable, V: Equatable, H: Hasher, H: Defaultable`._
 #### function `isEqual`
 
 ```kestrel
-public func isEqual(to: Dictionary[K, V, H]) -> Bool where K: Hashable, V: Equatable, H: Hasher, H: Defaultable
+public func isEqual(to: Dictionary[K, V, H, A]) -> Bool where K: Hashable, V: Equatable, H: Hasher, H: Defaultable
 ```
 
 Order-independent equality: dictionaries are equal iff they have
@@ -3892,19 +3944,19 @@ passing `options` to each key and value's `format`.
 ```
 ["a": 1, "b": 2].format();  // "{a: 1, b: 2}"  — order unspecified
 Dictionary[String, Int64]().format();  // "{}"
-"\{["a": 1, "b": 2]}";      // "{a: 1, b: 2}"  via interpolation
+"\(["a": 1, "b": 2])";      // "{a: 1, b: 2}"  via interpolation
 ```
 
 _Defined in `lang/std/collections/dictionary.ks`._
 
 ### Implements `_ExpressibleByDictionaryLiteral`
 
-_Conditional: `where K: Hashable, H: Hasher, H: Defaultable`._
+_Conditional: `where K: Hashable, H: Hasher, H: Defaultable, A: Defaultable`._
 
 #### typealias `Key`
 
 ```kestrel
-type Key = K where K: Hashable, H: Hasher, H: Defaultable
+type Key = K where K: Hashable, H: Hasher, H: Defaultable, A: Defaultable
 ```
 
 Key type for the literal protocol — matches `K`.
@@ -3914,7 +3966,7 @@ _Defined in `lang/std/collections/dictionary.ks`._
 #### typealias `Value`
 
 ```kestrel
-type Value = V where K: Hashable, H: Hasher, H: Defaultable
+type Value = V where K: Hashable, H: Hasher, H: Defaultable, A: Defaultable
 ```
 
 Value type for the literal protocol — matches `V`.
@@ -3923,26 +3975,26 @@ _Defined in `lang/std/collections/dictionary.ks`._
 
 ### Implements `ExpressibleByDictionaryLiteral`
 
-_Conditional: `where K: Hashable, H: Hasher, H: Defaultable`._
+_Conditional: `where K: Hashable, H: Hasher, H: Defaultable, A: Defaultable`._
 
 ### Implements `Defaultable`
 
-_Conditional: `where K: Hashable, H: Hasher, H: Defaultable`._
+_Conditional: `where K: Hashable, H: Hasher, H: Defaultable, A: Defaultable`._
 
 ## struct `DictionaryIterator`
 
 ```kestrel
-public struct DictionaryIterator[K, V] { /* private fields */ }
+public struct DictionaryIterator[K, V, A = GlobalAllocator] where A: Allocator { /* private fields */ }
 ```
 
 Single-pass forward iterator over the `(key, value)` entries of a
-`Dictionary[K, V, H]`.
+`Dictionary[K, V, H, A]`.
 
-Produced by `Dictionary.iter()`. Walks the bucket array once, skipping
-`.Empty` and `.Deleted` slots, and yields each occupied entry as a
-tuple. Iteration order matches bucket layout, which depends on the
-hash and probe sequence — treat it as unspecified. For key- or
-value-only views see `KeysIterator` and `ValuesIterator`.
+Produced by `Dictionary.iter()`. Walks the slots once, skipping empty
+and deleted ones, and yields each live entry as a tuple. Iteration
+order matches slot layout, which depends on the hash and probe
+sequence — treat it as unspecified. For key- or value-only views see
+`KeysIterator` and `ValuesIterator`.
 
 ### Examples
 
@@ -3956,35 +4008,15 @@ it.next();  // None
 
 ### Representation
 
-A `(buckets, capacity, index)` triple — pointer to the bucket array,
-total slots, and the current scan position.
+A share of the dictionary's storage, plus the current scan position.
 
 ### Memory Model
 
-Value type. The pointer aliases dictionary storage; do not retain an
-iterator across mutations of the source dictionary.
-
-_Defined in `lang/std/collections/dictionary.ks`._
-
-### Members
-
-#### initializer `From Buckets`
-
-```kestrel
-init(buckets: Pointer[Bucket[K, V]], capacity: Int64)
-```
-
-Constructs an iterator over a raw bucket pointer of the given
-capacity.
-
-Prefer `Dictionary.iter()` over calling this directly. The
-pointer must outlive the iterator.
-
-##### Safety
-
-`buckets` must point to at least `capacity` initialized
-`Bucket[K, V]` slots and remain valid for the iterator's
-lifetime.
+Holds a share of the dictionary's storage, like `ArrayIterator`. The
+share keeps the table alive and marks it shared, so the iterator
+sees the dictionary as it was when `iter()` was called: inserting into
+or dropping the dictionary while iterating copies or releases the
+dictionary's own table, never the one being read.
 
 _Defined in `lang/std/collections/dictionary.ks`._
 
@@ -4006,11 +4038,9 @@ _Defined in `lang/std/collections/dictionary.ks`._
 public mutating func next() -> (K, V)?
 ```
 
-Advances the scan to the next occupied slot and returns its
-entry, or `None` when no more remain.
-
-Skips `.Empty` and `.Deleted` slots silently. Once `None` is
-returned the iterator stays exhausted.
+Advances the scan to the next live slot and returns its entry, or
+`None` when no more remain. Once `None` is returned the iterator
+stays exhausted.
 
 ##### Examples
 
@@ -4045,13 +4075,113 @@ func tally(of words: [String: Int64]) -> Int64 { ... }
 
 _Defined in `lang/std/collections/dictionary.ks`._
 
+## typealias `FastHasher`
+
+```kestrel
+public type FastHasher = FoldHasher
+```
+
+The fast, unkeyed `Hasher`: currently `FoldHasher`. Name this for
+"fast, not attack-resistant"; name `FoldHasher` to pin the algorithm.
+
+_Defined in `lang/std/collections/hashing.ks`._
+
+## struct `FoldHasher`
+
+```kestrel
+public struct FoldHasher { /* private fields */ }
+```
+
+foldhash's fast variant (Orson Peters, the default in Rust's
+`hashbrown`), with its fixed seeds: a fast, unkeyed `Hasher` built on
+the folded multiply (the 128-bit product of two words, its halves
+XORed together). It passes SMHasher and gives the same values as the
+Rust crate's `foldhash::fast::FixedState`.
+
+Each `write(bytes:)` is absorbed as one block, so unlike `DefaultHasher`
+splitting a write changes the hash; variable-length values end their
+own input (`String` writes its length) to keep `["ab", "c"]` and
+`["a", "bc"]` apart. Integers collect in a 128-bit buffer and are
+folded in two at a time.
+
+**Not adversarially safe.** It's unkeyed, so anyone who chooses the
+keys can craft collisions, but hashes and iteration order are the same
+on every run. Pick it for trusted keys where speed matters (internal
+IDs, parser symbols): `Dictionary[K, V, FastHasher]`. The default,
+`DefaultHasher`, is keyed SipHash.
+
+### Examples
+
+```
+var h = FoldHasher();
+"hello".hash(into: h);
+let hash = h.finish();  // the same on every run
+
+let ids: Dictionary[Int64, String, FoldHasher] = Dictionary();
+```
+
+### Representation
+
+`accumulator` (the running digest) and the integer buffer: `spongeLo`
+and `spongeHi` hold up to two pending words, `spongeLen` the bits used
+(0, 64 or 128).
+
+_Defined in `lang/std/collections/hashing.ks`._
+
+### Members
+
+#### initializer `Default`
+
+```kestrel
+public init()
+```
+
+A hasher with foldhash's fixed seed.
+
+_Defined in `lang/std/collections/hashing.ks`._
+
+### Implements `Hasher`
+
+#### function `finish`
+
+```kestrel
+public mutating func finish() -> UInt64
+```
+
+Folds in any buffered words; otherwise the accumulator as is.
+
+_Defined in `lang/std/collections/hashing.ks`._
+
+#### function `write`
+
+```kestrel
+public mutating func write(Slice[UInt8])
+```
+
+Absorbs `bytes` as one block. Up to 16 bytes take one folded
+multiply; longer inputs fold 16 or 64 bytes per step.
+
+_Defined in `lang/std/collections/hashing.ks`._
+
+#### function `write`
+
+```kestrel
+public mutating func write(uint64: UInt64)
+```
+
+Buffers the word; once two are pending they're folded in together.
+
+_Defined in `lang/std/collections/hashing.ks`._
+
+### Implements `Defaultable`
+
 ## struct `Heap`
 
 ```kestrel
-public struct Heap[T] where T: Comparable { /* private fields */ }
+public struct Heap[T, A = GlobalAllocator] where T: Comparable, A: Allocator { /* private fields */ }
 ```
 
-Binary min-heap backed by `Array[T]`.
+Binary min-heap backed by `Array[T, A]`.
 
 O(log n) `push`/`pop`, O(1) `peek` at the minimum element. Builds
 from an existing array in O(n) via Floyd's heapify. Iteration yields
@@ -4071,12 +4201,12 @@ h.pop();    // .Some(3)
 
 ### Representation
 
-A single `Array[T]` field in standard binary-heap layout: the minimum
+A single `Array[T, A]` field in standard binary-heap layout: the minimum
 lives at index 0, children of node `i` are at `2i + 1` and `2i + 2`.
 
 ### Memory Model
 
-Delegates storage to `Array[T]`, inheriting its COW value semantics.
+Delegates storage to `Array[T, A]`, inheriting its COW value semantics.
 Copying a `Heap` is O(1); the first mutation on a shared copy triggers
 the array's copy-on-write barrier.
 
@@ -4093,7 +4223,7 @@ _Defined in `lang/std/collections/heap.ks`._
 #### initializer `Empty`
 
 ```kestrel
-public init()
+public init() where A: Defaultable
 ```
 
 Creates an empty min-heap with no allocation.
@@ -4113,7 +4243,7 @@ _Defined in `lang/std/collections/heap.ks`._
 #### initializer `From Data`
 
 ```kestrel
-init(data: Array[T])
+init(data: Array[T, A])
 ```
 
 Internal constructor that wraps an existing array as the heap's
@@ -4124,7 +4254,7 @@ _Defined in `lang/std/collections/heap.ks`._
 #### initializer `From Iterable`
 
 ```kestrel
-public init[I](from: I) where I: Iterable, I: not Static, I.Item == T
+public init[I](from: I) where I: Iterable, I: not Static, I.Item == T, A: Defaultable
 ```
 
 Builds a min-heap by collecting elements then heapifying in O(n).
@@ -4144,10 +4274,20 @@ h.count;    // 5
 
 _Defined in `lang/std/collections/heap.ks`._
 
+#### initializer `With Allocator`
+
+```kestrel
+public init(allocator: A)
+```
+
+An empty heap whose storage will come from `allocator`.
+
+_Defined in `lang/std/collections/heap.ks`._
+
 #### initializer `With Capacity`
 
 ```kestrel
-public init(capacity: Int64)
+public init(capacity: Int64) where A: Defaultable
 ```
 
 Creates an empty min-heap with at least `capacity` slots reserved.
@@ -4161,6 +4301,27 @@ can be pushed without triggering a reallocation.
 var h = Heap[Int64](capacity: 100);
 h.count;  // 0
 ```
+
+_Defined in `lang/std/collections/heap.ks`._
+
+#### initializer `With Capacity And Allocator`
+
+```kestrel
+public init(capacity: Int64, allocator: A)
+```
+
+An empty heap with room for `capacity` elements, allocated from
+`allocator`.
+
+_Defined in `lang/std/collections/heap.ks`._
+
+#### field `allocator`
+
+```kestrel
+public var allocator: A { get }
+```
+
+The allocator this heap's storage comes from.
 
 _Defined in `lang/std/collections/heap.ks`._
 
@@ -4324,7 +4485,7 @@ _Defined in `lang/std/collections/heap.ks`._
 #### typealias `TargetIterator`
 
 ```kestrel
-type TargetIterator = ArrayIterator[T]
+type TargetIterator = ArrayIterator[T, A]
 ```
 
 `Iterable` iterator type — reuses the backing array's iterator.
@@ -4334,7 +4495,7 @@ _Defined in `lang/std/collections/heap.ks`._
 #### function `iter`
 
 ```kestrel
-public func iter() -> ArrayIterator[T]
+public func iter() -> ArrayIterator[T, A]
 ```
 
 Returns an iterator over elements in storage order (NOT sorted).
@@ -4358,7 +4519,7 @@ _Defined in `lang/std/collections/heap.ks`._
 #### function `clone`
 
 ```kestrel
-public func clone() -> Heap[T]
+public func clone() -> Heap[T, A]
 ```
 
 Returns a shallow copy of this heap. O(1).
@@ -4382,12 +4543,12 @@ _Defined in `lang/std/collections/heap.ks`._
 ## struct `KeysIterator`
 
 ```kestrel
-public struct KeysIterator[K, V] where K: Hashable { /* private fields */ }
+public struct KeysIterator[K, V, A = GlobalAllocator] where K: Hashable, A: Allocator { /* private fields */ }
 ```
 
 Single-pass iterator yielding only the keys of a dictionary.
 
-Wraps a `DictionaryIterator[K, V]` and discards the value half of
+Wraps a `DictionaryIterator[K, V, A]` and discards the value half of
 each entry. Order matches the underlying entry iteration and is
 unspecified.
 
@@ -4402,7 +4563,7 @@ it.next();  // None
 
 ### Representation
 
-Wraps a `DictionaryIterator[K, V]`.
+Wraps a `DictionaryIterator[K, V, A]`.
 
 ### Memory Model
 
@@ -4416,7 +4577,7 @@ _Defined in `lang/std/collections/dictionary.ks`._
 #### initializer `From Dict`
 
 ```kestrel
-public init(dictIter: DictionaryIterator[K, V])
+public init(dictIter: DictionaryIterator[K, V, A])
 ```
 
 Wraps a `DictionaryIterator` to yield only its keys.
@@ -4459,7 +4620,7 @@ _Defined in `lang/std/collections/dictionary.ks`._
 ## struct `KeysView`
 
 ```kestrel
-public struct KeysView[K, V] where K: Hashable { /* private fields */ }
+public struct KeysView[K, V, A = GlobalAllocator] where K: Hashable, A: Allocator { /* private fields */ }
 ```
 
 Lazy `Iterable` view over the keys of a dictionary.
@@ -4478,25 +4639,12 @@ let arr = Array(from: dict.keys);
 
 ### Representation
 
-`(buckets, capacity)` — a pointer into the source dictionary's
-bucket array plus the total slot count.
+A share of the source dictionary's storage.
 
 ### Memory Model
 
-Value type that borrows the source dictionary's buffer.
-
-_Defined in `lang/std/collections/dictionary.ks`._
-
-### Members
-
-#### initializer `From Buckets`
-
-```kestrel
-init(buckets: Pointer[Bucket[K, V]], capacity: Int64)
-```
-
-Internal — constructs a view from a bucket pointer and capacity.
-Use `Dictionary.keys` to obtain a view.
+Holds a share of the storage (one refcount), so the view stays valid
+after the dictionary changes or is dropped, and sees it unchanged.
 
 _Defined in `lang/std/collections/dictionary.ks`._
 
@@ -4515,7 +4663,7 @@ _Defined in `lang/std/collections/dictionary.ks`._
 #### typealias `TargetIterator`
 
 ```kestrel
-type TargetIterator = KeysIterator[K, V]
+type TargetIterator = KeysIterator[K, V, A]
 ```
 
 Concrete iterator type returned by `iter()`.
@@ -4525,10 +4673,10 @@ _Defined in `lang/std/collections/dictionary.ks`._
 #### function `iter`
 
 ```kestrel
-public func iter() -> KeysIterator[K, V]
+public func iter() -> KeysIterator[K, V, A]
 ```
 
-Returns a fresh `KeysIterator[K, V]` over the view.
+Returns a fresh `KeysIterator[K, V, A]` over the view.
 
 Each call returns a new iterator starting at the beginning of
 the bucket array.
@@ -4677,13 +4825,13 @@ _Defined in `lang/std/collections/sliceable.ks`._
 ## struct `Set`
 
 ```kestrel
-public struct Set[T, H = DefaultHasher] where T: Hashable, H: Hasher, H: Defaultable { /* private fields */ }
+public struct Set[T, H = DefaultHasher, A = GlobalAllocator] where T: Hashable, H: Hasher, H: Defaultable, A: Allocator { /* private fields */ }
 ```
 
 An unordered hash set of unique elements, parameterized over the
 hasher type `H` (defaults to `DefaultHasher`).
 
-Backed by a `Dictionary[T, Unit, H]` — the dictionary's keys are
+Backed by a `Dictionary[T, Unit, H, A]` — the dictionary's keys are
 the set's elements, and `Unit` fills the value slot. Inherits
 O(1) average-case lookup, insertion, and removal, plus
 copy-on-write storage from the underlying dictionary: copying a
@@ -4720,13 +4868,13 @@ let strings: Set[String] = ["a", "b", "c"];
 ### Hashing
 
 Each element's hash is computed via `T: Hashable` and stored in the
-underlying dictionary's bucket. Swap the hasher type by writing
-`Set[T, SipHasher]` etc.; the default `DefaultHasher` is FNV-1a
-(see `DefaultHasher` for caveats around adversarial inputs).
+underlying dictionary's bucket. The default, `DefaultHasher`, is
+randomly keyed SipHash-1-3 (see `Dictionary`); write `Set[T, FastHasher]`
+for the faster unkeyed hasher.
 
 ### Representation
 
-One field, `dict: Dictionary[T, Unit, H]`. All set operations
+One field, `dict: Dictionary[T, Unit, H, A]`. All set operations
 delegate to the dictionary.
 
 ### Memory Model
@@ -4747,32 +4895,10 @@ _Defined in `lang/std/collections/set.ks`._
 
 ### Members
 
-#### initializer `Array Literal`
-
-```kestrel
-public init(arrayLiteral: LiteralSlice[T])
-```
-
-Creates a set from an array literal slice — emitted by the
-compiler when you write `let s: Set = [1, 2, 3]`.
-
-Pre-allocates capacity to the literal's element count (so the
-build avoids resizing) and inserts each element. Duplicates
-collapse.
-
-##### Examples
-
-```
-// Triggered by the array-literal-with-Set-annotation syntax:
-let nums: Set = [1, 2, 3];
-```
-
-_Defined in `lang/std/collections/set.ks`._
-
 #### typealias `Element`
 
 ```kestrel
-type Element = T where T: Hashable, H: Hasher, H: Defaultable
+type Element = T where T: Hashable, H: Hasher, H: Defaultable, A: Defaultable
 ```
 
 `ExpressibleByArrayLiteral` element type — equals `T`.
@@ -4782,7 +4908,7 @@ _Defined in `lang/std/collections/set.ks`._
 #### initializer `Empty`
 
 ```kestrel
-public init()
+public init() where A: Defaultable
 ```
 
 Creates an empty set with no allocation.
@@ -4804,7 +4930,7 @@ _Defined in `lang/std/collections/set.ks`._
 #### initializer `From Iterable`
 
 ```kestrel
-public init[I](from: I) where I: Iterable, I: not Static, I.Item == T
+public init[I](from: I) where I: Iterable, I: not Static, I.Item == T, A: Defaultable
 ```
 
 Creates a set by inserting every element produced by an
@@ -4825,29 +4951,29 @@ let r   = Set(from: 1..<4);  // {1, 2, 3}
 
 _Defined in `lang/std/collections/set.ks`._
 
-#### initializer `Literal Bridge`
+#### initializer `With Allocator`
 
 ```kestrel
-public init(_arrayLiteralPointer: consuming lang.ptr[T], _arrayLiteralCount: consuming lang.i64) where T: Hashable, H: Hasher, H: Defaultable
+public init(allocator: A)
 ```
 
-Compiler-emitted bridge for `[a, b, c]` literals constructing
-a `Set`.
+An empty set whose table will come from `allocator`. Nothing is
+allocated until the first insert.
 
-Forwards to `init(arrayLiteral:)` after wrapping the raw
-`(ptr, count)` in a `LiteralSlice`. Not called by user code.
+##### Examples
 
-##### Safety
-
-The compiler guarantees `_arrayLiteralPointer` covers exactly
-`_arrayLiteralCount` initialized elements of `T`.
+```
+var arena = ArenaAllocator();
+var s = Set[Int64, DefaultHasher, ArenaAllocator](allocator: arena);
+s.insert(1);  // allocated from the arena
+```
 
 _Defined in `lang/std/collections/set.ks`._
 
 #### initializer `With Capacity`
 
 ```kestrel
-public init(capacity: Int64)
+public init(capacity: Int64) where A: Defaultable
 ```
 
 Creates an empty set sized to hold at least `capacity` elements
@@ -4865,6 +4991,17 @@ var set = Set[String](capacity: 1000);
 set.capacity;  // 1024
 set.count;     // 0
 ```
+
+_Defined in `lang/std/collections/set.ks`._
+
+#### initializer `With Capacity And Allocator`
+
+```kestrel
+public init(capacity: Int64, allocator: A)
+```
+
+An empty set with room for at least `capacity` elements before
+growing, allocated from `allocator`.
 
 _Defined in `lang/std/collections/set.ks`._
 
@@ -4887,6 +5024,16 @@ Set([2, 4, 6]).all { (x) in x % 2 == 0 };  // true
 Set([1, 2, 4]).all { (x) in x % 2 == 0 };  // false
 Set[Int64]().all { (x) in false };           // true (vacuous)
 ```
+
+_Defined in `lang/std/collections/set.ks`._
+
+#### field `allocator`
+
+```kestrel
+public var allocator: A { get }
+```
+
+The allocator this set's table comes from.
 
 _Defined in `lang/std/collections/set.ks`._
 
@@ -5062,7 +5209,7 @@ _Defined in `lang/std/collections/set.ks`._
 #### function `deepClone`
 
 ```kestrel
-public func deepClone() -> Set[T, H] where T: Hashable, T: Cloneable, H: Hasher, H: Defaultable
+public func deepClone() -> Set[T, H, A] where T: Hashable, T: Cloneable, H: Hasher, H: Defaultable
 ```
 
 Returns a fully-detached copy of the set with no shared
@@ -5085,7 +5232,7 @@ _Defined in `lang/std/collections/set.ks`._
 #### field `dict`
 
 ```kestrel
-var dict: Dictionary[T, Unit, H]
+var dict: Dictionary[T, Unit, H, A]
 ```
 
 Backing dictionary. Keys are the set's elements; values are
@@ -5096,7 +5243,7 @@ _Defined in `lang/std/collections/set.ks`._
 #### function `difference`
 
 ```kestrel
-public func difference(Set[T, H]) -> Set[T, H]
+public func difference(Set[T, H, A]) -> Set[T, H, A]
 ```
 
 Returns a new set of every element in `self` that is **not**
@@ -5120,7 +5267,7 @@ _Defined in `lang/std/collections/set.ks`._
 #### function `filter`
 
 ```kestrel
-public func filter(where: (T) -> Bool) -> Set[T, H]
+public func filter(where: (T) -> Bool) -> Set[T, H, A]
 ```
 
 Returns a new set containing only elements for which
@@ -5187,7 +5334,7 @@ _Defined in `lang/std/collections/set.ks`._
 #### function `formDifference`
 
 ```kestrel
-public mutating func formDifference(Set[T, H])
+public mutating func formDifference(Set[T, H, A])
 ```
 
 In-place difference: removes every element of `self` that **is**
@@ -5209,7 +5356,7 @@ _Defined in `lang/std/collections/set.ks`._
 #### function `formIntersection`
 
 ```kestrel
-public mutating func formIntersection(Set[T, H])
+public mutating func formIntersection(Set[T, H, A])
 ```
 
 In-place intersection: removes every element of `self` that
@@ -5232,7 +5379,7 @@ _Defined in `lang/std/collections/set.ks`._
 #### function `formSymmetricDifference`
 
 ```kestrel
-public mutating func formSymmetricDifference(Set[T, H])
+public mutating func formSymmetricDifference(Set[T, H, A])
 ```
 
 In-place symmetric difference: keeps elements in exactly one
@@ -5255,7 +5402,7 @@ _Defined in `lang/std/collections/set.ks`._
 #### function `formUnion`
 
 ```kestrel
-public mutating func formUnion(Set[T, H])
+public mutating func formUnion(Set[T, H, A])
 ```
 
 In-place union: adds every element of `other` to `self`.
@@ -5276,10 +5423,10 @@ _Defined in `lang/std/collections/set.ks`._
 #### function `getDict`
 
 ```kestrel
-func getDict() -> Dictionary[T, Unit, H]
+func getDict() -> Dictionary[T, Unit, H, A]
 ```
 
-Returns the backing `Dictionary[T, Unit, H]`. Internal helper
+Returns the backing `Dictionary[T, Unit, H, A]`. Internal helper
 for extensions that need direct dictionary access.
 
 _Defined in `lang/std/collections/set.ks`._
@@ -5333,7 +5480,7 @@ _Defined in `lang/std/collections/set.ks`._
 #### function `intersection`
 
 ```kestrel
-public func intersection(Set[T, H]) -> Set[T, H]
+public func intersection(Set[T, H, A]) -> Set[T, H, A]
 ```
 
 Returns a new set containing only elements present in both
@@ -5356,7 +5503,7 @@ _Defined in `lang/std/collections/set.ks`._
 #### function `isDisjoint`
 
 ```kestrel
-public func isDisjoint(with: Set[T, H]) -> Bool
+public func isDisjoint(with: Set[T, H, A]) -> Bool
 ```
 
 `true` if `self` and `other` share no elements.
@@ -5398,7 +5545,7 @@ _Defined in `lang/std/collections/set.ks`._
 #### function `isStrictSubset`
 
 ```kestrel
-public func isStrictSubset(of: Set[T, H]) -> Bool
+public func isStrictSubset(of: Set[T, H, A]) -> Bool
 ```
 
 `true` if `self` is a subset of `other` and the two sets are
@@ -5421,7 +5568,7 @@ _Defined in `lang/std/collections/set.ks`._
 #### function `isStrictSuperset`
 
 ```kestrel
-public func isStrictSuperset(of: Set[T, H]) -> Bool
+public func isStrictSuperset(of: Set[T, H, A]) -> Bool
 ```
 
 `true` if `self` is a superset of `other` and the two sets
@@ -5443,7 +5590,7 @@ _Defined in `lang/std/collections/set.ks`._
 #### function `isSubset`
 
 ```kestrel
-public func isSubset(of: Set[T, H]) -> Bool
+public func isSubset(of: Set[T, H, A]) -> Bool
 ```
 
 `true` if every element of `self` appears in `other`.
@@ -5468,7 +5615,7 @@ _Defined in `lang/std/collections/set.ks`._
 #### function `isSuperset`
 
 ```kestrel
-public func isSuperset(of: Set[T, H]) -> Bool
+public func isSuperset(of: Set[T, H, A]) -> Bool
 ```
 
 `true` if every element of `other` appears in `self`.
@@ -5709,7 +5856,7 @@ _Defined in `lang/std/collections/set.ks`._
 #### function `symmetricDifference`
 
 ```kestrel
-public func symmetricDifference(Set[T, H]) -> Set[T, H]
+public func symmetricDifference(Set[T, H, A]) -> Set[T, H, A]
 ```
 
 Returns a new set of elements in exactly one of `self` or
@@ -5755,7 +5902,7 @@ _Defined in `lang/std/collections/set.ks`._
 #### function `union`
 
 ```kestrel
-public func union(Set[T, H]) -> Set[T, H]
+public func union(Set[T, H, A]) -> Set[T, H, A]
 ```
 
 Returns a new set containing every element from `self` and
@@ -5789,7 +5936,7 @@ _Defined in `lang/std/collections/set.ks`._
 #### typealias `TargetIterator`
 
 ```kestrel
-type TargetIterator = SetIterator[T, H]
+type TargetIterator = SetIterator[T, H, A]
 ```
 
 Concrete iterator type returned by `iter()`.
@@ -5799,10 +5946,10 @@ _Defined in `lang/std/collections/set.ks`._
 #### function `iter`
 
 ```kestrel
-public func iter() -> SetIterator[T, H]
+public func iter() -> SetIterator[T, H, A]
 ```
 
-Returns a single-pass `SetIterator[T, H]` over the elements.
+Returns a single-pass `SetIterator[T, H, A]` over the elements.
 
 Order is unspecified and may change between mutations. The
 iterator borrows the underlying buffer; do not mutate the
@@ -5822,7 +5969,7 @@ _Defined in `lang/std/collections/set.ks`._
 #### function `clone`
 
 ```kestrel
-public func clone() -> Set[T, H]
+public func clone() -> Set[T, H, A]
 ```
 
 Returns a `Set` sharing the same storage; the deep copy is
@@ -5850,7 +5997,7 @@ _Conditional: `where T: Hashable, H: Hasher, H: Defaultable`._
 #### function `isEqual`
 
 ```kestrel
-public func isEqual(to: Set[T, H]) -> Bool where T: Hashable, H: Hasher, H: Defaultable
+public func isEqual(to: Set[T, H, A]) -> Bool where T: Hashable, H: Hasher, H: Defaultable
 ```
 
 `true` when `self` and `other` contain exactly the same
@@ -5915,25 +6062,25 @@ passing `options` to each element's `format`.
 ```
 Set([1, 2, 3]).format();  // "{1, 2, 3}" — order unspecified
 Set[Int64]().format();    // "{}"
-"\{Set([1, 2, 3])}";      // "{1, 2, 3}" via interpolation
+"\(Set([1, 2, 3]))";      // "{1, 2, 3}" via interpolation
 ```
 
 _Defined in `lang/std/collections/set.ks`._
 
 ### Implements `ExpressibleByArrayLiteral`
 
-_Conditional: `where T: Hashable, H: Hasher, H: Defaultable`._
+_Conditional: `where T: Hashable, H: Hasher, H: Defaultable, A: Defaultable`._
 
 ## struct `SetIterator`
 
 ```kestrel
-public struct SetIterator[T, H = DefaultHasher] where T: Hashable, H: Hasher, H: Defaultable { /* private fields */ }
+public struct SetIterator[T, H = DefaultHasher, A = GlobalAllocator] where T: Hashable, H: Hasher, H: Defaultable, A: Allocator { /* private fields */ }
 ```
 
-Single-pass forward iterator over the elements of a `Set[T, H]`.
+Single-pass forward iterator over the elements of a `Set[T, H, A]`.
 
 Returned by `Set.iter()`. Wraps the underlying
-`DictionaryIterator[T, Unit]` and discards the (unused) value
+`DictionaryIterator[T, Unit, A]` and discards the (unused) value
 half of each entry, yielding only the key. Iteration order
 matches the underlying bucket layout and is unspecified.
 
@@ -5946,7 +6093,7 @@ for item in set { print(item); }
 
 ### Representation
 
-Wraps a `DictionaryIterator[T, Unit]`.
+Wraps a `DictionaryIterator[T, Unit, A]`.
 
 ### Memory Model
 
@@ -5960,7 +6107,7 @@ _Defined in `lang/std/collections/set.ks`._
 #### initializer `From Dict`
 
 ```kestrel
-public init(dictIter: DictionaryIterator[T, Unit])
+public init(dictIter: DictionaryIterator[T, Unit, A])
 ```
 
 Wraps a `DictionaryIterator` to yield only its keys.
@@ -6038,7 +6185,7 @@ _Defined in `lang/std/collections/slice.ks`._
 #### function `asUnsafeSlice`
 
 ```kestrel
-public func asUnsafeSlice() -> UnsafeSlice[T]
+public func asUnsafeSlice() -> UnsafeSlice[T] where T: Copyable
 ```
 
 The elements as a raw `(pointer, count)` view.
@@ -6048,7 +6195,7 @@ _Defined in `lang/std/collections/slice.ks`._
 #### function `assign`
 
 ```kestrel
-public mutating func assign(from: some Sliceable[T] and not Sized) where T: Copyable
+public mutating func assign(from: &some Sliceable[T] and not Static and not Copyable and not Sized) where T: Copyable
 ```
 
 Overwrites every element with the matching element of `other`.
@@ -6059,7 +6206,7 @@ _Defined in `lang/std/collections/slice.ks`._
 #### function `chunks`
 
 ```kestrel
-public func chunks(of: Int64) -> ChunksView[T]
+public func chunks(of: Int64) -> ChunksView[T] where T: Copyable
 ```
 
 Multi-pass lazy view over non-overlapping `size`-sized chunks. The
@@ -6130,9 +6277,12 @@ _Defined in `lang/std/collections/slice.ks`._
 public static func lend(start: consuming Pointer[T], count: consuming Int64) -> &Slice[T]
 ```
 
-Lends the `count` elements starting at `start` as a slice. The
-caller is responsible for `count` live elements being there for as
-long as the slice is used.
+Lends the `count` elements starting at `start` as a slice.
+
+##### Safety
+
+`start` must point to `count` initialised elements that stay alive,
+and aren't moved, for as long as the slice is used.
 
 _Defined in `lang/std/collections/slice.ks`._
 
@@ -6153,6 +6303,11 @@ public static func lendMutating(start: consuming Pointer[T], count: consuming In
 ```
 
 Like `lend(start:count:)`, for writing through.
+
+##### Safety
+
+As for `lend(start:count:)`, and nothing else may read or write
+the elements while the slice is in use.
 
 _Defined in `lang/std/collections/slice.ks`._
 
@@ -6189,7 +6344,7 @@ _Defined in `lang/std/collections/slice.ks`._
 #### function `partition`
 
 ```kestrel
-public mutating func partition(by: (T) -> Bool) -> Int64
+public mutating func partition(by: (T) -> Bool) -> Int64 where T: Copyable
 ```
 
 Reorders the slice so every element matching `predicate` comes
@@ -6221,7 +6376,7 @@ _Defined in `lang/std/collections/slice.ks`._
 #### function `reverse`
 
 ```kestrel
-public mutating func reverse()
+public mutating func reverse() where T: Copyable
 ```
 
 Reverses the slice in place. O(n).
@@ -6231,7 +6386,7 @@ _Defined in `lang/std/collections/slice_algorithms.ks`._
 #### field `reversed`
 
 ```kestrel
-public var reversed: ReversedView[T] { get }
+public var reversed: ReversedView[T] where T: Copyable { get }
 ```
 
 Multi-pass lazy view that reads back to front.
@@ -6247,7 +6402,7 @@ _Defined in `lang/std/collections/views.ks`._
 #### function `rotate`
 
 ```kestrel
-public mutating func rotate(by: Int64)
+public mutating func rotate(by: Int64) where T: Copyable
 ```
 
 Rotates the slice left by `amount` (negative rotates right; the
@@ -6259,7 +6414,7 @@ _Defined in `lang/std/collections/slice_algorithms.ks`._
 #### function `shuffle`
 
 ```kestrel
-public mutating func shuffle(using: mutating some RandomNumberGenerator)
+public mutating func shuffle(using: mutating some RandomNumberGenerator) where T: Copyable
 ```
 
 Shuffles the slice in place with `rng` (Fisher-Yates: every
@@ -6271,7 +6426,7 @@ _Defined in `lang/std/collections/slice_algorithms.ks`._
 #### function `shuffle`
 
 ```kestrel
-public mutating func shuffle()
+public mutating func shuffle() where T: Copyable
 ```
 
 Shuffles the slice in place with a fresh system RNG.
@@ -6281,7 +6436,7 @@ _Defined in `lang/std/collections/slice_algorithms.ks`._
 #### function `sort`
 
 ```kestrel
-public mutating func sort(by: (T, T) -> Bool)
+public mutating func sort(by: (T, T) -> Bool) where T: Copyable
 ```
 
 Sorts the slice in place with a `<`-style comparator. Introsort
@@ -6293,7 +6448,7 @@ _Defined in `lang/std/collections/slice_algorithms.ks`._
 #### function `sort`
 
 ```kestrel
-public mutating func sort[K](byKey: consuming (T) -> K) where K: Comparable
+public mutating func sort[K](byKey: consuming (T) -> K) where K: Comparable, T: Copyable
 ```
 
 Sorts the slice in place by an extracted `Comparable` key.
@@ -6313,7 +6468,7 @@ _Defined in `lang/std/collections/slice_algorithms.ks`._
 #### function `split`
 
 ```kestrel
-public func split(where: consuming escaping (T) -> Bool) -> ArraySplitWhereView[T]
+public func split(where: consuming escaping (T) -> Bool) -> ArraySplitWhereView[T] where T: Copyable
 ```
 
 Multi-pass lazy view over the segments between elements matching
@@ -6324,11 +6479,11 @@ _Defined in `lang/std/collections/views.ks`._
 #### function `split`
 
 ```kestrel
-public func split(T) -> ArraySplitView[T] where T: Equatable
+public func split(by: T) -> ArraySplitView[T] where T: Equatable, T: Copyable
 ```
 
 Multi-pass lazy view over the segments between occurrences of
-`separator`. `toArray()` copies them into owned arrays.
+`separator`. `toOwned()` copies them into owned arrays.
 
 ```
 [1, 0, 2, 0, 3].split(by: 0).toOwned();   // [[1], [2], [3]]
@@ -6354,8 +6509,11 @@ _Defined in `lang/std/collections/slice.ks`._
 public subscript[I](unchecked: I) -> I.SliceOutput where I: SliceIndex[T] { ref mutating ref }
 ```
 
-Like `self(index)`, without the bounds check (undefined behavior when
-out of range).
+Like `self(index)`, without the bounds check.
+
+##### Safety
+
+`index` must be in range. Out of range is undefined behavior.
 
 _Defined in `lang/std/collections/slice.ks`._
 
@@ -6418,7 +6576,7 @@ _Defined in `lang/std/collections/slice.ks`._
 #### function `swap`
 
 ```kestrel
-public mutating func swap(at: Int64, with: Int64)
+public mutating func swap(at: Int64, with: Int64) where T: Copyable
 ```
 
 Swaps elements `i` and `j` of the slice. Panics if either is out of
@@ -6426,10 +6584,10 @@ range.
 
 _Defined in `lang/std/collections/slice_algorithms.ks`._
 
-#### function `toArray`
+#### function `toOwned`
 
 ```kestrel
-public func toArray() -> Array[T] where T: Copyable
+public func toOwned() -> Array[T] where T: Copyable
 ```
 
 An owned copy of the elements.
@@ -6439,7 +6597,7 @@ _Defined in `lang/std/collections/slice.ks`._
 #### function `windows`
 
 ```kestrel
-public func windows(of: Int64) -> WindowsView[T]
+public func windows(of: Int64) -> WindowsView[T] where T: Copyable
 ```
 
 Multi-pass lazy view over overlapping `size`-sized sliding windows.
@@ -6454,10 +6612,12 @@ _Defined in `lang/std/collections/views.ks`._
 
 ### Implements `Sliceable`
 
+_Conditional: `where T: Copyable`._
+
 #### function `asSlice`
 
 ```kestrel
-public func asSlice() -> &Slice[T]
+public func asSlice() -> &Slice[T] where T: Copyable
 ```
 
 Itself: a slice is already the in-place view.
@@ -6466,10 +6626,12 @@ _Defined in `lang/std/collections/slice.ks`._
 
 ### Implements `Iterable`
 
+_Conditional: `where T: Copyable`._
+
 #### typealias `Item`
 
 ```kestrel
-type Item = T
+type Item = T where T: Copyable
 ```
 
 _Defined in `lang/std/collections/slice.ks`._
@@ -6477,7 +6639,7 @@ _Defined in `lang/std/collections/slice.ks`._
 #### typealias `TargetIterator`
 
 ```kestrel
-type TargetIterator = UnsafeSliceIterator[T]
+type TargetIterator = UnsafeSliceIterator[T] where T: Copyable
 ```
 
 _Defined in `lang/std/collections/slice.ks`._
@@ -6485,7 +6647,7 @@ _Defined in `lang/std/collections/slice.ks`._
 #### function `iter`
 
 ```kestrel
-public func iter() -> UnsafeSliceIterator[T]
+public func iter() -> UnsafeSliceIterator[T] where T: Copyable
 ```
 
 Forward iterator over the elements.
@@ -6496,12 +6658,18 @@ _Defined in `lang/std/collections/slice.ks`._
 
 _Conditional: `where T: Equatable`._
 
+### Implements `Formattable`
+
+_Conditional: `where T: Formattable`._
+
 ### Implements `ArrayMatchable`
+
+_Conditional: `where T: Copyable`._
 
 #### typealias `Element`
 
 ```kestrel
-type Element = T
+type Element = T where T: Copyable
 ```
 
 _Defined in `lang/std/collections/slice.ks`._
@@ -6509,31 +6677,7 @@ _Defined in `lang/std/collections/slice.ks`._
 #### typealias `Rest`
 
 ```kestrel
-type Rest = &Slice[T]
-```
-
-_Defined in `lang/std/collections/slice.ks`._
-
-#### function `matchGet`
-
-```kestrel
-public func matchGet(Int64) -> T
-```
-
-_Defined in `lang/std/collections/slice.ks`._
-
-#### function `matchLength`
-
-```kestrel
-public func matchLength() -> Int64
-```
-
-_Defined in `lang/std/collections/slice.ks`._
-
-#### function `matchSlice`
-
-```kestrel
-public func matchSlice(Int64, Int64) -> &Slice[T]
+type Rest = &Slice[T] where T: Copyable
 ```
 
 _Defined in `lang/std/collections/slice.ks`._
@@ -6650,8 +6794,8 @@ public protocol Sliceable[T]
 Shared read-only protocol for contiguous collections.
 
 `Sliceable[T]` is the contiguous-collection counterpart to `Str` in
-`std.text`: a conformer lends itself as a `Slice` (`asSlice`) and its
-index places; all read-only logic lives in a protocol extension.
+`std.text`: one kernel method (`asSlice`), and the index places and all
+read-only logic in a protocol extension.
 `Array[T]`, `Slice[T]` and `UnsafeSlice[T]` conform, so generic code
 constrained to `S: Sliceable[T]` accepts any of them without
 overloading, and `s(i)` borrows the element rather than copying it.
@@ -6890,7 +7034,7 @@ _Defined in `lang/std/collections/sliceable.ks`._
 #### function `ends`
 
 ```kestrel
-public func ends(with: some Sliceable[T] and not Sized) -> Bool where T: Equatable
+public func ends(with: &some Sliceable[T] and not Static and not Copyable and not Sized) -> Bool where T: Equatable
 ```
 
 `true` if the trailing elements match `suffix`. O(k) where k is
@@ -6923,6 +7067,38 @@ O(n). Result size is unknown; uses geometric growth.
 
 _Defined in `lang/std/collections/sliceable.ks`._
 
+#### function `find`
+
+```kestrel
+public func find(where: (T) -> Bool) -> Optional[&T]
+```
+
+Lends the first element matching `predicate`, or `None`. O(n).
+
+##### Examples
+
+```
+[1, 2, 3, 4, 5].find(where: { it > 3 });  // Some(4)
+```
+
+_Defined in `lang/std/collections/sliceable.ks`._
+
+#### function `findLast`
+
+```kestrel
+public func findLast(where: (T) -> Bool) -> Optional[&T]
+```
+
+Lends the last element matching `predicate`, or `None`. O(n).
+
+##### Examples
+
+```
+[1, 2, 3, 2, 1].findLast(where: { it > 1 });  // Some(2)
+```
+
+_Defined in `lang/std/collections/sliceable.ks`._
+
 #### field `first`
 
 ```kestrel
@@ -6940,22 +7116,6 @@ Read-only — to remove the first element from an `Array`, use
 ```
 [1, 2, 3].first;  // Some(1)
 [].first;          // None
-```
-
-_Defined in `lang/std/collections/sliceable.ks`._
-
-#### function `find`
-
-```kestrel
-public func find(where: (T) -> Bool) -> Optional[&T]
-```
-
-Lends the first element matching `predicate`, or `None`. O(n).
-
-##### Examples
-
-```
-[1, 2, 3, 4, 5].find(where: { it > 3 });  // Some(4)
 ```
 
 _Defined in `lang/std/collections/sliceable.ks`._
@@ -7123,6 +7283,31 @@ public func isValid(index: Int64) -> Bool
 
 _Defined in `lang/std/collections/sliceable.ks`._
 
+#### function `joined`
+
+```kestrel
+public func joined(by: String) -> String where T: Formattable
+```
+
+Concatenates each element's string representation, separated by
+`separator`.
+
+Each element is rendered with its `format()` method using default
+`FormatOptions`. The default `separator` is empty (raw
+concatenation). An empty collection produces `""`. Works on arrays
+and on slices of them alike. For the bracketed debug form
+(`"[1, 2, 3]"`), use `format()` directly.
+
+##### Examples
+
+```
+[1, 2, 3].joined(by: ", ");          // "1, 2, 3"
+[1, 2, 3].joined();                   // "123"
+["a", "b", "c"](1..<3).joined(by: "-");  // "b-c"
+```
+
+_Defined in `lang/std/collections/sliceable.ks`._
+
 #### field `last`
 
 ```kestrel
@@ -7133,29 +7318,13 @@ Lends the last element in place, or `.None` for an empty collection.
 O(1).
 
 Read-only — to remove the last element from an `Array`, use
-`pop()`.
+`popLast()`.
 
 ##### Examples
 
 ```
 [1, 2, 3].last;  // Some(3)
 [].last;          // None
-```
-
-_Defined in `lang/std/collections/sliceable.ks`._
-
-#### function `findLast`
-
-```kestrel
-public func findLast(where: (T) -> Bool) -> Optional[&T]
-```
-
-Lends the last element matching `predicate`, or `None`. O(n).
-
-##### Examples
-
-```
-[1, 2, 3, 2, 1].findLast(where: { it > 1 });  // Some(2)
 ```
 
 _Defined in `lang/std/collections/sliceable.ks`._
@@ -7302,7 +7471,7 @@ _Defined in `lang/std/collections/sliceable.ks`._
 public func randomElement() -> T?
 ```
 
-A uniformly random element using OS entropy, or `.None` for an
+A uniformly random element from `DefaultRandom`, or `.None` for an
 empty collection. O(1).
 
 ##### Examples
@@ -7334,7 +7503,7 @@ _Defined in `lang/std/collections/sliceable.ks`._
 #### function `starts`
 
 ```kestrel
-public func starts(with: some Sliceable[T] and not Sized) -> Bool where T: Equatable
+public func starts(with: &some Sliceable[T] and not Static and not Copyable and not Sized) -> Bool where T: Equatable
 ```
 
 `true` if the leading elements match `prefix`. O(k) where k is
@@ -7398,6 +7567,54 @@ subscript(wrapped: Int64) -> T? { ref }
 
 _Defined in `lang/std/collections/sliceable.ks`._
 
+#### subscript `subscript`
+
+```kestrel
+public subscript[I](I) -> I.SliceOutput where I: SliceIndex[T] { ref }
+```
+
+_Defined in `lang/std/collections/sliceable.ks`._
+
+#### subscript `subscript`
+
+```kestrel
+public subscript[I](checked: I) -> I.SliceOutput? where I: SliceIndex[T] { ref }
+```
+
+_Defined in `lang/std/collections/sliceable.ks`._
+
+#### subscript `subscript`
+
+```kestrel
+public subscript[I](unchecked: I) -> I.SliceOutput where I: SliceIndex[T] { ref }
+```
+
+_Defined in `lang/std/collections/sliceable.ks`._
+
+#### subscript `subscript`
+
+```kestrel
+public subscript(clamped: Int64) -> T? { ref }
+```
+
+_Defined in `lang/std/collections/sliceable.ks`._
+
+#### subscript `subscript`
+
+```kestrel
+public subscript[R](within: R) -> Slice[T] where R: SliceClampable[T] { ref }
+```
+
+_Defined in `lang/std/collections/sliceable.ks`._
+
+#### subscript `subscript`
+
+```kestrel
+public subscript(wrapped: Int64) -> T? { ref }
+```
+
+_Defined in `lang/std/collections/sliceable.ks`._
+
 #### function `suffix`
 
 ```kestrel
@@ -7425,9 +7642,9 @@ public func unique() -> Array[T] where T: Hashable
 ```
 
 Returns a new array with duplicates removed, preserving
-first-occurrence order. O(n²).
+first-occurrence order. O(n) expected: seen elements go in a `Set`.
 
-For the mutating variant on `Array`, see `removeDuplicates()`.
+To remove only adjacent repeats, use `dedup()` / `deduped()`.
 
 ##### Examples
 
@@ -7458,12 +7675,12 @@ _Defined in `lang/std/collections/sliceable.ks`._
 ## struct `ValuesIterator`
 
 ```kestrel
-public struct ValuesIterator[K, V] where K: Hashable { /* private fields */ }
+public struct ValuesIterator[K, V, A = GlobalAllocator] where K: Hashable, A: Allocator { /* private fields */ }
 ```
 
 Single-pass iterator yielding only the values of a dictionary.
 
-Wraps a `DictionaryIterator[K, V]` and discards the key half of
+Wraps a `DictionaryIterator[K, V, A]` and discards the key half of
 each entry. Order matches the underlying entry iteration and is
 unspecified.
 
@@ -7478,7 +7695,7 @@ it.next();  // None
 
 ### Representation
 
-Wraps a `DictionaryIterator[K, V]`.
+Wraps a `DictionaryIterator[K, V, A]`.
 
 ### Memory Model
 
@@ -7492,7 +7709,7 @@ _Defined in `lang/std/collections/dictionary.ks`._
 #### initializer `From Dict`
 
 ```kestrel
-public init(dictIter: DictionaryIterator[K, V])
+public init(dictIter: DictionaryIterator[K, V, A])
 ```
 
 Wraps a `DictionaryIterator` to yield only its values.
@@ -7535,7 +7752,7 @@ _Defined in `lang/std/collections/dictionary.ks`._
 ## struct `ValuesView`
 
 ```kestrel
-public struct ValuesView[K, V] where K: Hashable { /* private fields */ }
+public struct ValuesView[K, V, A = GlobalAllocator] where K: Hashable, A: Allocator { /* private fields */ }
 ```
 
 Lazy `Iterable` view over the values of a dictionary.
@@ -7554,25 +7771,12 @@ let sum = dict.values.iter().sum();
 
 ### Representation
 
-`(buckets, capacity)` — a pointer into the source dictionary's
-bucket array plus the total slot count.
+A share of the source dictionary's storage.
 
 ### Memory Model
 
-Value type that borrows the source dictionary's buffer.
-
-_Defined in `lang/std/collections/dictionary.ks`._
-
-### Members
-
-#### initializer `From Buckets`
-
-```kestrel
-init(buckets: Pointer[Bucket[K, V]], capacity: Int64)
-```
-
-Internal — constructs a view from a bucket pointer and capacity.
-Use `Dictionary.values` to obtain a view.
+Holds a share of the storage (one refcount), so the view stays valid
+after the dictionary changes or is dropped, and sees it unchanged.
 
 _Defined in `lang/std/collections/dictionary.ks`._
 
@@ -7591,7 +7795,7 @@ _Defined in `lang/std/collections/dictionary.ks`._
 #### typealias `TargetIterator`
 
 ```kestrel
-type TargetIterator = ValuesIterator[K, V]
+type TargetIterator = ValuesIterator[K, V, A]
 ```
 
 Concrete iterator type returned by `iter()`.
@@ -7601,10 +7805,10 @@ _Defined in `lang/std/collections/dictionary.ks`._
 #### function `iter`
 
 ```kestrel
-public func iter() -> ValuesIterator[K, V]
+public func iter() -> ValuesIterator[K, V, A]
 ```
 
-Returns a fresh `ValuesIterator[K, V]` over the view.
+Returns a fresh `ValuesIterator[K, V, A]` over the view.
 
 Each call returns a new iterator starting at the beginning of
 the bucket array.
@@ -7691,10 +7895,10 @@ Window `index`. Panics when out of range.
 
 _Defined in `lang/std/collections/views.ks`._
 
-#### function `toArray`
+#### function `toOwned`
 
 ```kestrel
-public func toArray() -> Array[Array[T]]
+public func toOwned() -> Array[Array[T]]
 ```
 
 Copies every window into an owned array.

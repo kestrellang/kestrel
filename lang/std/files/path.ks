@@ -56,8 +56,9 @@ public struct Path: Equatable, Hashable, Cloneable, Formattable, ExpressibleBySt
     /// `bytes` when the exact name matters.
     public var string: String { textOf(self.data.asSlice()) }
 
-    /// The path's bytes, exactly.
-    public var bytes: Array[UInt8] { self.data.clone() }
+    /// The path's bytes, exactly, borrowed from the path. Call
+    /// `toOwned()` for an array of your own.
+    public var bytes: &Slice[UInt8] { self.data.asSlice() }
 
     /// `true` for the empty path.
     public var isEmpty: Bool { self.data.isEmpty }
@@ -269,7 +270,7 @@ public struct Path: Equatable, Hashable, Cloneable, Formattable, ExpressibleBySt
 
     /// The path as a NUL-terminated C string for a system call;
     /// `InvalidInput` if it holds a NUL byte. The caller frees it.
-    internal func toNativePath() -> Result[CString, IoError] {
+    public func toNativePath() -> Result[CString, IoError] {
         let count = self.data.count;
         for i in 0..<count {
             if unsafe self.data(unchecked: i) == 0 {

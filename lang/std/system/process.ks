@@ -11,6 +11,7 @@ import std.result.(Optional, Result)
 import std.streams.(IoError, Readable, Writable, flushStandardOutput)
 import std.ffi.(malloc, free)
 import std.time.(Duration)
+import std.files.(Path)
 
 // ============================================================================
 // THIS PROCESS
@@ -37,7 +38,7 @@ public enum Process {
 
     /// The absolute path of the running executable, with symbolic links
     /// resolved on Linux.
-    public static func executablePath() -> Result[String, IoError] {
+    public static func executablePath() -> Result[Path, IoError] {
         let size: Int64 = 4096;
         let buf = unsafe malloc(size + 1);
         let length = unsafe native_executable_path(buf, size);
@@ -46,14 +47,14 @@ public enum Process {
             return .Err(IoError.last())
         }
         let bytes = buf.cast[UInt8]();
-        var path = String();
+        var path = Array[UInt8](capacity: length);
         var i: Int64 = 0;
         while i < length {
-            path.appendByte(unsafe bytes.offset(by: i).read());
+            path.append(unsafe bytes.offset(by: i).read());
             i = i + 1
         }
         unsafe free(buf);
-        .Ok(path)
+        .Ok(Path(bytes: path))
     }
 
     /// The raw command-line arguments, `argv[0]` (the program name)
@@ -208,13 +209,43 @@ public enum Stdio {
     case Pipe
     /// Connect `/dev/null`.
     case Null
+    /// Connect the file at this path: standard input reads it, and
+    /// standard output or error writes it, creating it if missing and
+    /// truncating it otherwise.
+    case File(Path)
 
     func nativeMode() -> Int32 {
         match self {
             .Inherit => 0,
             .Pipe => 1,
-            .Null => 2
+            .Null => 2,
+            .File(_) => 3
         }
+    }
+}
+
+/// A stream's mode for `kestrel_spawn`: its explicit setting, or `fallback`.
+func nativeMode(of mode: Optional[Stdio], or fallback: Stdio) -> Int32 {
+    match mode {
+        .Some(m) => m.nativeMode(),
+        .None => fallback.nativeMode()
+    }
+}
+
+/// A `.File` stream's path as a C string the caller frees; null otherwise.
+/// `Command.hasNulByte` has already ruled out the one failure.
+func nativePath(of mode: Optional[Stdio]) -> RawPointer {
+    match mode {
+        .Some(.File(path)) => path.toNativePath().unwrap().raw.asRaw(),
+        _ => RawPointer.nullPointer()
+    }
+}
+
+/// `true` when `mode` is a `.File` whose path holds a NUL byte.
+func hasNulByte(in mode: Optional[Stdio]) -> Bool {
+    match mode {
+        .Some(.File(path)) => path.bytes.contains(0),
+        _ => false
     }
 }
 
@@ -241,7 +272,7 @@ public struct Command: not Copyable {
     var argumentList: Array[String]
     var environmentChanges: Array[(String, Optional[String])]
     var clearsEnvironment: Bool
-    var workingDirectory: Optional[String]
+    var workingDirectory: Optional[Path]
     var inputMode: Optional[Stdio]
     var outputMode: Optional[Stdio]
     var errorMode: Optional[Stdio]
@@ -323,7 +354,7 @@ public struct Command: not Copyable {
     }
 
     /// Runs the child in `path` instead of the current directory.
-    public mutating func directory(path: String) -> &mutating Command {
+    public mutating func directory(path: Path) -> &mutating Command {
         self.workingDirectory = .Some(path);
         self
     }
@@ -400,13 +431,19 @@ public struct Command: not Copyable {
         let nativeArgv = NativeStringArray(from: argv);
         let nativeEnvironment = self.childEnvironment();
         let cwd = match self.workingDirectory {
-            .Some(dir) => dir.toCString().raw.asRaw(),
+            // `hasNulByte` already ruled out the one failure.
+            .Some(dir) => dir.toNativePath().unwrap().raw.asRaw(),
             .None => RawPointer.nullPointer()
         };
         let modes = NativeInt32Cells(3);
-        modes.write((self.inputMode ?? defaultInput).nativeMode(), at: 0);
-        modes.write((self.outputMode ?? defaultOutput).nativeMode(), at: 1);
-        modes.write((self.errorMode ?? defaultError).nativeMode(), at: 2);
+        modes.write(nativeMode(of: self.inputMode, or: defaultInput), at: 0);
+        modes.write(nativeMode(of: self.outputMode, or: defaultOutput), at: 1);
+        modes.write(nativeMode(of: self.errorMode, or: defaultError), at: 2);
+        // The defaults are never `.File`, so only explicit settings open one.
+        var paths = Array[RawPointer](capacity: 3);
+        paths.append(nativePath(of: self.inputMode));
+        paths.append(nativePath(of: self.outputMode));
+        paths.append(nativePath(of: self.errorMode));
         let pidCell = NativeInt32Cells(1);
         let fds = NativeInt32Cells(3);
 
@@ -421,10 +458,15 @@ public struct Command: not Copyable {
             .None => RawPointer.nullPointer()
         };
         let status = unsafe native_spawn(program.raw.asRaw(), nativeArgv.asNative(), envp, cwd,
-                                  modes.asNative(), pidCell.asNative(), fds.asNative());
+                                  modes.asNative(), paths.asPointer().asRaw(), pidCell.asNative(), fds.asNative());
         program.free();
         if not cwd.isNull {
             unsafe free(cwd);
+        }
+        for path in paths {
+            if not path.isNull {
+                unsafe free(path);
+            }
         }
         if status != 0 {
             return .Err(IoError(errno: status))
@@ -447,7 +489,10 @@ public struct Command: not Copyable {
             if arg.containsNulByte { return true }
         }
         if let .Some(dir) = self.workingDirectory {
-            if dir.containsNulByte { return true }
+            if dir.bytes.contains(0) { return true }
+        }
+        if hasNulByte(in: self.inputMode) or hasNulByte(in: self.outputMode) or hasNulByte(in: self.errorMode) {
+            return true
         }
         for change in self.environmentChanges {
             if change.0.containsNulByte { return true }

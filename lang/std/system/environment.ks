@@ -10,6 +10,7 @@ import std.core.(Bool)
 import std.result.(Optional, Result)
 import std.streams.(IoError)
 import std.ffi.(malloc, free)
+import std.files.(Path)
 
 /// Environment variables and the process's working, home and temporary
 /// directories.
@@ -128,13 +129,13 @@ public enum Environment {
     ///
     /// `NotFound` if the directory was deleted; `PermissionDenied` if a
     /// parent can't be read.
-    public static func currentDirectory() -> Result[String, IoError] {
+    public static func currentDirectory() -> Result[Path, IoError] {
         var size: Int64 = 512;
         while true {
             let buf = unsafe malloc(size);
             let result = unsafe native_getcwd(buf, size);
             if not result.isNull {
-                let path = stringFromNative(buf) ?? String();
+                let path = Path(bytes: bytesFromNative(buf));
                 unsafe free(buf);
                 return .Ok(path)
             }
@@ -146,12 +147,12 @@ public enum Environment {
             }
             size = size * 2
         }
-        .Ok(String())
+        .Ok(Path(String()))
     }
 
     /// Changes the process's working directory. Affects every thread.
-    public static func setCurrentDirectory(to path: String) -> Result[(), IoError] {
-        let cpath = try path.toNativeString();
+    public static func setCurrentDirectory(to path: Path) -> Result[(), IoError] {
+        let cpath = try path.toNativePath();
         let status = unsafe native_chdir(cpath.raw.asRaw());
         cpath.free();
         if status != 0 {
@@ -162,21 +163,25 @@ public enum Environment {
 
     /// The current user's home directory: `$HOME` if set and non-empty,
     /// else the password database entry. `None` if neither has one.
-    public static func homeDirectory() -> Optional[String] {
+    public static func homeDirectory() -> Optional[Path] {
         if let .Some(home) = Environment.variable("HOME") {
             if not home.isEmpty {
-                return .Some(home)
+                return .Some(Path(home))
             }
         }
-        stringFromNative(unsafe native_passwd_home())
+        let raw = unsafe native_passwd_home();
+        if raw.isNull {
+            return .None
+        }
+        .Some(Path(bytes: bytesFromNative(raw)))
     }
 
     /// The directory for temporary files: `$TMPDIR` if set and non-empty,
     /// else `/tmp`. Not checked for existence.
-    public static func temporaryDirectory() -> String {
+    public static func temporaryDirectory() -> Path {
         if let .Some(dir) = Environment.variable("TMPDIR") {
             if not dir.isEmpty {
-                return dir
+                return Path(dir)
             }
         }
         "/tmp"

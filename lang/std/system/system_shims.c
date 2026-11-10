@@ -56,7 +56,7 @@ char **kestrel_environ(void) { return KESTREL_ENVIRON; }
 // ---------------------------------------------------------------------------
 
 // Stdio modes, matching `Stdio` in process.ks.
-enum { KESTREL_STDIO_INHERIT = 0, KESTREL_STDIO_PIPE = 1, KESTREL_STDIO_NULL = 2 };
+enum { KESTREL_STDIO_INHERIT = 0, KESTREL_STDIO_PIPE = 1, KESTREL_STDIO_NULL = 2, KESTREL_STDIO_FILE = 3 };
 
 static int kestrel_cloexec_pipe(int fds[2]) {
 #ifdef __APPLE__
@@ -71,10 +71,12 @@ static int kestrel_cloexec_pipe(int fds[2]) {
 
 // Spawns `program` (PATH lookup unless it contains '/') with `argv`.
 // `envp` NULL means inherit; `cwd` NULL means the parent's directory.
-// `modes[i]` sets fd i (0, 1, 2). For each piped fd, the parent's end is
-// written to `parent_fds[i]`; others get -1. Returns 0 or an errno value.
+// `modes[i]` sets fd i (0, 1, 2); a file mode opens `paths[i]`, read-only
+// for fd 0 and created/truncated for 1 and 2. For each piped fd, the
+// parent's end is written to `parent_fds[i]`; others get -1. Returns 0 or
+// an errno value.
 int kestrel_spawn(const char *program, char *const *argv, char *const *envp, const char *cwd,
-                  const int32_t *modes, int32_t *pid_out, int32_t *parent_fds) {
+                  const int32_t *modes, const char *const *paths, int32_t *pid_out, int32_t *parent_fds) {
     int pipes[3][2] = {{-1, -1}, {-1, -1}, {-1, -1}};
     posix_spawn_file_actions_t actions;
     int err = posix_spawn_file_actions_init(&actions);
@@ -90,6 +92,10 @@ int kestrel_spawn(const char *program, char *const *argv, char *const *envp, con
             if (err != 0) goto fail;
         } else if (modes[i] == KESTREL_STDIO_NULL) {
             err = posix_spawn_file_actions_addopen(&actions, i, "/dev/null", i == 0 ? O_RDONLY : O_WRONLY, 0);
+            if (err != 0) goto fail;
+        } else if (modes[i] == KESTREL_STDIO_FILE) {
+            int flags = i == 0 ? O_RDONLY : (O_WRONLY | O_CREAT | O_TRUNC);
+            err = posix_spawn_file_actions_addopen(&actions, i, paths[i], flags, 0666);
             if (err != 0) goto fail;
         }
     }
