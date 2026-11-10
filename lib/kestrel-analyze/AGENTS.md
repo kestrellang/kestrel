@@ -258,7 +258,7 @@ Current allocations:
     `any[...]` box) is emitted by `kestrel-hir-lower/src/ty.rs`; E402 (invalid
     box, `decl/existential_box.rs`, rules in `kestrel_semantics::ExistentialBoxDefect`)
     and E403 (unsized type parameter by value, `decl/unsized_param.rs`) are
-    analyzers. **Free E4xx gaps are now E410 and E414.** E405 `missing_property_ref_accessor` (compilation/conformance_completeness.rs): a computed property without the `ref` / `mutating ref` a protocol requirement needs.
+    analyzers. **The only free E4xx gap is now E414.** E410 `associated_type_equality_not_satisfied` (compilation/conformance_completeness.rs, 2026-11): a conformer binds an associated type that its protocol pins with `where Self.P.Assoc = X` to something else. E405 `missing_property_ref_accessor` (compilation/conformance_completeness.rs): a computed property without the `ref` / `mutating ref` a protocol requirement needs.
   - E406–E409: indirect enums and infinite opaque returns (see the list above).
   - E1xx E144–E155 are existentials too: E144, E150, E153 and E154 are
     emitted by hir-lower; E145–E148 and E151 by type inference (`InferError`
