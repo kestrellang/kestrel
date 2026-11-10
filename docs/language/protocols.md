@@ -155,6 +155,28 @@ protocol Container {
 }
 ```
 
+### Same-Named Associated Types From Two Protocols
+
+When one type conforms to two protocols that each declare an associated type
+with the same name, name the protocol in the binding: `type Protocol.Name = T`.
+One extension can then conform to both. The operator protocols are the common
+case, since `Addable`, `Subtractable` and the rest each declare `Output`:
+
+```kestrel
+struct Stamp { let v: Int64 }
+struct Span { let v: Int64 }
+
+extend Stamp: Addable[Span], Subtractable[Stamp] {
+    type Addable.Output = Stamp        // Stamp + Span -> Stamp
+    type Subtractable.Output = Span    // Stamp - Stamp -> Span
+    consuming func add(consuming other: Span) -> Stamp { Stamp(v: self.v + other.v) }
+    consuming func subtract(consuming other: Stamp) -> Span { Span(v: self.v - other.v) }
+}
+```
+
+An unqualified `type Output = T` is fine when only one of the type's
+protocols declares `Output`.
+
 ### Using Self in Associated Types
 
 ```kestrel
