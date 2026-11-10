@@ -3433,7 +3433,7 @@ public struct ReversedCharsIterator: Iterator {
 ///
 /// ```
 /// let view = "abc".chars.reversed;
-/// view.first();    // Some('c')
+/// view.first;    // Some('c')
 /// view.count;      // 3
 /// ```
 public struct ReversedCharsView: Iterable, Cloneable {
@@ -3647,7 +3647,7 @@ public struct SplitViewIterator: Iterator, Cloneable {
 ///
 /// ```
 /// let view = "a,b,c".asSlice().split(by: ",");
-/// view.first();            // Some("a")
+/// view.first;            // Some("a")
 /// view.count;              // 3
 /// view.collect();          // [StringSlice("a"), StringSlice("b"), StringSlice("c")]
 /// ```
@@ -3895,7 +3895,7 @@ public struct SplitWhereViewIterator: Iterator, Cloneable {
 ///
 /// ```
 /// let view = "hello world".asSlice().split { (c) in c == Char(" ") };
-/// view.first();    // Some("hello")
+/// view.first;    // Some("hello")
 /// view.count;      // 2
 /// ```
 public struct SplitWhereView: Iterable, Cloneable {

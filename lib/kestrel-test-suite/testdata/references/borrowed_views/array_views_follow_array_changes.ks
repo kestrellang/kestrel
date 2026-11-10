@@ -13,7 +13,7 @@ import std.collections.(Array)
 @main
 func main() -> lang.i64 {
     var xs = [1, 2, 3, 4];
-    let rev = xs.reversed();
+    let rev = xs.reversed;
     let chunks = xs.chunks(of: 2);
     xs(0) = 10;
     for i in 0..<100 { xs.append(i); }

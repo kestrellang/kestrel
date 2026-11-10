@@ -314,20 +314,21 @@ Concrete rules:
 - **Key-extractor closures** always use `byKey:`.
 - **Combining closures** always use `by:`.
 - **Mapping closures** always use `as:` (or are unlabeled for trailing closures like `map`, `flatMap`).
-- **State queries** (`isEmpty`, `count`, `capacity`) are always properties, never methods.
-- **Same concept, same name** — if collections call it `first(where:)`, iterators call it `first(where:)` too, not `find`.
+- **State queries** (`isEmpty`, `count`, `capacity`) and **O(1) element views** (`first`, `last`, `reversed`) are always properties on collections, never methods. Iterators are the exception: their `first()`, `last()`, `count()` and `reversed()` advance or consume the iterator, so they stay methods.
+- **Searches** are `find(where:)` / `findLast(where:)`, never `first(where:)`, so they don't collide with the `first` property.
+- **Same concept, same name** — if collections call it `find(where:)`, iterators call it `find(where:)` too.
 
 ```
 // Good — consistent across Array, Set, Iterator, String
 filter(where: { it > 0 })
 all(where: { it.isReady })
-first(where: { it.isExpired })
+find(where: { it.isExpired })
 sort(byKey: { it.name })
 fold(from: 0, by: { a + b })
 
 // Bad — different names/labels for the same thing
 Array.all(satisfying: ...)   // vs Set.all(where: ...)
-Iterator.find(...)           // vs Array.first(where: ...)
+Iterator.first(where: ...)   // vs Array.find(where: ...)
 ```
 
 ## 14. Slices in public APIs

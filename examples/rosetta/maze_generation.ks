@@ -14,7 +14,7 @@ func main() {
     var visited = Array[Bool](repeating: false, count: w * h);
     var stack: Array[Int64] = [0];
     visited(0) = true;
-    while let some cell = stack.last() {
+    while let some cell = stack.last {
         let x = cell % w;
         let y = cell / w;
         var options = Array[Int64]();

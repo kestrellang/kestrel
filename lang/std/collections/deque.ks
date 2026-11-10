@@ -509,10 +509,10 @@ public struct Deque[T, A = GlobalAllocator]: Iterable, Cloneable where A: Alloca
     ///
     /// ```
     /// let d = Deque[Int64](from: [10, 20, 30]);
-    /// d.first();  // .Some(10)
-    /// Deque[Int64]().first();  // .None
+    /// d.first;  // .Some(10)
+    /// Deque[Int64]().first;  // .None
     /// ```
-    public func first() -> Optional[&T] {
+    public var first: Optional[&T] {
         let phys = self.physicalIndex(0);
         if phys < 0 { return .None; }
         .Some(unsafe self.rawPtr().offset(by: phys).value)
@@ -526,10 +526,10 @@ public struct Deque[T, A = GlobalAllocator]: Iterable, Cloneable where A: Alloca
     ///
     /// ```
     /// let d = Deque[Int64](from: [10, 20, 30]);
-    /// d.last();  // .Some(30)
-    /// Deque[Int64]().last();  // .None
+    /// d.last;  // .Some(30)
+    /// Deque[Int64]().last;  // .None
     /// ```
-    public func last() -> Optional[&T] {
+    public var last: Optional[&T] {
         let phys = self.physicalIndex(self.len() - 1);
         if phys < 0 { return .None; }
         .Some(unsafe self.rawPtr().offset(by: phys).value)
@@ -739,8 +739,8 @@ extend Deque[T, A] where A: Defaultable {
     /// ```
     /// let d = Deque[Int64](from: 1..<5);
     /// d.count;  // 4
-    /// d.first();  // .Some(1)
-    /// d.last();   // .Some(4)
+    /// d.first;  // .Some(1)
+    /// d.last;   // .Some(4)
     /// ```
     public init[I](from iterable: I) where I: Iterable, I: not Static, I.Item = T {
         self.init();

@@ -25,7 +25,7 @@ func toRpn(infix: String) -> String {
             }
         } else if precedence(token) > 0 {
             // Pop operators that bind tighter (or equal, for left-associative ones).
-            while let some top = ops.last() {
+            while let some top = ops.last {
                 let p = precedence(top);
                 let q = precedence(token);
                 if p > q or (p == q and token != "^") {

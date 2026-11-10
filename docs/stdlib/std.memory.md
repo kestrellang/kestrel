@@ -2026,10 +2026,10 @@ Element count.
 
 _Defined in `lang/std/memory/pointer.ks`._
 
-#### function `first`
+#### field `first`
 
 ```kestrel
-public func first() -> Optional[T]
+public var first: Optional[T] { get }
 ```
 
 First element, or `.None` for an empty slice.
@@ -2046,10 +2046,10 @@ public var isEmpty: Bool { get }
 
 _Defined in `lang/std/memory/pointer.ks`._
 
-#### function `last`
+#### field `last`
 
 ```kestrel
-public func last() -> Optional[T]
+public var last: Optional[T] { get }
 ```
 
 Last element, or `.None` for an empty slice.

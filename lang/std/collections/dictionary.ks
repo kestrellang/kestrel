@@ -1230,10 +1230,10 @@ public struct Dictionary[K, V, H = DefaultHasher, A = GlobalAllocator]: Iterable
     ///
     /// ```
     /// let dict = ["a": 1, "b": 5, "c": 3];
-    /// dict.first { (k, v) in v > 2 };  // Some entry with v > 2
-    /// dict.first { (k, v) in v > 99 }; // None
+    /// dict.find { (k, v) in v > 2 };  // Some entry with v > 2
+    /// dict.find { (k, v) in v > 99 }; // None
     /// ```
-    public func first(where predicate: (K, V) -> Bool) -> Optional[(&K, &V)] {
+    public func find(where predicate: (K, V) -> Bool) -> Optional[(&K, &V)] {
         for i in 0..<self.capacity {
             if not self.storage.value.isFull(i) { continue }
             let e = unsafe &self.entrySlot(i).value;
@@ -2020,7 +2020,7 @@ extend Dictionary[K, V, H, A] where A: Defaultable {
     ///
     /// ```
     /// let words = ["apple", "apricot", "banana", "blueberry"];
-    /// let grouped = Dictionary(grouping: words) { (w) in w.chars.first().unwrap() };
+    /// let grouped = Dictionary(grouping: words) { (w) in w.chars.first.unwrap() };
     /// // ["a": ["apple", "apricot"], "b": ["banana", "blueberry"]]
     ///
     /// let nums = [1, 2, 3, 4, 5];

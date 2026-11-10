@@ -28,7 +28,7 @@ func main() -> lang.i64 {
     print("\(a ?? 0) \(d("a") ?? 0) \(d("b") ?? 0) \(d("c") ?? 0) \(d("z") ?? -1) \(copy(unwrap: "b")) \(d(unwrap: "a")) \(g(unwrap: "x").count) \(d("q", default: 7))");
 
     let five: Dictionary[String, Int64] = ["a": 1, "b": 5];
-    match five.first(where: { (k, v) in v > 2 }) {
+    match five.find(where: { (k, v) in v > 2 }) {
         .Some((k, v)) => { print(" | \(k)=\(v)"); },
         .None => {},
     }
@@ -36,7 +36,7 @@ func main() -> lang.i64 {
     let s: Set[Int64] = [3, 1, 4, 9, 5];
     let e = Set[Int64]();
     let names: Set[String] = ["b", "a"];
-    print(" | \(s.min() ?? 0) \(s.max() ?? 0) \(e.min() ?? -1) \(s.first(where: { it > 8 }) ?? 0) \(s.first(where: { it > 80 })) \(names.min() ?? "")");
+    print(" | \(s.min() ?? 0) \(s.max() ?? 0) \(e.min() ?? -1) \(s.find(where: { it > 8 }) ?? 0) \(s.find(where: { it > 80 })) \(names.min() ?? "")");
 
     var xs = [1, 2, 3, 4];
     let empty: [Int64] = [];

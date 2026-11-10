@@ -928,13 +928,13 @@ arr.reverse();  // [3, 2, 1]
 
 _Defined in `lang/std/collections/array.ks`._
 
-#### function `reversed`
+#### field `reversed`
 
 ```kestrel
-public func reversed() -> ReversedView[T]
+public var reversed: ReversedView[T] { get }
 ```
 
-See `Slice.reversed()`.
+See `Slice.reversed`.
 
 _Defined in `lang/std/collections/views.ks`._
 
@@ -2276,8 +2276,8 @@ source is preserved as front-to-back order in the deque.
 ```
 let d = Deque[Int64](from: 1..<5);
 d.count;  // 4
-d.first();  // .Some(1)
-d.last();   // .Some(4)
+d.first;  // .Some(1)
+d.last;   // .Some(4)
 ```
 
 _Defined in `lang/std/collections/deque.ks`._
@@ -2414,10 +2414,10 @@ d.count;  // 3
 
 _Defined in `lang/std/collections/deque.ks`._
 
-#### function `first`
+#### field `first`
 
 ```kestrel
-public func first() -> Optional[&T]
+public var first: Optional[&T] { get }
 ```
 
 Lends the front element without removing it, or `.None` if empty.
@@ -2428,8 +2428,8 @@ O(1). The removing counterpart is `popFront()`.
 
 ```
 let d = Deque[Int64](from: [10, 20, 30]);
-d.first();  // .Some(10)
-Deque[Int64]().first();  // .None
+d.first;  // .Some(10)
+Deque[Int64]().first;  // .None
 ```
 
 _Defined in `lang/std/collections/deque.ks`._
@@ -2451,10 +2451,10 @@ Deque[Int64](from: [1]).isEmpty;  // false
 
 _Defined in `lang/std/collections/deque.ks`._
 
-#### function `last`
+#### field `last`
 
 ```kestrel
-public func last() -> Optional[&T]
+public var last: Optional[&T] { get }
 ```
 
 Lends the back element without removing it, or `.None` if empty.
@@ -2465,8 +2465,8 @@ O(1). The removing counterpart is `popBack()`.
 
 ```
 let d = Deque[Int64](from: [10, 20, 30]);
-d.last();  // .Some(30)
-Deque[Int64]().last();  // .None
+d.last;  // .Some(30)
+Deque[Int64]().last;  // .None
 ```
 
 _Defined in `lang/std/collections/deque.ks`._
@@ -2903,7 +2903,7 @@ flat collection. The `keyFunc` runs once per element.
 
 ```
 let words = ["apple", "apricot", "banana", "blueberry"];
-let grouped = Dictionary(grouping: words) { (w) in w.chars.first().unwrap() };
+let grouped = Dictionary(grouping: words) { (w) in w.chars.first.unwrap() };
 // ["a": ["apple", "apricot"], "b": ["banana", "blueberry"]]
 
 let nums = [1, 2, 3, 4, 5];
@@ -3340,10 +3340,10 @@ let big = dict.filter { (k, v) in v > 1 };  // ["b": 2, "c": 3]
 
 _Defined in `lang/std/collections/dictionary.ks`._
 
-#### function `first`
+#### function `find`
 
 ```kestrel
-public func first(where: (K, V) -> Bool) -> Optional[(&K, &V)]
+public func find(where: (K, V) -> Bool) -> Optional[(&K, &V)]
 ```
 
 Lends *some* entry matching `predicate(key, value)`, or `None`.
@@ -3356,8 +3356,8 @@ entries. Short-circuits on the first match.
 
 ```
 let dict = ["a": 1, "b": 5, "c": 3];
-dict.first { (k, v) in v > 2 };  // Some entry with v > 2
-dict.first { (k, v) in v > 99 }; // None
+dict.find { (k, v) in v > 2 };  // Some entry with v > 2
+dict.find { (k, v) in v > 99 }; // None
 ```
 
 _Defined in `lang/std/collections/dictionary.ks`._
@@ -5139,10 +5139,10 @@ let evens = set.filter { (x) in x % 2 == 0 };  // {2, 4}
 
 _Defined in `lang/std/collections/set.ks`._
 
-#### function `first`
+#### function `find`
 
 ```kestrel
-public func first(where: (T) -> Bool) -> Optional[&T]
+public func find(where: (T) -> Bool) -> Optional[&T]
 ```
 
 Lends *some* element matching `predicate`, or `None`.
@@ -5155,8 +5155,8 @@ elements. Short-circuits on the first match.
 
 ```
 let set: Set = [1, 2, 3, 4, 5];
-set.first { (x) in x > 3 };   // Some(4) or Some(5)
-set.first { (x) in x > 99 };  // None
+set.find { (x) in x > 3 };   // Some(4) or Some(5)
+set.find { (x) in x > 99 };  // None
 ```
 
 _Defined in `lang/std/collections/set.ks`._
@@ -6228,16 +6228,16 @@ Reverses the slice in place. O(n).
 
 _Defined in `lang/std/collections/slice_algorithms.ks`._
 
-#### function `reversed`
+#### field `reversed`
 
 ```kestrel
-public func reversed() -> ReversedView[T]
+public var reversed: ReversedView[T] { get }
 ```
 
 Multi-pass lazy view that reads back to front.
 
 ```
-let v = [1, 2, 3].reversed();
+let v = [1, 2, 3].reversed;
 v(0);           // 3
 v.toOwned();    // [3, 2, 1]
 ```
@@ -6923,14 +6923,14 @@ O(n). Result size is unknown; uses geometric growth.
 
 _Defined in `lang/std/collections/sliceable.ks`._
 
-#### function `first`
+#### field `first`
 
 ```kestrel
-public func first() -> Optional[&T]
+public var first: Optional[&T] { get }
 ```
 
 Lends the first element in place, or `.None` for an empty collection.
-O(1). A binding (`let f = xs.first()`) copies it out.
+O(1). A binding (`let f = xs.first`) copies it out.
 
 Read-only — to remove the first element from an `Array`, use
 `popFirst()`.
@@ -6938,16 +6938,16 @@ Read-only — to remove the first element from an `Array`, use
 ##### Examples
 
 ```
-[1, 2, 3].first();  // Some(1)
-[].first();          // None
+[1, 2, 3].first;  // Some(1)
+[].first;          // None
 ```
 
 _Defined in `lang/std/collections/sliceable.ks`._
 
-#### function `first`
+#### function `find`
 
 ```kestrel
-public func first(where: (T) -> Bool) -> Optional[&T]
+public func find(where: (T) -> Bool) -> Optional[&T]
 ```
 
 Lends the first element matching `predicate`, or `None`. O(n).
@@ -6955,7 +6955,7 @@ Lends the first element matching `predicate`, or `None`. O(n).
 ##### Examples
 
 ```
-[1, 2, 3, 4, 5].first(where: { it > 3 });  // Some(4)
+[1, 2, 3, 4, 5].find(where: { it > 3 });  // Some(4)
 ```
 
 _Defined in `lang/std/collections/sliceable.ks`._
@@ -7123,10 +7123,10 @@ public func isValid(index: Int64) -> Bool
 
 _Defined in `lang/std/collections/sliceable.ks`._
 
-#### function `last`
+#### field `last`
 
 ```kestrel
-public func last() -> Optional[&T]
+public var last: Optional[&T] { get }
 ```
 
 Lends the last element in place, or `.None` for an empty collection.
@@ -7138,16 +7138,16 @@ Read-only — to remove the last element from an `Array`, use
 ##### Examples
 
 ```
-[1, 2, 3].last();  // Some(3)
-[].last();          // None
+[1, 2, 3].last;  // Some(3)
+[].last;          // None
 ```
 
 _Defined in `lang/std/collections/sliceable.ks`._
 
-#### function `last`
+#### function `findLast`
 
 ```kestrel
-public func last(where: (T) -> Bool) -> Optional[&T]
+public func findLast(where: (T) -> Bool) -> Optional[&T]
 ```
 
 Lends the last element matching `predicate`, or `None`. O(n).
@@ -7155,7 +7155,7 @@ Lends the last element matching `predicate`, or `None`. O(n).
 ##### Examples
 
 ```
-[1, 2, 3, 2, 1].last(where: { it > 1 });  // Some(2)
+[1, 2, 3, 2, 1].findLast(where: { it > 1 });  // Some(2)
 ```
 
 _Defined in `lang/std/collections/sliceable.ks`._

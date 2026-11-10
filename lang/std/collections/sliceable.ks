@@ -214,7 +214,7 @@ extend Sliceable[T] {
     // -- Element access ------------------------------------------------------
 
     /// Lends the first element in place, or `.None` for an empty collection.
-    /// O(1). A binding (`let f = xs.first()`) copies it out.
+    /// O(1). A binding (`let f = xs.first`) copies it out.
     ///
     /// Read-only — to remove the first element from an `Array`, use
     /// `popFirst()`.
@@ -222,10 +222,10 @@ extend Sliceable[T] {
     /// # Examples
     ///
     /// ```
-    /// [1, 2, 3].first();  // Some(1)
-    /// [].first();          // None
+    /// [1, 2, 3].first;  // Some(1)
+    /// [].first;          // None
     /// ```
-    public func first() -> Optional[&T] {
+    public var first: Optional[&T] {
         let s = self.asUnsafeSlice();
         if s.count == 0 { return .None; }
         .Some(unsafe s.pointer.value)
@@ -240,10 +240,10 @@ extend Sliceable[T] {
     /// # Examples
     ///
     /// ```
-    /// [1, 2, 3].last();  // Some(3)
-    /// [].last();          // None
+    /// [1, 2, 3].last;  // Some(3)
+    /// [].last;          // None
     /// ```
-    public func last() -> Optional[&T] {
+    public var last: Optional[&T] {
         let s = self.asUnsafeSlice();
         if s.count == 0 { return .None; }
         .Some(unsafe s.pointer.offset(by: s.count - 1).value)
@@ -460,9 +460,9 @@ extend Sliceable[T] {
     /// # Examples
     ///
     /// ```
-    /// [1, 2, 3, 4, 5].first(where: { it > 3 });  // Some(4)
+    /// [1, 2, 3, 4, 5].find(where: { it > 3 });  // Some(4)
     /// ```
-    public func first(where predicate: (T) -> Bool) -> Optional[&T] {
+    public func find(where predicate: (T) -> Bool) -> Optional[&T] {
         let s = self.asUnsafeSlice();
         for i in 0..<s.count {
             if predicate(unsafe s.pointer.offset(by: i).value) {
@@ -477,9 +477,9 @@ extend Sliceable[T] {
     /// # Examples
     ///
     /// ```
-    /// [1, 2, 3, 2, 1].last(where: { it > 1 });  // Some(2)
+    /// [1, 2, 3, 2, 1].findLast(where: { it > 1 });  // Some(2)
     /// ```
-    public func last(where predicate: (T) -> Bool) -> Optional[&T] {
+    public func findLast(where predicate: (T) -> Bool) -> Optional[&T] {
         let s = self.asUnsafeSlice();
         var i = s.count - 1;
         while i >= 0 {

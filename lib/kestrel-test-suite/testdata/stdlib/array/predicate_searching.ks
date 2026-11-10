@@ -31,21 +31,21 @@ module Test
             if liNone.isSome { return 6 }
 
             // first(where:)
-            let fm = arr.first(where: { (x) in x > 3 });
+            let fm = arr.find(where: { (x) in x > 3 });
             if fm.isNone { return 7 }
             if fm.unwrap() != 4 { return 8 }
 
             // first(where:) - no match
-            let fmNone = arr.first(where: { (x) in x > 10 });
+            let fmNone = arr.find(where: { (x) in x > 10 });
             if fmNone.isSome { return 9 }
 
             // last(where:)
-            let lm = arr.last(where: { (x) in x < 4 });
+            let lm = arr.findLast(where: { (x) in x < 4 });
             if lm.isNone { return 10 }
             if lm.unwrap() != 3 { return 11 }
 
             // last(where:) - no match
-            let lmNone = arr.last(where: { (x) in x > 10 });
+            let lmNone = arr.findLast(where: { (x) in x > 10 });
             if lmNone.isSome { return 12 }
 
             // all(satisfy:)

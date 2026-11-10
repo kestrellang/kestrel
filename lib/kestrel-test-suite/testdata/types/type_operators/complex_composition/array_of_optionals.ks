@@ -11,6 +11,6 @@ func main() -> lang.i64 {
     arr.append(.None);
     arr.append(.Some(3));
      println(arr.count);
-     println(arr.first().unwrap().unwrap());
+     println(arr.first.unwrap().unwrap());
     0
 }

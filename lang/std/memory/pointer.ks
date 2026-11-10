@@ -401,7 +401,7 @@ public struct UnsafeSlice[T] {
     }
 
     /// First element, or `.None` for an empty slice.
-    public func first() -> Optional[T] {
+    public var first: Optional[T] {
         if self.len > 0 {
             .Some(unsafe self.ptr.read())
         } else {
@@ -410,7 +410,7 @@ public struct UnsafeSlice[T] {
     }
 
     /// Last element, or `.None` for an empty slice.
-    public func last() -> Optional[T] {
+    public var last: Optional[T] {
         if self.len > 0 {
             .Some(unsafe self.ptr.offset(by: self.len - 1).read())
         } else {

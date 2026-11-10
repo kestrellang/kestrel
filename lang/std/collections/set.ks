@@ -823,10 +823,10 @@ public struct Set[T, H = DefaultHasher, A = GlobalAllocator]: Iterable, Cloneabl
     ///
     /// ```
     /// let set: Set = [1, 2, 3, 4, 5];
-    /// set.first { (x) in x > 3 };   // Some(4) or Some(5)
-    /// set.first { (x) in x > 99 };  // None
+    /// set.find { (x) in x > 3 };   // Some(4) or Some(5)
+    /// set.find { (x) in x > 99 };  // None
     /// ```
-    public func first(where predicate: (T) -> Bool) -> Optional[&T] {
+    public func find(where predicate: (T) -> Bool) -> Optional[&T] {
         for slot in 0..<self.dict.slotCount {
             if let .Some(elem) = self.dict.keyAt(slot) {
                 if predicate(elem) { return self.dict.keyAt(slot); }

@@ -48,18 +48,18 @@ module Test
             if safeNeg.isSome { return 13 }
 
             // Test first()
-            let f = slice.first();
+            let f = slice.first;
             if f.isNone { return 14 }
             if f.unwrap() != 10 { return 15 }
 
             // Test last()
-            let l = slice.last();
+            let l = slice.last;
             if l.isNone { return 16 }
             if l.unwrap() != 50 { return 17 }
 
             // Test first() and last() on empty slice
-            if emptySlice.first().isSome { return 18 }
-            if emptySlice.last().isSome { return 19 }
+            if emptySlice.first.isSome { return 18 }
+            if emptySlice.last.isSome { return 19 }
 
             // Test subscript(checked: Range) - valid sub-slice
             let sub = slice(checked: std.core.Range[std.numeric.Int64](1, 4));

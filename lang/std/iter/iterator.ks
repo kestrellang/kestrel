@@ -755,10 +755,10 @@ extend Iterator {
     /// # Examples
     ///
     /// ```
-    /// [1, 2, 3, 4, 5].iter().first { it > 3 };   // Some(4)
-    /// [1, 2, 3].iter().first { it > 10 };        // None
+    /// [1, 2, 3, 4, 5].iter().find { it > 3 };   // Some(4)
+    /// [1, 2, 3].iter().find { it > 10 };        // None
     /// ```
-    public mutating func first(where predicate: (Item) -> Bool) -> Item? {
+    public mutating func find(where predicate: (Item) -> Bool) -> Item? {
         while let .Some(item) = self.next() {
             if predicate(item) {
                 return .Some(item)
@@ -1100,7 +1100,7 @@ extend DoubleEndedIterator {
     /// ```
     /// [1, 2, 3, 4, 5].iter().reversed().collect();                        // [5, 4, 3, 2, 1]
     /// [1, 2, 3, 4, 5].iter().reversed().take(3).collect();         // [5, 4, 3]
-    /// [1, 2, 3, 4, 5].iter().reversed().first { it % 2 == 0 };            // Some(4)
+    /// [1, 2, 3, 4, 5].iter().reversed().find { it % 2 == 0 };            // Some(4)
     /// ```
     public consuming func reversed() -> ReversedIterator[Self] {
         ReversedIterator(inner: self)

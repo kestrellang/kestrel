@@ -16,8 +16,8 @@ func multiply(a: String, b: String) -> String {
         }
         digits(i + y.count) = digits(i + y.count) + carry;
     }
-    while digits.count > 1 and digits.last() == .Some(0) { digits.pop(); }
-    digits.reversed().iter().map { "\(it)" }.collect().joined(by: "")
+    while digits.count > 1 and digits.last == .Some(0) { digits.pop(); }
+    digits.reversed.iter().map { "\(it)" }.collect().joined(by: "")
 }
 
 @main
