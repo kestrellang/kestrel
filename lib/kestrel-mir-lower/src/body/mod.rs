@@ -4707,7 +4707,12 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
                 let self_type = self.type_from_type_ref(receiver_expr);
                 self.place_accessor_callee(accessor, self_type, vec![])
             } else {
-                let (recv_arg, receiver_ty) = self.accessor_receiver_mut_arg(&receiver)?;
+                let (recv_arg, receiver_ty) = match &receiver {
+                    AccessorReceiver::Expr(e) => {
+                        self.member_receiver_arg(expr_id, *e, ParamConvention::MutBorrow)
+                    },
+                    _ => self.accessor_receiver_mut_arg(&receiver)?,
+                };
                 let ta = self.resolve_type_args(expr_id);
                 call_args.push(recv_arg);
                 self.place_accessor_callee(accessor, receiver_ty, ta)

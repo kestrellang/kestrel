@@ -23,7 +23,8 @@
 | `peel/borrowed_argument_peels.ks` | exec | borrowed, `&`, `mutating` and nested-wrapper arguments peel and writes land in the payload (R6) |
 | `peel/argument_peel_sources.ks` | exec | array-literal, method-call, generic-call, init, default-value and overload-picked arguments peel (R6) |
 | `peel/computed_property_on_target.ks` | exec | a computed property read through the peel calls the target's getter on the view |
-| `stdlib/slice/custom_view_peels_to_slice.ks` | exec | a custom `Indirection` to `Slice` gets the index places through the peel (subscript calls through the peel currently ICE in post-mono verify) |
+| `stdlib/slice/custom_view_peels_to_slice.ks` | exec | a custom `Indirection` to `Slice` gets the index places through the peel |
+| `peel/subscript_through_peel.ks` | exec | subscript read, assignment and compound assignment through the peel run on the target with the target's type args |
 | `operators/without_extend_rejects.ks` | diag | `rc1 == rc2` without the `extend` rejects (`!: Equal`) — operators don't peel (R7) |
 | `readonly/write_rejected.ks` | diag | write through a read-only `Indirection` wrapper → E208 (R8/D2) |
 | `diagnostics/not_found_names_pointee.ks` | diag | `rc.nonexistent` errors on the pointee type (R8/D1) |

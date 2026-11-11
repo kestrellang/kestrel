@@ -804,7 +804,13 @@ impl OssaBodyCtx<'_, '_> {
         } else {
             let convs = self.collect_conventions(entity);
             let callee = if has_receiver {
-                let receiver_ty = self.resolve_expr_type(callee_expr);
+                // A subscript call peeled through `Indirection` (`v(1)` where
+                // only `v`'s target declares the subscript) dispatches on the
+                // pointee, so its type args come from the pointee's type.
+                let receiver_ty = match self.indirection_peels_of(expr_id) {
+                    Some(peels) => lower_resolved_ty(self.ctx, &peels.last().unwrap().target),
+                    None => self.resolve_expr_type(callee_expr),
+                };
                 let mut ta = self.prepend_receiver_type_args(receiver_ty, type_args);
                 if let Some(mir_func) = self.ctx.module.functions.get(&entity) {
                     ta.truncate(mir_func.type_params.len());
@@ -827,7 +833,7 @@ impl OssaBodyCtx<'_, '_> {
                 .first()
                 .copied()
                 .unwrap_or(ParamConvention::Borrow);
-            let receiver_arg = self.prepare_call_arg_for_expr(callee_expr, recv_conv);
+            let (receiver_arg, _) = self.member_receiver_arg(expr_id, callee_expr, recv_conv);
             call_args.insert(0, receiver_arg);
         }
 

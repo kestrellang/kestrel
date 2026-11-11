@@ -800,6 +800,32 @@ impl OssaBodyCtx<'_, '_> {
         self.emit_literal(Immediate::unit())
     }
 
+    /// The receiver argument of member `member_expr` on `receiver`, and the
+    /// type its callee's type args come from. When the member was reached
+    /// through an `Indirection` peel (`v(1)`, `b(0) = 9` where only the
+    /// target declares the subscript), that is the pointee view and type.
+    pub(crate) fn member_receiver_arg(
+        &mut self,
+        member_expr: HirExprId,
+        receiver: HirExprId,
+        conv: ParamConvention,
+    ) -> (CallArg, TyId) {
+        let Some(peels) = self.indirection_peels_of(member_expr) else {
+            let ty = self.resolve_expr_type(receiver);
+            return (self.prepare_call_arg_for_expr(receiver, conv), ty);
+        };
+        let ty = lower_resolved_ty(self.ctx, &peels.last().unwrap().target);
+        let view =
+            self.lower_indirection_chain(receiver, &peels, conv == ParamConvention::MutBorrow);
+        (
+            CallArg {
+                value: view,
+                convention: conv,
+            },
+            ty,
+        )
+    }
+
     /// The read accessor of the concrete computed property `expr_id`
     /// resolves to, if it is one (its `ref` provider when it has one).
     fn peeled_property_getter(&self, expr_id: HirExprId) -> Option<kestrel_hecs::Entity> {
@@ -1862,10 +1888,10 @@ impl OssaBodyCtx<'_, '_> {
                 let self_type = self.type_from_type_ref(callee_expr);
                 self.place_accessor_callee(accessor, self_type, vec![])
             } else {
-                let receiver_ty = self.resolve_expr_type(callee_expr);
+                let (recv_arg, receiver_ty) =
+                    self.member_receiver_arg(target_id, callee_expr, ParamConvention::MutBorrow);
                 let ta = self.resolve_type_args(target_id);
-                call_args
-                    .push(self.prepare_call_arg_for_expr(callee_expr, ParamConvention::MutBorrow));
+                call_args.push(recv_arg);
                 self.place_accessor_callee(accessor, receiver_ty, ta)
             };
             for a in args {
@@ -1908,14 +1934,14 @@ impl OssaBodyCtx<'_, '_> {
             let callee = Callee::direct_with_args(setter, type_args, None);
             self.emit_call_void(callee, call_args);
         } else {
-            let receiver_ty = self.resolve_expr_type(callee_expr);
             let type_args = self.resolve_type_args(target_id);
 
             // Use prepare_call_arg_for_expr to get the var address directly
             // (via the place resolver) instead of lower_expr which emits CopyAddr —
             // a shallow copy that breaks COW refcounting.
-            let mut call_args =
-                vec![self.prepare_call_arg_for_expr(callee_expr, ParamConvention::MutBorrow)];
+            let (recv_arg, receiver_ty) =
+                self.member_receiver_arg(target_id, callee_expr, ParamConvention::MutBorrow);
+            let mut call_args = vec![recv_arg];
             for v in subscript_args {
                 call_args.push(self.prepare_call_arg(v, ParamConvention::Borrow));
             }
