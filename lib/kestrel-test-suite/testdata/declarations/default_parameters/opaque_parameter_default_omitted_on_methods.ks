@@ -9,18 +9,24 @@
 
 module Test
 import std.numeric.(Int64, UInt8)
+import std.collections.(Slice)
+
+// `Lends` stands in for the removed std `Sliceable`: a protocol whose
+// conformers lend their elements as a `Slice`.
+protocol Lends[T] { func asSlice() -> &Slice[T] }
+extend Array[T, A]: Lends[T] { }
 struct Summer {
     var base: Int64
-    func total(data: some Sliceable[UInt8], extra extra: some Sliceable[UInt8] = Array[UInt8]()) -> Int64 {
+    func total(data: some Lends[UInt8], extra extra: some Lends[UInt8] = Array[UInt8]()) -> Int64 {
         var sum: Int64 = self.base;
-        for b in data.asUnsafeSlice() { sum = sum + Int64(from: b); }
-        for b in extra.asUnsafeSlice() { sum = sum + Int64(from: b); }
+        for b in data.asSlice().asUnsafeSlice() { sum = sum + Int64(from: b); }
+        for b in extra.asSlice().asUnsafeSlice() { sum = sum + Int64(from: b); }
         sum
     }
-    static func seal(data: some Sliceable[UInt8], aad aad: some Sliceable[UInt8] = Array[UInt8](), nonce nonce: Int64 = 5) -> Int64 {
+    static func seal(data: some Lends[UInt8], aad aad: some Lends[UInt8] = Array[UInt8](), nonce nonce: Int64 = 5) -> Int64 {
         var sum: Int64 = nonce;
-        for b in data.asUnsafeSlice() { sum = sum + Int64(from: b); }
-        for b in aad.asUnsafeSlice() { sum = sum + Int64(from: b); }
+        for b in data.asSlice().asUnsafeSlice() { sum = sum + Int64(from: b); }
+        for b in aad.asSlice().asUnsafeSlice() { sum = sum + Int64(from: b); }
         sum
     }
 }

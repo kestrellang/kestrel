@@ -15,7 +15,7 @@ public struct SHA224: Digest {
         ]);
     }
 
-    public mutating func update[S](bytes: &S) where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized {
+    public mutating func update(bytes: &Slice[UInt8]) {
         self.core.update(bytes);
     }
 
@@ -41,7 +41,7 @@ public struct SHA384: Digest {
         ]);
     }
 
-    public mutating func update[S](bytes: &S) where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized {
+    public mutating func update(bytes: &Slice[UInt8]) {
         self.core.update(bytes);
     }
 
@@ -68,7 +68,7 @@ public struct SHA512_256: Digest {
         ]);
     }
 
-    public mutating func update[S](bytes: &S) where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized {
+    public mutating func update(bytes: &Slice[UInt8]) {
         self.core.update(bytes);
     }
 

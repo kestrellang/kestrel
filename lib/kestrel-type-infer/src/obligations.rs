@@ -71,6 +71,10 @@ pub fn finish_body(ctx: &mut InferCtx<'_>, hir: &HirBody) {
         let kind = kind.split([' ', '{', '(']).next().unwrap_or("");
         kestrel_debug::ktrace!("p5", "after-flush {kind}");
     }
+    // Borrowed arguments still waiting on their own type coerce now, before
+    // any literal default can pin what only the param would have.
+    ctx.view_peel_gate = false;
+    fixpoint(ctx);
     apply_defaults(ctx);
 
     // Every call/member that could type a check-mode leaf has fired, so a

@@ -6,7 +6,7 @@ import std.core.(Bool, Defaultable, fatalError)
 import std.numeric.(Int64)
 import std.memory.(Layout, Pointer, Allocator, GlobalAllocator, CowBox)
 import std.ffi.(memcpy)
-import std.collections.(Sliceable)
+import std.collections.(Slice)
 import std.iter.(Iterable)
 
 /// Write-only buffer for efficient array construction. No COW, no
@@ -95,9 +95,9 @@ public struct ArrayBuilder[T, A = GlobalAllocator] where A: Allocator {
         self.len = self.len + 1
     }
 
-    /// Appends every element of `other` (an `Array`, `Slice`, or any
-    /// other `Sliceable`), copying in a single pass.
-    public mutating func append(contentsOf other: &some Sliceable[T] and not Static and not Copyable and not Sized) {
+    /// Appends every element of `other` (an `Array`, a `Slice`, or anything
+    /// else that lends a `Slice`), copying in a single pass.
+    public mutating func append(contentsOf other: &Slice[T]) {
         let sl = other.asUnsafeSlice();
         let n = sl.count;
         if n == 0 { return }

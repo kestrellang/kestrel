@@ -6,7 +6,7 @@ import std.core.(Bool, Equatable, Comparable, Ordering, Cloneable, ArrayMatchabl
 import std.core.(ExpressibleByArrayLiteral, _ExpressibleByArrayLiteral)
 import std.core.(Range, ClosedRange, Hashable)
 import std.collections.(SeqRange)
-import std.text.(Formattable, FormatOptions, StringBuilder)
+import std.text.(Formattable, Formatter, FormatOptions, StringBuilder)
 import std.numeric.(Int64, UInt8)
 import std.numeric.(RandomNumberGenerator, Lcg64, DefaultRandom)
 import std.result.(Optional)
@@ -14,7 +14,8 @@ import std.memory.(Layout, Pointer, UnsafeSlice, UnsafeSliceIterator, RawPointer
 import std.ffi.(memcpy, memmove)
 import std.iter.(Iterator, Iterable)
 import std.text.(String)
-import std.collections.(Sliceable, Slice, SliceIndex, SliceClampable)
+import std.collections.(Slice, SliceIndex, SliceClampable)
+import std.core.(MutableIndirection)
 
 /// Forward iterator over an `Array[T]`: an `UnsafeSliceIterator[T]` cursor plus
 /// a share of the array's storage.
@@ -259,7 +260,7 @@ struct ArrayStorage[T, A]: Cloneable where A: Allocator {
 /// - Iteration order is insertion order.
 /// - Operations marked O(1) are amortized; growth is geometric.
 @builtin(.ArrayStruct)
-public struct Array[T, A = GlobalAllocator]: Sliceable[T], Iterable, Cloneable where A: Allocator {
+public struct Array[T, A = GlobalAllocator]: Iterable, Cloneable where A: Allocator {
     /// `Iterable` element type — the element produced by `iter().next()`.
     type Item = T
     /// `Iterable` iterator type — the concrete iterator returned by `iter()`.
@@ -370,10 +371,24 @@ public struct Array[T, A = GlobalAllocator]: Sliceable[T], Iterable, Cloneable w
     // PROPERTIES
     // ========================================================================
 
-    // count, isEmpty, indices, asPointer, isValid(index:): provided by extend Sliceable[T]
+    // count, isEmpty, indices, asPointer, isValid(index:): on `Slice`, reached through the `MutableIndirection` peel
 
     /// The number of elements the buffer can hold without reallocating.
     public var capacity: Int64 { self.cap() }
+
+    /// The number of elements. O(1). Declared here rather than reached
+    /// through the `Slice` peel, so reading it lends no view.
+    public var count: Int64 { self.len() }
+
+    /// `true` if the array has no elements. O(1).
+    public var isEmpty: Bool { self.len() == 0 }
+
+    /// The elements as a raw `(pointer, count)` view, for algorithms that
+    /// walk the buffer directly. Only valid until the array next changes,
+    /// so never hand it out.
+    public func asUnsafeSlice() -> UnsafeSlice[T] {
+        unsafe UnsafeSlice(pointer: self.ptr(), count: self.len())
+    }
 
     /// The elements as a slice, in place. Valid until the array next
     /// reallocates or is dropped.
@@ -636,7 +651,7 @@ public struct Array[T, A = GlobalAllocator]: Sliceable[T], Iterable, Cloneable w
     /// arr.append(contentsOf: [3, 4]);  // [1, 2, 3, 4]
     /// arr.append(contentsOf: []);      // [1, 2, 3, 4]  — no-op
     /// ```
-    public mutating func append(contentsOf other: &some Sliceable[T] and not Static and not Copyable and not Sized) {
+    public mutating func append(contentsOf other: &Slice[T]) {
         let sl = other.asUnsafeSlice();
         let otherLen = sl.count;
         if otherLen == 0 {
@@ -978,7 +993,7 @@ public struct Array[T, A = GlobalAllocator]: Sliceable[T], Iterable, Cloneable w
         self.asMutableSlice().reverse()
     }
 
-    // reversed(): provided by extend Sliceable[T] — returns a lazy ReversedView[T]
+    // reversed(): on `Slice`, reached through the `MutableIndirection` peel — returns a lazy ReversedView[T]
     // (use `arr.reversed.toOwned()` if an owned Array is needed).
 
     /// Rotates the elements in place by `amount` positions to the left.
@@ -1196,7 +1211,7 @@ public struct Array[T, A = GlobalAllocator]: Sliceable[T], Iterable, Cloneable w
     // first(), last(), firstIndex(where:), lastIndex(where:),
     // first(where:), last(where:), all(where:), any(where:),
     // countItems(where:), prefix(count:), suffix(count:),
-    // drop(first:), drop(last:): provided by extend Sliceable[T]
+    // drop(first:), drop(last:): on `Slice`, reached through the `MutableIndirection` peel
 
     // ========================================================================
     // ITERATION
@@ -1220,7 +1235,7 @@ public struct Array[T, A = GlobalAllocator]: Sliceable[T], Iterable, Cloneable w
 
     // refs(), mutatingRefs(): in array_slice.ks — they borrow the array.
 
-    // chunks(of:), windows(of:): provided by extend Sliceable[T] — return
+    // chunks(of:), windows(of:): on `Slice`, reached through the `MutableIndirection` peel — return
     // ChunksView[T] / WindowsView[T] (multi-pass; subscript via .get(i)).
 
     // ========================================================================
@@ -1561,9 +1576,13 @@ extend Array[T, A]: ExpressibleByArrayLiteral, _ExpressibleByArrayLiteral, Defau
 
 /// `Equatable` and value-based search/dedup operations available when the
 /// element type itself is `Equatable`.
-// contains, firstIndex(of:), lastIndex(of:), starts(with:), ends(with:), split(separator:),
-// isEqual: provided by extend Sliceable[T] where T: Equatable
-extend Array[T, A]: Equatable where T: Equatable { }
+// contains, firstIndex(of:), lastIndex(of:), starts(with:), ends(with:) and
+// split(separator:) are on `Slice`, reached through the `MutableIndirection`
+// peel.
+extend Array[T, A]: Equatable where T: Equatable {
+    /// Element-wise equality: same count, equal elements in order.
+    public func isEqual(to other: Array[T, A]) -> Bool { self.asSlice().isEqual(to: other) }
+}
 
 extend Array[T, A] where T: Equatable {
     /// Removes the first element equal to `element`. Returns whether a
@@ -1722,7 +1741,7 @@ extend Array[T, A] where T: Comparable {
         self.sort(by: { (a, b) in a.compare(b) == Ordering.Less })
     }
 
-    // sorted(), min(), max(), isSorted(), binarySearch(): provided by extend Sliceable[T] where T: Comparable
+    // sorted(), min(), max(), isSorted(), binarySearch(): on `Slice`, reached through the `MutableIndirection` peel
 }
 
 // ============================================================================
@@ -1887,9 +1906,13 @@ extend Array[T, A] where T: Iterable {
 }
 
 /// Renders as `"[e1, e2, ...]"`, so arrays work in string interpolation and
-/// `print`. The `format` witness comes from `extend Sliceable[T] where
-/// T: Formattable`.
-extend Array[T, A]: Formattable where T: Formattable {}
+/// `print`.
+extend Array[T, A]: Formattable where T: Formattable {
+    /// Writes `[e1, e2, ...]`, each element formatted with `options`.
+    public func format(mutating into writer: some Formatter, options: FormatOptions = FormatOptions.default()) {
+        self.asSlice().format(into: writer, options);
+    }
+}
 
 // ============================================================================
 // DIRECT ITERABLE CONFORMANCE
@@ -1935,4 +1958,14 @@ func bytesAreZero(p: RawPointer, size: Int64) -> Bool {
         if unsafe bytes.offset(by: i).read() != 0 { return false }
     }
     true
+}
+
+/// An array lends itself as its `Slice`: slice members and borrowed `&Slice[T]`
+/// params reach the elements in place.
+extend Array[T, A]: MutableIndirection {
+    type Target = Slice[T]
+    public var value: Slice[T] {
+        ref { self.asSlice() }
+        mutating ref { self.asMutableSlice() }
+    }
 }

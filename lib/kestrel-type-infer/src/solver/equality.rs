@@ -947,6 +947,32 @@ fn try_view_arg_peel(
     if let TySlot::Resolved(TyKind::Ref { pointee, .. }) = ctx.slot(wrapper) {
         wrapper = ctx.resolve(*pointee);
     }
+    // An argument whose type isn't known yet waits for it rather than being
+    // pinned to the param's type, which would rule the peel out:
+    // - one whose own constraint is still pending (`probe(xs.asUnsafeSlice())`)
+    //   while `view_peel_gate` is up;
+    // - a literal the target can't take (`total([1, 2])` with a `&Slice`
+    //   param) while `synth_gate` is up, so it defaults to `Array` and peels.
+    let wait = match ctx.slot(wrapper) {
+        TySlot::Resolved(_) => false,
+        TySlot::Unresolved { literal: None } => ctx.view_peel_gate,
+        TySlot::Unresolved { literal: Some(lit) } => {
+            ctx.synth_gate && !crate::unify::conforms_to_literal_protocol(ctx, to_kind, *lit)
+        },
+        _ => return None,
+    };
+    if wait {
+        if is_existential_box(ctx, to_kind) {
+            return None;
+        }
+        return Some(SolveResult::Deferred(Constraint::Coerce {
+            from,
+            to,
+            expr,
+            span: span.clone(),
+            reason: Reason::Unspecified,
+        }));
+    }
     let TySlot::Resolved(wrapper_kind) = ctx.slot(wrapper) else {
         return None;
     };
@@ -971,7 +997,12 @@ fn try_view_arg_peel(
         )));
     }
     let pointee = peel.target_tv;
-    kestrel_debug::ktrace!("arg-peel", "expr {expr:?} peels to {pointee:?}");
+    kestrel_debug::ktrace!(
+        "arg-peel",
+        "expr {expr:?} at {span:?}: {:?} peels toward {:?}",
+        wrapper_kind,
+        to_kind
+    );
     ctx.arg_indirection_peels
         .entry(expr)
         .or_default()

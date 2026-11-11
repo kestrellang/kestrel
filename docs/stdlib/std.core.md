@@ -768,7 +768,7 @@ _Defined in `lang/std/collections/slice.ks`._
 public func resolve(Int64) -> Range[Int64]
 ```
 
-_Defined in `lang/std/collections/sliceable.ks`._
+_Defined in `lang/std/collections/slice_methods.ks`._
 
 ### Implements `RandomBounds`
 
@@ -2744,7 +2744,7 @@ _Defined in `lang/std/collections/slice.ks`._
 public func resolve(Int64) -> Range[Int64]
 ```
 
-_Defined in `lang/std/collections/sliceable.ks`._
+_Defined in `lang/std/collections/slice_methods.ks`._
 
 ### Implements `RandomBounds`
 
@@ -3036,7 +3036,7 @@ _Defined in `lang/std/collections/slice.ks`._
 public func resolve(Int64) -> Range[Int64]
 ```
 
-_Defined in `lang/std/collections/sliceable.ks`._
+_Defined in `lang/std/collections/slice_methods.ks`._
 
 ### Implements `BytesIndex`
 
@@ -3437,7 +3437,7 @@ _Defined in `lang/std/collections/slice.ks`._
 public func resolve(Int64) -> Range[Int64]
 ```
 
-_Defined in `lang/std/collections/sliceable.ks`._
+_Defined in `lang/std/collections/slice_methods.ks`._
 
 ### Implements `BytesIndex`
 
@@ -3684,7 +3684,7 @@ _Defined in `lang/std/collections/slice.ks`._
 public func resolve(Int64) -> Range[Int64]
 ```
 
-_Defined in `lang/std/collections/sliceable.ks`._
+_Defined in `lang/std/collections/slice_methods.ks`._
 
 ### Implements `BytesIndex`
 

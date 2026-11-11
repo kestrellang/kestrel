@@ -9,26 +9,31 @@
 
 module Test
 
-import std.collections.(Array, Slice, Sliceable)
+import std.collections.(Array, Slice)
 import std.memory.(UnsafeSlice, UnsafeSliceIterator)
+
+// `Lends` stands in for the removed std `Sliceable`: a protocol whose
+// conformers lend their elements as a `Slice`.
+protocol Lends[T] { func asSlice() -> &Slice[T] }
+extend Array[T, A]: Lends[T] { }
 
 // A borrowing view: it holds a reference, so it is not `Static`.
 struct Borrowed { let base: &Array[Int64] }
 
-extend Borrowed: Sliceable[Int64], Iterable {
+extend Borrowed: Lends[Int64], Iterable {
     type Item = Int64
     type TargetIterator = UnsafeSliceIterator[Int64]
     func asSlice() -> &Slice[Int64] { self.base.asSlice() }
     func iter() -> UnsafeSliceIterator[Int64] { self.base.asUnsafeSlice().iter() }
 }
 
-func total(xs: some Sliceable[Int64] and not Static) -> Int64 {
+func total(xs: some Lends[Int64] and not Static) -> Int64 {
     var t: Int64 = 0;
-    for x in xs.asUnsafeSlice() { t += x; }
+    for x in xs.asSlice().asUnsafeSlice() { t += x; }
     t
 }
 
-func totalOr(xs: some Sliceable[Int64] and not Static = Array[Int64]()) -> Int64 {
+func totalOr(xs: some Lends[Int64] and not Static = Array[Int64]()) -> Int64 {
     total(xs)
 }
 

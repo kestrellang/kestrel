@@ -3344,7 +3344,7 @@ _Defined in `lang/std/numeric/int16.ks`._
 #### initializer `From Bytes`
 
 ```kestrel
-public init[S](fromBytes: &S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
+public init(fromBytes: &Slice[UInt8])?
 ```
 
 Reassembles a `Int16` from 2 bytes in native byte order.
@@ -3355,7 +3355,7 @@ _Defined in `lang/std/numeric/int16.ks`._
 #### initializer `From Bytes Big Endian`
 
 ```kestrel
-public init[S](fromBytesBigEndian: &S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
+public init(fromBytesBigEndian: &Slice[UInt8])?
 ```
 
 Reassembles a `Int16` from 2 bytes in big-endian order.
@@ -3366,7 +3366,7 @@ _Defined in `lang/std/numeric/int16.ks`._
 #### initializer `From Bytes Little Endian`
 
 ```kestrel
-public init[S](fromBytesLittleEndian: &S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
+public init(fromBytesLittleEndian: &Slice[UInt8])?
 ```
 
 Reassembles a `Int16` from 2 bytes in little-endian order.
@@ -4813,7 +4813,7 @@ _Defined in `lang/std/numeric/int32.ks`._
 #### initializer `From Bytes`
 
 ```kestrel
-public init[S](fromBytes: &S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
+public init(fromBytes: &Slice[UInt8])?
 ```
 
 Reassembles a `Int32` from 4 bytes in native byte order.
@@ -4824,7 +4824,7 @@ _Defined in `lang/std/numeric/int32.ks`._
 #### initializer `From Bytes Big Endian`
 
 ```kestrel
-public init[S](fromBytesBigEndian: &S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
+public init(fromBytesBigEndian: &Slice[UInt8])?
 ```
 
 Reassembles a `Int32` from 4 bytes in big-endian order.
@@ -4835,7 +4835,7 @@ _Defined in `lang/std/numeric/int32.ks`._
 #### initializer `From Bytes Little Endian`
 
 ```kestrel
-public init[S](fromBytesLittleEndian: &S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
+public init(fromBytesLittleEndian: &Slice[UInt8])?
 ```
 
 Reassembles a `Int32` from 4 bytes in little-endian order.
@@ -6226,7 +6226,7 @@ _Defined in `lang/std/numeric/int64.ks`._
 #### initializer `From Bytes`
 
 ```kestrel
-public init[S](fromBytes: &S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
+public init(fromBytes: &Slice[UInt8])?
 ```
 
 Reassembles a `Int64` from 8 bytes in native byte order.
@@ -6237,7 +6237,7 @@ _Defined in `lang/std/numeric/int64.ks`._
 #### initializer `From Bytes Big Endian`
 
 ```kestrel
-public init[S](fromBytesBigEndian: &S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
+public init(fromBytesBigEndian: &Slice[UInt8])?
 ```
 
 Reassembles a `Int64` from 8 bytes in big-endian order.
@@ -6248,7 +6248,7 @@ _Defined in `lang/std/numeric/int64.ks`._
 #### initializer `From Bytes Little Endian`
 
 ```kestrel
-public init[S](fromBytesLittleEndian: &S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
+public init(fromBytesLittleEndian: &Slice[UInt8])?
 ```
 
 Reassembles a `Int64` from 8 bytes in little-endian order.
@@ -7779,7 +7779,7 @@ _Defined in `lang/std/numeric/int8.ks`._
 #### initializer `From Bytes`
 
 ```kestrel
-public init[S](fromBytes: &S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
+public init(fromBytes: &Slice[UInt8])?
 ```
 
 Reassembles a `Int8` from 1 bytes in native byte order.
@@ -7790,7 +7790,7 @@ _Defined in `lang/std/numeric/int8.ks`._
 #### initializer `From Bytes Big Endian`
 
 ```kestrel
-public init[S](fromBytesBigEndian: &S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
+public init(fromBytesBigEndian: &Slice[UInt8])?
 ```
 
 Reassembles a `Int8` from 1 bytes in big-endian order.
@@ -7801,7 +7801,7 @@ _Defined in `lang/std/numeric/int8.ks`._
 #### initializer `From Bytes Little Endian`
 
 ```kestrel
-public init[S](fromBytesLittleEndian: &S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
+public init(fromBytesLittleEndian: &Slice[UInt8])?
 ```
 
 Reassembles a `Int8` from 1 bytes in little-endian order.
@@ -9810,7 +9810,7 @@ _Defined in `lang/std/numeric/uint16.ks`._
 #### initializer `From Bytes`
 
 ```kestrel
-public init[S](fromBytes: &S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
+public init(fromBytes: &Slice[UInt8])?
 ```
 
 Reassembles a `UInt16` from 2 bytes in native byte order.
@@ -9821,7 +9821,7 @@ _Defined in `lang/std/numeric/uint16.ks`._
 #### initializer `From Bytes Big Endian`
 
 ```kestrel
-public init[S](fromBytesBigEndian: &S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
+public init(fromBytesBigEndian: &Slice[UInt8])?
 ```
 
 Reassembles a `UInt16` from 2 bytes in big-endian order.
@@ -9832,7 +9832,7 @@ _Defined in `lang/std/numeric/uint16.ks`._
 #### initializer `From Bytes Little Endian`
 
 ```kestrel
-public init[S](fromBytesLittleEndian: &S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
+public init(fromBytesLittleEndian: &Slice[UInt8])?
 ```
 
 Reassembles a `UInt16` from 2 bytes in little-endian order.
@@ -11205,7 +11205,7 @@ _Defined in `lang/std/numeric/uint32.ks`._
 #### initializer `From Bytes`
 
 ```kestrel
-public init[S](fromBytes: &S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
+public init(fromBytes: &Slice[UInt8])?
 ```
 
 Reassembles a `UInt32` from 4 bytes in native byte order.
@@ -11216,7 +11216,7 @@ _Defined in `lang/std/numeric/uint32.ks`._
 #### initializer `From Bytes Big Endian`
 
 ```kestrel
-public init[S](fromBytesBigEndian: &S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
+public init(fromBytesBigEndian: &Slice[UInt8])?
 ```
 
 Reassembles a `UInt32` from 4 bytes in big-endian order.
@@ -11227,7 +11227,7 @@ _Defined in `lang/std/numeric/uint32.ks`._
 #### initializer `From Bytes Little Endian`
 
 ```kestrel
-public init[S](fromBytesLittleEndian: &S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
+public init(fromBytesLittleEndian: &Slice[UInt8])?
 ```
 
 Reassembles a `UInt32` from 4 bytes in little-endian order.
@@ -12572,7 +12572,7 @@ _Defined in `lang/std/numeric/uint64.ks`._
 #### initializer `From Bytes`
 
 ```kestrel
-public init[S](fromBytes: &S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
+public init(fromBytes: &Slice[UInt8])?
 ```
 
 Reassembles a `UInt64` from 8 bytes in native byte order.
@@ -12583,7 +12583,7 @@ _Defined in `lang/std/numeric/uint64.ks`._
 #### initializer `From Bytes Big Endian`
 
 ```kestrel
-public init[S](fromBytesBigEndian: &S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
+public init(fromBytesBigEndian: &Slice[UInt8])?
 ```
 
 Reassembles a `UInt64` from 8 bytes in big-endian order.
@@ -12594,7 +12594,7 @@ _Defined in `lang/std/numeric/uint64.ks`._
 #### initializer `From Bytes Little Endian`
 
 ```kestrel
-public init[S](fromBytesLittleEndian: &S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
+public init(fromBytesLittleEndian: &Slice[UInt8])?
 ```
 
 Reassembles a `UInt64` from 8 bytes in little-endian order.
@@ -13964,7 +13964,7 @@ _Defined in `lang/std/numeric/uint8.ks`._
 #### initializer `From Bytes`
 
 ```kestrel
-public init[S](fromBytes: &S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
+public init(fromBytes: &Slice[UInt8])?
 ```
 
 Reassembles a `UInt8` from 1 bytes in native byte order.
@@ -13975,7 +13975,7 @@ _Defined in `lang/std/numeric/uint8.ks`._
 #### initializer `From Bytes Big Endian`
 
 ```kestrel
-public init[S](fromBytesBigEndian: &S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
+public init(fromBytesBigEndian: &Slice[UInt8])?
 ```
 
 Reassembles a `UInt8` from 1 bytes in big-endian order.
@@ -13986,7 +13986,7 @@ _Defined in `lang/std/numeric/uint8.ks`._
 #### initializer `From Bytes Little Endian`
 
 ```kestrel
-public init[S](fromBytesLittleEndian: &S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
+public init(fromBytesLittleEndian: &Slice[UInt8])?
 ```
 
 Reassembles a `UInt8` from 1 bytes in little-endian order.

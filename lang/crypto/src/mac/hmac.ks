@@ -65,7 +65,7 @@ public struct HMAC[H] where H: Digest {
         HMAC.setup(hasher, key.bytes, self.inner, self.base, self.opadKey);
     }
 
-    public mutating func update[S](bytes: &S) where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized {
+    public mutating func update(bytes: &Slice[UInt8]) {
         self.inner.update(bytes);
     }
 
@@ -79,7 +79,7 @@ public struct HMAC[H] where H: Digest {
     }
 
     /// One-shot authentication.
-    public static func authenticate(message: &some Sliceable[UInt8] and not Static and not Copyable and not Sized, using key: SymmetricKey) -> AuthenticationCode {
+    public static func authenticate(message: &Slice[UInt8], using key: SymmetricKey) -> AuthenticationCode {
         var mac = HMAC[H](key: key);
         mac.update(message);
         return mac.finalize();

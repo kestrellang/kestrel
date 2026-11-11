@@ -18,7 +18,7 @@ import std.core.(
 )
 import std.text.(String, Str, StringBuilder, Formatter, Formattable, FormatOptions, _writePadded)
 import std.memory.(UnsafeSlice, Pointer)
-import std.collections.(Sliceable, Slice)
+import std.collections.(Slice)
 import std.numeric.(UInt8, Int64, UInt64)
 
 /// A 64-bit unsigned integer.
@@ -981,7 +981,7 @@ public struct UInt64:
     /// @name From Bytes
     /// Reassembles a `UInt64` from 8 bytes in native byte order.
     /// Returns `null` if the input is not exactly 8 bytes long.
-    public init[S](fromBytes fromBytes: &S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized {
+    public init(fromBytes fromBytes: &Slice[UInt8])? {
         let bytes = fromBytes.asUnsafeSlice();
         if bytes.count != 8 {
             return null
@@ -999,7 +999,7 @@ public struct UInt64:
     /// @name From Bytes Big Endian
     /// Reassembles a `UInt64` from 8 bytes in big-endian order.
     /// Returns `null` if the input is not exactly 8 bytes long.
-    public init[S](fromBytesBigEndian fromBytesBigEndian: &S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized {
+    public init(fromBytesBigEndian fromBytesBigEndian: &Slice[UInt8])? {
         let bytes = fromBytesBigEndian.asUnsafeSlice();
         if bytes.count != 8 {
             return null
@@ -1017,7 +1017,7 @@ public struct UInt64:
     /// @name From Bytes Little Endian
     /// Reassembles a `UInt64` from 8 bytes in little-endian order.
     /// Returns `null` if the input is not exactly 8 bytes long.
-    public init[S](fromBytesLittleEndian fromBytesLittleEndian: &S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized {
+    public init(fromBytesLittleEndian fromBytesLittleEndian: &Slice[UInt8])? {
         let bytes = fromBytesLittleEndian.asUnsafeSlice();
         if bytes.count != 8 {
             return null

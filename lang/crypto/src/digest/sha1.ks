@@ -20,7 +20,7 @@ public struct SHA1: Digest {
         self.blocks = BlockBuffer(function: SHA1State(words: initial), blockLength: 64);
     }
 
-    public mutating func update[S](bytes: &S) where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized {
+    public mutating func update(bytes: &Slice[UInt8]) {
         self.blocks.update(bytes.asUnsafeSlice());
     }
 

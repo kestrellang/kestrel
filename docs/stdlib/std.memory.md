@@ -236,7 +236,7 @@ Owning, allocator-parameterised contiguous storage.
 `Buffer` is the building block underneath `Array`, `String`, and any
 other COW/growable collection. It owns its allocation, deallocates on
 drop, and is `not Copyable` to keep ownership unique. For a non-owning
-view see `Sliceable`; for a refcounted owning wrapper see `RcBox`.
+view see `Slice`; for a refcounted owning wrapper see `RcBox`.
 
 ### Examples
 
@@ -908,7 +908,7 @@ element-by-element, advancing a typed pointer.
 
 ### Representation
 
-A `Pointer[T]` plus a remaining count. No `Sliceable` indirection — the
+A `Pointer[T]` plus a remaining count. No `Slice` indirection — the
 iterator is what `LiteralSlice` hands out instead of exposing its
 pointer directly.
 
@@ -2226,6 +2226,14 @@ caller is responsible for ensuring `count` elements live at `pointer`.
 
 _Defined in `lang/std/memory/pointer.ks`._
 
+#### typealias `Target`
+
+```kestrel
+type Target = Slice[T]
+```
+
+_Defined in `lang/std/memory/pointer.ks`._
+
 #### function `asMutableSlice`
 
 ```kestrel
@@ -2234,7 +2242,17 @@ public mutating func asMutableSlice() -> &mutating Slice[T]
 
 Like `asSlice()`, for writing through.
 
-_Defined in `lang/std/collections/sliceable.ks`._
+_Defined in `lang/std/collections/slice_methods.ks`._
+
+#### function `asSlice`
+
+```kestrel
+public func asSlice() -> &Slice[T]
+```
+
+The elements as a `Slice`, in place.
+
+_Defined in `lang/std/collections/slice_methods.ks`._
 
 #### function `asUnsafeSlice`
 
@@ -2303,7 +2321,7 @@ _Defined in `lang/std/memory/pointer.ks`._
 public subscript[I](I) -> I.SliceOutput where I: SliceIndex[T] { ref mutating ref }
 ```
 
-_Defined in `lang/std/collections/sliceable.ks`._
+_Defined in `lang/std/collections/slice_methods.ks`._
 
 #### subscript `subscript`
 
@@ -2311,7 +2329,7 @@ _Defined in `lang/std/collections/sliceable.ks`._
 public subscript[I](checked: I) -> I.SliceOutput? where I: SliceIndex[T] { ref mutating ref }
 ```
 
-_Defined in `lang/std/collections/sliceable.ks`._
+_Defined in `lang/std/collections/slice_methods.ks`._
 
 #### subscript `subscript`
 
@@ -2319,7 +2337,7 @@ _Defined in `lang/std/collections/sliceable.ks`._
 public subscript[I](unchecked: I) -> I.SliceOutput where I: SliceIndex[T] { ref mutating ref }
 ```
 
-_Defined in `lang/std/collections/sliceable.ks`._
+_Defined in `lang/std/collections/slice_methods.ks`._
 
 #### subscript `subscript`
 
@@ -2327,7 +2345,7 @@ _Defined in `lang/std/collections/sliceable.ks`._
 public subscript(clamped: Int64) -> T? { ref mutating ref }
 ```
 
-_Defined in `lang/std/collections/sliceable.ks`._
+_Defined in `lang/std/collections/slice_methods.ks`._
 
 #### subscript `subscript`
 
@@ -2335,7 +2353,7 @@ _Defined in `lang/std/collections/sliceable.ks`._
 public subscript[R](within: R) -> Slice[T] where R: SliceClampable[T] { ref mutating ref }
 ```
 
-_Defined in `lang/std/collections/sliceable.ks`._
+_Defined in `lang/std/collections/slice_methods.ks`._
 
 #### subscript `subscript`
 
@@ -2343,19 +2361,7 @@ _Defined in `lang/std/collections/sliceable.ks`._
 public subscript(wrapped: Int64) -> T? { ref mutating ref }
 ```
 
-_Defined in `lang/std/collections/sliceable.ks`._
-
-### Implements `Sliceable`
-
-#### function `asSlice`
-
-```kestrel
-public func asSlice() -> &Slice[T]
-```
-
-The elements as a `Slice`, in place.
-
-_Defined in `lang/std/collections/sliceable.ks`._
+_Defined in `lang/std/collections/slice_methods.ks`._
 
 ### Implements `Iterable`
 
@@ -2385,9 +2391,29 @@ Forward iterator over the elements.
 
 _Defined in `lang/std/memory/pointer.ks`._
 
+### Implements `MutableIndirection`
+
+#### field `value`
+
+```kestrel
+public var value: Slice[T] { ref mutating ref }
+```
+
+_Defined in `lang/std/memory/pointer.ks`._
+
 ### Implements `Equatable`
 
 _Conditional: `where T: Equatable`._
+
+#### function `isEqual`
+
+```kestrel
+public func isEqual(to: UnsafeSlice[T]) -> Bool where T: Equatable
+```
+
+Same count, equal elements in order.
+
+_Defined in `lang/std/memory/pointer.ks`._
 
 ### Implements `ArrayMatchable`
 

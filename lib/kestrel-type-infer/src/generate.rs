@@ -37,6 +37,12 @@ pub fn generate(ctx: &mut InferCtx<'_>, hir: &HirBody, param_types: &[TyVar], re
     // Set return type
     ctx.return_ty = return_ty;
 
+    // A borrowed param's default value (`aad: &Slice[UInt8] = Array()`) is
+    // an argument too, so it may peel through `Indirection` the same way.
+    if let (Some(tail), Some(mutating)) = (hir.tail_expr, default_value_view(ctx)) {
+        ctx.view_args.insert(tail, mutating);
+    }
+
     // Walk statements
     for &stmt_id in &hir.statements {
         gen_stmt(ctx, hir, stmt_id);
@@ -73,6 +79,18 @@ pub fn generate(ctx: &mut InferCtx<'_>, hir: &HirBody, param_types: &[TyVar], re
         }
     }
     emit_type_param_value_errors(ctx);
+}
+
+/// When this body is a parameter's default value, the param's view (see
+/// `AstParam::view`): the default entity is the param, its parent the callee.
+fn default_value_view(ctx: &InferCtx<'_>) -> Option<bool> {
+    let callee = ctx.query_ctx.parent_of(ctx.owner)?;
+    let callable = ctx.query_ctx.get::<Callable>(callee)?;
+    callable
+        .params
+        .iter()
+        .find(|p| p.default_entity == Some(ctx.owner))?
+        .view()
 }
 
 /// A returned value (tail or `return e`) is a value position: a
@@ -2075,7 +2093,15 @@ fn gen_struct_init(
                 let slots = crate::solver::call::binding_plan_for(qctx, init, args)
                     .map(|plan| arg_slots(&plan, args.len()))
                     .unwrap_or_else(|| (0..args.len()).collect());
+                let callable = qctx.get::<Callable>(init);
                 for (arg, &index) in args.iter().zip(slots.iter()) {
+                    // A borrowed init param may peel its argument too.
+                    let view = callable
+                        .and_then(|c| c.params.get(index))
+                        .and_then(|p| p.view());
+                    if let Some(mutating) = view {
+                        ctx.view_args.insert(arg.value, mutating);
+                    }
                     if let Some(Some(hir_ty)) = param_tys.get(index) {
                         let param_tv = lower_hir_ty_with_subs(ctx, hir_ty, &init_subs);
                         let reason = Reason::Param {

@@ -215,7 +215,7 @@ public struct BytesView: Iterable, Cloneable {
         String(fromUtf8Lossy: unsafe UnsafeSlice(
             pointer: self.slice._rawPtr().offset(by: self.slice.start),
             count: self.length
-        ))
+        ).asSlice())
     }
 
     /// Convenience: dispatches to a `BytesSubstringIndex` to produce

@@ -195,6 +195,13 @@ pub struct InferCtx<'a> {
     /// whose type only the target can give (`none()`) still unifies.
     pub(crate) synth_pending_exprs: HashSet<HirExprId>,
     pub(crate) synth_gate: bool,
+    /// While up, a borrowed argument whose own type is still pending (a
+    /// method call's result) waits for it before coercing, so it can peel
+    /// through `Indirection` instead of being pinned to the param's type.
+    /// Drops after the first flush, before literal defaults, so a pending
+    /// argument only the param can type (`x.f(1 << 26)`) still unifies with
+    /// it ahead of defaulting.
+    pub(crate) view_peel_gate: bool,
     /// Tail leaves of optional-chain arms. Their pending coerce waits for
     /// the leaf's own type even after `synth_gate` drops: unifying first
     /// would assume flattening, a silent miscompile when the tail is not an
@@ -553,6 +560,7 @@ impl<'a> InferCtx<'a> {
             optional_chain_leaves: HashSet::default(),
             chain_modes: HashMap::default(),
             synth_gate: true,
+            view_peel_gate: true,
             interpolation_depth: 0,
             solving_depth: 0,
             formation_site: None,

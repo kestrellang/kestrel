@@ -155,14 +155,15 @@ impl OssaBodyCtx<'_, '_> {
                     let Some(default_entity) = shape[pi].default_entity else {
                         continue; // required-but-missing: impossible post-typecheck
                     };
-                    let param_ty = resolve_type_annotation(self.ctx, default_entity);
-                    let default_val =
-                        self.lower_default_arg_inline(default_entity, param_ty, callee_type_args);
                     let conv = conventions
                         .get(conv_offset + pi)
                         .copied()
                         .unwrap_or(ParamConvention::Borrow);
-                    result.push(self.prepare_call_arg(default_val, conv));
+                    result.push(self.lower_default_call_arg(
+                        default_entity,
+                        callee_type_args,
+                        conv,
+                    ));
                 },
             }
         }
@@ -335,16 +336,34 @@ impl OssaBodyCtx<'_, '_> {
             .collect();
 
         for (di, default_entity) in defaults.into_iter().enumerate() {
-            let param_ty = resolve_type_annotation(self.ctx, default_entity);
-            let default_val =
-                self.lower_default_arg_inline(default_entity, param_ty, callee_type_args);
             let conv = conventions
                 .get(conv_offset + explicit_count + di)
                 .copied()
                 .unwrap_or(ParamConvention::Borrow);
-            let arg = self.prepare_call_arg(default_val, conv);
+            let arg = self.lower_default_call_arg(default_entity, callee_type_args, conv);
             call_args.push(arg);
         }
+    }
+
+    /// One defaulted argument, inline-lowered and prepared for `conv`. A
+    /// default that peeled through `Indirection` is already the borrowed
+    /// view; anything else is prepared like a written argument.
+    fn lower_default_call_arg(
+        &mut self,
+        default_entity: Entity,
+        callee_type_args: &[TyId],
+        conv: ParamConvention,
+    ) -> CallArg {
+        let param_ty = resolve_type_annotation(self.ctx, default_entity);
+        let (value, peeled) =
+            self.lower_default_arg_inline(default_entity, param_ty, callee_type_args, conv);
+        if peeled {
+            return CallArg {
+                value,
+                convention: conv,
+            };
+        }
+        self.prepare_call_arg(value, conv)
     }
 
     /// Build the type substitution (#148) mapping the callee's type params to a
@@ -378,7 +397,8 @@ impl OssaBodyCtx<'_, '_> {
         default_entity: Entity,
         _param_ty: TyId,
         callee_type_args: &[TyId],
-    ) -> ValueId {
+        conv: ParamConvention,
+    ) -> (ValueId, bool) {
         let Some(default_hir) = self.ctx.query.query(LowerBody {
             entity: default_entity,
             root: self.ctx.root,
@@ -401,7 +421,7 @@ impl OssaBodyCtx<'_, '_> {
                             .with_message("default value could not be lowered to MIR"),
                     ]),
             );
-            return self.emit_literal(Immediate::error());
+            return (self.emit_literal(Immediate::error()), false);
         };
         // A default whose expression calls its own function relying on that
         // same default (`func f(x: Int64 = f()) -> Int64`) would inline
@@ -424,7 +444,7 @@ impl OssaBodyCtx<'_, '_> {
                         "pass the argument explicitly in the recursive call".into(),
                     ]),
             );
-            return self.emit_literal(Immediate::error());
+            return (self.emit_literal(Immediate::error()), false);
         }
         INLINING_DEFAULTS.with(|s| s.borrow_mut().push(default_entity));
         let _inlining = kestrel_hecs::guard::OnDrop::new(|| {
@@ -467,10 +487,16 @@ impl OssaBodyCtx<'_, '_> {
                 .insert(*hir_id, crate::body::LocalBinding::Ssa(val));
         }
 
-        let result = if let Some(tail_id) = tail {
-            self.lower_expr(tail_id)
-        } else {
-            self.emit_literal(Immediate::unit())
+        // A borrowed param's default may peel through `Indirection`, like a
+        // written argument (`prepare_bound_call_arg`).
+        let peels = tail.and_then(|t| self.arg_indirection_peels_of(t).map(|p| (t, p)));
+        let result = match (tail, peels) {
+            (_, Some((tail_id, peels))) => (
+                self.lower_indirection_chain(tail_id, &peels, conv == ParamConvention::MutBorrow),
+                true,
+            ),
+            (Some(tail_id), None) => (self.lower_expr(tail_id), false),
+            (None, None) => (self.emit_literal(Immediate::unit()), false),
         };
 
         self.hir = saved_hir;

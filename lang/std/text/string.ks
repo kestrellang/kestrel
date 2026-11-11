@@ -8,7 +8,7 @@ import std.numeric.(Int64, UInt8)
 import std.result.(Optional)
 import std.memory.(Allocator, GlobalAllocator, Layout, Pointer, RawPointer, RcBox, CowBox, UnsafeSlice)
 import std.iter.(Iterator, Iterable)
-import std.collections.(Sliceable, Slice)
+import std.collections.(Slice)
 import std.numeric.(UInt32)
 import std.text.(Char, decodeUtf8, encodeUtf8, BytesView, CharsView, CharsIterator, GraphemesView, LinesView, CharsSubstringIndex, StringSlice, Str, SplitView, SplitWhereView)
 import std.text.unicode as unicode
@@ -936,7 +936,7 @@ extend String[A]: Defaultable, ExpressibleByStringLiteral, Addable where A: Defa
     /// ```
     /// let s = String(fromUtf8: "héllo".bytes);  // Some("héllo")
     /// ```
-    public init[S](fromUtf8 fromUtf8: &S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized {
+    public init(fromUtf8 fromUtf8: &Slice[UInt8])? {
         let bytes = fromUtf8.asUnsafeSlice();
         let count = bytes.count;
         if count == 0 {
@@ -965,7 +965,7 @@ extend String[A]: Defaultable, ExpressibleByStringLiteral, Addable where A: Defa
     /// # Safety
     ///
     /// The caller must ensure the bytes are valid UTF-8.
-    public init[S](fromUtf8Unchecked fromUtf8Unchecked: &S) where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized {
+    public init(fromUtf8Unchecked fromUtf8Unchecked: &Slice[UInt8]) {
         let bytes = fromUtf8Unchecked.asUnsafeSlice();
         let count = bytes.count;
         if count == 0 {
@@ -989,7 +989,7 @@ extend String[A]: Defaultable, ExpressibleByStringLiteral, Addable where A: Defa
     /// ```
     /// let s = String(fromUtf8Lossy: mixedBytes);  // invalid bytes become '�'
     /// ```
-    public init[S](fromUtf8Lossy fromUtf8Lossy: &S) where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized {
+    public init(fromUtf8Lossy fromUtf8Lossy: &Slice[UInt8]) {
         let bytes = fromUtf8Lossy.asUnsafeSlice();
         let count = bytes.count;
         if count == 0 {

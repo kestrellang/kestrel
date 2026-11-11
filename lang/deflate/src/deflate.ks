@@ -66,7 +66,7 @@ public struct Deflater: Compressor {
         self.distanceSymbols = makeDistanceSymbolTable();
     }
 
-    public mutating func write[S](input: &S) -> Array[UInt8] where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized {
+    public mutating func write(input: &Slice[UInt8]) -> Array[UInt8] {
         if self.isFinished { return []; }
         self.buffer.append(contentsOf: input.asUnsafeSlice());
         if self.buffer.count - self.historyLength >= compressChunkSize {

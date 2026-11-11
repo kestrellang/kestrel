@@ -18,7 +18,7 @@ import std.core.(
 )
 import std.text.(String, Str, StringBuilder, Formatter, Formattable, FormatOptions, _writePadded)
 import std.memory.(UnsafeSlice, Pointer)
-import std.collections.(Sliceable, Slice)
+import std.collections.(Slice)
 import std.numeric.(UInt8, Int64, UInt64)
 
 /// A {{BITS}}-bit {{SIGNEDNESS}} integer.

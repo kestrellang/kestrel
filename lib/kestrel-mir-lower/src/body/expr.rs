@@ -776,6 +776,20 @@ impl OssaBodyCtx<'_, '_> {
         self.emit_literal(Immediate::unit())
     }
 
+    /// The read accessor of the concrete computed property `expr_id`
+    /// resolves to, if it is one (its `ref` provider when it has one).
+    fn peeled_property_getter(&self, expr_id: HirExprId) -> Option<kestrel_hecs::Entity> {
+        let resolved = self.typed.as_ref()?.resolutions.get(&expr_id).copied()?;
+        self.ctx.world.get::<Callable>(resolved)?;
+        if self.ctx.world.has::<kestrel_ast_builder::Static>(resolved) {
+            return None;
+        }
+        Some(
+            self.read_place_provider(resolved, expr_id)
+                .unwrap_or(resolved),
+        )
+    }
+
     /// The protocol property requirement `expr_id` resolves to (a field
     /// declared in a protocol), if any.
     fn protocol_property_requirement(&self, expr_id: HirExprId) -> Option<kestrel_hecs::Entity> {
@@ -823,6 +837,19 @@ impl OssaBodyCtx<'_, '_> {
                 {
                     return result;
                 }
+            }
+            // A computed property on the pointee (`xs.first` on an `Array`
+            // peeled to `Slice`) calls its getter with the view as receiver.
+            if let Some(getter) = self.peeled_property_getter(expr_id) {
+                self.ctx.register_name(getter);
+                let method_type_args = self.resolve_type_args(expr_id);
+                let convention = self.ctx.read_receiver_convention(getter);
+                let arg = CallArg {
+                    value: view,
+                    convention,
+                };
+                let callee = self.place_accessor_callee(getter, pointee_ty, method_type_args);
+                return self.emit_call_returning(callee, vec![arg], result_ty);
             }
             let field_idx = match self.ctx.module.ty_arena.get(pointee_ty) {
                 MirTy::Named { entity, .. } => self.ctx.resolve_field_idx(*entity, field_name),

@@ -340,10 +340,21 @@ pub(super) fn narrow_overloads(
     if !args.iter().all(|a| ctx.is_concrete(ctx.resolve(a.ty))) {
         return Narrowed::Open(matched);
     }
-    let compatible: Vec<Entity> = matched
-        .into_iter()
-        .filter(|&c| types_compatible(ctx, c, args))
+    // Exact nominal matches first; only when none fit does a borrowed
+    // parameter also take an argument that peels to it through `Indirection`
+    // (an `Array` for `&Slice[T]`), so a peel never makes an exact overload
+    // ambiguous.
+    let mut compatible: Vec<Entity> = matched
+        .iter()
+        .copied()
+        .filter(|&c| types_compatible(ctx, c, args, false))
         .collect();
+    if compatible.is_empty() {
+        compatible = matched
+            .into_iter()
+            .filter(|&c| types_compatible(ctx, c, args, true))
+            .collect();
+    }
     // The most specific candidate wins: when a concrete overload and a
     // generic one both fit (`init(from: CString)` and `init[I](from: I)` for
     // a `CString` argument), take the concrete.
@@ -689,9 +700,18 @@ pub(super) fn emit_resolved_call(
 
 /// Check if a candidate's param types are compatible with concrete arg types.
 /// Does not mutate the type table — only inspects resolved types structurally.
-pub(super) fn types_compatible(ctx: &InferCtx<'_>, entity: Entity, args: &[CallArg]) -> bool {
+pub(super) fn types_compatible(
+    ctx: &InferCtx<'_>,
+    entity: Entity,
+    args: &[CallArg],
+    allow_peel: bool,
+) -> bool {
     let qctx = ctx.query_ctx;
     let root = ctx.root;
+    let views: Vec<Option<bool>> = qctx
+        .get::<Callable>(entity)
+        .map(|c| c.params.iter().map(|p| p.view()).collect())
+        .unwrap_or_default();
 
     let Some(param_hir_tys) = qctx.query(LowerCallableTypes { entity, root }) else {
         return false;
@@ -776,12 +796,14 @@ pub(super) fn types_compatible(ctx: &InferCtx<'_>, entity: Entity, args: &[CallA
                     continue;
                 }
                 match arg_kind.entity() {
-                    Some(arg_entity) => {
-                        if arg_entity != *param_entity {
-                            return false;
-                        }
-                    },
-                    None => return false,
+                    Some(arg_entity) if arg_entity == *param_entity => {},
+                    // A borrowed param may take a wrapper that peels to it;
+                    // `try_view_arg_peel` checks the `Target` when it coerces.
+                    Some(_)
+                        if allow_peel
+                            && views.get(slot).copied().flatten().is_some()
+                            && peels_through_indirection(ctx, arg_resolved, *param_entity) => {},
+                    _ => return false,
                 }
             },
             kestrel_hir::ty::HirTy::AssocProjection { .. } => {
@@ -861,5 +883,63 @@ pub(super) fn wrap_init_call_result(
             ctx.named(*entity, wrapped_args)
         },
         _ => inner_tv,
+    }
+}
+
+/// Whether a borrowed argument of `tv`'s type can peel through
+/// `Indirection` to `param` (see `try_view_arg_peel`): its type conforms,
+/// and its `Target` is `param`, peels on to it, or is abstract (a generic
+/// box's `T`), which only the coercion can settle.
+fn peels_through_indirection(ctx: &InferCtx<'_>, tv: TyVar, param: Entity) -> bool {
+    let hir = super::conformance::reify_tv(ctx, tv);
+    peels_to(ctx, &hir, param, 4)
+}
+
+fn peels_to(ctx: &InferCtx<'_>, ty: &kestrel_hir::ty::HirTy, param: Entity, depth: u8) -> bool {
+    let qctx = ctx.query_ctx;
+    let (Some(indirection), Some(target)) = (
+        qctx.query(ResolveBuiltin {
+            builtin: Builtin::Indirection,
+            root: ctx.root,
+        }),
+        ctx.resolver.builtin(Builtin::IndirectionTarget),
+    ) else {
+        return false;
+    };
+    let (kestrel_hir::ty::HirTy::Struct { entity, .. }
+    | kestrel_hir::ty::HirTy::Enum { entity, .. }) = ty
+    else {
+        return false;
+    };
+    if depth == 0 || !crate::conformance::type_satisfies(qctx, ty, indirection, ctx.root) {
+        return false;
+    }
+    let Some(pointee) = qctx
+        .query(kestrel_name_res::AssociatedTypeBinding {
+            type_entity: *entity,
+            assoc: target,
+            conformance_source: None,
+            root: ctx.root,
+        })
+        .and_then(|(alias, _)| {
+            qctx.query(kestrel_hir_lower::LowerTypeAnnotation {
+                entity: alias,
+                root: ctx.root,
+            })
+        })
+    else {
+        return true; // no concrete binding to judge by
+    };
+    match &pointee {
+        kestrel_hir::ty::HirTy::Struct { entity, .. }
+        | kestrel_hir::ty::HirTy::Enum { entity, .. }
+            if *entity == param =>
+        {
+            true
+        },
+        kestrel_hir::ty::HirTy::Struct { .. } | kestrel_hir::ty::HirTy::Enum { .. } => {
+            peels_to(ctx, &pointee, param, depth - 1)
+        },
+        _ => true,
     }
 }

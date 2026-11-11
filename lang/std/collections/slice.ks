@@ -7,7 +7,7 @@ import std.numeric.(Int64)
 import std.result.(Optional)
 import std.memory.(UnsafeSlice, UnsafeSliceIterator, Pointer)
 import std.iter.(Iterable)
-import std.collections.(Sliceable, SeqRange)
+import std.collections.(SeqRange)
 import std.text.(Formattable)
 
 // ============================================================================
@@ -162,7 +162,7 @@ extend Slice[T] {
 extend Slice[T] where T: Copyable {
     /// Overwrites every element with the matching element of `other`.
     /// Panics if the counts differ.
-    public mutating func assign(from other: &some Sliceable[T] and not Static and not Copyable and not Sized) {
+    public mutating func assign(from other: &Slice[T]) {
         let src = other.asUnsafeSlice();
         let n = self.count;
         if src.count != n {
@@ -187,19 +187,24 @@ extend Slice[T] where T: Copyable {
     }
 }
 
-/// `Sliceable[T]` conformance: every read-only algorithm on `Sliceable`
-/// works on a slice too.
-extend Slice[T]: Sliceable[T], Iterable where T: Copyable {
-    type Item = T
-    type TargetIterator = UnsafeSliceIterator[T]
-
+extend Slice[T] {
     /// Itself: a slice is already the in-place view.
     public func asSlice() -> &Slice[T] { self }
+}
 
-    /// The elements as a raw `(pointer, count)` view.
+extend Slice[T] where T: Copyable {
+    /// The elements as a raw `(pointer, count)` view, for algorithms that
+    /// walk the buffer directly. Only valid until the owner next changes,
+    /// so never hand it out.
     public func asUnsafeSlice() -> UnsafeSlice[T] {
         unsafe UnsafeSlice(pointer: self.pointer, count: self.count)
     }
+}
+
+/// `for`-`in` over a slice's elements.
+extend Slice[T]: Iterable where T: Copyable {
+    type Item = T
+    type TargetIterator = UnsafeSliceIterator[T]
 
     /// Forward iterator over the elements.
     public func iter() -> UnsafeSliceIterator[T] {
@@ -235,7 +240,7 @@ extend Array[T, A] {
     public func drop(last count: Int64) -> &Slice[T] { self(..<(self.count - count)) }
 }
 
-/// Element-wise equality (`isEqual` comes from `extend Sliceable[T] where
+/// Element-wise equality (`isEqual` is in `extend Slice[T] where
 /// T: Equatable`).
 extend Slice[T]: Equatable where T: Equatable { }
 

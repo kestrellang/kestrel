@@ -202,6 +202,14 @@ let zeros = Array[Int64, ArenaAllocator](repeating: 0, count: 4, allocator: aren
 
 _Defined in `lang/std/collections/array.ks`._
 
+#### typealias `Target`
+
+```kestrel
+type Target = Slice[T]
+```
+
+_Defined in `lang/std/collections/array.ks`._
+
 #### initializer `With Allocator`
 
 ```kestrel
@@ -290,7 +298,7 @@ _Defined in `lang/std/collections/array.ks`._
 #### function `append`
 
 ```kestrel
-public mutating func append(contentsOf: &some Sliceable[T] and not Static and not Copyable and not Sized)
+public mutating func append(contentsOf: &Slice[T])
 ```
 
 Appends every element of `other` to the end of this array.
@@ -345,6 +353,29 @@ change elements, never the array's length.
 
 _Defined in `lang/std/collections/array.ks`._
 
+#### function `asSlice`
+
+```kestrel
+public func asSlice() -> &Slice[T]
+```
+
+The elements as a slice, in place. Valid until the array next
+reallocates or is dropped.
+
+_Defined in `lang/std/collections/array.ks`._
+
+#### function `asUnsafeSlice`
+
+```kestrel
+public func asUnsafeSlice() -> UnsafeSlice[T]
+```
+
+The elements as a raw `(pointer, count)` view, for algorithms that
+walk the buffer directly. Only valid until the array next changes,
+so never hand it out.
+
+_Defined in `lang/std/collections/array.ks`._
+
 #### field `capacity`
 
 ```kestrel
@@ -383,6 +414,17 @@ var arr = [1, 2, 3];
 arr.clear();    // arr is []
 arr.capacity;   // unchanged
 ```
+
+_Defined in `lang/std/collections/array.ks`._
+
+#### field `count`
+
+```kestrel
+public var count: Int64 { get }
+```
+
+The number of elements. O(1). Declared here rather than reached
+through the `Slice` peel, so reading it lends no view.
 
 _Defined in `lang/std/collections/array.ks`._
 
@@ -510,6 +552,16 @@ arr.insert(0, at: 0);  // [0, 1, 2, 3]
 arr.insert(4, at: 4);  // [0, 1, 2, 3, 4]  — append-equivalent
 arr.insert(9, at: 99); // PANIC
 ```
+
+_Defined in `lang/std/collections/array.ks`._
+
+#### field `isEmpty`
+
+```kestrel
+public var isEmpty: Bool { get }
+```
+
+`true` if the array has no elements. O(1).
 
 _Defined in `lang/std/collections/array.ks`._
 
@@ -1342,19 +1394,6 @@ See `Slice.windows(of:)`.
 
 _Defined in `lang/std/collections/views.ks`._
 
-### Implements `Sliceable`
-
-#### function `asSlice`
-
-```kestrel
-public func asSlice() -> &Slice[T]
-```
-
-The elements as a slice, in place. Valid until the array next
-reallocates or is dropped.
-
-_Defined in `lang/std/collections/array.ks`._
-
 ### Implements `Iterable`
 
 #### typealias `Item`
@@ -1451,6 +1490,16 @@ _Conditional: `where A: Defaultable`._
 
 _Conditional: `where T: Equatable`._
 
+#### function `isEqual`
+
+```kestrel
+public func isEqual(to: Array[T, A]) -> Bool where T: Equatable
+```
+
+Element-wise equality: same count, equal elements in order.
+
+_Defined in `lang/std/collections/array.ks`._
+
 ### Implements `ArrayMatchable`
 
 #### typealias `Rest`
@@ -1493,6 +1542,26 @@ _Defined in `lang/std/collections/array.ks`._
 ### Implements `Formattable`
 
 _Conditional: `where T: Formattable`._
+
+#### function `format`
+
+```kestrel
+public func format(into: mutating some Formatter, FormatOptions) where T: Formattable
+```
+
+Writes `[e1, e2, ...]`, each element formatted with `options`.
+
+_Defined in `lang/std/collections/array.ks`._
+
+### Implements `MutableIndirection`
+
+#### field `value`
+
+```kestrel
+public var value: Slice[T] { ref mutating ref }
+```
+
+_Defined in `lang/std/collections/array.ks`._
 
 ## struct `ArrayBuilder`
 
@@ -1588,11 +1657,11 @@ _Defined in `lang/std/collections/builder.ks`._
 #### function `append`
 
 ```kestrel
-public mutating func append(contentsOf: &some Sliceable[T] and not Static and not Copyable and not Sized)
+public mutating func append(contentsOf: &Slice[T])
 ```
 
-Appends every element of `other` (an `Array`, `Slice`, or any
-other `Sliceable`), copying in a single pass.
+Appends every element of `other` (an `Array`, a `Slice`, or anything
+else that lends a `Slice`), copying in a single pass.
 
 _Defined in `lang/std/collections/builder.ks`._
 
@@ -4810,7 +4879,7 @@ collection length. Used by `removeSubrange` and `replaceSubrange` so
 they accept `Range`, `ClosedRange`, `RangeFrom`, `RangeUpTo`, and
 `RangeThrough` through a single generic parameter.
 
-_Defined in `lang/std/collections/sliceable.ks`._
+_Defined in `lang/std/collections/slice_methods.ks`._
 
 ### Members
 
@@ -4820,7 +4889,7 @@ _Defined in `lang/std/collections/sliceable.ks`._
 func resolve(Int64) -> Range[Int64]
 ```
 
-_Defined in `lang/std/collections/sliceable.ks`._
+_Defined in `lang/std/collections/slice_methods.ks`._
 
 ## struct `Set`
 
@@ -6182,26 +6251,117 @@ _Defined in `lang/std/collections/slice.ks`._
 
 ### Members
 
+#### function `all`
+
+```kestrel
+public func all(where: (T) -> Bool) -> Bool where T: Copyable
+```
+
+`true` when every element satisfies `predicate`. O(n).
+
+Short-circuits on the first failure. Vacuously true for empty
+collections.
+
+##### Examples
+
+```
+[2, 4, 6].all(where: { it % 2 == 0 });  // true
+[2, 3, 6].all(where: { it % 2 == 0 });  // false
+```
+
+_Defined in `lang/std/collections/slice_methods.ks`._
+
+#### function `any`
+
+```kestrel
+public func any(where: (T) -> Bool) -> Bool where T: Copyable
+```
+
+`true` when at least one element satisfies `predicate`. O(n).
+
+Short-circuits on the first match. Always `false` for empty
+collections.
+
+##### Examples
+
+```
+[1, 2, 3].any(where: { it > 2 });  // true
+[1, 2, 3].any(where: { it > 5 });  // false
+```
+
+_Defined in `lang/std/collections/slice_methods.ks`._
+
+#### function `asPointer`
+
+```kestrel
+public func asPointer() -> Pointer[T] where T: Copyable
+```
+
+Pointer to the first element. The pointer aliases the collection's
+buffer; do not outlive the source or mutate through it.
+
+##### Safety
+
+Reading past `count` is undefined behavior.
+
+_Defined in `lang/std/collections/slice_methods.ks`._
+
+#### function `asSlice`
+
+```kestrel
+public func asSlice() -> &Slice[T]
+```
+
+Itself: a slice is already the in-place view.
+
+_Defined in `lang/std/collections/slice.ks`._
+
 #### function `asUnsafeSlice`
 
 ```kestrel
 public func asUnsafeSlice() -> UnsafeSlice[T] where T: Copyable
 ```
 
-The elements as a raw `(pointer, count)` view.
+The elements as a raw `(pointer, count)` view, for algorithms that
+walk the buffer directly. Only valid until the owner next changes,
+so never hand it out.
 
 _Defined in `lang/std/collections/slice.ks`._
 
 #### function `assign`
 
 ```kestrel
-public mutating func assign(from: &some Sliceable[T] and not Static and not Copyable and not Sized) where T: Copyable
+public mutating func assign(from: &Slice[T]) where T: Copyable
 ```
 
 Overwrites every element with the matching element of `other`.
 Panics if the counts differ.
 
 _Defined in `lang/std/collections/slice.ks`._
+
+#### function `binarySearch`
+
+```kestrel
+public func binarySearch(T) -> Int64? where T: Comparable, T: Copyable
+```
+
+Binary search for `element`. Returns its index or `None`. O(log n).
+
+When duplicates exist, which index is returned is unspecified.
+
+##### Safety
+
+The collection must be sorted in ascending order. Calling on
+unsorted data won't crash but may produce false negatives.
+
+##### Examples
+
+```
+[1, 2, 3, 4, 5].binarySearch(3);  // Some(2)
+[1, 2, 3, 4, 5].binarySearch(6);  // None
+```
+
+_Defined in `lang/std/collections/slice_methods.ks`._
 
 #### function `chunks`
 
@@ -6221,6 +6381,42 @@ v(2).count;       // 1
 
 _Defined in `lang/std/collections/views.ks`._
 
+#### function `compactMap`
+
+```kestrel
+public func compactMap[U]((T) -> Optional[U]) -> Array[U] where T: Copyable
+```
+
+Maps every element through `transform`, dropping `.None` results.
+O(n).
+
+##### Examples
+
+```
+["1", "x", "3"].compactMap { Int64.parse(it) };  // [1, 3]
+```
+
+_Defined in `lang/std/collections/slice_methods.ks`._
+
+#### function `contains`
+
+```kestrel
+public func contains(T) -> Bool where T: Equatable, T: Copyable
+```
+
+`true` if the collection contains `element`. O(n).
+
+Linear scan; short-circuits on the first match.
+
+##### Examples
+
+```
+[1, 2, 3].contains(2);  // true
+[1, 2, 3].contains(5);  // false
+```
+
+_Defined in `lang/std/collections/slice_methods.ks`._
+
 #### field `count`
 
 ```kestrel
@@ -6230,6 +6426,22 @@ public var count: Int64 { get }
 Element count.
 
 _Defined in `lang/std/collections/slice.ks`._
+
+#### function `countItems`
+
+```kestrel
+public func countItems(where: (T) -> Bool) -> Int64 where T: Copyable
+```
+
+Number of elements for which `predicate` is true. O(n).
+
+##### Examples
+
+```
+[1, 2, 3, 4, 5].countItems(where: { it % 2 == 0 });  // 2
+```
+
+_Defined in `lang/std/collections/slice_methods.ks`._
 
 #### function `drop`
 
@@ -6251,6 +6463,25 @@ Everything before the last `count` elements.
 
 _Defined in `lang/std/collections/slice.ks`._
 
+#### function `ends`
+
+```kestrel
+public func ends(with: &Slice[T]) -> Bool where T: Equatable, T: Copyable
+```
+
+`true` if the trailing elements match `suffix`. O(k) where k is
+the suffix length. Accepts anything that lends a `Slice[T]`.
+
+##### Examples
+
+```
+[1, 2, 3].ends(with: [2, 3]);  // true
+[1, 2, 3].ends(with: [1, 2]);  // false
+[1, 2, 3].ends(with: []);       // true (vacuous)
+```
+
+_Defined in `lang/std/collections/slice_methods.ks`._
+
 #### function `fill`
 
 ```kestrel
@@ -6261,6 +6492,146 @@ Sets every element of the slice to `value`.
 
 _Defined in `lang/std/collections/slice_algorithms.ks`._
 
+#### function `filter`
+
+```kestrel
+public func filter(where: (T) -> Bool) -> Array[T] where T: Copyable
+```
+
+Returns a new array containing every element matching `predicate`.
+O(n). Result size is unknown; uses geometric growth.
+
+##### Examples
+
+```
+[1, 2, 3, 4].filter(where: { it % 2 == 0 });  // [2, 4]
+```
+
+_Defined in `lang/std/collections/slice_methods.ks`._
+
+#### function `find`
+
+```kestrel
+public func find(where: (T) -> Bool) -> Optional[&T] where T: Copyable
+```
+
+Lends the first element matching `predicate`, or `None`. O(n).
+
+##### Examples
+
+```
+[1, 2, 3, 4, 5].find(where: { it > 3 });  // Some(4)
+```
+
+_Defined in `lang/std/collections/slice_methods.ks`._
+
+#### function `findLast`
+
+```kestrel
+public func findLast(where: (T) -> Bool) -> Optional[&T] where T: Copyable
+```
+
+Lends the last element matching `predicate`, or `None`. O(n).
+
+##### Examples
+
+```
+[1, 2, 3, 2, 1].findLast(where: { it > 1 });  // Some(2)
+```
+
+_Defined in `lang/std/collections/slice_methods.ks`._
+
+#### field `first`
+
+```kestrel
+public var first: Optional[&T] where T: Copyable { get }
+```
+
+Lends the first element in place, or `.None` for an empty collection.
+O(1). A binding (`let f = xs.first`) copies it out.
+
+Read-only — to remove the first element from an `Array`, use
+`popFirst()`.
+
+##### Examples
+
+```
+[1, 2, 3].first;  // Some(1)
+[].first;          // None
+```
+
+_Defined in `lang/std/collections/slice_methods.ks`._
+
+#### function `firstIndex`
+
+```kestrel
+public func firstIndex(where: (T) -> Bool) -> Int64? where T: Copyable
+```
+
+Index of the first element matching `predicate`, or `None`. O(n).
+
+Short-circuits on the first match. For value-based search on
+`Equatable` collections, use `firstIndex(of:)`.
+
+##### Examples
+
+```
+[1, 2, 3, 4, 5].firstIndex(where: { it > 3 });   // Some(3)
+[1, 2, 3].firstIndex(where: { it > 10 });         // None
+```
+
+_Defined in `lang/std/collections/slice_methods.ks`._
+
+#### function `firstIndex`
+
+```kestrel
+public func firstIndex(of: T) -> Int64? where T: Equatable, T: Copyable
+```
+
+Index of the first element equal to `element`, or `None`. O(n).
+
+##### Examples
+
+```
+[1, 2, 3, 2].firstIndex(of: 2);  // Some(1)
+[1, 2, 3].firstIndex(of: 5);      // None
+```
+
+_Defined in `lang/std/collections/slice_methods.ks`._
+
+#### function `flatMap`
+
+```kestrel
+public func flatMap[U]((T) -> Array[U]) -> Array[U] where T: Copyable
+```
+
+Maps every element through `transform` and concatenates the results
+into one flat array. O(n + total_output).
+
+##### Examples
+
+```
+[1, 2, 3].flatMap { [it, it * 10] };  // [1, 10, 2, 20, 3, 30]
+```
+
+_Defined in `lang/std/collections/slice_methods.ks`._
+
+#### field `indices`
+
+```kestrel
+public var indices: Range[Int64] where T: Copyable { get }
+```
+
+Half-open range `0..<count`.
+
+##### Examples
+
+```
+[10, 20, 30].indices;  // 0..<3
+```
+
+_Defined in `lang/std/collections/slice_methods.ks`._
+
 #### field `isEmpty`
 
 ```kestrel
@@ -6270,6 +6641,127 @@ public var isEmpty: Bool { get }
 `true` when `count == 0`.
 
 _Defined in `lang/std/collections/slice.ks`._
+
+#### function `isSorted`
+
+```kestrel
+public func isSorted() -> Bool where T: Comparable, T: Copyable
+```
+
+`true` if elements are in non-decreasing order. O(n).
+
+Equal adjacent elements are allowed. Empty and single-element
+collections are vacuously sorted.
+
+##### Examples
+
+```
+[1, 2, 3].isSorted();  // true
+[1, 3, 2].isSorted();  // false
+[1, 1, 1].isSorted();  // true
+[].isSorted();          // true
+```
+
+_Defined in `lang/std/collections/slice_methods.ks`._
+
+#### function `isValid`
+
+```kestrel
+public func isValid(index: Int64) -> Bool where T: Copyable
+```
+
+`true` if `index` is in `[0, count)`.
+
+##### Examples
+
+```
+[10, 20, 30].isValid(index: 2);   // true
+[10, 20, 30].isValid(index: 3);   // false
+[10, 20, 30].isValid(index: -1);  // false
+```
+
+_Defined in `lang/std/collections/slice_methods.ks`._
+
+#### function `joined`
+
+```kestrel
+public func joined(by: String) -> String where T: Formattable, T: Copyable
+```
+
+Concatenates each element's string representation, separated by
+`separator`.
+
+Each element is rendered with its `format()` method using default
+`FormatOptions`. The default `separator` is empty (raw
+concatenation). An empty collection produces `""`. Works on arrays
+and on slices of them alike. For the bracketed debug form
+(`"[1, 2, 3]"`), use `format()` directly.
+
+##### Examples
+
+```
+[1, 2, 3].joined(by: ", ");          // "1, 2, 3"
+[1, 2, 3].joined();                   // "123"
+["a", "b", "c"](1..<3).joined(by: "-");  // "b-c"
+```
+
+_Defined in `lang/std/collections/slice_methods.ks`._
+
+#### field `last`
+
+```kestrel
+public var last: Optional[&T] where T: Copyable { get }
+```
+
+Lends the last element in place, or `.None` for an empty collection.
+O(1).
+
+Read-only — to remove the last element from an `Array`, use
+`popLast()`.
+
+##### Examples
+
+```
+[1, 2, 3].last;  // Some(3)
+[].last;          // None
+```
+
+_Defined in `lang/std/collections/slice_methods.ks`._
+
+#### function `lastIndex`
+
+```kestrel
+public func lastIndex(where: (T) -> Bool) -> Int64? where T: Copyable
+```
+
+Index of the last element matching `predicate`, or `None`. O(n).
+
+Scans from the back; short-circuits on the first match.
+
+##### Examples
+
+```
+[1, 2, 3, 2, 1].lastIndex(where: { it == 2 });  // Some(3)
+```
+
+_Defined in `lang/std/collections/slice_methods.ks`._
+
+#### function `lastIndex`
+
+```kestrel
+public func lastIndex(of: T) -> Int64? where T: Equatable, T: Copyable
+```
+
+Index of the last element equal to `element`, or `None`. O(n).
+
+##### Examples
+
+```
+[1, 2, 3, 2].lastIndex(of: 2);  // Some(3)
+[1, 2, 3].lastIndex(of: 5);      // None
+```
+
+_Defined in `lang/std/collections/slice_methods.ks`._
 
 #### function `lend`
 
@@ -6341,6 +6833,64 @@ Lends the element `xs(wrapped: index)` names.
 
 _Defined in `lang/std/collections/slice.ks`._
 
+#### function `map`
+
+```kestrel
+public func map[U]((T) -> U) -> Array[U] where T: Copyable
+```
+
+Maps every element through `transform` into a new array. O(n).
+
+Pre-sizes the result buffer to `self.count`, so no growth steps. For
+the lazy version that fuses into a chain, use `iter().map { ... }`.
+
+##### Examples
+
+```
+[1, 2, 3].map { it * 2 };       // [2, 4, 6]
+[1, 2, 3].map { it.format() };  // ["1", "2", "3"]
+```
+
+_Defined in `lang/std/collections/slice_methods.ks`._
+
+#### function `max`
+
+```kestrel
+public func max() -> Optional[&T] where T: Comparable, T: Copyable
+```
+
+Lends the largest element, or `None` if empty. O(n).
+
+Ties go to the first occurrence.
+
+##### Examples
+
+```
+[3, 1, 4].max();  // Some(4)
+[].max();          // None
+```
+
+_Defined in `lang/std/collections/slice_methods.ks`._
+
+#### function `min`
+
+```kestrel
+public func min() -> Optional[&T] where T: Comparable, T: Copyable
+```
+
+Lends the smallest element, or `None` if empty. O(n).
+
+Ties go to the first occurrence.
+
+##### Examples
+
+```
+[3, 1, 4].min();  // Some(1)
+[].min();          // None
+```
+
+_Defined in `lang/std/collections/slice_methods.ks`._
+
 #### function `partition`
 
 ```kestrel
@@ -6372,6 +6922,45 @@ public func prefix(Int64) -> &Slice[T]
 The first `count` elements. Panics if `count > self.count`.
 
 _Defined in `lang/std/collections/slice.ks`._
+
+#### function `randomElement`
+
+```kestrel
+public func randomElement(using: mutating some RandomNumberGenerator) -> T? where T: Copyable
+```
+
+A uniformly random element drawn from `rng`, or `.None` for an
+empty collection. O(1).
+
+Passing the same seeded generator reproduces the same picks —
+use the no-argument overload for OS-entropy randomness.
+
+##### Examples
+
+```
+var rng = Lcg64(seed: 42);
+[1, 2, 3].randomElement(using: rng);  // deterministic for the seed
+[].randomElement(using: rng);          // None
+```
+
+_Defined in `lang/std/collections/slice_methods.ks`._
+
+#### function `randomElement`
+
+```kestrel
+public func randomElement() -> T? where T: Copyable
+```
+
+A uniformly random element from `DefaultRandom`, or `.None` for an
+empty collection. O(1).
+
+##### Examples
+
+```
+["red", "green", "blue"].randomElement();  // e.g. Some("green")
+```
+
+_Defined in `lang/std/collections/slice_methods.ks`._
 
 #### function `reverse`
 
@@ -6465,6 +7054,24 @@ Sorts the slice in place, ascending (introsort; see `sort(by:)`).
 
 _Defined in `lang/std/collections/slice_algorithms.ks`._
 
+#### function `sorted`
+
+```kestrel
+public func sorted() -> Array[T] where T: Comparable, T: Copyable
+```
+
+Returns a new sorted array; original unchanged. O(n log n).
+
+##### Examples
+
+```
+let arr = [3, 1, 4, 1, 5];
+arr.sorted();  // [1, 1, 3, 4, 5]
+// arr is still [3, 1, 4, 1, 5]
+```
+
+_Defined in `lang/std/collections/slice_methods.ks`._
+
 #### function `split`
 
 ```kestrel
@@ -6490,6 +7097,25 @@ Multi-pass lazy view over the segments between occurrences of
 ```
 
 _Defined in `lang/std/collections/views.ks`._
+
+#### function `starts`
+
+```kestrel
+public func starts(with: &Slice[T]) -> Bool where T: Equatable, T: Copyable
+```
+
+`true` if the leading elements match `prefix`. O(k) where k is
+the prefix length. Accepts anything that lends a `Slice[T]`.
+
+##### Examples
+
+```
+[1, 2, 3].starts(with: [1, 2]);     // true
+[1, 2, 3].starts(with: [2, 3]);     // false
+[1, 2, 3].starts(with: []);          // true (vacuous)
+```
+
+_Defined in `lang/std/collections/slice_methods.ks`._
 
 #### subscript `subscript`
 
@@ -6594,6 +7220,25 @@ An owned copy of the elements.
 
 _Defined in `lang/std/collections/slice.ks`._
 
+#### function `unique`
+
+```kestrel
+public func unique() -> Array[T] where T: Hashable, T: Copyable
+```
+
+Returns a new array with duplicates removed, preserving
+first-occurrence order. O(n) expected: seen elements go in a `Set`.
+
+To remove only adjacent repeats, use `dedup()` / `deduped()`.
+
+##### Examples
+
+```
+[1, 2, 1, 3, 2, 4].unique();  // [1, 2, 3, 4]
+```
+
+_Defined in `lang/std/collections/slice_methods.ks`._
+
 #### function `windows`
 
 ```kestrel
@@ -6609,20 +7254,6 @@ Empty when there are fewer than `size` elements. Panics if
 ```
 
 _Defined in `lang/std/collections/views.ks`._
-
-### Implements `Sliceable`
-
-_Conditional: `where T: Copyable`._
-
-#### function `asSlice`
-
-```kestrel
-public func asSlice() -> &Slice[T] where T: Copyable
-```
-
-Itself: a slice is already the in-place view.
-
-_Defined in `lang/std/collections/slice.ks`._
 
 ### Implements `Iterable`
 
@@ -6658,9 +7289,45 @@ _Defined in `lang/std/collections/slice.ks`._
 
 _Conditional: `where T: Equatable`._
 
+#### function `isEqual`
+
+```kestrel
+public func isEqual(to: Self) -> Bool where T: Equatable, T: Copyable
+```
+
+Element-wise equality. O(n).
+
+Short-circuits on the first mismatch. Order matters.
+
+##### Examples
+
+```
+[1, 2, 3].isEqual(to: [1, 2, 3]);  // true
+[1, 2, 3].isEqual(to: [3, 2, 1]);  // false
+```
+
+_Defined in `lang/std/collections/slice_methods.ks`._
+
 ### Implements `Formattable`
 
 _Conditional: `where T: Formattable`._
+
+#### function `format`
+
+```kestrel
+public func format(into: mutating some Formatter, FormatOptions) where T: Formattable, T: Copyable
+```
+
+Renders as `"[e1, e2, ...]"`. Empty collections render as `"[]"`.
+
+##### Examples
+
+```
+[1, 2, 3].format();  // "[1, 2, 3]"
+[].format();          // "[]"
+```
+
+_Defined in `lang/std/collections/slice_methods.ks`._
 
 ### Implements `ArrayMatchable`
 
@@ -6784,893 +7451,6 @@ static func lendUnchecked(consuming Self, Slice[T]) -> &SliceOutput
 ```
 
 _Defined in `lang/std/collections/slice.ks`._
-
-## protocol `Sliceable`
-
-```kestrel
-public protocol Sliceable[T]
-```
-
-Shared read-only protocol for contiguous collections.
-
-`Sliceable[T]` is the contiguous-collection counterpart to `Str` in
-`std.text`: one kernel method (`asSlice`), and the index places and all
-read-only logic in a protocol extension.
-`Array[T]`, `Slice[T]` and `UnsafeSlice[T]` conform, so generic code
-constrained to `S: Sliceable[T]` accepts any of them without
-overloading, and `s(i)` borrows the element rather than copying it.
-
-### Examples
-
-```
-func sum[S](s: &S) -> Int64 where S: Sliceable[Int64], S: not Static, S: not Copyable, S: not Sized {
-    var total: Int64 = 0;
-    for elem in s { total = total + elem }
-    total
-}
-sum([1, 2, 3]);              // works with Array
-sum([1, 2, 3](1..<3));       // works with Slice
-```
-
-_Defined in `lang/std/collections/sliceable.ks`._
-
-### Members
-
-#### function `all`
-
-```kestrel
-public func all(where: (T) -> Bool) -> Bool
-```
-
-`true` when every element satisfies `predicate`. O(n).
-
-Short-circuits on the first failure. Vacuously true for empty
-collections.
-
-##### Examples
-
-```
-[2, 4, 6].all(where: { it % 2 == 0 });  // true
-[2, 3, 6].all(where: { it % 2 == 0 });  // false
-```
-
-_Defined in `lang/std/collections/sliceable.ks`._
-
-#### function `any`
-
-```kestrel
-public func any(where: (T) -> Bool) -> Bool
-```
-
-`true` when at least one element satisfies `predicate`. O(n).
-
-Short-circuits on the first match. Always `false` for empty
-collections.
-
-##### Examples
-
-```
-[1, 2, 3].any(where: { it > 2 });  // true
-[1, 2, 3].any(where: { it > 5 });  // false
-```
-
-_Defined in `lang/std/collections/sliceable.ks`._
-
-#### function `asPointer`
-
-```kestrel
-public func asPointer() -> Pointer[T]
-```
-
-Pointer to the first element. The pointer aliases the collection's
-buffer; do not outlive the source or mutate through it.
-
-##### Safety
-
-Reading past `count` is undefined behavior.
-
-_Defined in `lang/std/collections/sliceable.ks`._
-
-#### function `asSlice`
-
-```kestrel
-func asSlice() -> &Slice[T]
-```
-
-The elements as a `Slice`, in place. Every shared algorithm reads
-through it.
-
-_Defined in `lang/std/collections/sliceable.ks`._
-
-#### function `asUnsafeSlice`
-
-```kestrel
-public func asUnsafeSlice() -> UnsafeSlice[T]
-```
-
-The elements as a raw `(pointer, count)` view, for algorithms that
-walk the buffer directly. Only valid until the collection next
-changes, so never hand it out.
-
-_Defined in `lang/std/collections/sliceable.ks`._
-
-#### function `binarySearch`
-
-```kestrel
-public func binarySearch(T) -> Int64? where T: Comparable
-```
-
-Binary search for `element`. Returns its index or `None`. O(log n).
-
-When duplicates exist, which index is returned is unspecified.
-
-##### Safety
-
-The collection must be sorted in ascending order. Calling on
-unsorted data won't crash but may produce false negatives.
-
-##### Examples
-
-```
-[1, 2, 3, 4, 5].binarySearch(3);  // Some(2)
-[1, 2, 3, 4, 5].binarySearch(6);  // None
-```
-
-_Defined in `lang/std/collections/sliceable.ks`._
-
-#### function `compactMap`
-
-```kestrel
-public func compactMap[U]((T) -> Optional[U]) -> Array[U]
-```
-
-Maps every element through `transform`, dropping `.None` results.
-O(n).
-
-##### Examples
-
-```
-["1", "x", "3"].compactMap { Int64.parse(it) };  // [1, 3]
-```
-
-_Defined in `lang/std/collections/sliceable.ks`._
-
-#### function `contains`
-
-```kestrel
-public func contains(T) -> Bool where T: Equatable
-```
-
-`true` if the collection contains `element`. O(n).
-
-Linear scan; short-circuits on the first match.
-
-##### Examples
-
-```
-[1, 2, 3].contains(2);  // true
-[1, 2, 3].contains(5);  // false
-```
-
-_Defined in `lang/std/collections/sliceable.ks`._
-
-#### field `count`
-
-```kestrel
-public var count: Int64 { get }
-```
-
-Element count. O(1).
-
-##### Examples
-
-```
-[1, 2, 3].count;  // 3
-[].count;          // 0
-```
-
-_Defined in `lang/std/collections/sliceable.ks`._
-
-#### function `countItems`
-
-```kestrel
-public func countItems(where: (T) -> Bool) -> Int64
-```
-
-Number of elements for which `predicate` is true. O(n).
-
-##### Examples
-
-```
-[1, 2, 3, 4, 5].countItems(where: { it % 2 == 0 });  // 2
-```
-
-_Defined in `lang/std/collections/sliceable.ks`._
-
-#### function `drop`
-
-```kestrel
-public func drop(first: Int64) -> &Slice[T]
-```
-
-Returns a slice with the first `count` elements skipped. O(1).
-
-Complement of `prefix`.
-
-##### Errors
-
-Panics if `count > self.count`.
-
-##### Examples
-
-```
-[1, 2, 3, 4, 5].drop(first: 2);  // [3, 4, 5]
-```
-
-_Defined in `lang/std/collections/sliceable.ks`._
-
-#### function `drop`
-
-```kestrel
-public func drop(last: Int64) -> &Slice[T]
-```
-
-Returns a slice with the last `count` elements skipped. O(1).
-
-Complement of `suffix`.
-
-##### Errors
-
-Panics if `count > self.count`.
-
-##### Examples
-
-```
-[1, 2, 3, 4, 5].drop(last: 2);  // [1, 2, 3]
-```
-
-_Defined in `lang/std/collections/sliceable.ks`._
-
-#### function `ends`
-
-```kestrel
-public func ends(with: &some Sliceable[T] and not Static and not Copyable and not Sized) -> Bool where T: Equatable
-```
-
-`true` if the trailing elements match `suffix`. O(k) where k is
-the suffix length. Accepts any `Sliceable[T]` conformer.
-
-##### Examples
-
-```
-[1, 2, 3].ends(with: [2, 3]);  // true
-[1, 2, 3].ends(with: [1, 2]);  // false
-[1, 2, 3].ends(with: []);       // true (vacuous)
-```
-
-_Defined in `lang/std/collections/sliceable.ks`._
-
-#### function `filter`
-
-```kestrel
-public func filter(where: (T) -> Bool) -> Array[T]
-```
-
-Returns a new array containing every element matching `predicate`.
-O(n). Result size is unknown; uses geometric growth.
-
-##### Examples
-
-```
-[1, 2, 3, 4].filter(where: { it % 2 == 0 });  // [2, 4]
-```
-
-_Defined in `lang/std/collections/sliceable.ks`._
-
-#### function `find`
-
-```kestrel
-public func find(where: (T) -> Bool) -> Optional[&T]
-```
-
-Lends the first element matching `predicate`, or `None`. O(n).
-
-##### Examples
-
-```
-[1, 2, 3, 4, 5].find(where: { it > 3 });  // Some(4)
-```
-
-_Defined in `lang/std/collections/sliceable.ks`._
-
-#### function `findLast`
-
-```kestrel
-public func findLast(where: (T) -> Bool) -> Optional[&T]
-```
-
-Lends the last element matching `predicate`, or `None`. O(n).
-
-##### Examples
-
-```
-[1, 2, 3, 2, 1].findLast(where: { it > 1 });  // Some(2)
-```
-
-_Defined in `lang/std/collections/sliceable.ks`._
-
-#### field `first`
-
-```kestrel
-public var first: Optional[&T] { get }
-```
-
-Lends the first element in place, or `.None` for an empty collection.
-O(1). A binding (`let f = xs.first`) copies it out.
-
-Read-only — to remove the first element from an `Array`, use
-`popFirst()`.
-
-##### Examples
-
-```
-[1, 2, 3].first;  // Some(1)
-[].first;          // None
-```
-
-_Defined in `lang/std/collections/sliceable.ks`._
-
-#### function `firstIndex`
-
-```kestrel
-public func firstIndex(where: (T) -> Bool) -> Int64?
-```
-
-Index of the first element matching `predicate`, or `None`. O(n).
-
-Short-circuits on the first match. For value-based search on
-`Equatable` collections, use `firstIndex(of:)`.
-
-##### Examples
-
-```
-[1, 2, 3, 4, 5].firstIndex(where: { it > 3 });   // Some(3)
-[1, 2, 3].firstIndex(where: { it > 10 });         // None
-```
-
-_Defined in `lang/std/collections/sliceable.ks`._
-
-#### function `firstIndex`
-
-```kestrel
-public func firstIndex(of: T) -> Int64? where T: Equatable
-```
-
-Index of the first element equal to `element`, or `None`. O(n).
-
-##### Examples
-
-```
-[1, 2, 3, 2].firstIndex(of: 2);  // Some(1)
-[1, 2, 3].firstIndex(of: 5);      // None
-```
-
-_Defined in `lang/std/collections/sliceable.ks`._
-
-#### function `flatMap`
-
-```kestrel
-public func flatMap[U]((T) -> Array[U]) -> Array[U]
-```
-
-Maps every element through `transform` and concatenates the results
-into one flat array. O(n + total_output).
-
-##### Examples
-
-```
-[1, 2, 3].flatMap { [it, it * 10] };  // [1, 10, 2, 20, 3, 30]
-```
-
-_Defined in `lang/std/collections/sliceable.ks`._
-
-#### function `format`
-
-```kestrel
-public func format(into: mutating some Formatter, FormatOptions) where T: Formattable
-```
-
-Renders as `"[e1, e2, ...]"`. Empty collections render as `"[]"`.
-
-##### Examples
-
-```
-[1, 2, 3].format();  // "[1, 2, 3]"
-[].format();          // "[]"
-```
-
-_Defined in `lang/std/collections/sliceable.ks`._
-
-#### field `indices`
-
-```kestrel
-public var indices: Range[Int64] { get }
-```
-
-Half-open range `0..<count`.
-
-##### Examples
-
-```
-[10, 20, 30].indices;  // 0..<3
-```
-
-_Defined in `lang/std/collections/sliceable.ks`._
-
-#### field `isEmpty`
-
-```kestrel
-public var isEmpty: Bool { get }
-```
-
-`true` when `count == 0`.
-
-##### Examples
-
-```
-[].isEmpty;   // true
-[1].isEmpty;  // false
-```
-
-_Defined in `lang/std/collections/sliceable.ks`._
-
-#### function `isEqual`
-
-```kestrel
-public func isEqual(to: Self) -> Bool where T: Equatable
-```
-
-Element-wise equality. O(n).
-
-Short-circuits on the first mismatch. Order matters.
-
-##### Examples
-
-```
-[1, 2, 3].isEqual(to: [1, 2, 3]);  // true
-[1, 2, 3].isEqual(to: [3, 2, 1]);  // false
-```
-
-_Defined in `lang/std/collections/sliceable.ks`._
-
-#### function `isSorted`
-
-```kestrel
-public func isSorted() -> Bool where T: Comparable
-```
-
-`true` if elements are in non-decreasing order. O(n).
-
-Equal adjacent elements are allowed. Empty and single-element
-collections are vacuously sorted.
-
-##### Examples
-
-```
-[1, 2, 3].isSorted();  // true
-[1, 3, 2].isSorted();  // false
-[1, 1, 1].isSorted();  // true
-[].isSorted();          // true
-```
-
-_Defined in `lang/std/collections/sliceable.ks`._
-
-#### function `isValid`
-
-```kestrel
-public func isValid(index: Int64) -> Bool
-```
-
-`true` if `index` is in `[0, count)`.
-
-##### Examples
-
-```
-[10, 20, 30].isValid(index: 2);   // true
-[10, 20, 30].isValid(index: 3);   // false
-[10, 20, 30].isValid(index: -1);  // false
-```
-
-_Defined in `lang/std/collections/sliceable.ks`._
-
-#### function `joined`
-
-```kestrel
-public func joined(by: String) -> String where T: Formattable
-```
-
-Concatenates each element's string representation, separated by
-`separator`.
-
-Each element is rendered with its `format()` method using default
-`FormatOptions`. The default `separator` is empty (raw
-concatenation). An empty collection produces `""`. Works on arrays
-and on slices of them alike. For the bracketed debug form
-(`"[1, 2, 3]"`), use `format()` directly.
-
-##### Examples
-
-```
-[1, 2, 3].joined(by: ", ");          // "1, 2, 3"
-[1, 2, 3].joined();                   // "123"
-["a", "b", "c"](1..<3).joined(by: "-");  // "b-c"
-```
-
-_Defined in `lang/std/collections/sliceable.ks`._
-
-#### field `last`
-
-```kestrel
-public var last: Optional[&T] { get }
-```
-
-Lends the last element in place, or `.None` for an empty collection.
-O(1).
-
-Read-only — to remove the last element from an `Array`, use
-`popLast()`.
-
-##### Examples
-
-```
-[1, 2, 3].last;  // Some(3)
-[].last;          // None
-```
-
-_Defined in `lang/std/collections/sliceable.ks`._
-
-#### function `lastIndex`
-
-```kestrel
-public func lastIndex(where: (T) -> Bool) -> Int64?
-```
-
-Index of the last element matching `predicate`, or `None`. O(n).
-
-Scans from the back; short-circuits on the first match.
-
-##### Examples
-
-```
-[1, 2, 3, 2, 1].lastIndex(where: { it == 2 });  // Some(3)
-```
-
-_Defined in `lang/std/collections/sliceable.ks`._
-
-#### function `lastIndex`
-
-```kestrel
-public func lastIndex(of: T) -> Int64? where T: Equatable
-```
-
-Index of the last element equal to `element`, or `None`. O(n).
-
-##### Examples
-
-```
-[1, 2, 3, 2].lastIndex(of: 2);  // Some(3)
-[1, 2, 3].lastIndex(of: 5);      // None
-```
-
-_Defined in `lang/std/collections/sliceable.ks`._
-
-#### function `map`
-
-```kestrel
-public func map[U]((T) -> U) -> Array[U]
-```
-
-Maps every element through `transform` into a new array. O(n).
-
-Pre-sizes the result buffer to `self.count`, so no growth steps. For
-the lazy version that fuses into a chain, use `iter().map { ... }`.
-
-##### Examples
-
-```
-[1, 2, 3].map { it * 2 };       // [2, 4, 6]
-[1, 2, 3].map { it.format() };  // ["1", "2", "3"]
-```
-
-_Defined in `lang/std/collections/sliceable.ks`._
-
-#### function `max`
-
-```kestrel
-public func max() -> Optional[&T] where T: Comparable
-```
-
-Lends the largest element, or `None` if empty. O(n).
-
-Ties go to the first occurrence.
-
-##### Examples
-
-```
-[3, 1, 4].max();  // Some(4)
-[].max();          // None
-```
-
-_Defined in `lang/std/collections/sliceable.ks`._
-
-#### function `min`
-
-```kestrel
-public func min() -> Optional[&T] where T: Comparable
-```
-
-Lends the smallest element, or `None` if empty. O(n).
-
-Ties go to the first occurrence.
-
-##### Examples
-
-```
-[3, 1, 4].min();  // Some(1)
-[].min();          // None
-```
-
-_Defined in `lang/std/collections/sliceable.ks`._
-
-#### function `prefix`
-
-```kestrel
-public func prefix(Int64) -> &Slice[T]
-```
-
-Returns a slice over the first `count` elements. O(1).
-
-##### Errors
-
-Panics if `count > self.count`.
-
-##### Examples
-
-```
-[1, 2, 3, 4, 5].prefix(3);  // [1, 2, 3]
-[1, 2].prefix(0);            // empty slice
-```
-
-_Defined in `lang/std/collections/sliceable.ks`._
-
-#### function `randomElement`
-
-```kestrel
-public func randomElement(using: mutating some RandomNumberGenerator) -> T?
-```
-
-A uniformly random element drawn from `rng`, or `.None` for an
-empty collection. O(1).
-
-Passing the same seeded generator reproduces the same picks —
-use the no-argument overload for OS-entropy randomness.
-
-##### Examples
-
-```
-var rng = Lcg64(seed: 42);
-[1, 2, 3].randomElement(using: rng);  // deterministic for the seed
-[].randomElement(using: rng);          // None
-```
-
-_Defined in `lang/std/collections/sliceable.ks`._
-
-#### function `randomElement`
-
-```kestrel
-public func randomElement() -> T?
-```
-
-A uniformly random element from `DefaultRandom`, or `.None` for an
-empty collection. O(1).
-
-##### Examples
-
-```
-["red", "green", "blue"].randomElement();  // e.g. Some("green")
-```
-
-_Defined in `lang/std/collections/sliceable.ks`._
-
-#### function `sorted`
-
-```kestrel
-public func sorted() -> Array[T] where T: Comparable
-```
-
-Returns a new sorted array; original unchanged. O(n log n).
-
-##### Examples
-
-```
-let arr = [3, 1, 4, 1, 5];
-arr.sorted();  // [1, 1, 3, 4, 5]
-// arr is still [3, 1, 4, 1, 5]
-```
-
-_Defined in `lang/std/collections/sliceable.ks`._
-
-#### function `starts`
-
-```kestrel
-public func starts(with: &some Sliceable[T] and not Static and not Copyable and not Sized) -> Bool where T: Equatable
-```
-
-`true` if the leading elements match `prefix`. O(k) where k is
-the prefix length. Accepts any `Sliceable[T]` conformer.
-
-##### Examples
-
-```
-[1, 2, 3].starts(with: [1, 2]);     // true
-[1, 2, 3].starts(with: [2, 3]);     // false
-[1, 2, 3].starts(with: []);          // true (vacuous)
-```
-
-_Defined in `lang/std/collections/sliceable.ks`._
-
-#### subscript `subscript`
-
-```kestrel
-subscript[I](I) -> I.SliceOutput where I: SliceIndex[T] { ref }
-```
-
-_Defined in `lang/std/collections/sliceable.ks`._
-
-#### subscript `subscript`
-
-```kestrel
-subscript[I](checked: I) -> I.SliceOutput? where I: SliceIndex[T] { ref }
-```
-
-_Defined in `lang/std/collections/sliceable.ks`._
-
-#### subscript `subscript`
-
-```kestrel
-subscript[I](unchecked: I) -> I.SliceOutput where I: SliceIndex[T] { ref }
-```
-
-_Defined in `lang/std/collections/sliceable.ks`._
-
-#### subscript `subscript`
-
-```kestrel
-subscript(clamped: Int64) -> T? { ref }
-```
-
-_Defined in `lang/std/collections/sliceable.ks`._
-
-#### subscript `subscript`
-
-```kestrel
-subscript[R](within: R) -> Slice[T] where R: SliceClampable[T] { ref }
-```
-
-_Defined in `lang/std/collections/sliceable.ks`._
-
-#### subscript `subscript`
-
-```kestrel
-subscript(wrapped: Int64) -> T? { ref }
-```
-
-_Defined in `lang/std/collections/sliceable.ks`._
-
-#### subscript `subscript`
-
-```kestrel
-public subscript[I](I) -> I.SliceOutput where I: SliceIndex[T] { ref }
-```
-
-_Defined in `lang/std/collections/sliceable.ks`._
-
-#### subscript `subscript`
-
-```kestrel
-public subscript[I](checked: I) -> I.SliceOutput? where I: SliceIndex[T] { ref }
-```
-
-_Defined in `lang/std/collections/sliceable.ks`._
-
-#### subscript `subscript`
-
-```kestrel
-public subscript[I](unchecked: I) -> I.SliceOutput where I: SliceIndex[T] { ref }
-```
-
-_Defined in `lang/std/collections/sliceable.ks`._
-
-#### subscript `subscript`
-
-```kestrel
-public subscript(clamped: Int64) -> T? { ref }
-```
-
-_Defined in `lang/std/collections/sliceable.ks`._
-
-#### subscript `subscript`
-
-```kestrel
-public subscript[R](within: R) -> Slice[T] where R: SliceClampable[T] { ref }
-```
-
-_Defined in `lang/std/collections/sliceable.ks`._
-
-#### subscript `subscript`
-
-```kestrel
-public subscript(wrapped: Int64) -> T? { ref }
-```
-
-_Defined in `lang/std/collections/sliceable.ks`._
-
-#### function `suffix`
-
-```kestrel
-public func suffix(Int64) -> &Slice[T]
-```
-
-Returns a slice over the last `count` elements. O(1).
-
-##### Errors
-
-Panics if `count > self.count`.
-
-##### Examples
-
-```
-[1, 2, 3, 4, 5].suffix(2);  // [4, 5]
-```
-
-_Defined in `lang/std/collections/sliceable.ks`._
-
-#### function `unique`
-
-```kestrel
-public func unique() -> Array[T] where T: Hashable
-```
-
-Returns a new array with duplicates removed, preserving
-first-occurrence order. O(n) expected: seen elements go in a `Set`.
-
-To remove only adjacent repeats, use `dedup()` / `deduped()`.
-
-##### Examples
-
-```
-[1, 2, 1, 3, 2, 4].unique();  // [1, 2, 3, 4]
-```
-
-_Defined in `lang/std/collections/sliceable.ks`._
-
-### Implements `Iterable`
-
-#### function `iter`
-
-```kestrel
-public func iter() -> UnsafeSliceIterator[T]
-```
-
-Forward iterator over the elements.
-
-##### Examples
-
-```
-for item in [1, 2, 3] { ... }
-```
-
-_Defined in `lang/std/collections/sliceable.ks`._
 
 ## struct `ValuesIterator`
 

@@ -21,8 +21,8 @@ public struct Scrypt {
     /// `parallelism` are at least 1 with `blockSize × parallelism < 2^30`;
     /// throws `.InvalidLength` for a negative `length`.
     public static func deriveKey(
-        password: &some Sliceable[UInt8] and not Static and not Copyable and not Sized,
-        salt salt: &some Sliceable[UInt8] and not Static and not Copyable and not Sized,
+        password: &Slice[UInt8],
+        salt salt: &Slice[UInt8],
         logN logN: Int64,
         blockSize r: Int64,
         parallelism p: Int64,

@@ -264,7 +264,7 @@ fn lower_structural_type(
                 .map(|b| lower_bound_type(ctx, owner, root, b))
                 .collect();
             // The legal negative bounds are the implicit builtins: `Copyable`,
-            // `Static` and `Sized` (`some Sliceable[T] and not Static and not
+            // `Static` and `Sized` (`some Iterable and not Static and not
             // Sized` takes a borrowed slice view; the param desugar turns each
             // into a where-clause bound). Only `not Copyable` changes the
             // opaque itself. Recovery sets the flag so a bad negative doesn't

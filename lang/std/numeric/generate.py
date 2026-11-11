@@ -901,7 +901,7 @@ def generate_integer_byte_conversion_method(type_name: str, bits: int, signed: b
     /// @name From Bytes
     /// Reassembles a `{type_name}` from {byte_count} bytes in native byte order.
     /// Returns `null` if the input is not exactly {byte_count} bytes long.
-    public init[S](fromBytes fromBytes: &S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized {{
+    public init(fromBytes fromBytes: &Slice[UInt8])? {{
         let bytes = fromBytes.asUnsafeSlice();
         if bytes.count != {bc} {{
             return null
@@ -919,7 +919,7 @@ def generate_integer_byte_conversion_method(type_name: str, bits: int, signed: b
     /// @name From Bytes Big Endian
     /// Reassembles a `{type_name}` from {byte_count} bytes in big-endian order.
     /// Returns `null` if the input is not exactly {byte_count} bytes long.
-    public init[S](fromBytesBigEndian fromBytesBigEndian: &S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized {{
+    public init(fromBytesBigEndian fromBytesBigEndian: &Slice[UInt8])? {{
         let bytes = fromBytesBigEndian.asUnsafeSlice();
         if bytes.count != {bc} {{
             return null
@@ -937,7 +937,7 @@ def generate_integer_byte_conversion_method(type_name: str, bits: int, signed: b
     /// @name From Bytes Little Endian
     /// Reassembles a `{type_name}` from {byte_count} bytes in little-endian order.
     /// Returns `null` if the input is not exactly {byte_count} bytes long.
-    public init[S](fromBytesLittleEndian fromBytesLittleEndian: &S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized {{
+    public init(fromBytesLittleEndian fromBytesLittleEndian: &Slice[UInt8])? {{
         let bytes = fromBytesLittleEndian.asUnsafeSlice();
         if bytes.count != {bc} {{
             return null

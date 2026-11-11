@@ -31,7 +31,7 @@ Rules for borrow expressions:
 - **Function and method return types** — `-> &Int64`, `-> &mutating T`
 - **Struct fields and tuple elements** — `var item: &Int64;`, `(&Int64, Int64)`
 - **Generic arguments** — `Optional[&T]`, iterator `Item` types
-- **Parameters** — `x: &T` borrows (like `x: T`) and `x: &mutating T` mutably borrows (like `mutating x: T`), in declarations, function types and closure params. Only a ref-typed param may take an unsized type: `func sum[S](s: &S) where S: Sliceable[Int64], S: not Copyable, S: not Sized` accepts a `Slice[Int64]`. Combining the ref with a `mutating`/`consuming` keyword is E480.
+- **Parameters** — `x: &T` borrows (like `x: T`) and `x: &mutating T` mutably borrows (like `mutating x: T`), in declarations, function types and closure params. Only a ref-typed param may take an unsized type: `func sum[S](s: &S) where S: Iterable, S.Item = Int64, S: not Copyable, S: not Sized` accepts a `Slice[Int64]`. Combining the ref with a `mutating`/`consuming` keyword is E480.
 
 They may **not** appear in:
 

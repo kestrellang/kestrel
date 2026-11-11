@@ -1643,7 +1643,14 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
             .into_iter()
             .filter_map(|(field, idx)| {
                 let ty = *field_tys.get(idx.index())?;
-                Some((idx, self.lower_default_arg_inline(field, ty, &type_args)))
+                // A field default is stored, never a borrowed view.
+                let (value, _) = self.lower_default_arg_inline(
+                    field,
+                    ty,
+                    &type_args,
+                    ParamConvention::Consuming,
+                );
+                Some((idx, value))
             })
             .collect()
     }

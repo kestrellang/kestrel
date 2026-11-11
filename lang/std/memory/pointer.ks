@@ -8,7 +8,8 @@ import std.numeric.(Int64, UInt64, UInt8)
 import std.memory.(UnsafeSlice)
 import std.result.(Optional)
 import std.iter.(Iterator, Iterable)
-import std.collections.(Sliceable, Slice)
+import std.collections.(Slice)
+import std.core.(MutableIndirection)
 
 /// Untyped pointer to raw memory — `void*` in C terms.
 ///
@@ -393,7 +394,7 @@ public struct UnsafeSlice[T] {
     public var pointer: Pointer[T] { self.ptr }
 
     // subscript(index:), subscript(checked:), subscript(unchecked:),
-    // subscript(clamped:), subscript(within:), subscript(wrapped:): provided by extend Sliceable[T]
+    // subscript(clamped:), subscript(within:), subscript(wrapped:): on `Slice`, reached through the `MutableIndirection` peel
 
     /// Forward iterator over the elements.
     public func iter() -> UnsafeSliceIterator[T] {
@@ -420,22 +421,27 @@ public struct UnsafeSlice[T] {
 
 }
 
-/// `Sliceable[T]` conformance — `UnsafeSlice` is the kernel type, so
-/// `asUnsafeSlice()` returns `self`. Also declares the `Iterable` associated
-/// types so slices can be used in `for`-`in` loops and generic
+/// `Iterable`, so raw slices work in `for`-`in` loops and generic
 /// `I: Iterable` contexts.
-extend UnsafeSlice[T]: Sliceable[T], Iterable {
+extend UnsafeSlice[T]: Iterable {
     type Item = T
     type TargetIterator = UnsafeSliceIterator[T]
 
     /// Returns `self` — `UnsafeSlice` is already the borrowed view.
     public func asUnsafeSlice() -> UnsafeSlice[T] { self }
-
 }
 
-/// Element-wise equality when the element type is `Equatable`. `isEqual`
-/// is supplied by `extend Sliceable[T] where T: Equatable` in
-/// `std.collections.slice`.
+/// A raw slice lends its elements as a `Slice`: the slice algorithms and
+/// borrowed `&Slice[T]` params reach them in place.
+extend UnsafeSlice[T]: MutableIndirection {
+    type Target = Slice[T]
+    public var value: Slice[T] {
+        ref { self.asSlice() }
+        mutating ref { self.asMutableSlice() }
+    }
+}
+
+/// Element-wise equality when the element type is `Equatable`.
 ///
 /// # Examples
 ///
@@ -447,7 +453,10 @@ extend UnsafeSlice[T]: Sliceable[T], Iterable {
 /// let c = [4, 5, 6].asUnsafeSlice();
 /// a == c;  // false (same length, different elements)
 /// ```
-extend UnsafeSlice[T]: Equatable where T: Equatable { }
+extend UnsafeSlice[T]: Equatable where T: Equatable {
+    /// Same count, equal elements in order.
+    public func isEqual(to other: UnsafeSlice[T]) -> Bool { self.asSlice().isEqual(to: other) }
+}
 
 /// `ArrayMatchable` conformance: array patterns over raw memory. `..rest`
 /// binds a narrower `UnsafeSlice` (no lifetime tracking, like the slice).
