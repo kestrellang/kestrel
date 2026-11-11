@@ -331,6 +331,43 @@ pub(super) fn solve_assign_target(
 /// the system is at a fixpoint and waiting longer cannot help. This keeps
 /// assignment-driven inference (`x = 5` pinning `x`) working for locals
 /// whose type has no other source.
+/// A borrowed unsized value (a `&Slice[T]` / `&StringSlice` parameter, whose
+/// local is typed as the pointee) passed to a generic parameter that keeps
+/// its implicit `T: Sized` bound goes as the reference: `print(s)` binds
+/// `T = &Slice[T]`. Same two words either way, so nothing is copied. A
+/// parameter relaxed with `where T: not Sized` (`lang.ptr_to(self)`) takes
+/// the unsized type itself.
+fn try_lend_unsized_arg(
+    ctx: &mut InferCtx<'_>,
+    from: TyVar,
+    to: TyVar,
+    expr: kestrel_hir::body::HirExprId,
+    span: &Span,
+) -> Option<SolveResult> {
+    if !ctx.call_arg_exprs.contains(&expr) {
+        return None;
+    }
+    let (fr, tr) = (ctx.resolve(from), ctx.resolve(to));
+    if !matches!(ctx.slot(tr), TySlot::Unresolved { literal: None })
+        || !matches!(ctx.slot(fr), TySlot::Resolved(TyKind::Struct { .. }))
+        || super::solver_ty_is_sized(ctx, fr, 0)
+    {
+        return None;
+    }
+    let requires_sized = ctx.constraints.iter().any(|c| {
+        matches!(c, Constraint::Conforms { ty, protocol, .. }
+            if ctx.resolve(*ty) == tr && super::is_sized_builtin(ctx, *protocol))
+    });
+    if !requires_sized {
+        return None;
+    }
+    let lent = ctx.ref_ty(fr, false);
+    Some(match unify::unify(ctx, to, lent) {
+        Ok(()) => SolveResult::Solved,
+        Err(_) => SolveResult::Error(mismatch_error(ctx, to, from, span.clone())),
+    })
+}
+
 pub(super) fn solve_coerce(
     ctx: &mut InferCtx<'_>,
     from: TyVar,
@@ -530,6 +567,10 @@ pub(super) fn solve_coerce(
     {
         ctx.errored_coerce_exprs.insert(expr);
         return SolveResult::Error(err);
+    }
+
+    if let Some(result) = try_lend_unsized_arg(ctx, from, to, expr, &span) {
+        return result;
     }
 
     // Try unification first (handles the common case)
