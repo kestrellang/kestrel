@@ -1030,6 +1030,12 @@ fn try_view_arg_peel(
     if nominal(&wrapper_kind)? == target_entity {
         return None;
     }
+    // An `Optional` param takes a non-optional argument by wrapping it in
+    // `.Some` (`show(s: String?)` given a `String`), never by peeling it:
+    // the pointee isn't the payload the param asked for.
+    if ctx.resolver.builtin(Builtin::OptionalEnum) == Some(target_entity) {
+        return None;
+    }
     // Existentials in different boxes stay different types (E147): an
     // `any[OwnedBox] P` must not peel to its payload and rebox as `any P`.
     let to_kind = to_kind.clone();
