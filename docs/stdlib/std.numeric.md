@@ -555,23 +555,6 @@ Real cube root. Defined for negatives — `(-8.0).cbrt() == -2.0`.
 
 _Defined in `lang/std/numeric/float32.ks`._
 
-#### function `ceil`
-
-```kestrel
-public func ceil() -> Float32
-```
-
-Smallest integer ≥ `self`. Rounds toward `+infinity`.
-
-##### Examples
-
-```
-(3.2).ceil();   //  4.0
-(-3.7).ceil();  // -3.0
-```
-
-_Defined in `lang/std/numeric/float32.ks`._
-
 #### function `clamp`
 
 ```kestrel
@@ -632,28 +615,6 @@ Euler's number `e` ≈ 2.71828182845904… — base of the natural logarithm.
 
 _Defined in `lang/std/numeric/float32.ks`._
 
-#### field `epsilon`
-
-```kestrel
-public static var epsilon: Float32 { get }
-```
-
-Machine epsilon — the smallest `e` such that `1.0 + e != 1.0`,
-≈ 1.1920929e-7.
-
-Useful as a tolerance in approximate comparisons; scale by the
-operand magnitude for relative-error checks.
-
-##### Examples
-
-```
-func almostEqual(a: Float64, b: Float64) -> Bool {
-    (a - b).abs() < Float64.epsilon * a.abs().max(b.abs());
-}
-```
-
-_Defined in `lang/std/numeric/float32.ks`._
-
 #### function `exp`
 
 ```kestrel
@@ -682,23 +643,6 @@ public func expm1() -> Float32
 
 `e^self - 1`, computed without the cancellation that hurts
 `self.exp() - 1.0` for small `self`.
-
-_Defined in `lang/std/numeric/float32.ks`._
-
-#### function `floor`
-
-```kestrel
-public func floor() -> Float32
-```
-
-Largest integer ≤ `self`. Rounds toward `-infinity`.
-
-##### Examples
-
-```
-(3.7).floor();   //  3.0
-(-3.2).floor();  // -4.0
-```
 
 _Defined in `lang/std/numeric/float32.ks`._
 
@@ -753,27 +697,6 @@ avoids intermediate overflow when one operand is very large.
 
 _Defined in `lang/std/numeric/float32.ks`._
 
-#### field `infinity`
-
-```kestrel
-public static var infinity: Float32 { get }
-```
-
-Positive infinity. Produced by overflow or `+x / 0.0` for `x > 0`.
-Arithmetic with infinity follows IEEE 754: finite + infinity is
-infinity, infinity − infinity is NaN.
-
-##### Examples
-
-```
-Float64.infinity;       // inf
-Float64.infinity + 1;   // inf
-1.0 / 0.0;              // inf
-Float64.infinity.negate();  // -inf
-```
-
-_Defined in `lang/std/numeric/float32.ks`._
-
 #### initializer `init`
 
 ```kestrel
@@ -787,56 +710,6 @@ inverse of `bitPattern`). No value conversion — the bits are used directly.
 
 ```
 Float32(bitPattern: 4607182418800017408);   // 1.0  (Float64)
-```
-
-_Defined in `lang/std/numeric/float32.ks`._
-
-#### field `isFinite`
-
-```kestrel
-public var isFinite: Bool { get }
-```
-
-True if `self` is finite — equivalently, not NaN and not infinite.
-Includes zero and subnormals.
-
-_Defined in `lang/std/numeric/float32.ks`._
-
-#### field `isInfinite`
-
-```kestrel
-public var isInfinite: Bool { get }
-```
-
-True if `self` is `+infinity` or `-infinity`.
-
-##### Examples
-
-```
-Float64.infinity.isInfinite;             // true
-Float64.infinity.negate().isInfinite;    // true
-(1.0 / 0.0).isInfinite;                  // true
-Float64.nan.isInfinite;                  // false
-```
-
-_Defined in `lang/std/numeric/float32.ks`._
-
-#### field `isNaN`
-
-```kestrel
-public var isNaN: Bool { get }
-```
-
-True if `self` is NaN. The only correct way to test for NaN — `==`
-returns false against NaN even when both operands are NaN.
-
-##### Examples
-
-```
-(0.0 / 0.0).isNaN;        // true
-Float64.nan.isNaN;        // true
-(1.0).isNaN;              // false
-Float64.infinity.isNaN;   // false
 ```
 
 _Defined in `lang/std/numeric/float32.ks`._
@@ -1088,26 +961,6 @@ For a min that skips NaN instead, compare with `compare`.
 
 _Defined in `lang/std/numeric/float32.ks`._
 
-#### field `nan`
-
-```kestrel
-public static var nan: Float32 { get }
-```
-
-Not-a-Number. Produced by undefined operations like `0.0 / 0.0` or
-`sqrt(-1.0)`. NaN propagates through arithmetic and is unequal to
-every value including itself — always test with `isNaN`.
-
-##### Examples
-
-```
-Float64.nan.isNaN;             // true
-Float64.nan == Float64.nan;    // false (!)
-0.0 / 0.0;                     // nan
-```
-
-_Defined in `lang/std/numeric/float32.ks`._
-
 #### function `nextDown`
 
 ```kestrel
@@ -1126,16 +979,6 @@ public func nextUp() -> Float32
 
 Next representable value greater than `self`. `+inf` and `nan` are
 fixed points; the largest finite value steps up to `+inf`.
-
-_Defined in `lang/std/numeric/float32.ks`._
-
-#### field `pi`
-
-```kestrel
-public static var pi: Float32 { get }
-```
-
-The constant π ≈ 3.14159265358979… — circle circumference over diameter.
 
 _Defined in `lang/std/numeric/float32.ks`._
 
@@ -1221,25 +1064,6 @@ Differs from `%`: `(5.0).remainder(dividingBy: 3.0)` is `-1.0`, not
 
 _Defined in `lang/std/numeric/float32.ks`._
 
-#### function `round`
-
-```kestrel
-public func round() -> Float32
-```
-
-Round to nearest integer, breaking ties *away from zero* (banker's
-rounding is not used).
-
-##### Examples
-
-```
-(3.4).round();   //  3.0
-(3.5).round();   //  4.0   (tie → away from zero)
-(-3.5).round();  // -4.0
-```
-
-_Defined in `lang/std/numeric/float32.ks`._
-
 #### field `sign`
 
 ```kestrel
@@ -1294,24 +1118,6 @@ public func sinh() -> Float32
 ```
 
 Hyperbolic sine.
-
-_Defined in `lang/std/numeric/float32.ks`._
-
-#### function `sqrt`
-
-```kestrel
-public func sqrt() -> Float32
-```
-
-Principal square root. Negatives return NaN (`-0.0` returns `-0.0`);
-`+inf` returns `+inf`.
-
-##### Examples
-
-```
-(4.0).sqrt();    // 2.0
-(-1.0).sqrt();   // nan
-```
 
 _Defined in `lang/std/numeric/float32.ks`._
 
@@ -1383,6 +1189,202 @@ infinity, or values that fall outside the `Int64` range.
 (-3.7).toInt64();             // Some(-3)
 Float64.nan.toInt64();        // None
 Float64.infinity.toInt64();   // None
+```
+
+_Defined in `lang/std/numeric/float32.ks`._
+
+### Implements `FloatingPoint`
+
+#### function `ceil`
+
+```kestrel
+public func ceil() -> Float32
+```
+
+Smallest integer ≥ `self`. Rounds toward `+infinity`.
+
+##### Examples
+
+```
+(3.2).ceil();   //  4.0
+(-3.7).ceil();  // -3.0
+```
+
+_Defined in `lang/std/numeric/float32.ks`._
+
+#### field `epsilon`
+
+```kestrel
+public static var epsilon: Float32 { get }
+```
+
+Machine epsilon — the smallest `e` such that `1.0 + e != 1.0`,
+≈ 1.1920929e-7.
+
+Useful as a tolerance in approximate comparisons; scale by the
+operand magnitude for relative-error checks.
+
+##### Examples
+
+```
+func almostEqual(a: Float64, b: Float64) -> Bool {
+    (a - b).abs() < Float64.epsilon * a.abs().max(b.abs());
+}
+```
+
+_Defined in `lang/std/numeric/float32.ks`._
+
+#### function `floor`
+
+```kestrel
+public func floor() -> Float32
+```
+
+Largest integer ≤ `self`. Rounds toward `-infinity`.
+
+##### Examples
+
+```
+(3.7).floor();   //  3.0
+(-3.2).floor();  // -4.0
+```
+
+_Defined in `lang/std/numeric/float32.ks`._
+
+#### field `infinity`
+
+```kestrel
+public static var infinity: Float32 { get }
+```
+
+Positive infinity. Produced by overflow or `+x / 0.0` for `x > 0`.
+Arithmetic with infinity follows IEEE 754: finite + infinity is
+infinity, infinity − infinity is NaN.
+
+##### Examples
+
+```
+Float64.infinity;       // inf
+Float64.infinity + 1;   // inf
+1.0 / 0.0;              // inf
+Float64.infinity.negate();  // -inf
+```
+
+_Defined in `lang/std/numeric/float32.ks`._
+
+#### field `isFinite`
+
+```kestrel
+public var isFinite: Bool { get }
+```
+
+True if `self` is finite — equivalently, not NaN and not infinite.
+Includes zero and subnormals.
+
+_Defined in `lang/std/numeric/float32.ks`._
+
+#### field `isInfinite`
+
+```kestrel
+public var isInfinite: Bool { get }
+```
+
+True if `self` is `+infinity` or `-infinity`.
+
+##### Examples
+
+```
+Float64.infinity.isInfinite;             // true
+Float64.infinity.negate().isInfinite;    // true
+(1.0 / 0.0).isInfinite;                  // true
+Float64.nan.isInfinite;                  // false
+```
+
+_Defined in `lang/std/numeric/float32.ks`._
+
+#### field `isNaN`
+
+```kestrel
+public var isNaN: Bool { get }
+```
+
+True if `self` is NaN. The only correct way to test for NaN — `==`
+returns false against NaN even when both operands are NaN.
+
+##### Examples
+
+```
+(0.0 / 0.0).isNaN;        // true
+Float64.nan.isNaN;        // true
+(1.0).isNaN;              // false
+Float64.infinity.isNaN;   // false
+```
+
+_Defined in `lang/std/numeric/float32.ks`._
+
+#### field `nan`
+
+```kestrel
+public static var nan: Float32 { get }
+```
+
+Not-a-Number. Produced by undefined operations like `0.0 / 0.0` or
+`sqrt(-1.0)`. NaN propagates through arithmetic and is unequal to
+every value including itself — always test with `isNaN`.
+
+##### Examples
+
+```
+Float64.nan.isNaN;             // true
+Float64.nan == Float64.nan;    // false (!)
+0.0 / 0.0;                     // nan
+```
+
+_Defined in `lang/std/numeric/float32.ks`._
+
+#### field `pi`
+
+```kestrel
+public static var pi: Float32 { get }
+```
+
+The constant π ≈ 3.14159265358979… — circle circumference over diameter.
+
+_Defined in `lang/std/numeric/float32.ks`._
+
+#### function `round`
+
+```kestrel
+public func round() -> Float32
+```
+
+Round to nearest integer, breaking ties *away from zero* (banker's
+rounding is not used).
+
+##### Examples
+
+```
+(3.4).round();   //  3.0
+(3.5).round();   //  4.0   (tie → away from zero)
+(-3.5).round();  // -4.0
+```
+
+_Defined in `lang/std/numeric/float32.ks`._
+
+#### function `sqrt`
+
+```kestrel
+public func sqrt() -> Float32
+```
+
+Principal square root. Negatives return NaN (`-0.0` returns `-0.0`);
+`+inf` returns `+inf`.
+
+##### Examples
+
+```
+(4.0).sqrt();    // 2.0
+(-1.0).sqrt();   // nan
 ```
 
 _Defined in `lang/std/numeric/float32.ks`._
@@ -1919,23 +1921,6 @@ Real cube root. Defined for negatives — `(-8.0).cbrt() == -2.0`.
 
 _Defined in `lang/std/numeric/float64.ks`._
 
-#### function `ceil`
-
-```kestrel
-public func ceil() -> Float64
-```
-
-Smallest integer ≥ `self`. Rounds toward `+infinity`.
-
-##### Examples
-
-```
-(3.2).ceil();   //  4.0
-(-3.7).ceil();  // -3.0
-```
-
-_Defined in `lang/std/numeric/float64.ks`._
-
 #### function `clamp`
 
 ```kestrel
@@ -1996,28 +1981,6 @@ Euler's number `e` ≈ 2.71828182845904… — base of the natural logarithm.
 
 _Defined in `lang/std/numeric/float64.ks`._
 
-#### field `epsilon`
-
-```kestrel
-public static var epsilon: Float64 { get }
-```
-
-Machine epsilon — the smallest `e` such that `1.0 + e != 1.0`,
-≈ 2.220446049250313e-16.
-
-Useful as a tolerance in approximate comparisons; scale by the
-operand magnitude for relative-error checks.
-
-##### Examples
-
-```
-func almostEqual(a: Float64, b: Float64) -> Bool {
-    (a - b).abs() < Float64.epsilon * a.abs().max(b.abs());
-}
-```
-
-_Defined in `lang/std/numeric/float64.ks`._
-
 #### function `exp`
 
 ```kestrel
@@ -2046,23 +2009,6 @@ public func expm1() -> Float64
 
 `e^self - 1`, computed without the cancellation that hurts
 `self.exp() - 1.0` for small `self`.
-
-_Defined in `lang/std/numeric/float64.ks`._
-
-#### function `floor`
-
-```kestrel
-public func floor() -> Float64
-```
-
-Largest integer ≤ `self`. Rounds toward `-infinity`.
-
-##### Examples
-
-```
-(3.7).floor();   //  3.0
-(-3.2).floor();  // -4.0
-```
 
 _Defined in `lang/std/numeric/float64.ks`._
 
@@ -2117,27 +2063,6 @@ avoids intermediate overflow when one operand is very large.
 
 _Defined in `lang/std/numeric/float64.ks`._
 
-#### field `infinity`
-
-```kestrel
-public static var infinity: Float64 { get }
-```
-
-Positive infinity. Produced by overflow or `+x / 0.0` for `x > 0`.
-Arithmetic with infinity follows IEEE 754: finite + infinity is
-infinity, infinity − infinity is NaN.
-
-##### Examples
-
-```
-Float64.infinity;       // inf
-Float64.infinity + 1;   // inf
-1.0 / 0.0;              // inf
-Float64.infinity.negate();  // -inf
-```
-
-_Defined in `lang/std/numeric/float64.ks`._
-
 #### initializer `init`
 
 ```kestrel
@@ -2151,56 +2076,6 @@ inverse of `bitPattern`). No value conversion — the bits are used directly.
 
 ```
 Float64(bitPattern: 4607182418800017408);   // 1.0  (Float64)
-```
-
-_Defined in `lang/std/numeric/float64.ks`._
-
-#### field `isFinite`
-
-```kestrel
-public var isFinite: Bool { get }
-```
-
-True if `self` is finite — equivalently, not NaN and not infinite.
-Includes zero and subnormals.
-
-_Defined in `lang/std/numeric/float64.ks`._
-
-#### field `isInfinite`
-
-```kestrel
-public var isInfinite: Bool { get }
-```
-
-True if `self` is `+infinity` or `-infinity`.
-
-##### Examples
-
-```
-Float64.infinity.isInfinite;             // true
-Float64.infinity.negate().isInfinite;    // true
-(1.0 / 0.0).isInfinite;                  // true
-Float64.nan.isInfinite;                  // false
-```
-
-_Defined in `lang/std/numeric/float64.ks`._
-
-#### field `isNaN`
-
-```kestrel
-public var isNaN: Bool { get }
-```
-
-True if `self` is NaN. The only correct way to test for NaN — `==`
-returns false against NaN even when both operands are NaN.
-
-##### Examples
-
-```
-(0.0 / 0.0).isNaN;        // true
-Float64.nan.isNaN;        // true
-(1.0).isNaN;              // false
-Float64.infinity.isNaN;   // false
 ```
 
 _Defined in `lang/std/numeric/float64.ks`._
@@ -2452,26 +2327,6 @@ For a min that skips NaN instead, compare with `compare`.
 
 _Defined in `lang/std/numeric/float64.ks`._
 
-#### field `nan`
-
-```kestrel
-public static var nan: Float64 { get }
-```
-
-Not-a-Number. Produced by undefined operations like `0.0 / 0.0` or
-`sqrt(-1.0)`. NaN propagates through arithmetic and is unequal to
-every value including itself — always test with `isNaN`.
-
-##### Examples
-
-```
-Float64.nan.isNaN;             // true
-Float64.nan == Float64.nan;    // false (!)
-0.0 / 0.0;                     // nan
-```
-
-_Defined in `lang/std/numeric/float64.ks`._
-
 #### function `nextDown`
 
 ```kestrel
@@ -2490,16 +2345,6 @@ public func nextUp() -> Float64
 
 Next representable value greater than `self`. `+inf` and `nan` are
 fixed points; the largest finite value steps up to `+inf`.
-
-_Defined in `lang/std/numeric/float64.ks`._
-
-#### field `pi`
-
-```kestrel
-public static var pi: Float64 { get }
-```
-
-The constant π ≈ 3.14159265358979… — circle circumference over diameter.
 
 _Defined in `lang/std/numeric/float64.ks`._
 
@@ -2618,25 +2463,6 @@ Differs from `%`: `(5.0).remainder(dividingBy: 3.0)` is `-1.0`, not
 
 _Defined in `lang/std/numeric/float64.ks`._
 
-#### function `round`
-
-```kestrel
-public func round() -> Float64
-```
-
-Round to nearest integer, breaking ties *away from zero* (banker's
-rounding is not used).
-
-##### Examples
-
-```
-(3.4).round();   //  3.0
-(3.5).round();   //  4.0   (tie → away from zero)
-(-3.5).round();  // -4.0
-```
-
-_Defined in `lang/std/numeric/float64.ks`._
-
 #### field `sign`
 
 ```kestrel
@@ -2691,24 +2517,6 @@ public func sinh() -> Float64
 ```
 
 Hyperbolic sine.
-
-_Defined in `lang/std/numeric/float64.ks`._
-
-#### function `sqrt`
-
-```kestrel
-public func sqrt() -> Float64
-```
-
-Principal square root. Negatives return NaN (`-0.0` returns `-0.0`);
-`+inf` returns `+inf`.
-
-##### Examples
-
-```
-(4.0).sqrt();    // 2.0
-(-1.0).sqrt();   // nan
-```
 
 _Defined in `lang/std/numeric/float64.ks`._
 
@@ -2780,6 +2588,202 @@ infinity, or values that fall outside the `Int64` range.
 (-3.7).toInt64();             // Some(-3)
 Float64.nan.toInt64();        // None
 Float64.infinity.toInt64();   // None
+```
+
+_Defined in `lang/std/numeric/float64.ks`._
+
+### Implements `FloatingPoint`
+
+#### function `ceil`
+
+```kestrel
+public func ceil() -> Float64
+```
+
+Smallest integer ≥ `self`. Rounds toward `+infinity`.
+
+##### Examples
+
+```
+(3.2).ceil();   //  4.0
+(-3.7).ceil();  // -3.0
+```
+
+_Defined in `lang/std/numeric/float64.ks`._
+
+#### field `epsilon`
+
+```kestrel
+public static var epsilon: Float64 { get }
+```
+
+Machine epsilon — the smallest `e` such that `1.0 + e != 1.0`,
+≈ 2.220446049250313e-16.
+
+Useful as a tolerance in approximate comparisons; scale by the
+operand magnitude for relative-error checks.
+
+##### Examples
+
+```
+func almostEqual(a: Float64, b: Float64) -> Bool {
+    (a - b).abs() < Float64.epsilon * a.abs().max(b.abs());
+}
+```
+
+_Defined in `lang/std/numeric/float64.ks`._
+
+#### function `floor`
+
+```kestrel
+public func floor() -> Float64
+```
+
+Largest integer ≤ `self`. Rounds toward `-infinity`.
+
+##### Examples
+
+```
+(3.7).floor();   //  3.0
+(-3.2).floor();  // -4.0
+```
+
+_Defined in `lang/std/numeric/float64.ks`._
+
+#### field `infinity`
+
+```kestrel
+public static var infinity: Float64 { get }
+```
+
+Positive infinity. Produced by overflow or `+x / 0.0` for `x > 0`.
+Arithmetic with infinity follows IEEE 754: finite + infinity is
+infinity, infinity − infinity is NaN.
+
+##### Examples
+
+```
+Float64.infinity;       // inf
+Float64.infinity + 1;   // inf
+1.0 / 0.0;              // inf
+Float64.infinity.negate();  // -inf
+```
+
+_Defined in `lang/std/numeric/float64.ks`._
+
+#### field `isFinite`
+
+```kestrel
+public var isFinite: Bool { get }
+```
+
+True if `self` is finite — equivalently, not NaN and not infinite.
+Includes zero and subnormals.
+
+_Defined in `lang/std/numeric/float64.ks`._
+
+#### field `isInfinite`
+
+```kestrel
+public var isInfinite: Bool { get }
+```
+
+True if `self` is `+infinity` or `-infinity`.
+
+##### Examples
+
+```
+Float64.infinity.isInfinite;             // true
+Float64.infinity.negate().isInfinite;    // true
+(1.0 / 0.0).isInfinite;                  // true
+Float64.nan.isInfinite;                  // false
+```
+
+_Defined in `lang/std/numeric/float64.ks`._
+
+#### field `isNaN`
+
+```kestrel
+public var isNaN: Bool { get }
+```
+
+True if `self` is NaN. The only correct way to test for NaN — `==`
+returns false against NaN even when both operands are NaN.
+
+##### Examples
+
+```
+(0.0 / 0.0).isNaN;        // true
+Float64.nan.isNaN;        // true
+(1.0).isNaN;              // false
+Float64.infinity.isNaN;   // false
+```
+
+_Defined in `lang/std/numeric/float64.ks`._
+
+#### field `nan`
+
+```kestrel
+public static var nan: Float64 { get }
+```
+
+Not-a-Number. Produced by undefined operations like `0.0 / 0.0` or
+`sqrt(-1.0)`. NaN propagates through arithmetic and is unequal to
+every value including itself — always test with `isNaN`.
+
+##### Examples
+
+```
+Float64.nan.isNaN;             // true
+Float64.nan == Float64.nan;    // false (!)
+0.0 / 0.0;                     // nan
+```
+
+_Defined in `lang/std/numeric/float64.ks`._
+
+#### field `pi`
+
+```kestrel
+public static var pi: Float64 { get }
+```
+
+The constant π ≈ 3.14159265358979… — circle circumference over diameter.
+
+_Defined in `lang/std/numeric/float64.ks`._
+
+#### function `round`
+
+```kestrel
+public func round() -> Float64
+```
+
+Round to nearest integer, breaking ties *away from zero* (banker's
+rounding is not used).
+
+##### Examples
+
+```
+(3.4).round();   //  3.0
+(3.5).round();   //  4.0   (tie → away from zero)
+(-3.5).round();  // -4.0
+```
+
+_Defined in `lang/std/numeric/float64.ks`._
+
+#### function `sqrt`
+
+```kestrel
+public func sqrt() -> Float64
+```
+
+Principal square root. Negatives return NaN (`-0.0` returns `-0.0`);
+`+inf` returns `+inf`.
+
+##### Examples
+
+```
+(4.0).sqrt();    // 2.0
+(-1.0).sqrt();   // nan
 ```
 
 _Defined in `lang/std/numeric/float64.ks`._
@@ -3065,6 +3069,145 @@ _Defined in `lang/std/numeric/float64.ks`._
 ### Implements `Convertible`
 
 ### Implements `FFISafe`
+
+## protocol `FloatingPoint`
+
+```kestrel
+public protocol FloatingPoint
+```
+
+An IEEE 754 binary floating-point type: `Float32` and `Float64`.
+
+Adds float literals, the special values, and the rounding and root
+functions every float type has.
+
+_Defined in `lang/std/numeric/numeric.ks`._
+
+### Members
+
+#### function `ceil`
+
+```kestrel
+func ceil() -> Self
+```
+
+The smallest integral value not below `self`.
+
+_Defined in `lang/std/numeric/numeric.ks`._
+
+#### field `epsilon`
+
+```kestrel
+static var epsilon: Self { get }
+```
+
+The gap between `1` and the next larger value.
+
+_Defined in `lang/std/numeric/numeric.ks`._
+
+#### function `floor`
+
+```kestrel
+func floor() -> Self
+```
+
+The largest integral value not above `self`.
+
+_Defined in `lang/std/numeric/numeric.ks`._
+
+#### field `infinity`
+
+```kestrel
+static var infinity: Self { get }
+```
+
+Positive infinity.
+
+_Defined in `lang/std/numeric/numeric.ks`._
+
+#### field `isFinite`
+
+```kestrel
+var isFinite: Bool { get }
+```
+
+True if `self` is neither infinite nor NaN.
+
+_Defined in `lang/std/numeric/numeric.ks`._
+
+#### field `isInfinite`
+
+```kestrel
+var isInfinite: Bool { get }
+```
+
+True if `self` is positive or negative infinity.
+
+_Defined in `lang/std/numeric/numeric.ks`._
+
+#### field `isNaN`
+
+```kestrel
+var isNaN: Bool { get }
+```
+
+True if `self` is NaN.
+
+_Defined in `lang/std/numeric/numeric.ks`._
+
+#### field `nan`
+
+```kestrel
+static var nan: Self { get }
+```
+
+A quiet NaN. Never equal to anything, itself included; test with `isNaN`.
+
+_Defined in `lang/std/numeric/numeric.ks`._
+
+#### field `pi`
+
+```kestrel
+static var pi: Self { get }
+```
+
+π.
+
+_Defined in `lang/std/numeric/numeric.ks`._
+
+#### function `round`
+
+```kestrel
+func round() -> Self
+```
+
+The nearest integral value, halfway cases away from zero.
+
+_Defined in `lang/std/numeric/numeric.ks`._
+
+#### function `sqrt`
+
+```kestrel
+func sqrt() -> Self
+```
+
+The square root. NaN for negative inputs.
+
+_Defined in `lang/std/numeric/numeric.ks`._
+
+#### function `trunc`
+
+```kestrel
+func trunc() -> Self
+```
+
+`self` with its fractional part dropped.
+
+_Defined in `lang/std/numeric/numeric.ks`._
+
+### Implements `SignedNumeric`
+
+### Implements `ExpressibleByFloatLiteral`
 
 ## typealias `Int`
 
@@ -3433,6 +3576,17 @@ public init(truncating: UInt64)
 
 Converts from `UInt64` keeping only the low bits, reinterpreted as
 `Int16`. Never traps.
+
+_Defined in `lang/std/numeric/int16.ks`._
+
+#### function `abs`
+
+```kestrel
+public func abs() -> Int16
+```
+
+Absolute value. Traps at the minimum value when overflow checks are on; use `absWrapping`,
+`absChecked` or `absSaturating` there.
 
 _Defined in `lang/std/numeric/int16.ks`._
 
@@ -4117,17 +4271,6 @@ power of two dividing the value.
 _Defined in `lang/std/numeric/int16.ks`._
 
 ### Implements `SignedInteger`
-
-#### function `abs`
-
-```kestrel
-public func abs() -> Int16
-```
-
-Absolute value. Traps at the minimum value when overflow checks are on; use `absWrapping`,
-`absChecked` or `absSaturating` there.
-
-_Defined in `lang/std/numeric/int16.ks`._
 
 ### Implements `Steppable`
 
@@ -4871,6 +5014,17 @@ Converts from `UInt64` keeping only the low bits, reinterpreted as
 
 _Defined in `lang/std/numeric/int32.ks`._
 
+#### function `abs`
+
+```kestrel
+public func abs() -> Int32
+```
+
+Absolute value. Traps at the minimum value when overflow checks are on; use `absWrapping`,
+`absChecked` or `absSaturating` there.
+
+_Defined in `lang/std/numeric/int32.ks`._
+
 #### function `absChecked`
 
 ```kestrel
@@ -5552,17 +5706,6 @@ power of two dividing the value.
 _Defined in `lang/std/numeric/int32.ks`._
 
 ### Implements `SignedInteger`
-
-#### function `abs`
-
-```kestrel
-public func abs() -> Int32
-```
-
-Absolute value. Traps at the minimum value when overflow checks are on; use `absWrapping`,
-`absChecked` or `absSaturating` there.
-
-_Defined in `lang/std/numeric/int32.ks`._
 
 ### Implements `Steppable`
 
@@ -6247,6 +6390,17 @@ public init(truncating: UInt64)
 
 Converts from `UInt64` keeping only the low bits, reinterpreted as
 `Int64`. Never traps.
+
+_Defined in `lang/std/numeric/int64.ks`._
+
+#### function `abs`
+
+```kestrel
+public func abs() -> Int64
+```
+
+Absolute value. Traps at the minimum value when overflow checks are on; use `absWrapping`,
+`absChecked` or `absSaturating` there.
 
 _Defined in `lang/std/numeric/int64.ks`._
 
@@ -6949,17 +7103,6 @@ power of two dividing the value.
 _Defined in `lang/std/numeric/int64.ks`._
 
 ### Implements `SignedInteger`
-
-#### function `abs`
-
-```kestrel
-public func abs() -> Int64
-```
-
-Absolute value. Traps at the minimum value when overflow checks are on; use `absWrapping`,
-`absChecked` or `absSaturating` there.
-
-_Defined in `lang/std/numeric/int64.ks`._
 
 ### Implements `Steppable`
 
@@ -7905,6 +8048,17 @@ Converts from `UInt64` keeping only the low bits, reinterpreted as
 
 _Defined in `lang/std/numeric/int8.ks`._
 
+#### function `abs`
+
+```kestrel
+public func abs() -> Int8
+```
+
+Absolute value. Traps at the minimum value when overflow checks are on; use `absWrapping`,
+`absChecked` or `absSaturating` there.
+
+_Defined in `lang/std/numeric/int8.ks`._
+
 #### function `absChecked`
 
 ```kestrel
@@ -8587,17 +8741,6 @@ _Defined in `lang/std/numeric/int8.ks`._
 
 ### Implements `SignedInteger`
 
-#### function `abs`
-
-```kestrel
-public func abs() -> Int8
-```
-
-Absolute value. Traps at the minimum value when overflow checks are on; use `absWrapping`,
-`absChecked` or `absSaturating` there.
-
-_Defined in `lang/std/numeric/int8.ks`._
-
 ### Implements `Steppable`
 
 #### function `distance`
@@ -9036,6 +9179,69 @@ consuming func report() -> ExitCode
 
 _Defined in `lang/std/system/exitable.ks`._
 
+## protocol `Integer`
+
+```kestrel
+public protocol Integer where Self.Remainder.Output == Self, Self.BitwiseAnd.Output == Self, Self.BitwiseOr.Output == Self, Self.BitwiseXor.Output == Self, Self.BitwiseNot.Output == Self, Self.LeftShift.Output == Self, Self.RightShift.Output == Self
+```
+
+A fixed-width integer: remainder, bit operations and shifts that stay in
+`Self`, stepping, hashing, and the type's range.
+
+_Defined in `lang/std/numeric/numeric.ks`._
+
+### Members
+
+#### field `bitWidth`
+
+```kestrel
+static var bitWidth: Int64 { get }
+```
+
+The width in bits.
+
+_Defined in `lang/std/numeric/numeric.ks`._
+
+#### field `maxValue`
+
+```kestrel
+static var maxValue: Self { get }
+```
+
+The largest representable value.
+
+_Defined in `lang/std/numeric/numeric.ks`._
+
+#### field `minValue`
+
+```kestrel
+static var minValue: Self { get }
+```
+
+The smallest representable value.
+
+_Defined in `lang/std/numeric/numeric.ks`._
+
+### Implements `Numeric`
+
+### Implements `Remainder`
+
+### Implements `Steppable`
+
+### Implements `Hashable`
+
+### Implements `BitwiseAnd`
+
+### Implements `BitwiseOr`
+
+### Implements `BitwiseXor`
+
+### Implements `BitwiseNot`
+
+### Implements `LeftShift`
+
+### Implements `RightShift`
+
 ## struct `Lcg64`
 
 ```kestrel
@@ -9116,6 +9322,43 @@ allocation-free.
 _Defined in `lang/std/numeric/random.ks`._
 
 ### Implements `Defaultable`
+
+## protocol `Numeric`
+
+```kestrel
+public protocol Numeric where Self.Addable.Output == Self, Self.Subtractable.Output == Self, Self.Multipliable.Output == Self, Self.Divisible.Output == Self
+```
+
+A number: arithmetic that stays in `Self`, ordering, and integer literals.
+
+Every integer and float type conforms. Generic code bound by `Numeric`
+can add, subtract, multiply and divide values and get `Self` back, so a
+running total needs no casts. The `where` clause names which `Output`
+each operator protocol means, since all four declare one.
+
+### Examples
+
+```
+func sum[T](xs: &Slice[T]) -> T where T: Numeric {
+    var total = T.zero;
+    for x in xs { total = total + x; }
+    total
+}
+```
+
+_Defined in `lang/std/numeric/numeric.ks`._
+
+### Implements `Addable`
+
+### Implements `Subtractable`
+
+### Implements `Multipliable`
+
+### Implements `Divisible`
+
+### Implements `Comparable`
+
+### Implements `ExpressibleByIntLiteral`
 
 ## protocol `RandomBounds`
 
@@ -9266,9 +9509,24 @@ _Defined in `lang/std/numeric/random.ks`._
 public protocol SignedInteger
 ```
 
-Marker protocol for signed integer types. The `abs()` requirement is
-what justifies treating these uniformly in generic code — unsigned
-integers can't satisfy it without changing semantics.
+A signed integer type: `Int8` through `Int64`.
+
+_Defined in `lang/std/numeric/numeric.ks`._
+
+### Implements `Integer`
+
+### Implements `SignedNumeric`
+
+## protocol `SignedNumeric`
+
+```kestrel
+public protocol SignedNumeric where Self.Negatable.Output == Self
+```
+
+A number that can be negative: negation stays in `Self`, and `abs()`
+gives the magnitude.
+
+Signed integers and floats conform; unsigned integers don't.
 
 _Defined in `lang/std/numeric/numeric.ks`._
 
@@ -9280,11 +9538,14 @@ _Defined in `lang/std/numeric/numeric.ks`._
 func abs() -> Self
 ```
 
-Absolute value. For two's-complement types this can overflow at
-`minValue`; consumers that need a total function should use
-`absChecked()` from the concrete type instead.
+The magnitude of `self`. For two's-complement integers this can
+overflow at `minValue`; the concrete types offer `absChecked()`.
 
 _Defined in `lang/std/numeric/numeric.ks`._
+
+### Implements `Numeric`
+
+### Implements `Negatable`
 
 ## protocol `Steppable`
 
@@ -14998,10 +15259,11 @@ _Defined in `lang/std/system/exitable.ks`._
 public protocol UnsignedInteger
 ```
 
-Marker protocol for unsigned integer types. Carries no requirements —
-it exists so generic code can constrain on signedness without naming
-every concrete `UInt*` type. The compiler also reads it: integer patterns
-on a conforming type test and tile its raw bits as unsigned.
+An unsigned integer type: `UInt8` through `UInt64`. The compiler also
+reads this protocol: integer patterns on a conforming type test and tile
+its raw bits as unsigned.
 
 _Defined in `lang/std/numeric/numeric.ks`._
+
+### Implements `Integer`
 

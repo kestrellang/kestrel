@@ -55,6 +55,7 @@ import std.collections.Array
 ///
 /// A single `lang.f32` field holding the raw IEEE 754 bit pattern.
 public struct Float32:
+    FloatingPoint,
     Comparable,
     Equatable,
     Less[Float32],

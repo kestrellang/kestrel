@@ -181,6 +181,25 @@ extend Stamp: Addable[Span], Subtractable[Stamp] {
 An unqualified `type Output = T` is fine when only one of the type's
 protocols declares `Output`.
 
+The same qualified name works in a `where` clause, on a generic function or
+on a protocol. It picks one of several same-named associated types:
+
+```kestrel
+func addThenSubtract[T](a: T, b: T, c: T) -> T
+    where T: Addable, T: Subtractable, T: Copyable,
+          T.Addable.Output = T, T.Subtractable.Output = T {
+    a + b - c
+}
+
+// Every conformer must bind each `Output` to itself (E410 otherwise), and
+// generic code bound by `Arithmetic` gets `T` back from `+` and `-`.
+protocol Arithmetic: Addable, Subtractable
+    where Self.Addable.Output = Self, Self.Subtractable.Output = Self {}
+```
+
+The standard library's `Numeric`, `Integer` and `FloatingPoint` protocols are
+built this way.
+
 ### Using Self in Associated Types
 
 ```kestrel
@@ -735,6 +754,13 @@ protocol C: A, B { }
 // Error: conflicting associated type 'Element'
 ```
 
+A `where` clause that pins every one of them settles the conflict, for the
+protocol and for anything that refines it:
+
+```kestrel
+protocol C: A, B where Self.A.Element = Self, Self.B.Element = Self { }  // OK
+```
+
 However, child protocols can redeclare parent associated types:
 
 ```kestrel
@@ -777,6 +803,7 @@ Common protocol-related errors:
 | Wrong label | "does not implement method 'methodName'" |
 | Receiver kind mismatch | "receiver kind mismatch" |
 | Conflicting associated type | "conflicting associated type 'TypeName'" |
+| Pinned associated type bound to something else (E410) | "'T' binds 'P.Name' to 'X', but protocol 'Q' requires 'Y'" |
 | Duplicate protocol method | "ambiguous method 'methodName'" |
 | Missing associated type | "does not provide associated type 'TypeName'" |
 

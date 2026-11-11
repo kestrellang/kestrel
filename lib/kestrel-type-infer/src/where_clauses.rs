@@ -665,6 +665,9 @@ fn resolve_equality_subject(
     entity: Entity,
     root: Entity,
 ) -> Result<WhereSubject, Option<DroppedAssocPath>> {
+    if let Some(subject) = qualified_equality_subject(ctx, lhs, entity, root) {
+        return Ok(subject);
+    }
     let Some((param, assoc_name)) = extract_associated_type_path(ctx, lhs, entity, root) else {
         return resolve_type_param_or_assoc(ctx, lhs, entity, root)
             .map(WhereSubject::Param)
@@ -685,6 +688,52 @@ fn resolve_equality_subject(
         })?;
     Ok(WhereSubject::Projection {
         base: Box::new(WhereSubject::Param(param)),
+        assoc,
+    })
+}
+
+/// `T.Protocol.Assoc = X`: the associated type `Assoc` that `Protocol`
+/// declares (or inherits), on `T`. The protocol names which of several
+/// same-named associated types is meant (`T.Addable.Output` beside
+/// `T.Subtractable.Output`), as `type Addable.Output = …` does in a
+/// conformance. `None` for any other shape.
+fn qualified_equality_subject(
+    ctx: &QueryContext<'_>,
+    lhs: &AstType,
+    entity: Entity,
+    root: Entity,
+) -> Option<WhereSubject> {
+    let AstType::Named { segments, .. } = lhs else {
+        return None;
+    };
+    let [param_seg, protocol_segs @ .., assoc_seg] = segments.as_slice() else {
+        return None;
+    };
+    if protocol_segs.is_empty() {
+        return None;
+    }
+    let resolve = |names: Vec<String>| match ctx.query(ResolveTypePath {
+        segments: names,
+        context: entity,
+        root,
+    }) {
+        TypeResolution::Found(e) => Some(e),
+        _ => None,
+    };
+    let protocol = resolve(protocol_segs.iter().map(|s| s.name.clone()).collect())?;
+    if ctx.get::<NodeKind>(protocol) != Some(&NodeKind::Protocol) {
+        return None;
+    }
+    let base = if param_seg.name == "Self" {
+        WhereSubject::SelfType
+    } else {
+        WhereSubject::Param(resolve(vec![param_seg.name.clone()])?)
+    };
+    let [assoc] = nearest_level_assoc(ctx, vec![protocol], &assoc_seg.name, root)[..] else {
+        return None;
+    };
+    Some(WhereSubject::Projection {
+        base: Box::new(base),
         assoc,
     })
 }

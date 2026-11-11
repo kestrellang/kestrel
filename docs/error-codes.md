@@ -197,6 +197,7 @@ func unwrap(opt: Int64?) -> Int64 {
 | E407 | indirect enum '{name}' contains itself with different type arguments | Polymorphic recursion (`case Nest(Nested[Array[T]])` in `Nested[T]`): every level would need a new instantiation. |
 | E408 | opaque return type of '{name}' contains itself | Functions whose `some P` bodies wrap each other's opaque returns (`g` returns `W(inner: h())`, `h` returns `W(inner: g())`) describe an infinite type. |
 | E409 | `indirect` has no effect: enum '{name}' has no recursive case | *(warning)* An `indirect enum` none of whose cases contains the enum boxes nothing. |
+| E410 | '{type}' binds '{proto}.{name}' to '{actual}', but protocol '{req}' requires '{expected}' | A protocol's `where Self.P.Name = X` pins an associated type for every conformer, including conformers of its refinements; this one binds it to something else. |
 | E411 | duplicate method '{name}': defined on both the type and an extension | An extension redefines a method the type already declares. |
 | E412 | duplicate method '{name}' in extensions of '{type}' | Two extensions of the same type instantiation define the same method. |
 | E413 | computed properties must use 'var' | A computed property (with `get`/`set`) can't be declared `let`. |

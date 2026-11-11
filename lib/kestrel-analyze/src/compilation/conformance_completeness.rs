@@ -32,6 +32,10 @@
 //! ### E462 -- `conflicting_associated_type` (Error, Correctness)
 //! **Message:** "conflicting associated type '{name}' inherited by protocol '{proto}'"
 //!
+//! ### E410 -- `associated_type_equality_not_satisfied` (Error, Correctness)
+//! **Message:** "'{type}' binds '{proto}.{name}' to '{actual}', but protocol '{req}' requires '{expected}'"
+//! A protocol's `where Self.P.Assoc = X` pins what every conformer binds.
+//!
 //! ### E464 -- `init_effect_mismatch` (Error, Correctness)
 //! **Message:** "init has wrong effect for protocol '{proto}'"
 //!
@@ -176,6 +180,12 @@ static DESCRIPTORS: &[DiagnosticDescriptor] = &[
         name: "unnecessary_unsafe_conformance",
         default_severity: Severity::Warning,
         category: Category::Usage,
+    },
+    DiagnosticDescriptor {
+        id: "E410",
+        name: "associated_type_equality_not_satisfied",
+        default_severity: Severity::Error,
+        category: Category::Correctness,
     },
 ];
 
@@ -683,6 +693,90 @@ fn check_protocol_requirements(
     // When BadIterator conforms to SortedIterator and binds Item = NotComparable,
     // verify NotComparable: Comparable.
     check_where_clause_constraints(cx, type_entity, protocol, decl_entity, diags);
+    check_pinned_associated_types(cx, type_entity, protocol, decl_entity, diags);
+}
+
+/// A type's name for a diagnostic: the nominal or parameter it names.
+fn short_type_name(cx: &CompilationContext<'_>, ty: &ResolvedTy) -> String {
+    match ty {
+        ResolvedTy::Named { entity, .. } | ResolvedTy::Param { entity } => {
+            util::entity_name(cx.query, *entity)
+        },
+        ResolvedTy::Tuple(items) if items.is_empty() => "()".into(),
+        ResolvedTy::Never => "!".into(),
+        _ => "another type".into(),
+    }
+}
+
+/// Each `where Self.P.Assoc = X` on `protocol` must hold for the conformer:
+/// `Meters: Summable` with `Summable where Self.Addable.Output = Self` needs
+/// Meters' `Addable.Output` to be `Meters`.
+fn check_pinned_associated_types(
+    cx: &CompilationContext<'_>,
+    type_entity: Entity,
+    protocol: Entity,
+    decl_entity: Entity,
+    diags: &mut Vec<AnalyzeDiagnostic>,
+) {
+    // Pins inherited from a refined protocol bind this conformer too.
+    let pins = protocol_closure(cx, protocol)
+        .into_iter()
+        .flat_map(|proto| {
+            self_pins(cx, proto)
+                .into_iter()
+                .map(move |pin| (proto, pin))
+        });
+    for (pinning, (assoc, rhs)) in pins {
+        let Some(declaring) = cx.query.parent_of(assoc) else {
+            continue;
+        };
+        // No binding is E455's to report.
+        let binding = cx.query.query(kestrel_name_res::AssociatedTypeBinding {
+            type_entity,
+            assoc,
+            conformance_source: None,
+            root: cx.root,
+        });
+        let Some((alias, _)) = binding else {
+            continue;
+        };
+        let Some(actual) = cx.query.query(LowerTypeAnnotation {
+            entity: alias,
+            root: cx.root,
+        }) else {
+            continue;
+        };
+        let env = type_compare_env_for_conformance(cx, type_entity, declaring, None);
+        let result = compare_hir_types(cx.query, &rhs, &actual, &env);
+        let TypeCompareResult::NotEqual { expected, actual } = result else {
+            continue;
+        };
+        let name = member_lookup_name(cx, assoc).unwrap_or_default();
+        let assoc_path = format!("{}.{}", util::entity_name(cx.query, declaring), name);
+        let descriptor = descriptor("E410");
+        diags.push(AnalyzeDiagnostic {
+            descriptor_id: descriptor.id,
+            severity: descriptor.default_severity,
+            message: format!(
+                "'{}' binds '{}' to '{}', but protocol '{}' requires '{}'",
+                util::entity_name(cx.query, type_entity),
+                assoc_path,
+                short_type_name(cx, &actual),
+                util::entity_name(cx.query, pinning),
+                short_type_name(cx, &expected),
+            ),
+            labels: vec![DiagLabel {
+                span: util::entity_span(cx.query, decl_entity),
+                message: format!(
+                    "'{}' must be '{}'",
+                    assoc_path,
+                    short_type_name(cx, &expected)
+                ),
+                is_primary: true,
+            }],
+            notes: vec![],
+        });
+    }
 }
 
 fn check_associated_type_conflicts(
@@ -717,10 +811,17 @@ fn check_associated_type_conflicts(
         }
     }
 
+    let pinned = pinned_self_associated_types(cx, protocol);
     let proto_name = util::entity_name(cx.query, protocol);
     let span = util::entity_span(cx.query, protocol);
     for (name, entries) in by_name {
         if entries.len() < 2 {
+            continue;
+        }
+        // `where Self.Addable.Output = Self, Self.Subtractable.Output = Self`
+        // says what each same-named associated type is, so neither the
+        // protocol's own uses nor its conformers have to guess.
+        if entries.iter().all(|(assoc, _)| pinned.contains(assoc)) {
             continue;
         }
 
@@ -747,6 +848,38 @@ fn check_associated_type_conflicts(
             )],
         });
     }
+}
+
+/// The associated types pinned by `where Self.P.Assoc = X` clauses on a
+/// protocol or anything it refines, so a name inherited from several refined
+/// protocols is no conflict.
+fn pinned_self_associated_types(cx: &CompilationContext<'_>, protocol: Entity) -> HashSet<Entity> {
+    protocol_closure(cx, protocol)
+        .into_iter()
+        .flat_map(|proto| self_pins(cx, proto))
+        .map(|(assoc, _)| assoc)
+        .collect()
+}
+
+/// A protocol's own `where Self.P.Assoc = X` clauses, as `(Assoc, X)`.
+fn self_pins(
+    cx: &CompilationContext<'_>,
+    protocol: Entity,
+) -> Vec<(Entity, kestrel_hir::ty::HirTy)> {
+    cx.query
+        .query(WhereClausesOf {
+            entity: protocol,
+            root: cx.root,
+        })
+        .into_iter()
+        .filter_map(|clause| match clause {
+            ResolvedWhereClause::Equality {
+                subject: WhereSubject::Projection { base, assoc },
+                rhs,
+            } if matches!(*base, WhereSubject::SelfType) => Some((assoc, rhs)),
+            _ => None,
+        })
+        .collect()
 }
 
 fn declared_associated_types(

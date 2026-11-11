@@ -362,6 +362,7 @@ fn emit_method_where_clauses(ctx: &mut InferCtx<'_>, query_ctx: &QueryContext<'_
             } => match &subject {
                 resolve::WhereSubject::Param(param) => emit_method_bound_constraint(
                     ctx,
+                    query_ctx,
                     *param,
                     protocol,
                     &protocol_type_args,
@@ -434,8 +435,10 @@ fn method_where_clause_subs(
 
 /// Emit a `param: Protocol[...]` bound clause: Conforms constraint plus cached
 /// witness args for protocols with explicit type args.
+#[allow(clippy::too_many_arguments)]
 fn emit_method_bound_constraint(
     ctx: &mut InferCtx<'_>,
+    query_ctx: &QueryContext<'_>,
     param: Entity,
     protocol: Entity,
     protocol_type_args: &[kestrel_hir::ty::HirTy],
@@ -463,6 +466,43 @@ fn emit_method_bound_constraint(
         .map(|hir_ty| generate::lower_hir_ty_with_subs(ctx, hir_ty, &subs))
         .collect();
     ctx.bound_typearg(tv, protocol, arg_tvs, span.clone());
+    emit_protocol_self_equalities(ctx, query_ctx, protocol, tv, span);
+}
+
+/// Carry a bound protocol's own `where Self.P.Assoc = X` clauses, and those
+/// of every protocol it refines, onto the conformer: `T: Numeric` then knows
+/// `T.Addable.Output = T`, so `a + b` has type `T` in the body.
+fn emit_protocol_self_equalities(
+    ctx: &mut InferCtx<'_>,
+    query_ctx: &QueryContext<'_>,
+    protocol: Entity,
+    subject_tv: ty::TyVar,
+    span: &Span,
+) {
+    for proto in kestrel_name_res::expand_protocol_closure(query_ctx, ctx.root, [protocol]) {
+        let clauses = query_ctx.query(crate::where_clauses::WhereClausesOf {
+            entity: proto,
+            root: ctx.root,
+        });
+        for clause in clauses {
+            let resolve::WhereClause::Equality {
+                subject: resolve::WhereSubject::Projection { base, assoc },
+                rhs,
+            } = clause
+            else {
+                continue;
+            };
+            if !matches!(*base, resolve::WhereSubject::SelfType) {
+                continue;
+            }
+            let assoc_result = ctx.fresh();
+            ctx.associated_entity(subject_tv, assoc, assoc_result, span.clone());
+            // The clause's `Self` is this protocol's; bind it to the conformer.
+            let rhs_tv = generate::lower_hir_ty_with_subs(ctx, &rhs, &[(proto, subject_tv)]);
+            ctx.push_assoc_sub(Some(subject_tv), assoc, rhs_tv);
+            ctx.equal(assoc_result, rhs_tv, span.clone());
+        }
+    }
 }
 
 /// Emit a `T.Assoc: Protocol` bound: constrain the PROJECTION
@@ -809,6 +849,7 @@ fn emit_container_where_clauses(
                     .map(|hir_ty| generate::lower_hir_ty_with_subs(ctx, hir_ty, &subs))
                     .collect();
                 ctx.bound_typearg(subject_tv, protocol, arg_tvs, span.clone());
+                emit_protocol_self_equalities(ctx, query_ctx, protocol, subject_tv, &span);
 
                 // Propagate where clauses from the protocol's associated types.
                 // E.g., `type Iter: Iterator where Iter.Item = Item` on Iterable
