@@ -1,4 +1,4 @@
-// Str protocol - shared read-only API for String and StringSlice
+// Read-only text API, on StringSlice and reached by String through its peel
 
 module std.text
 
@@ -9,39 +9,17 @@ import std.memory.(Pointer, RawPointer)
 import std.collections.(Array, Slice)
 import std.iter.(Iterable)
 import std.ffi.(memmem)
-import std.text.(Formattable, Formatter, FormatOptions, Char, decodeUtf8, String, StringBuilder, StringSlice, CharsIterator, BytesView, CharsView, GraphemesView, LinesView, WordsView, ByteIndex, CharIndex, GraphemeIndex, LineIndex, SplitView, SplitWhereView, _bytesEqual)
+import std.text.(Formattable, Formatter, FormatOptions, Char, decodeUtf8, String, StringBuilder, StringSlice, BytesView, CharsView, GraphemesView, LinesView, WordsView, ByteIndex, CharIndex, GraphemeIndex, LineIndex, SplitView, SplitWhereView, _bytesEqual)
 import std.text.unicode as unicode
 
 // ============================================================================
-// STR PROTOCOL
+// READ-ONLY TEXT METHODS
 // ============================================================================
 
-/// Shared read-only protocol for `String` and `StringSlice`.
-///
-/// Requires exactly one method from conformers: `asSlice()`. All
-/// read-only methods are defined once in `extend Str` and inherited
-/// by both types automatically.
-public protocol Str: Iterable, Equatable, Comparable, Hashable, Formattable {
-    func asSlice() -> StringSlice
-}
-
-// ============================================================================
-// EXTEND STR — Read-Only Methods
-// ============================================================================
-
-extend Str {
-
-    // -- Size ----------------------------------------------------------------
-
-    /// True when the string contains no bytes.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// "".isEmpty;       // true
-    /// "hello".isEmpty;  // false
-    /// ```
-    public var isEmpty: Bool { self.asSlice().isEmpty }
+/// Every read-only text method, defined once on `StringSlice`. `String`
+/// reaches them through its `Indirection` peel, and any parameter typed
+/// `&StringSlice` takes a `String` or a string literal as well.
+extend StringSlice {
 
     // -- Views ---------------------------------------------------------------
 
@@ -52,7 +30,7 @@ extend Str {
     /// ```
     /// "hi".bytes.count;  // 2
     /// ```
-    public var bytes: BytesView { BytesView(slice: self.asSlice()) }
+    public var bytes: BytesView { BytesView(slice: self) }
 
     /// View over Unicode code points.
     ///
@@ -61,7 +39,7 @@ extend Str {
     /// ```
     /// "caf\u{00E9}".chars.count;  // 4
     /// ```
-    public var chars: CharsView { CharsView(slice: self.asSlice()) }
+    public var chars: CharsView { CharsView(slice: self) }
 
     /// View over grapheme clusters (user-perceived characters).
     ///
@@ -70,7 +48,7 @@ extend Str {
     /// ```
     /// "caf\u{00E9}".graphemes.count;  // 4
     /// ```
-    public var graphemes: GraphemesView { GraphemesView(slice: self.asSlice()) }
+    public var graphemes: GraphemesView { GraphemesView(slice: self) }
 
     /// View over lines, recognising `\n`, `\r\n`, and `\r`.
     ///
@@ -79,7 +57,7 @@ extend Str {
     /// ```
     /// "a\nb\nc".lines.count;  // 3
     /// ```
-    public var lines: LinesView { LinesView(slice: self.asSlice()) }
+    public var lines: LinesView { LinesView(slice: self) }
 
     /// View over the whitespace-separated words. Runs of whitespace act as
     /// one break and never yield empty words (unlike `split(by: " ")`).
@@ -89,25 +67,9 @@ extend Str {
     /// ```
     /// "  a  b\tc ".words.collect();  // ["a", "b", "c"]
     /// ```
-    public var words: WordsView { WordsView(slice: self.asSlice()) }
+    public var words: WordsView { WordsView(slice: self) }
 
     // -- Conversion ----------------------------------------------------------
-
-    /// Copies this string's bytes into a new independent `String`.
-    ///
-    /// For `String`, this is equivalent to `clone()`. For
-    /// `StringSlice`, it copies only the slice's bytes, releasing
-    /// the reference to the source buffer.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// let slice = "hello world".asSlice();
-    /// let owned = slice.toOwned();  // independent copy
-    /// ```
-    public func toOwned() -> String {
-        self.asSlice().toOwned()
-    }
 
     /// Copies this string's raw UTF-8 bytes into a new `Array[UInt8]`.
     ///
@@ -123,8 +85,7 @@ extend Str {
     /// "Hi".toBytes()(0);     // 72  ('H')
     /// ```
     public func toBytes() -> Array[UInt8] {
-        let slice = self.asSlice();
-        let n = (slice.end - slice.start);
+        let n = self._len;
         var buffer = Array[UInt8](capacity: n);
         if n == 0 {
             return buffer
@@ -149,73 +110,7 @@ extend Str {
     /// bytes.count;  // 2
     /// ```
     public func asByteSlice() -> &Slice[UInt8] {
-        let slice = self.asSlice();
-        unsafe Slice.lend(start: slice._rawPtr().offset(by: slice.start), count: slice.end - slice.start)
-    }
-
-    // -- Iteration -----------------------------------------------------------
-
-    /// Returns a `CharsIterator` over the code points.
-    ///
-    /// Required by `Iterable`. Each call returns a fresh iterator;
-    /// the source is reusable.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// for c in "abc" { ... }  // iterates 'a', 'b', 'c'
-    /// ```
-    public func iter() -> CharsIterator {
-        self.asSlice().iter()
-    }
-
-    // -- Protocol conformances -----------------------------------------------
-
-    /// Returns true if both strings have the same byte sequence.
-    ///
-    /// Pure byte-wise equality — not normalization-aware. For
-    /// case-insensitive comparison, see `equalsCaseInsensitive`.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// "abc".isEqual(to: "abc");  // true
-    /// "abc".isEqual(to: "ABC");  // false
-    /// ```
-    public func isEqual(to other: Self) -> Bool {
-        self.asSlice().isEqual(to: other.asSlice())
-    }
-
-    /// Lexicographic byte-wise comparison.
-    ///
-    /// Returns `Less` / `Equal` / `Greater` according to the first
-    /// differing byte; if one string is a prefix of the other, the
-    /// shorter is less.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// "abc".compare("abd");  // Less
-    /// "abc".compare("ab");   // Greater
-    /// ```
-    public func compare(other: Self) -> Ordering {
-        self.asSlice().compare(other.asSlice())
-    }
-
-    /// Hashes the byte content into `hasher`.
-    public func hash[H](mutating into hasher: H) where H: Hasher {
-        self.asSlice().hash(into: hasher)
-    }
-
-    /// Formats the string using the given options.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// "hi".formatted(FormatOptions(width: 5));  // "hi   "
-    /// ```
-    public func format(mutating into writer: some Formatter, options: FormatOptions = FormatOptions.default()) {
-        self.toOwned().format(into: writer, options)
+        unsafe Slice.lend(start: self._rawPtr(), count: self._len)
     }
 
     // -- Searching -------------------------------------------------------------
@@ -228,7 +123,7 @@ extend Str {
     /// "hello world".contains(substring: "world");  // true
     /// "hello world".contains(substring: "xyz");    // false
     /// ```
-    public func contains(substring: some Str and not Static) -> Bool {
+    public func contains(substring: &StringSlice) -> Bool {
         self.firstIndex(of: substring).isSome
     }
 
@@ -253,13 +148,11 @@ extend Str {
     /// "hello".starts(with: "hel");  // true
     /// "hello".starts(with: "xyz");  // false
     /// ```
-    public func starts(with prefix: some Str and not Static) -> Bool {
-        let slice = self.asSlice();
-        let ps = prefix.asSlice();
-        let prefixLen = (ps.end - ps.start);
-        if prefixLen > (slice.end - slice.start) { return false }
+    public func starts(with prefix: &StringSlice) -> Bool {
+        let prefixLen = prefix._len;
+        if prefixLen > self._len { return false }
         if prefixLen == 0 { return true }
-        _bytesEqual(a: slice._rawPtr().offset(by: slice.start), b: ps._rawPtr().offset(by: ps.start), n: prefixLen)
+        _bytesEqual(a: self._rawPtr(), b: prefix._rawPtr(), n: prefixLen)
     }
 
     /// Returns true if this string ends with `suffix`.
@@ -272,13 +165,11 @@ extend Str {
     /// "hello".ends(with: "llo");  // true
     /// "hello".ends(with: "xyz");  // false
     /// ```
-    public func ends(with suffix: some Str and not Static) -> Bool {
-        let slice = self.asSlice();
-        let ss = suffix.asSlice();
-        let suffixLen = (ss.end - ss.start);
-        if suffixLen > (slice.end - slice.start) { return false }
+    public func ends(with suffix: &StringSlice) -> Bool {
+        let suffixLen = suffix._len;
+        if suffixLen > self._len { return false }
         if suffixLen == 0 { return true }
-        _bytesEqual(a: slice._rawPtr().offset(by: slice.end - suffixLen), b: ss._rawPtr().offset(by: ss.start), n: suffixLen)
+        _bytesEqual(a: self._rawPtr().offset(by: self._len - suffixLen), b: suffix._rawPtr(), n: suffixLen)
     }
 
     /// Returns the byte index of the first occurrence of `substring`,
@@ -295,17 +186,15 @@ extend Str {
     /// "hello world".firstIndex(of: "world");  // Some(ByteIndex(6))
     /// "hello world".firstIndex(of: "xyz");    // None
     /// ```
-    public func firstIndex(of substring: some Str and not Static) -> ByteIndex? {
-        let slice = self.asSlice();
-        let sub = substring.asSlice();
-        let subLen = (sub.end - sub.start);
-        let myLen = (slice.end - slice.start);
+    public func firstIndex(of substring: &StringSlice) -> ByteIndex? {
+        let subLen = substring._len;
+        let myLen = self._len;
         if subLen == 0 {
             return .Some(ByteIndex(0))
         }
         if subLen > myLen { return .None }
-        let base = slice._rawPtr().offset(by: slice.start).asRaw();
-        let needle = sub._rawPtr().offset(by: sub.start).asRaw();
+        let base = self._rawPtr().asRaw();
+        let needle = substring._rawPtr().asRaw();
         let result = unsafe memmem(base, myLen, needle, subLen);
         if result.isNull {
             .None
@@ -327,21 +216,19 @@ extend Str {
     /// "abcabc".lastIndex(of: "abc");  // Some(ByteIndex(3))
     /// "abcabc".lastIndex(of: "xyz");  // None
     /// ```
-    public func lastIndex(of substring: some Str and not Static) -> ByteIndex? {
-        let slice = self.asSlice();
-        let sub = substring.asSlice();
-        let subLen = (sub.end - sub.start);
-        let myLen = (slice.end - slice.start);
+    public func lastIndex(of substring: &StringSlice) -> ByteIndex? {
+        let subLen = substring._len;
+        let myLen = self._len;
         if subLen == 0 {
             return .Some(ByteIndex(myLen))
         }
         if subLen > myLen { return .None }
-        let myPtr = slice._rawPtr();
-        let needlePtr = sub._rawPtr().offset(by: sub.start).asRaw();
+        let myPtr = self._rawPtr();
+        let needlePtr = substring._rawPtr().asRaw();
         var lastFound: Int64 = -1;
         var i: Int64 = 0;
         while myLen - i >= subLen {
-            let base = myPtr.offset(by: slice.start + i).asRaw();
+            let base = myPtr.offset(by: i).asRaw();
             let remaining = myLen - i;
             let result = unsafe memmem(base, remaining, needlePtr, subLen);
             if result.isNull {
@@ -375,8 +262,8 @@ extend Str {
     /// "a,,b".split(by: ",").count;        // 3 (empty segment preserved)
     /// "a,".split(by: ",").count;          // 2 (["a", ""])
     /// ```
-    public func split(by separator: some Str and not Static) -> SplitView {
-        SplitView(slice: self.asSlice(), separator: separator.asSlice())
+    public func split(by separator: &StringSlice) -> SplitView {
+        SplitView(slice: self, separator: separator, limit: 0)
     }
 
     /// Like `split(by:)`, but yields at most `limit` pieces: the last one
@@ -389,11 +276,11 @@ extend Str {
     /// "a,b,c".split(by: ",", limit: 2).collect();  // ["a", "b,c"]
     /// "a,b,c".split(by: ",", limit: 1).collect();  // ["a,b,c"]
     /// ```
-    public func split(by separator: some Str and not Static, limit limit: Int64) -> SplitView {
+    public func split(by separator: &StringSlice, limit limit: Int64) -> SplitView {
         if limit < 1 {
             fatalError("split(by:limit:): limit must be at least 1")
         }
-        SplitView(slice: self.asSlice(), separator: separator.asSlice(), limit: limit)
+        SplitView(slice: self, separator: separator, limit: limit)
     }
 
     /// Splits at the first occurrence of `separator`, returning the parts
@@ -407,13 +294,11 @@ extend Str {
     /// }
     /// "no-equals".split(once: "=");  // .None
     /// ```
-    public func split(once separator: some Str and not Static) -> (StringSlice, StringSlice)? {
-        let slice = self.asSlice();
-        let sep = separator.asSlice();
-        match slice.firstIndex(of: sep) {
+    public func split(once separator: &StringSlice) -> (&StringSlice, &StringSlice)? {
+        match self.firstIndex(of: separator) {
             .Some(at) => {
-                let head = slice.subslice(from: 0, to: at.value);
-                let tail = slice.subslice(from: at.value + sep.bytes.count, to: slice.bytes.count);
+                let head = self.subslice(from: 0, to: at.value);
+                let tail = self.subslice(from: at.value + separator.bytes.count, to: self.bytes.count);
                 .Some((head, tail))
             },
             .None => .None,
@@ -431,7 +316,7 @@ extend Str {
     /// "hello world".split(where: { (c) in c.isWhitespace }).count;  // 2
     /// ```
     public func split(consuming where predicate: escaping (Char) -> Bool) -> SplitWhereView {
-        SplitWhereView(slice: self.asSlice(), where: predicate)
+        SplitWhereView(slice: self, predicate: predicate)
     }
 
     // -- Trimming (non-mutating) -----------------------------------------------
@@ -450,10 +335,9 @@ extend Str {
     /// "  hello  ".trimmed().toOwned();   // "hello"
     /// "\t\n".trimmed().isEmpty;          // true
     /// ```
-    public func trimmed() -> StringSlice {
-        let slice = self.asSlice();
-        let myLen = (slice.end - slice.start);
-        let basePtr = slice._rawPtr().offset(by: slice.start);
+    public func trimmed() -> &StringSlice {
+        let myLen = self._len;
+        let basePtr = self._rawPtr();
         var realStart: Int64 = 0;
         var startDone: Bool = false;
         while realStart < myLen and startDone == false {
@@ -479,7 +363,7 @@ extend Str {
                 endDone = true
             }
         }
-        slice.subslice(from: realStart, to: endPos)
+        self.subslice(from: realStart, to: endPos)
     }
 
     /// Returns a zero-copy slice with leading whitespace removed.
@@ -492,10 +376,9 @@ extend Str {
     /// ```
     /// "  hello  ".trimmedStart().toOwned();  // "hello  "
     /// ```
-    public func trimmedStart() -> StringSlice {
-        let slice = self.asSlice();
-        let myLen = (slice.end - slice.start);
-        let basePtr = slice._rawPtr().offset(by: slice.start);
+    public func trimmedStart() -> &StringSlice {
+        let myLen = self._len;
+        let basePtr = self._rawPtr();
         var realStart: Int64 = 0;
         var done: Bool = false;
         while realStart < myLen and done == false {
@@ -508,7 +391,7 @@ extend Str {
                 done = true
             }
         }
-        slice.subslice(from: realStart, to: slice.end - slice.start)
+        self.subslice(from: realStart, to: self._len)
     }
 
     /// Returns a zero-copy slice with trailing whitespace removed.
@@ -521,10 +404,9 @@ extend Str {
     /// ```
     /// "  hello  ".trimmedEnd().toOwned();  // "  hello"
     /// ```
-    public func trimmedEnd() -> StringSlice {
-        let slice = self.asSlice();
-        let myLen = (slice.end - slice.start);
-        let basePtr = slice._rawPtr().offset(by: slice.start);
+    public func trimmedEnd() -> &StringSlice {
+        let myLen = self._len;
+        let basePtr = self._rawPtr();
         var endPos: Int64 = myLen;
         var done: Bool = false;
         while endPos > 0 and done == false {
@@ -538,7 +420,7 @@ extend Str {
                 done = true
             }
         }
-        slice.subslice(from: 0, to: endPos)
+        self.subslice(from: 0, to: endPos)
     }
 
     /// Returns a zero-copy slice with leading and trailing code points
@@ -553,10 +435,9 @@ extend Str {
     /// ```
     /// "00042".trimmed(where: { (c) in c.isEqual(to: '0') }).toOwned();  // "42"
     /// ```
-    public func trimmed(where predicate: (Char) -> Bool) -> StringSlice {
-        let slice = self.asSlice();
-        let myLen = (slice.end - slice.start);
-        let basePtr = slice._rawPtr().offset(by: slice.start);
+    public func trimmed(where predicate: (Char) -> Bool) -> &StringSlice {
+        let myLen = self._len;
+        let basePtr = self._rawPtr();
         let rawPtr: lang.ptr[lang.i8] = lang.cast_ptr[_, lang.i8](basePtr.asRaw().raw);
         var realStart: Int64 = 0;
         var startDone: Bool = false;
@@ -585,7 +466,7 @@ extend Str {
                 i = i + 1
             }
         }
-        slice.subslice(from: realStart, to: lastNonMatch)
+        self.subslice(from: realStart, to: lastNonMatch)
     }
 
     /// Returns a zero-copy slice with leading code points matching
@@ -596,10 +477,9 @@ extend Str {
     /// ```
     /// "000abc".trimmedStart(where: { (c) in c.isEqual(to: '0') }).toOwned();  // "abc"
     /// ```
-    public func trimmedStart(where predicate: (Char) -> Bool) -> StringSlice {
-        let slice = self.asSlice();
-        let myLen = (slice.end - slice.start);
-        let basePtr = slice._rawPtr().offset(by: slice.start);
+    public func trimmedStart(where predicate: (Char) -> Bool) -> &StringSlice {
+        let myLen = self._len;
+        let basePtr = self._rawPtr();
         let rawPtr: lang.ptr[lang.i8] = lang.cast_ptr[_, lang.i8](basePtr.asRaw().raw);
         var realStart: Int64 = 0;
         var done: Bool = false;
@@ -615,7 +495,7 @@ extend Str {
                 done = true
             }
         }
-        slice.subslice(from: realStart, to: slice.end - slice.start)
+        self.subslice(from: realStart, to: self._len)
     }
 
     /// Returns a zero-copy slice with trailing code points matching
@@ -626,10 +506,9 @@ extend Str {
     /// ```
     /// "abc000".trimmedEnd(where: { (c) in c.isEqual(to: '0') }).toOwned();  // "abc"
     /// ```
-    public func trimmedEnd(where predicate: (Char) -> Bool) -> StringSlice {
-        let slice = self.asSlice();
-        let myLen = (slice.end - slice.start);
-        let basePtr = slice._rawPtr().offset(by: slice.start);
+    public func trimmedEnd(where predicate: (Char) -> Bool) -> &StringSlice {
+        let myLen = self._len;
+        let basePtr = self._rawPtr();
         let rawPtr: lang.ptr[lang.i8] = lang.cast_ptr[_, lang.i8](basePtr.asRaw().raw);
         var lastNonMatch: Int64 = 0;
         var i: Int64 = 0;
@@ -644,7 +523,7 @@ extend Str {
                 i = i + 1
             }
         }
-        slice.subslice(from: 0, to: lastNonMatch)
+        self.subslice(from: 0, to: lastNonMatch)
     }
 
     // -- Case conversion -------------------------------------------------------
@@ -662,9 +541,8 @@ extend Str {
     /// "\u{0130}".lowercased();   // "i\u{0307}"
     /// ```
     public func lowercased() -> String {
-        let slice = self.asSlice();
-        let myLen = (slice.end - slice.start);
-        let basePtr = slice._rawPtr().offset(by: slice.start);
+        let myLen = self._len;
+        let basePtr = self._rawPtr();
         var hasUpperAscii = false;
         var i: Int64 = 0;
         while i < myLen {
@@ -717,9 +595,8 @@ extend Str {
     /// "stra\u{00DF}e".uppercased();     // "STRASSE"
     /// ```
     public func uppercased() -> String {
-        let slice = self.asSlice();
-        let myLen = (slice.end - slice.start);
-        let basePtr = slice._rawPtr().offset(by: slice.start);
+        let myLen = self._len;
+        let basePtr = self._rawPtr();
         var hasLowerAscii = false;
         var i: Int64 = 0;
         while i < myLen {
@@ -808,9 +685,8 @@ extend Str {
     /// "H\u{00E9}LLO".lowercasedAscii();  // "h\u{00E9}llo"
     /// ```
     public func lowercasedAscii() -> String {
-        let slice = self.asSlice();
-        let myLen = (slice.end - slice.start);
-        let basePtr = slice._rawPtr().offset(by: slice.start);
+        let myLen = self._len;
+        let basePtr = self._rawPtr();
         var result = String(capacity: myLen);
         var i: Int64 = 0;
         while i < myLen {
@@ -839,9 +715,8 @@ extend Str {
     /// "h\u{00E9}llo".uppercasedAscii();  // "H\u{00E9}LLO"
     /// ```
     public func uppercasedAscii() -> String {
-        let slice = self.asSlice();
-        let myLen = (slice.end - slice.start);
-        let basePtr = slice._rawPtr().offset(by: slice.start);
+        let myLen = self._len;
+        let basePtr = self._rawPtr();
         var result = String(capacity: myLen);
         var i: Int64 = 0;
         while i < myLen {
@@ -872,7 +747,7 @@ extend Str {
     /// "Hello".equalsCaseInsensitive("HELLO");  // true
     /// "Hello".equalsCaseInsensitive("World");  // false
     /// ```
-    public func equalsCaseInsensitive(other: some Str and not Static) -> Bool {
+    public func equalsCaseInsensitive(other: &StringSlice) -> Bool {
         self.caseFolded().isEqual(to: other.caseFolded())
     }
 
@@ -890,7 +765,7 @@ extend Str {
     /// "Content-Type".equalsIgnoreAsciiCase("content-type");  // true
     /// "Content-Type".equalsIgnoreAsciiCase("Host");          // false
     /// ```
-    public func equalsIgnoreAsciiCase(other: some Str and not Static) -> Bool {
+    public func equalsIgnoreAsciiCase(other: &StringSlice) -> Bool {
         let a = self.asByteSlice();
         let b = other.asByteSlice();
         if a.count != b.count {
@@ -947,19 +822,17 @@ extend Str {
     /// "hello world".replaced("o", with: "0");    // "hell0 w0rld"
     /// "abcabc".replaced("ab", with: "ABCD");     // "ABCDcABCDc"
     /// ```
-    public func replaced(pattern: some Str and not Static, with replacement: some Str and not Static) -> String {
-        let patternSlice = pattern.asSlice();
-        let patternLen = (patternSlice.end - patternSlice.start);
+    public func replaced(pattern: &StringSlice, with replacement: &StringSlice) -> String {
+        let patternLen = pattern._len;
         if patternLen == 0 {
             return self.toOwned()
         }
-        let slice = self.asSlice();
-        let myLen = (slice.end - slice.start);
+        let myLen = self._len;
         if patternLen > myLen {
             return self.toOwned()
         }
-        let myPtr = slice._rawPtr().offset(by: slice.start);
-        let patternPtr = patternSlice._rawPtr().offset(by: patternSlice.start);
+        let myPtr = self._rawPtr();
+        let patternPtr = pattern._rawPtr();
 
         var matchCount: Int64 = 0;
         var i: Int64 = 0;
@@ -976,10 +849,8 @@ extend Str {
         if matchCount == 0 {
             return self.toOwned()
         }
-
-        let repSlice = replacement.asSlice();
-        let repLen = (repSlice.end - repSlice.start);
-        let repPtr = repSlice._rawPtr().offset(by: repSlice.start);
+        let repLen = replacement._len;
+        let repPtr = replacement._rawPtr();
         let resultLen = myLen - matchCount * patternLen + matchCount * repLen;
         var result = String(capacity: resultLen);
         var runStart: Int64 = 0;
@@ -1018,12 +889,11 @@ extend Str {
         if count <= 0 {
             return String()
         }
-        let slice = self.asSlice();
-        let myLen = (slice.end - slice.start);
+        let myLen = self._len;
         if myLen == 0 {
             return String()
         }
-        let basePtr = slice._rawPtr().offset(by: slice.start);
+        let basePtr = self._rawPtr();
         let totalLen = myLen * count;
         var result = String(capacity: totalLen);
         for i in 0..<count {
@@ -1050,8 +920,7 @@ extend Str {
     /// ```
     public func padded(toWidth width: Int64, with fill: Char = ' ', side side: PaddingSide = .Trailing) -> String {
         let padding = width - self.graphemes.count;
-        let slice = self.asSlice();
-        let byteCount = slice.end - slice.start;
+        let byteCount = self._len;
         if padding <= 0 {
             return self.toOwned()
         }
@@ -1064,7 +933,7 @@ extend Str {
         for _ in 0..<before {
             result.append(char: fill)
         }
-        result._appendBytes(slice._rawPtr().offset(by: slice.start), byteCount);
+        result._appendBytes(self._rawPtr(), byteCount);
         for _ in 0..<(padding - before) {
             result.append(char: fill)
         }

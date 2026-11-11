@@ -527,8 +527,8 @@ def generate_integer_parse_method(type_name: str, bits: int, signed: bool) -> st
     /// {type_name}(parsing: "-7");    // Some(-7)
     /// {type_name}(parsing: "abc");   // None
     /// ```
-    public init[S](parsing text: S)? where S: Str, S: not Static {{
-        // One view for the whole parse; works on String and StringSlice alike.
+    public init(parsing text: &StringSlice)? {{
+        // One view for the whole parse; a String argument lends its slice.
         let bytes = text.bytes;
         let len = bytes.count;
         if len == 0 {{
@@ -599,8 +599,8 @@ def generate_integer_parse_method(type_name: str, bits: int, signed: bool) -> st
     /// {type_name}(parsing: "101010", radix: 2);  // Some(42)
     /// {type_name}(parsing: "z", radix: 36);      // Some(35)
     /// ```
-    public init[S](parsing text: S, radix radix: Int64)? where S: Str, S: not Static {{
-        // One view for the whole parse; works on String and StringSlice alike.
+    public init(parsing text: &StringSlice, radix radix: Int64)? {{
+        // One view for the whole parse; a String argument lends its slice.
         let bytes = text.bytes;
         if radix < 2 or radix > 36 {{
             return null
@@ -686,8 +686,8 @@ def generate_integer_parse_method(type_name: str, bits: int, signed: bool) -> st
     /// let n = {type_name}(parsing: "42");   // Some(42)
     /// let bad = {type_name}(parsing: "-1"); // null (no sign for unsigned)
     /// ```
-    public init[S](parsing text: S)? where S: Str, S: not Static {{
-        // One view for the whole parse; works on String and StringSlice alike.
+    public init(parsing text: &StringSlice)? {{
+        // One view for the whole parse; a String argument lends its slice.
         let bytes = text.bytes;
         let len = bytes.count;
         if len == 0 {{
@@ -760,8 +760,8 @@ def generate_integer_parse_method(type_name: str, bits: int, signed: bool) -> st
     /// let n = {type_name}(parsing: "ff", radix: 16);      // Some(255 if it fits, else None)
     /// let m = {type_name}(parsing: "101010", radix: 2);   // Some(42)
     /// ```
-    public init[S](parsing text: S, radix radix: Int64)? where S: Str, S: not Static {{
-        // One view for the whole parse; works on String and StringSlice alike.
+    public init(parsing text: &StringSlice, radix radix: Int64)? {{
+        // One view for the whole parse; a String argument lends its slice.
         let bytes = text.bytes;
         if radix < 2 or radix > 36 {{
             return null
@@ -1150,8 +1150,8 @@ def generate_float_parse_method(type_name: str, bits: int) -> str:
     /// __TYPE_NAME__(parsing: "abc");       // None
     /// __TYPE_NAME__(parsing: "");          // None
     /// ```
-    public init[S](parsing text: S)? where S: Str, S: not Static {
-        // One view for the whole parse; works on String and StringSlice alike.
+    public init(parsing text: &StringSlice)? {
+        // One view for the whole parse; a String argument lends its slice.
         let bytes = text.bytes;
         let len = bytes.count;
         if len == 0 {

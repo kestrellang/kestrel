@@ -4,7 +4,7 @@ module std.text
 
 import std.core.(Bool, Equatable, Matchable, ExpressibleByStringLiteral)
 import std.numeric.(Int64)
-import std.text.(String, Char, Str, StringBuilder)
+import std.text.(String, Char, StringSlice, StringBuilder)
 import std.result.(Optional)
 import std.collections.(Array)
 import std.memory.(Allocator, GlobalAllocator)
@@ -372,7 +372,7 @@ public struct FormatOptions: Equatable {
 /// points. `StringBuilder` is the default implementation; streaming sinks can
 /// implement this protocol without forcing an intermediate `String`.
 public protocol Formatter {
-    mutating func append(other: some Str and not Static)
+    mutating func append(other: &StringSlice)
     mutating func append(char c: Char)
 }
 
@@ -394,6 +394,14 @@ public protocol Formattable {
     /// generic `format(into:)`, it can sit in the existential's function
     /// table.
     func formatted(options: FormatOptions = FormatOptions.default()) -> String
+}
+
+/// A shared reference formats as its pointee, like `&T: Equatable`, so
+/// `print(s.trimmed())` prints the text of the `&StringSlice` it lends.
+extend &T: Formattable where T: Formattable, T: not Sized {
+    public func format(mutating into writer: some Formatter, options: FormatOptions = FormatOptions.default()) {
+        self.format(into: writer, options)
+    }
 }
 
 extend Formattable {

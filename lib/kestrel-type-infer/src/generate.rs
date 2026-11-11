@@ -1479,6 +1479,14 @@ fn mark_sugar_primary(
     }
 }
 
+/// Is a binding initializer an unsized NON-reference value — a borrowed
+/// `&Slice[T]` / `&StringSlice` parameter, whose local is typed as the
+/// pointee? (A ref-returning call's unsized result is already a `Ref`.)
+fn init_is_unsized_view(ctx: &InferCtx<'_>, val_tv: TyVar) -> bool {
+    matches!(ctx.slot(ctx.resolve(val_tv)), TySlot::Resolved(TyKind::Struct { .. }))
+        && !crate::solver::solver_ty_is_sized(ctx, val_tv, 0)
+}
+
 // ===== Statement generation =====
 
 fn gen_stmt(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirStmtId) {
@@ -1523,6 +1531,13 @@ fn gen_stmt(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirStmtId) {
                 };
                 if pushed {
                     // The leaves already coerced into the annotation.
+                } else if ty.is_none() && init_is_unsized_view(ctx, val_tv) {
+                    // A slice parameter re-bound (`let t = s` for
+                    // `s: &Slice[T]`, whose local is typed as its pointee):
+                    // an unsized value only lives behind a reference, so the
+                    // binding re-lends it, like a named ref binding.
+                    let lent = ctx.ref_ty(val_tv, false);
+                    ctx.local_types.insert(*local, lent);
                 } else if named_ref {
                     // Named ref binding (`let r = &expr;`): the one binding
                     // form that is NOT a value context — no decay-set entry,

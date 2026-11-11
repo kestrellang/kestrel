@@ -6,7 +6,7 @@ import std.core.(Bool, Equatable, Comparable, Ordering, Range, ClosedRange, Rang
 import std.numeric.(Int64, UInt8, UInt32)
 import std.result.(Optional)
 import std.iter.(Iterator, Iterable)
-import std.text.(Char, Grapheme, decodeUtf8, String, StringSlice, Str, LineIndex, Formattable, Formatter, FormatOptions)
+import std.text.(Char, Grapheme, decodeUtf8, String, StringSlice, LineIndex, Formattable, Formatter, FormatOptions)
 import std.text.unicode.(GraphemeBreakProperty, graphemeBreakProperty, shouldBreakBetween)
 import std.memory.(Pointer, UnsafeSlice)
 import std.collections.(Array)
@@ -45,20 +45,11 @@ public struct BytesIterator: Iterator {
     /// The element type yielded by `next()` — always `UInt8`.
     type Item = UInt8
 
-    private var source: StringSlice
+    let source: &StringSlice
     // Re-read on every access: the string may have changed since.
     private var ptr: lang.ptr[lang.i8] { self.source._bytes() }
-    private var length: Int64
-    private var index: Int64
-
-    /// @name From Slice
-    /// Iterates the first `length` bytes of `source`, from `index`. Use
-    /// `String.bytes.iter()`; `length` must not exceed the slice.
-    init(source source: StringSlice, length length: Int64, index index: Int64) {
-        self.source = source;
-        self.length = length;
-        self.index = index;
-    }
+    fileprivate var length: Int64
+    fileprivate var index: Int64
 
     /// Returns the next byte, or `None` once `index` reaches `length`.
     ///
@@ -109,20 +100,13 @@ public struct BytesView: Iterable, Cloneable {
     /// The iterator type returned by `iter()`.
     type TargetIterator = BytesIterator
 
-    fileprivate var slice: StringSlice
+    let slice: &StringSlice
     // Re-read on every access: the string may have changed since.
     fileprivate var ptr: lang.ptr[lang.i8] { self.slice._bytes() }
-    fileprivate var length: Int64
+    // The slice's byte count.
+    fileprivate var length: Int64 { self.slice._len }
 
-    /// @name From Slice
-    /// Constructs a bytes view backed by the given string slice.
-    /// The view retains shared ownership of the underlying bytes.
-    public init(slice slice: StringSlice) {
-        self.slice = slice;
-        self.length = (slice.end - slice.start);
-    }
-
-    public func clone() -> BytesView { BytesView(slice: self.slice.clone()) }
+    public func clone() -> BytesView { BytesView(slice: self.slice) }
 
     /// Number of bytes in the view.
     ///
@@ -213,7 +197,7 @@ public struct BytesView: Iterable, Cloneable {
     /// so the result is always a well-formed `String`.
     public func toOwned() -> String {
         String(fromUtf8Lossy: unsafe UnsafeSlice(
-            pointer: self.slice._rawPtr().offset(by: self.slice.start),
+            pointer: self.slice._rawPtr(),
             count: self.length
         ).asSlice())
     }
@@ -266,21 +250,11 @@ public struct CharsIterator: Iterator {
     /// The element type yielded by `next()` — always `Char`.
     type Item = Char
 
-    private var source: StringSlice
+    let source: &StringSlice
     // Re-read on every access: the string may have changed since.
     private var ptr: lang.ptr[lang.i8] { self.source._bytes() }
-    private var length: Int64
-    private var byteIndex: Int64
-
-    /// @name From Slice
-    /// Iterates the first `length` bytes of `source` as code points, from
-    /// `byteIndex` (0 or a UTF-8 boundary). Use `String.chars.iter()`;
-    /// `length` must not exceed the slice.
-    init(source source: StringSlice, length length: Int64, byteIndex byteIndex: Int64) {
-        self.source = source;
-        self.length = length;
-        self.byteIndex = byteIndex;
-    }
+    var length: Int64
+    var byteIndex: Int64
 
     /// Returns the next code point, or `None` when the buffer is exhausted.
     ///
@@ -338,20 +312,13 @@ public struct CharsView: Iterable, Cloneable {
     /// The iterator type returned by `iter()`.
     type TargetIterator = CharsIterator
 
-    fileprivate var slice: StringSlice
+    let slice: &StringSlice
     // Re-read on every access: the string may have changed since.
     fileprivate var ptr: lang.ptr[lang.i8] { self.slice._bytes() }
-    fileprivate var length: Int64
+    // The slice's byte count.
+    fileprivate var length: Int64 { self.slice._len }
 
-    /// @name From Slice
-    /// Constructs a chars view backed by the given string slice.
-    /// The view retains shared ownership of the underlying bytes.
-    public init(slice slice: StringSlice) {
-        self.slice = slice;
-        self.length = (slice.end - slice.start);
-    }
-
-    public func clone() -> CharsView { CharsView(slice: self.slice.clone()) }
+    public func clone() -> CharsView { CharsView(slice: self.slice) }
 
     /// Returns a `CharsIterator` positioned at byte 0.
     ///
@@ -618,20 +585,13 @@ public struct GraphemesView: Iterable, Cloneable {
     /// The iterator type returned by `iter()`.
     type TargetIterator = GraphemesIterator
 
-    fileprivate var slice: StringSlice
+    let slice: &StringSlice
     // Re-read on every access: the string may have changed since.
     fileprivate var ptr: lang.ptr[lang.i8] { self.slice._bytes() }
-    fileprivate var length: Int64
+    // The slice's byte count.
+    fileprivate var length: Int64 { self.slice._len }
 
-    /// @name From Slice
-    /// Constructs a graphemes view backed by the given string slice.
-    /// The view retains shared ownership of the underlying bytes.
-    public init(slice slice: StringSlice) {
-        self.slice = slice;
-        self.length = (slice.end - slice.start);
-    }
-
-    public func clone() -> GraphemesView { GraphemesView(slice: self.slice.clone()) }
+    public func clone() -> GraphemesView { GraphemesView(slice: self.slice) }
 
     /// Returns a `GraphemesIterator` positioned at byte 0.
     public func iter() -> GraphemesIterator {
@@ -775,32 +735,21 @@ public struct GraphemesView: Iterable, Cloneable {
 public struct LinesIterator: Iterator {
     /// The element type yielded by `next()`: a zero-copy slice of the
     /// source. Call `toOwned()` to keep a line as a `String`.
-    type Item = StringSlice
+    type Item = &StringSlice
 
-    private var source: StringSlice
+    let source: &StringSlice
     // Re-read on every access: the string may have changed since.
     private var ptr: lang.ptr[lang.i8] { self.source._bytes() }
-    private var length: Int64
-    private var byteIndex: Int64
-    private var done: Bool
-
-    /// @name From Slice
-    /// Iterates the lines in the first `length` bytes of `source`, from
-    /// `byteIndex` (0 or a UTF-8 boundary). Use `someString.lines.iter()`;
-    /// `length` must not exceed the slice.
-    init(source source: StringSlice, length length: Int64, byteIndex byteIndex: Int64, done done: Bool) {
-        self.source = source;
-        self.length = length;
-        self.byteIndex = byteIndex;
-        self.done = done;
-    }
+    fileprivate var length: Int64
+    fileprivate var byteIndex: Int64
+    fileprivate var done: Bool
 
     /// Returns the next line, or `None` once exhausted.
     ///
     /// Scans byte-by-byte for `\n` or `\r`, treating `\r\n` as a
     /// single terminator. The yielded string contains the bytes up
     /// to but not including the terminator.
-    public mutating func next() -> StringSlice? {
+    public mutating func next() -> (&StringSlice)? {
         if self.done or self.byteIndex >= self.length {
             return .None
         }
@@ -853,7 +802,7 @@ public struct LinesIterator: Iterator {
             return .Some(self.createSubstring(start, self.length))
         }
 
-        let none: StringSlice? = .None;
+        let none: (&StringSlice)? = .None;
         none
     }
 
@@ -868,7 +817,7 @@ public struct LinesIterator: Iterator {
     }
 
     /// Bytes `[start, end)` of the source as a slice sharing its storage.
-    private func createSubstring(start: Int64, end: Int64) -> StringSlice {
+    private func createSubstring(start: Int64, end: Int64) -> &StringSlice {
         self.source.subslice(from: start, to: end)
     }
 }
@@ -901,24 +850,17 @@ public struct LinesIterator: Iterator {
 /// A `(ptr, length)` pair pointing into the source string.
 public struct LinesView: Iterable, Cloneable {
     /// The element type yielded by iteration: a zero-copy `StringSlice`.
-    type Item = StringSlice
+    type Item = &StringSlice
     /// The iterator type returned by `iter()`.
     type TargetIterator = LinesIterator
 
-    fileprivate var slice: StringSlice
+    let slice: &StringSlice
     // Re-read on every access: the string may have changed since.
     fileprivate var ptr: lang.ptr[lang.i8] { self.slice._bytes() }
-    fileprivate var length: Int64
+    // The slice's byte count.
+    fileprivate var length: Int64 { self.slice._len }
 
-    /// @name From Slice
-    /// Constructs a lines view backed by the given string slice.
-    /// The view retains shared ownership of the underlying bytes.
-    public init(slice slice: StringSlice) {
-        self.slice = slice;
-        self.length = (slice.end - slice.start);
-    }
-
-    public func clone() -> LinesView { LinesView(slice: self.slice.clone()) }
+    public func clone() -> LinesView { LinesView(slice: self.slice) }
 
     /// Returns a `LinesIterator` positioned at byte 0.
     public func iter() -> LinesIterator {
@@ -2960,7 +2902,7 @@ extend CharIndex: CharsIndex {
 
 extend BytesView {
     /// Returns a `StringSlice` covering the byte range `[start, end)`.
-    public func slice(from start: ByteIndex, to end: ByteIndex) -> StringSlice {
+    public func slice(from start: ByteIndex, to end: ByteIndex) -> &StringSlice {
         self.slice.subslice(from: start.value, to: end.value)
     }
 
@@ -2973,7 +2915,7 @@ extend BytesView {
 
 extend CharsView {
     /// Returns a `StringSlice` covering `[start, end)` by byte offset.
-    public func slice(from start: CharIndex, to end: CharIndex) -> StringSlice {
+    public func slice(from start: CharIndex, to end: CharIndex) -> &StringSlice {
         self.slice.subslice(from: start.byteOffset, to: end.byteOffset)
     }
 
@@ -2986,7 +2928,7 @@ extend CharsView {
 
 extend GraphemesView {
     /// Returns a `StringSlice` covering `[start, end)` by byte offset.
-    public func slice(from start: GraphemeIndex, to end: GraphemeIndex) -> StringSlice {
+    public func slice(from start: GraphemeIndex, to end: GraphemeIndex) -> &StringSlice {
         self.slice.subslice(from: start.byteOffset, to: end.byteOffset)
     }
 
@@ -2999,7 +2941,7 @@ extend GraphemesView {
 
 extend LinesView {
     /// Returns a `StringSlice` covering `[start, end)` by byte offset.
-    public func slice(from start: LineIndex, to end: LineIndex) -> StringSlice {
+    public func slice(from start: LineIndex, to end: LineIndex) -> &StringSlice {
         self.slice.subslice(from: start.byteOffset, to: end.byteOffset)
     }
 
@@ -3163,9 +3105,9 @@ extend GraphemeIndex {
     /// let next = idx.advance(by: 2, from: s.asSlice());
     /// // Skipped 'h' (1 byte) and 'é' (2 bytes) → byte 3
     /// ```
-    public func advance(by n: Int64, from source: StringSlice) -> GraphemeIndex {
-        let rawPtr: lang.ptr[lang.i8] = lang.cast_ptr[_, lang.i8](source._rawPtr().offset(by: source.start).asRaw().raw);
-        let length = (source.end - source.start);
+    public func advance(by n: Int64, from source: &StringSlice) -> GraphemeIndex {
+        let rawPtr: lang.ptr[lang.i8] = lang.cast_ptr[_, lang.i8](source._rawPtr().asRaw().raw);
+        let length = source._len;
         var offset = self.byteOffset;
         var remaining = n;
 
@@ -3197,9 +3139,9 @@ extend LineIndex {
     /// let second = idx.advance(by: 1, from: s.asSlice());
     /// // second.byteOffset == 2 (past "a\n")
     /// ```
-    public func advance(by n: Int64, from source: StringSlice) -> LineIndex {
-        let rawPtr: lang.ptr[lang.i8] = lang.cast_ptr[_, lang.i8](source._rawPtr().offset(by: source.start).asRaw().raw);
-        let length = (source.end - source.start);
+    public func advance(by n: Int64, from source: &StringSlice) -> LineIndex {
+        let rawPtr: lang.ptr[lang.i8] = lang.cast_ptr[_, lang.i8](source._rawPtr().asRaw().raw);
+        let length = source._len;
         var offset = self.byteOffset;
         var remaining = n;
 
@@ -3245,17 +3187,11 @@ extend LineIndex {
 public struct IndexedCharsIterator: Iterator {
     type Item = (CharIndex, Char)
 
-    private var source: StringSlice
+    let source: &StringSlice
     // Re-read on every access: the string may have changed since.
     private var ptr: lang.ptr[lang.i8] { self.source._bytes() }
-    private var length: Int64
-    private var byteIndex: Int64
-
-    init(source source: StringSlice, length length: Int64) {
-        self.source = source;
-        self.length = length;
-        self.byteIndex = 0;
-    }
+    fileprivate var length: Int64
+    fileprivate var byteIndex: Int64
 
     public mutating func next() -> (CharIndex, Char)? {
         if self.byteIndex >= self.length { return .None }
@@ -3302,19 +3238,12 @@ public struct IndexedGraphemesIterator: Iterator {
 public struct IndexedLinesIterator: Iterator {
     type Item = (LineIndex, String)
 
-    private var source: StringSlice
+    let source: &StringSlice
     // Re-read on every access: the string may have changed since.
     private var ptr: lang.ptr[lang.i8] { self.source._bytes() }
-    private var length: Int64
-    private var byteIndex: Int64
-    private var done: Bool
-
-    init(source source: StringSlice, length length: Int64) {
-        self.source = source;
-        self.length = length;
-        self.byteIndex = 0;
-        self.done = false;
-    }
+    fileprivate var length: Int64
+    fileprivate var byteIndex: Int64
+    fileprivate var done: Bool
 
     public mutating func next() -> (LineIndex, String)? {
         if self.done or self.byteIndex >= self.length {
@@ -3382,7 +3311,7 @@ public struct IndexedLinesIterator: Iterator {
 extend CharsView {
     /// Returns an iterator yielding `(CharIndex, Char)` pairs.
     public func indexedIter() -> IndexedCharsIterator {
-        IndexedCharsIterator(source: self.slice, length: self.length)
+        IndexedCharsIterator(source: self.slice, length: self.length, byteIndex: 0)
     }
 }
 
@@ -3396,7 +3325,7 @@ extend GraphemesView {
 extend LinesView {
     /// Returns an iterator yielding `(LineIndex, String)` pairs.
     public func indexedIter() -> IndexedLinesIterator {
-        IndexedLinesIterator(source: self.slice, length: self.length)
+        IndexedLinesIterator(source: self.slice, length: self.length, byteIndex: 0, done: false)
     }
 }
 
@@ -3410,17 +3339,11 @@ extend LinesView {
 public struct ReversedCharsIterator: Iterator {
     type Item = Char
 
-    private var source: StringSlice
+    let source: &StringSlice
     // Re-read on every access: the string may have changed since.
     private var ptr: lang.ptr[lang.i8] { self.source._bytes() }
-    private var length: Int64
-    private var byteIndex: Int64
-
-    init(source source: StringSlice, length length: Int64) {
-        self.source = source;
-        self.length = length;
-        self.byteIndex = length;
-    }
+    fileprivate var length: Int64
+    fileprivate var byteIndex: Int64
 
     public mutating func next() -> Char? {
         if self.byteIndex <= 0 { return .None }
@@ -3462,20 +3385,16 @@ public struct ReversedCharsView: Iterable, Cloneable {
     type Item = Char
     type TargetIterator = ReversedCharsIterator
 
-    fileprivate var slice: StringSlice
+    let slice: &StringSlice
     // Re-read on every access: the string may have changed since.
     fileprivate var ptr: lang.ptr[lang.i8] { self.slice._bytes() }
-    fileprivate var length: Int64
+    // The slice's byte count.
+    fileprivate var length: Int64 { self.slice._len }
 
-    public init(slice slice: StringSlice) {
-        self.slice = slice;
-        self.length = (slice.end - slice.start);
-    }
-
-    public func clone() -> ReversedCharsView { ReversedCharsView(slice: self.slice.clone()) }
+    public func clone() -> ReversedCharsView { ReversedCharsView(slice: self.slice) }
 
     public func iter() -> ReversedCharsIterator {
-        ReversedCharsIterator(source: self.slice, length: self.length)
+        ReversedCharsIterator(source: self.slice, length: self.length, byteIndex: self.length)
     }
 
     /// Number of code points. O(n).
@@ -3556,44 +3475,20 @@ extend LinesView {
 /// fixed separator. Zero-copy: each yielded slice is a window into the
 /// original source buffer.
 public struct SplitViewIterator: Iterator, Cloneable {
-    type Item = StringSlice
+    type Item = &StringSlice
 
-    fileprivate var slice: StringSlice
-    fileprivate var separator: StringSlice
+    let slice: &StringSlice
+    let separator: &StringSlice
     // Re-read on every access: the string may have changed since.
-    fileprivate var sourcePtr: Pointer[UInt8] { self.slice._rawPtr().offset(by: self.slice.start) }
-    fileprivate var sourceLen: Int64
+    fileprivate var sourcePtr: Pointer[UInt8] { self.slice._rawPtr() }
+    fileprivate var sourceLen: Int64 { self.slice._len }
     fileprivate var index: Int64
     fileprivate var done: Bool
     // Pieces still allowed before the rest is yielded unsplit; 0 = no limit.
     fileprivate var piecesLeft: Int64
 
-    public init(slice slice: StringSlice, separator separator: StringSlice) {
-        self.init(slice: slice, separator: separator, limit: 0)
-    }
-
-    /// @name With Limit
-    /// Yields at most `limit` pieces (0 = no limit); the last holds the rest.
-    public init(slice slice: StringSlice, separator separator: StringSlice, limit limit: Int64) {
-        self.slice = slice;
-        self.separator = separator;
-        self.sourceLen = (slice.end - slice.start);
-        self.index = 0;
-        self.done = false;
-        self.piecesLeft = limit;
-    }
-
-    fileprivate init(slice slice: StringSlice, separator separator: StringSlice, index index: Int64, done done: Bool, piecesLeft piecesLeft: Int64) {
-        self.slice = slice;
-        self.separator = separator;
-        self.sourceLen = (slice.end - slice.start);
-        self.index = index;
-        self.done = done;
-        self.piecesLeft = piecesLeft;
-    }
-
     public func clone() -> SplitViewIterator {
-        SplitViewIterator(slice: self.slice.clone(), separator: self.separator.clone(), index: self.index, done: self.done, piecesLeft: self.piecesLeft)
+        SplitViewIterator(slice: self.slice, separator: self.separator, index: self.index, done: self.done, piecesLeft: self.piecesLeft)
     }
 
     /// Counts a non-final piece against the limit, if there is one.
@@ -3601,7 +3496,7 @@ public struct SplitViewIterator: Iterator, Cloneable {
         if self.piecesLeft > 0 { self.piecesLeft = self.piecesLeft - 1 }
     }
 
-    public mutating func next() -> StringSlice? {
+    public mutating func next() -> (&StringSlice)? {
         if self.done { return .None }
 
         let start = self.index;
@@ -3637,7 +3532,7 @@ public struct SplitViewIterator: Iterator, Cloneable {
         if remaining >= sepLen {
             let base = self.sourcePtr.offset(by: self.index).asRaw();
             let sepSlice = self.separator.asSlice();
-            let needle = sepSlice._rawPtr().offset(by: sepSlice.start).asRaw();
+            let needle = sepSlice._rawPtr().asRaw();
             let result = unsafe memmem(base, remaining, needle, sepLen);
             if result.isNull == false {
                 let diff: lang.i64 = lang.i64_sub(result.address.raw, base.address.raw);
@@ -3653,7 +3548,7 @@ public struct SplitViewIterator: Iterator, Cloneable {
         // and that empty segment is kept, just as a leading one is.
         self.done = true;
         if start < self.sourceLen or start > 0 {
-            return .Some(self.slice.subslice(from: start, to: self.slice.end - self.slice.start))
+            return .Some(self.slice.subslice(from: start, to: self.slice._len))
         }
         .None
     }
@@ -3674,33 +3569,20 @@ public struct SplitViewIterator: Iterator, Cloneable {
 /// view.collect();          // [StringSlice("a"), StringSlice("b"), StringSlice("c")]
 /// ```
 public struct SplitView: Iterable, Cloneable {
-    type Item = StringSlice
+    type Item = &StringSlice
     type TargetIterator = SplitViewIterator
 
-    fileprivate var slice: StringSlice
-    fileprivate var separator: StringSlice
+    let slice: &StringSlice
+    let separator: &StringSlice
     // At most this many pieces, the last holding the rest; 0 = no limit.
-    fileprivate var limit: Int64
-
-    public init(slice slice: StringSlice, separator separator: StringSlice) {
-        self.init(slice: slice, separator: separator, limit: 0)
-    }
-
-    /// @name With Limit
-    /// Splits into at most `limit` pieces (0 = no limit); the last piece
-    /// holds the rest of the source unsplit.
-    public init(slice slice: StringSlice, separator separator: StringSlice, limit limit: Int64) {
-        self.slice = slice;
-        self.separator = separator;
-        self.limit = limit;
-    }
+    var limit: Int64
 
     public func clone() -> SplitView {
-        SplitView(slice: self.slice.clone(), separator: self.separator.clone(), limit: self.limit)
+        SplitView(slice: self.slice, separator: self.separator, limit: self.limit)
     }
 
     public func iter() -> SplitViewIterator {
-        SplitViewIterator(slice: self.slice.clone(), separator: self.separator.clone(), limit: self.limit)
+        SplitViewIterator(slice: self.slice, separator: self.separator, index: 0, done: false, piecesLeft: self.limit)
     }
 
     /// True when the source slice is empty.
@@ -3717,15 +3599,15 @@ public struct SplitView: Iterable, Cloneable {
     }
 
     /// The first segment, or `.None` if empty.
-    public var first: StringSlice? {
+    public var first: (&StringSlice)? {
         var it = self.iter();
         it.next()
     }
 
     /// The last segment, or `.None` if empty.
-    public var last: StringSlice? {
+    public var last: (&StringSlice)? {
         var it = self.iter();
-        var result: StringSlice? = .None;
+        var result: (&StringSlice)? = .None;
         while let .Some(segment) = it.next() {
             result = .Some(segment)
         }
@@ -3757,28 +3639,16 @@ fileprivate func isWordBreak(b: UInt8) -> Bool {
 /// whitespace count as one break, and leading/trailing whitespace yields
 /// nothing, so no word is ever empty.
 public struct WordsIterator: Iterator, Cloneable {
-    type Item = StringSlice
+    type Item = &StringSlice
 
-    fileprivate var slice: StringSlice
+    let slice: &StringSlice
     fileprivate var index: Int64
 
-    /// @name From Slice
-    /// Iterates the words of `slice` from its start.
-    public init(slice slice: StringSlice) {
-        self.slice = slice;
-        self.index = 0;
-    }
-
-    fileprivate init(slice slice: StringSlice, index index: Int64) {
-        self.slice = slice;
-        self.index = index;
-    }
-
     public func clone() -> WordsIterator {
-        WordsIterator(slice: self.slice.clone(), index: self.index)
+        WordsIterator(slice: self.slice, index: self.index)
     }
 
-    public mutating func next() -> StringSlice? {
+    public mutating func next() -> (&StringSlice)? {
         let len = self.slice.bytes.count;
         // Skip the whitespace before the word.
         while self.index < len and isWordBreak(self.slice.bytes(self.index)) {
@@ -3803,20 +3673,14 @@ public struct WordsIterator: Iterator, Cloneable {
 /// "  a  b\tc ".words.count;   // 3
 /// ```
 public struct WordsView: Iterable, Cloneable {
-    type Item = StringSlice
+    type Item = &StringSlice
     type TargetIterator = WordsIterator
 
-    fileprivate var slice: StringSlice
+    let slice: &StringSlice
 
-    /// @name From Slice
-    /// A view over the words of `slice`.
-    public init(slice slice: StringSlice) {
-        self.slice = slice;
-    }
+    public func clone() -> WordsView { WordsView(slice: self.slice) }
 
-    public func clone() -> WordsView { WordsView(slice: self.slice.clone()) }
-
-    public func iter() -> WordsIterator { WordsIterator(slice: self.slice.clone()) }
+    public func iter() -> WordsIterator { WordsIterator(slice: self.slice, index: 0) }
 
     /// True when there are no words (the source is empty or all whitespace).
     public var isEmpty: Bool {
@@ -3850,37 +3714,21 @@ public struct WordsView: Iterable, Cloneable {
 /// every code point matching a predicate. The matching character is not
 /// included in any segment.
 public struct SplitWhereViewIterator: Iterator, Cloneable {
-    type Item = StringSlice
+    type Item = &StringSlice
 
-    fileprivate var slice: StringSlice
+    let slice: &StringSlice
     fileprivate var predicate: escaping (Char) -> Bool
     // Re-read on every access: the string may have changed since.
-    fileprivate var sourcePtr: Pointer[UInt8] { self.slice._rawPtr().offset(by: self.slice.start) }
-    fileprivate var sourceLen: Int64
+    fileprivate var sourcePtr: Pointer[UInt8] { self.slice._rawPtr() }
+    fileprivate var sourceLen: Int64 { self.slice._len }
     fileprivate var index: Int64
     fileprivate var done: Bool
 
-    public init(slice slice: StringSlice, consuming where predicate: escaping (Char) -> Bool) {
-        self.slice = slice;
-        self.predicate = predicate;
-        self.sourceLen = (slice.end - slice.start);
-        self.index = 0;
-        self.done = false;
-    }
-
-    fileprivate init(slice slice: StringSlice, consuming where predicate: escaping (Char) -> Bool, index index: Int64, done done: Bool) {
-        self.slice = slice;
-        self.predicate = predicate;
-        self.sourceLen = (slice.end - slice.start);
-        self.index = index;
-        self.done = done;
-    }
-
     public func clone() -> SplitWhereViewIterator {
-        SplitWhereViewIterator(slice: self.slice.clone(), where: self.predicate, index: self.index, done: self.done)
+        SplitWhereViewIterator(slice: self.slice, predicate: self.predicate, index: self.index, done: self.done)
     }
 
-    public mutating func next() -> StringSlice? {
+    public mutating func next() -> (&StringSlice)? {
         if self.done { return .None }
 
         let start = self.index;
@@ -3904,7 +3752,7 @@ public struct SplitWhereViewIterator: Iterator, Cloneable {
         // segment like SplitViewIterator does.
         self.done = true;
         if start < self.sourceLen or start > 0 {
-            return .Some(self.slice.subslice(from: start, to: self.slice.end - self.slice.start))
+            return .Some(self.slice.subslice(from: start, to: self.slice._len))
         }
         .None
     }
@@ -3921,23 +3769,18 @@ public struct SplitWhereViewIterator: Iterator, Cloneable {
 /// view.count;      // 2
 /// ```
 public struct SplitWhereView: Iterable, Cloneable {
-    type Item = StringSlice
+    type Item = &StringSlice
     type TargetIterator = SplitWhereViewIterator
 
-    fileprivate var slice: StringSlice
-    fileprivate var predicate: escaping (Char) -> Bool
-
-    public init(slice slice: StringSlice, consuming where predicate: escaping (Char) -> Bool) {
-        self.slice = slice;
-        self.predicate = predicate;
-    }
+    let slice: &StringSlice
+    var predicate: escaping (Char) -> Bool
 
     public func clone() -> SplitWhereView {
-        SplitWhereView(slice: self.slice.clone(), where: self.predicate)
+        SplitWhereView(slice: self.slice, predicate: self.predicate)
     }
 
     public func iter() -> SplitWhereViewIterator {
-        SplitWhereViewIterator(slice: self.slice.clone(), where: self.predicate)
+        SplitWhereViewIterator(slice: self.slice, predicate: self.predicate, index: 0, done: false)
     }
 
     /// True when the source slice is empty.
@@ -3954,15 +3797,15 @@ public struct SplitWhereView: Iterable, Cloneable {
     }
 
     /// The first segment, or `.None` if empty.
-    public var first: StringSlice? {
+    public var first: (&StringSlice)? {
         var it = self.iter();
         it.next()
     }
 
     /// The last segment, or `.None` if empty.
-    public var last: StringSlice? {
+    public var last: (&StringSlice)? {
         var it = self.iter();
-        var result: StringSlice? = .None;
+        var result: (&StringSlice)? = .None;
         while let .Some(segment) = it.next() {
             result = .Some(segment)
         }

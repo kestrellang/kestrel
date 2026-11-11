@@ -16,7 +16,7 @@ import std.core.(
     RangeFromConstructible, RangeUpToConstructible, RangeThroughConstructible,
     RangeFrom, RangeUpTo, RangeThrough
 )
-import std.text.(String, Str, StringBuilder, Formatter, Formattable, FormatOptions, _writePadded)
+import std.text.(String, StringSlice, StringBuilder, Formatter, Formattable, FormatOptions, _writePadded)
 import std.memory.(UnsafeSlice, Pointer)
 import std.collections.(Slice)
 import std.numeric.(UInt8, Int64, UInt64)
@@ -1100,8 +1100,8 @@ public struct UInt16:
     /// let n = UInt16(parsing: "42");   // Some(42)
     /// let bad = UInt16(parsing: "-1"); // null (no sign for unsigned)
     /// ```
-    public init[S](parsing text: S)? where S: Str, S: not Static {
-        // One view for the whole parse; works on String and StringSlice alike.
+    public init(parsing text: &StringSlice)? {
+        // One view for the whole parse; a String argument lends its slice.
         let bytes = text.bytes;
         let len = bytes.count;
         if len == 0 {
@@ -1168,8 +1168,8 @@ public struct UInt16:
     /// let n = UInt16(parsing: "ff", radix: 16);      // Some(255 if it fits, else None)
     /// let m = UInt16(parsing: "101010", radix: 2);   // Some(42)
     /// ```
-    public init[S](parsing text: S, radix radix: Int64)? where S: Str, S: not Static {
-        // One view for the whole parse; works on String and StringSlice alike.
+    public init(parsing text: &StringSlice, radix radix: Int64)? {
+        // One view for the whole parse; a String argument lends its slice.
         let bytes = text.bytes;
         if radix < 2 or radix > 36 {
             return null

@@ -16,7 +16,7 @@ import std.core.(
     AddAssign, SubtractAssign, MultiplyAssign, DivideAssign,
     ExpressibleByFloatLiteral, ExpressibleByIntLiteral, Convertible, Defaultable
 )
-import std.text.(String, Str, StringBuilder, Formatter, Formattable, FormatOptions, _writePadded)
+import std.text.(String, StringSlice, StringBuilder, Formatter, Formattable, FormatOptions, _writePadded)
 import std.numeric.(Int64, UInt32, Float64)
 import std.collections.Array
 
@@ -936,8 +936,8 @@ public struct Float32:
     /// Float32(parsing: "abc");       // None
     /// Float32(parsing: "");          // None
     /// ```
-    public init[S](parsing text: S)? where S: Str, S: not Static {
-        // One view for the whole parse; works on String and StringSlice alike.
+    public init(parsing text: &StringSlice)? {
+        // One view for the whole parse; a String argument lends its slice.
         let bytes = text.bytes;
         let len = bytes.count;
         if len == 0 {

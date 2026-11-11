@@ -2276,6 +2276,9 @@ fn expr_is_non_copyable(mcx: &MoveCtx<'_>, expr: HirExprId) -> bool {
     let Some(ty) = mcx.cx.typed.expr_types.get(&expr) else {
         return false;
     };
+    if is_unsized_view(mcx, ty) {
+        return false;
+    }
     if mcx.copyable.is_some() {
         return resolved_ty_copy_semantics(mcx, ty) == CopySemantics::NotCopyable;
     }
@@ -2314,6 +2317,9 @@ fn local_is_non_copyable(mcx: &MoveCtx<'_>, local: LocalId) -> bool {
     let Some(ty) = mcx.cx.typed.local_types.get(&local) else {
         return false;
     };
+    if is_unsized_view(mcx, ty) {
+        return false;
+    }
     // With the Copyable builtin available, use the canonical per-instantiation
     // copy semantics: it folds a conditional `Copyable where T: Copyable`
     // conformance over the concrete type args and recognizes Cloneable types
@@ -2324,6 +2330,21 @@ fn local_is_non_copyable(mcx: &MoveCtx<'_>, local: LocalId) -> bool {
         return resolved_ty_copy_semantics(mcx, ty) == CopySemantics::NotCopyable;
     }
     !ty_is_copyable(mcx, ty)
+}
+
+/// Is `ty` an always-unsized nominal (`Slice[T]`, `StringSlice`)? A local
+/// of such a type is a borrow — a `&Slice[T]` parameter's local is typed as
+/// its pointee — so using it re-lends the view and never moves a value
+/// (there is no value to move: an unsized type only lives behind a ref).
+fn is_unsized_view(mcx: &MoveCtx<'_>, ty: &ResolvedTy) -> bool {
+    let ResolvedTy::Named { entity, .. } = ty else {
+        return false;
+    };
+    let sizedness = mcx.cx.query.query(kestrel_semantics::sizedness::NominalSizedness {
+        entity: *entity,
+        root: mcx.cx.root,
+    });
+    sizedness == kestrel_semantics::Sizedness::Unsized
 }
 
 /// `CopyLayer` over `ResolvedTy` — the move checker's hooks into the shared

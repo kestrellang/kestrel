@@ -5,7 +5,7 @@ module std.text
 import std.core.(Bool, Cloneable, Defaultable, fatalError)
 import std.numeric.(Int64, UInt8)
 import std.memory.(Allocator, GlobalAllocator, Layout, Pointer, RawPointer, RcBox, CowBox)
-import std.text.(Char, encodeUtf8, Formatter, String, StringSlice, StringStorage, Str, _textAlloc, _textDealloc, _memcpyBytes)
+import std.text.(Char, encodeUtf8, Formatter, String, StringSlice, StringStorage, _textAlloc, _textDealloc, _memcpyBytes)
 
 /// Write-only buffer for efficient string construction. No COW, no
 /// RcBox, no `isUnique` checks — every append writes directly.
@@ -81,14 +81,13 @@ public struct StringBuilder[A = GlobalAllocator]: Cloneable, Formatter where A: 
 
     // -- Appending -----------------------------------------------------------
 
-    /// Appends the UTF-8 bytes of `other` to this builder. Accepts any
-    /// type conforming to `Str` — `String`, `StringSlice`, etc.
-    public mutating func append(other: some Str and not Static) {
-        let slice = other.asSlice();
-        let otherLen = (slice.end - slice.start);
+    /// Appends the UTF-8 bytes of `other` to this builder: a `String`
+    /// lends its slice.
+    public mutating func append(other: &StringSlice) {
+        let otherLen = other._len;
         if otherLen == 0 { return }
         self.grow(self.len + otherLen);
-        let srcPtr = slice._rawPtr().offset(by: slice.start);
+        let srcPtr = other._rawPtr();
         _memcpyBytes(dst: self.ptr.offset(by: self.len), src: srcPtr, n: otherLen);
         self.len = self.len + otherLen
     }

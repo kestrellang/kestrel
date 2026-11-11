@@ -118,7 +118,11 @@ impl OssaBodyCtx<'_, '_> {
                     // has no value to copy out: type inference kept the
                     // binding a reference, so it holds the place like
                     // `let mid = &xs(1..<3)`.
-                    if self.ref_results.contains(&init_val) && self.local_is_ref(*local) {
+                    // A re-lent slice parameter (`let t = s`) is the
+                    // parameter's own @guaranteed value: hold it the same way.
+                    let lent = self.ref_results.contains(&init_val)
+                        || self.body.value(init_val).ownership == kestrel_mir::value::Ownership::Guaranteed;
+                    if lent && self.local_is_ref(*local) {
                         self.bind_ref_local(init_val, *local, name);
                     } else {
                         // Stage-1 binding decay: a ref-typed initializer

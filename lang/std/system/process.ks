@@ -5,7 +5,7 @@ module std.system
 import std.numeric.(Int32, Int64, UInt8)
 import std.memory.(RawPointer, UnsafeSlice)
 import std.collections.(Array, Slice)
-import std.text.(String, Str, Formatter, Formattable, FormatOptions, _writePadded)
+import std.text.(String, Formatter, Formattable, FormatOptions, _writePadded)
 import std.core.(Bool, Equatable)
 import std.result.(Optional, Result)
 import std.streams.(IoError, Readable, Writable, flushStandardOutput)

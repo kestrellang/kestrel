@@ -2,7 +2,7 @@
 
 module std.text
 
-import std.core.(Bool, Equal, NotEqual, Equatable, Matchable, Comparable, Cloneable, Ordering, Addable, ExpressibleByStringLiteral, Hashable, Hasher, Defaultable, fatalError)
+import std.core.(Bool, Equal, NotEqual, Equatable, Matchable, Comparable, Cloneable, Ordering, Addable, ExpressibleByStringLiteral, Hashable, Hasher, Defaultable, Indirection, fatalError)
 import std.text.(Formattable, Formatter, StringBuilder, _writePadded)
 import std.numeric.(Int64, UInt8)
 import std.result.(Optional)
@@ -10,7 +10,7 @@ import std.memory.(Allocator, GlobalAllocator, Layout, Pointer, RawPointer, RcBo
 import std.iter.(Iterator, Iterable)
 import std.collections.(Slice)
 import std.numeric.(UInt32)
-import std.text.(Char, decodeUtf8, encodeUtf8, BytesView, CharsView, CharsIterator, GraphemesView, LinesView, CharsSubstringIndex, StringSlice, Str, SplitView, SplitWhereView)
+import std.text.(Char, decodeUtf8, encodeUtf8, BytesView, CharsView, CharsIterator, GraphemesView, LinesView, CharsSubstringIndex, StringSlice, SplitView, SplitWhereView)
 import std.text.unicode as unicode
 import std.ffi.(memcpy, memmove, memcmp, memmem)
 
@@ -193,7 +193,7 @@ struct StringStorage[A]: Cloneable where A: Allocator {
 ///   points) is O(n).
 /// - Clones do not share mutation; `s.clone()` and `s` will diverge as
 ///   soon as either is mutated.
-public struct String[A = GlobalAllocator]: Str, Iterable, Equatable, Equal[String[A]], Equal[StringSlice], NotEqual[String[A]], NotEqual[StringSlice], Matchable, Comparable, Cloneable, Formattable, Hashable where A: Allocator {
+public struct String[A = GlobalAllocator]: Iterable, Equatable, Equal[String[A]], Equal[StringSlice], NotEqual[String[A]], NotEqual[StringSlice], Matchable, Comparable, Cloneable, Formattable, Hashable where A: Allocator {
     /// The element type yielded by iteration — always `Char`.
     type Item = Char
     /// The iterator type returned by `iter()`.
@@ -302,21 +302,16 @@ public struct String[A = GlobalAllocator]: Str, Iterable, Equatable, Equal[Strin
     public var lines: LinesView { LinesView(slice: self.asSlice()) }
 
     // ========================================================================
-    // STR CONFORMANCE
+    // SLICE VIEW
     // ========================================================================
 
-    /// Returns a `StringSlice` covering the whole string. It borrows the
-    /// string — zero-copy, no refcount.
-    public func asSlice() -> StringSlice {
-        let b = &self.storage.value.bytes;
-        StringSlice(base: b, start: 0, end: self.len())
+    /// Lends the whole string as a `StringSlice`, in place: zero-copy, no
+    /// refcount. Valid until the string next changes or is dropped. Every
+    /// read-only text method is on `StringSlice`; `String` reaches them
+    /// through its `Indirection` peel.
+    public func asSlice() -> &StringSlice {
+        unsafe StringSlice.lend(start: self.ptr(), count: self.len())
     }
-
-    /// The current byte buffer, for `StringSlice` reads.
-    func _bytePtr() -> Pointer[UInt8] { self.ptr() }
-
-    /// The current byte count, for `StringSlice` bounds checks.
-    func _byteCount() -> Int64 { self.len() }
 
     // ========================================================================
     // SIZE & CAPACITY
@@ -387,15 +382,14 @@ public struct String[A = GlobalAllocator]: Str, Iterable, Equatable, Equal[Strin
     /// s.append(", world");
     /// s;  // "hello, world"
     /// ```
-    public mutating func append(other: some Str and not Static) {
-        let slice = other.asSlice();
-        let otherLen = (slice.end - slice.start);
+    public mutating func append(other: &StringSlice) {
+        let otherLen = other._len;
         if otherLen == 0 {
             return
         }
         let myLen = self.len();
         self.grow(myLen + otherLen);
-        let srcPtr = slice._rawPtr().offset(by: slice.start);
+        let srcPtr = other._rawPtr();
         let s = &mutating self.storage.value.bytes;
         _memcpyBytes(dst: s.ptr.offset(by: s.len), src: srcPtr, n: otherLen);
         s.len = s.len + otherLen
@@ -506,13 +500,13 @@ public struct String[A = GlobalAllocator]: Str, Iterable, Equatable, Equal[Strin
 
     /// Removes leading ASCII whitespace in place.
     public mutating func trimStart() {
-        let start = self.trimmedStart().start;
+        let start = self.len() - self.trimmedStart()._len;
         self.dropLeadingBytes(start)
     }
 
     /// Removes trailing ASCII whitespace in place.
     public mutating func trimEnd() {
-        let end = self.trimmedEnd().end;
+        let end = self.trimmedEnd()._len;
         self.truncateBytes(end)
     }
 
@@ -554,21 +548,21 @@ public struct String[A = GlobalAllocator]: Str, Iterable, Equatable, Equal[Strin
     /// s;  // "hi"
     /// ```
     public mutating func trim(where predicate: (Char) -> Bool) {
-        let end = self.trimmedEnd(where: predicate).end;
+        let end = self.trimmedEnd(where: predicate)._len;
         self.truncateBytes(end);
-        let start = self.trimmedStart(where: predicate).start;
+        let start = self.len() - self.trimmedStart(where: predicate)._len;
         self.dropLeadingBytes(start)
     }
 
     /// Removes leading code points matching `predicate`, in place.
     public mutating func trimStart(where predicate: (Char) -> Bool) {
-        let start = self.trimmedStart(where: predicate).start;
+        let start = self.len() - self.trimmedStart(where: predicate)._len;
         self.dropLeadingBytes(start)
     }
 
     /// Removes trailing code points matching `predicate`, in place.
     public mutating func trimEnd(where predicate: (Char) -> Bool) {
-        let end = self.trimmedEnd(where: predicate).end;
+        let end = self.trimmedEnd(where: predicate)._len;
         self.truncateBytes(end)
     }
 
@@ -670,7 +664,7 @@ public struct String[A = GlobalAllocator]: Str, Iterable, Equatable, Equal[Strin
     // ========================================================================
 
     /// Replaces every occurrence of `pattern` with `replacement`, in place.
-    public mutating func replace(pattern: some Str and not Static, with replacement: some Str and not Static) {
+    public mutating func replace(pattern: &StringSlice, with replacement: &StringSlice) {
         // No match (or an empty pattern) leaves the string, and its buffer, alone.
         if pattern.isEmpty or not self.contains(pattern) {
             return
@@ -1037,5 +1031,15 @@ extend String[GlobalAllocator] {
         }
         let typedPtr: lang.ptr[UInt8] = lang.cast_ptr[_, UInt8](rawPtr);
         String.fromBytesUnchecked(Pointer(raw: typedPtr), count)
+    }
+}
+
+/// `String` lends its text as a `StringSlice`: every read-only text method
+/// (`split`, `trimmed`, `contains`, …) is reached through this peel, and a
+/// `String` passes wherever a `&StringSlice` is expected.
+extend String[A]: Indirection {
+    type Target = StringSlice
+    public var value: StringSlice {
+        ref { self.asSlice() }
     }
 }
