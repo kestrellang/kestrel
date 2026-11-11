@@ -164,12 +164,14 @@ extend StringSlice {
     /// Returns the sub-slice covering bytes `[from, to)` of this slice.
     /// Offsets count from this slice's first byte, like every byte
     /// position std hands out for a slice (`firstIndex(of:)`, `bytes`).
-    /// Panics when the range doesn't fit.
+    /// An inverted range (`to < from`) is empty; panics when either end
+    /// falls outside the slice.
     public func subslice(from newStart: Int64, to newEnd: Int64) -> &StringSlice {
-        if newStart < 0 or newStart > newEnd or newEnd > self._len {
+        if newStart < 0 or newStart > self._len or newEnd < 0 or newEnd > self._len {
             fatalError("StringSlice: subslice range out of bounds");
         }
-        unsafe StringSlice.lend(start: self._rawPtr().offset(by: newStart), count: newEnd - newStart)
+        let count = if newEnd > newStart { newEnd - newStart } else { 0 };
+        unsafe StringSlice.lend(start: self._rawPtr().offset(by: newStart), count: count)
     }
 
     /// Itself: a slice is already the in-place view.
