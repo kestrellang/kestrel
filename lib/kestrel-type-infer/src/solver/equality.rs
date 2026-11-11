@@ -331,6 +331,17 @@ pub(super) fn solve_assign_target(
 /// the system is at a fixpoint and waiting longer cannot help. This keeps
 /// assignment-driven inference (`x = 5` pinning `x`) working for locals
 /// whose type has no other source.
+/// Does a pending obligation require `tv: Sized` — the implicit bound of a
+/// generic parameter it was instantiated from? (A `where T: not Sized`
+/// parameter, an intrinsic's, or an operator protocol's `Rhs` has none.)
+pub(crate) fn requires_sized(ctx: &InferCtx<'_>, tv: TyVar) -> bool {
+    let tv = ctx.resolve(tv);
+    ctx.constraints.iter().any(|c| {
+        matches!(c, Constraint::Conforms { ty, protocol, .. }
+            if ctx.resolve(*ty) == tv && super::is_sized_builtin(ctx, *protocol))
+    })
+}
+
 /// A borrowed unsized value (a `&Slice[T]` / `&StringSlice` parameter, whose
 /// local is typed as the pointee) passed to a generic parameter that keeps
 /// its implicit `T: Sized` bound goes as the reference: `print(s)` binds
@@ -354,11 +365,7 @@ fn try_lend_unsized_arg(
     {
         return None;
     }
-    let requires_sized = ctx.constraints.iter().any(|c| {
-        matches!(c, Constraint::Conforms { ty, protocol, .. }
-            if ctx.resolve(*ty) == tr && super::is_sized_builtin(ctx, *protocol))
-    });
-    if !requires_sized {
+    if !requires_sized(ctx, tr) {
         return None;
     }
     let lent = ctx.ref_ty(fr, false);
