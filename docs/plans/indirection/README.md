@@ -112,28 +112,29 @@ already work — they're the shipped stage-2d witness-ref-return support. The
 two-protocol split (`MutableIndirection` refines `Indirection`) gives the
 optional mutating half a name to query without needing "optional requirements."
 
-## The line that never moves
+## Where the peel applies
 
-**The receiver peels. Arguments never coerce.**
+**The receiver peels, and so does a borrowed argument.** (Revised 2026-11: the
+original design kept arguments strict; borrowed arguments now peel so an
+`Array` can lend itself as a `Slice` and a box as its payload.)
 
 - ✅ `r.foo`, `r.bar()`, `r.foo = 5`, `r.mutate()` — member access on the
   wrapper resolves through to the pointee.
-- ❌ `f(r)` where `f` expects a `T` — **type error**, not a silent conversion.
-  You write `f(r.pointeeRef())`.
-
-This is the same split `&T` already enforces. Argument-position coercion is
-*the* part of Rust's `Deref` that people regret (the invisible `&String`→`&str`
-at call boundaries); member access is local and visible at the use site. We
-take the member half and leave the coercion half — and because nothing coerces,
-there is no new coercion site to diagnose.
+- ✅ `f(r)` where `f` takes `x: T` or `x: &T` — passes `r.value`'s `ref`.
+  `mutating x: T` / `x: &mutating T` take its `mutating ref` (a read-only
+  wrapper is a type error). Nested wrappers peel once per level.
+- ❌ `f(r)` where `f` takes `consuming x: T` — type error. The wrapper would
+  have to give up its payload; write `f(r.value)` to pass a copy.
+- ❌ Binding, return, assignment (`let t: T = r`) — type error. Only a call's
+  borrowed argument peels.
+- ❌ Generic params — `f[T](x: T)` binds `T` to the wrapper itself.
 
 Binary operators and protocol conformances (`==`, `<`, hashing, `Formattable`)
 do **not** ride member fall-through either — they forward via ordinary
 `extend RcBox[T]: Equatable where T: Equatable` (the established `extend &T: P`
 pattern). Operators desugar to a `HirExpr::ProtocolCall`, and the peel
-explicitly excludes those: routing `==` through the peel would reopen the "does
-the *argument* also peel?" question — argument coercion through the back door.
-Member fall-through only ever peels the **receiver**.
+explicitly excludes those, receiver and operand alike: `a == rc` peeling while
+`rc == a` doesn't would make the operator lopsided.
 
 ## Worked end-to-end
 
@@ -143,14 +144,15 @@ acct.balance              // RcBox has no `balance` → peel → acct.pointeeRef
 acct.deposit(100)         // mutating method → acct.pointeeMutRef().deposit(100)
 acct.clone()              // RcBox HAS clone → refcount bump (wrapper wins)
 acct.pointeeRef().clone() // force Account.clone (deep copy) — the escape hatch
-sendTo(acct)              // ERROR if sendTo wants Account — write sendTo(acct.pointeeRef())
+sendTo(acct)              // borrowed param: passes the Account in place
+consume(acct)             // ERROR if consume takes `consuming a: Account`
 acct == other             // via extend RcBox[T]: Equatable, NOT fall-through
 ```
 
 ## What this is explicitly NOT
 
-- **Not implicit deref coercion.** No argument-position conversion, no `&T`-style
-  decay for user wrappers. Receiver peel only.
+- **Not a general conversion.** Only a borrowed call argument peels; bindings,
+  returns, assignments and `consuming` arguments never do.
 - **Not automatic for every wrapper.** Conforming to `Indirection` is the opt-in;
   a struct with a `value` field gets nothing for free.
 - **Not for code reuse / inheritance.** Documented (as Rust's own `Deref` docs

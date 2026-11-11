@@ -644,6 +644,38 @@ impl OssaBodyCtx<'_, '_> {
             .cloned()
     }
 
+    /// The `Indirection`-peel chain for call ARGUMENT `expr_id` bound to a
+    /// view param (`takes(xs)` with `takes(xs: &Slice[T])`), or `None`.
+    pub(crate) fn arg_indirection_peels_of(
+        &self,
+        expr_id: HirExprId,
+    ) -> Option<Vec<IndirectionPeel>> {
+        self.typed
+            .as_ref()
+            .and_then(|t| t.arg_indirection_peels.get(&expr_id))
+            .filter(|v| !v.is_empty())
+            .cloned()
+    }
+
+    /// Lower call argument `expr_id` for a param of convention `conv`: the
+    /// pointee view when the argument peels through `Indirection`, else the
+    /// argument itself.
+    pub(crate) fn prepare_bound_call_arg(
+        &mut self,
+        expr_id: HirExprId,
+        conv: ParamConvention,
+    ) -> CallArg {
+        let Some(peels) = self.arg_indirection_peels_of(expr_id) else {
+            return self.prepare_call_arg_for_expr(expr_id, conv);
+        };
+        let view =
+            self.lower_indirection_chain(expr_id, &peels, conv == ParamConvention::MutBorrow);
+        CallArg {
+            value: view,
+            convention: conv,
+        }
+    }
+
     /// Replay an `Indirection` peel: emit the `value` place's `ref` /
     /// `mutating ref` witness call(s) on member-access base `base`, returning
     /// the final `&Target` / `&mutating Target` pointee view. `mutating` selects the

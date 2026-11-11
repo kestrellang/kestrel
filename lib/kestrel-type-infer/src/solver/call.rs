@@ -618,6 +618,10 @@ pub(super) fn emit_resolved_call(
     // to (per plan). Skipped params take their defaults, checked at their def site.
     if let Some(param_hir_tys) = qctx.query(LowerCallableTypes { entity, root }) {
         let plan = binding_plan_for(qctx, entity, &args);
+        let views: Vec<Option<bool>> = qctx
+            .get::<Callable>(entity)
+            .map(|c| c.params.iter().map(|p| p.view()).collect())
+            .unwrap_or_default();
         match plan {
             Some(plan) => {
                 for (slot, binding) in plan.iter().enumerate() {
@@ -625,7 +629,9 @@ pub(super) fn emit_resolved_call(
                         && let Some(Some(hir_ty)) = param_hir_tys.get(slot)
                     {
                         let param_tv = lower_hir_ty_sub(ctx, hir_ty, None, TyVar(0), &subs);
-                        ctx.coerce(args[*ai].ty, param_tv, args[*ai].value, span.clone());
+                        let view = views.get(slot).copied().flatten();
+                        let arg = &args[*ai];
+                        ctx.coerce_arg(arg.ty, param_tv, arg.value, view, span.clone());
                     }
                 }
                 for (param_ty, default_ty) in

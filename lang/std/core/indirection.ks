@@ -3,10 +3,12 @@
 // A type conforming to `Indirection` lets `wrapper.member` reach through to
 // its pointee: member access on the wrapper *peels* to the pointee, the same
 // way `&T` already does. The peel is LAZY (it fires only after the wrapper's
-// own members miss, so the wrapper always wins a name clash) and RECEIVER-ONLY
-// (arguments never coerce — `f(wrapper)` where `f` wants the pointee stays a
-// type error). Operators and other protocol conformances do NOT ride the peel;
-// they forward via explicit `extend` (the `extend &T: P` pattern in `ref.ks`).
+// own members miss, so the wrapper always wins a name clash). A BORROWED call
+// argument peels too: `f(wrapper)` where `f` takes the pointee (`x: T`,
+// `x: &T`, `mutating x: T`) passes the pointee in place. A `consuming`
+// argument, a binding and a return never coerce. Operators and other protocol
+// conformances do NOT ride the peel; they forward via explicit `extend`
+// (the `extend &T: P` pattern in `ref.ks`).
 
 module std.core
 

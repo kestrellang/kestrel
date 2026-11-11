@@ -63,7 +63,7 @@ impl OssaBodyCtx<'_, '_> {
                     .get(offset + i)
                     .copied()
                     .unwrap_or(ParamConvention::Borrow);
-                self.prepare_call_arg_for_expr(arg.value, conv)
+                self.prepare_bound_call_arg(arg.value, conv)
             })
             .collect()
     }
@@ -137,7 +137,7 @@ impl OssaBodyCtx<'_, '_> {
         // Lower explicit args in source order, each with its bound param's convention.
         let mut prepared = Vec::with_capacity(args.len());
         for (arg, &conv) in args.iter().zip(&arg_convs) {
-            prepared.push(self.prepare_call_arg_for_expr(arg.value, conv));
+            prepared.push(self.prepare_bound_call_arg(arg.value, conv));
         }
 
         // Assemble in parameter order: explicit args via a source-order cursor,

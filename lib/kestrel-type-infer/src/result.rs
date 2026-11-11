@@ -60,6 +60,11 @@ pub struct TypedBody {
     /// `resolutions` / `ClosureCaptures`).
     pub indirection_peels: HashMap<HirExprId, Vec<IndirectionPeel>>,
 
+    /// `Indirection`-peel chain per call ARGUMENT bound to a view param
+    /// (`takes(xs)` with `takes(xs: &Slice[T])`, `xs: Array[T]`). MIR passes
+    /// the chain's last pointee view instead of the argument itself.
+    pub arg_indirection_peels: HashMap<HirExprId, Vec<IndirectionPeel>>,
+
     /// Accepted CROSS-kind closure coercions: `expr → (source kind, target
     /// kind)`. Only cells where the two kinds DIFFER are recorded, and the
     /// source value's own type is never re-labelled (`expr_types[expr]` still
@@ -216,6 +221,7 @@ impl Hash for TypedBody {
             error_details,
             opaque_concrete_type,
             indirection_peels,
+            arg_indirection_peels,
             kind_coercions,
             field_callee_types,
             direct_iterators,
@@ -237,6 +243,7 @@ impl Hash for TypedBody {
         error_details.hash(state);
         opaque_concrete_type.hash(state);
         hash_sorted(indirection_peels, state);
+        hash_sorted(arg_indirection_peels, state);
         hash_sorted(kind_coercions, state);
         hash_sorted(field_callee_types, state);
         let mut direct: Vec<_> = direct_iterators.iter().map(|e| e.raw()).collect();
@@ -343,6 +350,27 @@ pub struct ResolvedPromotion {
 
 /// Resolve a TyVar into a fully concrete ResolvedTy.
 /// Unresolved TyVars default to Error (shouldn't happen after solving).
+/// Resolve each pending peel chain's pointee types for MIR.
+fn resolve_peels(
+    ctx: &InferCtx<'_>,
+    peels: &HashMap<HirExprId, Vec<crate::ctx::PendingPeel>>,
+) -> HashMap<HirExprId, Vec<IndirectionPeel>> {
+    peels
+        .iter()
+        .map(|(&expr, chain)| {
+            let resolved = chain
+                .iter()
+                .map(|p| IndirectionPeel {
+                    read_method: p.read_method,
+                    mut_method: p.mut_method,
+                    target: resolve_to_concrete(ctx, p.target_tv),
+                })
+                .collect();
+            (expr, resolved)
+        })
+        .collect()
+}
+
 fn resolve_to_concrete(ctx: &InferCtx<'_>, tv: TyVar) -> ResolvedTy {
     let resolved = ctx.resolve(tv);
     match &ctx.types[resolved.0 as usize] {
@@ -516,21 +544,8 @@ pub fn build_result(ctx: &InferCtx<'_>) -> TypedBody {
         errors: ctx.errors.clone(),
         error_details: ctx.error_details.clone(),
         opaque_concrete_type,
-        indirection_peels: ctx
-            .indirection_peels
-            .iter()
-            .map(|(&expr, peels)| {
-                let resolved: Vec<IndirectionPeel> = peels
-                    .iter()
-                    .map(|p| IndirectionPeel {
-                        read_method: p.read_method,
-                        mut_method: p.mut_method,
-                        target: resolve_to_concrete(ctx, p.target_tv),
-                    })
-                    .collect();
-                (expr, resolved)
-            })
-            .collect(),
+        indirection_peels: resolve_peels(ctx, &ctx.indirection_peels),
+        arg_indirection_peels: resolve_peels(ctx, &ctx.arg_indirection_peels),
         kind_coercions: ctx.kind_coercions.clone(),
         direct_iterators: ctx.direct_iterators.clone(),
         mutating_lends: ctx.mutating_lends.clone(),
@@ -1138,6 +1153,7 @@ mod tests {
             error_details: Vec::new(),
             opaque_concrete_type: None,
             indirection_peels: HashMap::default(),
+            arg_indirection_peels: HashMap::default(),
             kind_coercions: HashMap::default(),
             field_callee_types: HashMap::default(),
             direct_iterators: HashSet::default(),

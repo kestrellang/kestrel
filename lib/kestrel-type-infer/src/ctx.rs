@@ -297,6 +297,17 @@ pub struct InferCtx<'a> {
     /// each `target_tv` and copies the chain to `TypedBody.indirection_peels`.
     pub(crate) indirection_peels: HashMap<HirExprId, Vec<PendingPeel>>,
 
+    /// Arguments bound to a borrowed param (`false`) or a mutably borrowed
+    /// one (`true`). Only these may peel through `Indirection`
+    /// (`solve_coerce`); a `consuming` argument never does.
+    pub(crate) view_args: HashMap<HirExprId, bool>,
+
+    /// `Indirection`-peel chain per ARGUMENT expr (`takes(xs)` with
+    /// `takes(xs: &Slice[T])` and `xs: Array[T]`). Kept apart from
+    /// `indirection_peels`, which an argument that is itself a peeled member
+    /// access (`takes(box.items)`) also uses.
+    pub(crate) arg_indirection_peels: HashMap<HirExprId, Vec<PendingPeel>>,
+
     /// MethodCall exprs where the resolution went through a field access.
     /// Maps expr → field entity. MIR lowering must interpose a field
     /// projection before the call (the resolution points to the subscript/
@@ -560,6 +571,8 @@ impl<'a> InferCtx<'a> {
             method_receiver_exprs: HashSet::default(),
             resolutions: HashMap::default(),
             indirection_peels: HashMap::default(),
+            view_args: HashMap::default(),
+            arg_indirection_peels: HashMap::default(),
             field_subscripts: HashMap::default(),
             promotions: HashMap::default(),
             type_args: HashMap::default(),
@@ -1225,6 +1238,23 @@ impl<'a> InferCtx<'a> {
 
     pub fn coerce(&mut self, from: TyVar, to: TyVar, expr: HirExprId, span: Span) {
         self.coerce_because(from, to, expr, span, Reason::Unspecified);
+    }
+
+    /// `coerce` for a call argument; `view` is its param's
+    /// `AstParam::view`. A borrowed argument may reach the param's type by
+    /// peeling through `Indirection`.
+    pub(crate) fn coerce_arg(
+        &mut self,
+        from: TyVar,
+        to: TyVar,
+        expr: HirExprId,
+        view: Option<bool>,
+        span: Span,
+    ) {
+        if let Some(mutating) = view {
+            self.view_args.insert(expr, mutating);
+        }
+        self.coerce(from, to, expr, span);
     }
 
     /// `coerce` with the user-facing cause of the expected type `to`.
