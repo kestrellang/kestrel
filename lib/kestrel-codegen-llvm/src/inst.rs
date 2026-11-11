@@ -121,7 +121,11 @@ pub fn compile_inst<'ctx>(
                     .get(fc.body.values[result.index()].ty),
                 MirTy::Ref { .. }
             );
-            if operand_is_ref && !result_is_ref {
+            // A FAT ref (`&Slice[T]`, `&rawany P`) is already the address of
+            // its two words, which is how the unsized pointee is passed:
+            // nothing to load (as `ref_slot_loads_pointee`).
+            let fat_ref = fc.ctx.module.is_fat(operand_ty);
+            if operand_is_ref && !result_is_ref && !fat_ref {
                 let v = if is_guaranteed {
                     mem::load(
                         builder,
