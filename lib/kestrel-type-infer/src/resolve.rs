@@ -69,6 +69,10 @@ pub struct ParamInfo {
     pub has_default: bool,
     /// `AstParam::takes_closure`: a trailing closure may fill it.
     pub takes_closure: bool,
+    /// Borrowed (`Some(false)`), mutably borrowed (`Some(true)`) or
+    /// `consuming` (`None`): `AstParam::view`. A borrowed param's argument
+    /// may peel through `Indirection`.
+    pub view: Option<bool>,
 }
 
 /// What kind of member was resolved.
@@ -1744,6 +1748,7 @@ impl WorldResolver<'_> {
                         ty,
                         has_default: p.default_entity.is_some(),
                         takes_closure: p.takes_closure(),
+                        view: p.view(),
                     }
                 })
                 .collect()
@@ -2003,6 +2008,7 @@ impl WorldResolver<'_> {
                     .unwrap_or(HirTy::Error(Span::synthetic(0))),
                 has_default: p.default_entity.is_some(),
                 takes_closure: p.takes_closure(),
+                view: p.view(),
             })
             .collect()
     }

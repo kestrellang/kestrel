@@ -312,6 +312,24 @@ pub(crate) fn try_indirection_peel(
     expr: kestrel_hir::body::HirExprId,
     span: &Span,
 ) -> Option<TyVar> {
+    let peel = indirection_peel_step(ctx, recv_kind, receiver, span)?;
+    let pointee_tv = peel.target_tv;
+    // Record the peel for MIR — append so nested wrappers build a chain.
+    // `target_tv` is resolved in `build_result`.
+    ctx.indirection_peels.entry(expr).or_default().push(peel);
+    Some(pointee_tv)
+}
+
+/// One `Indirection` level of `receiver` (of kind `recv_kind`): the `value`
+/// accessors MIR replays and a TyVar bound to the wrapper's
+/// `Indirection.Target`. `None` when the receiver isn't a nominal or doesn't
+/// conform. Shared by member peels and argument peels (`solve_coerce`).
+pub(crate) fn indirection_peel_step(
+    ctx: &mut InferCtx<'_>,
+    recv_kind: &TyKind,
+    receiver: TyVar,
+    span: &Span,
+) -> Option<crate::ctx::PendingPeel> {
     // Only nominal wrappers peel.
     let _w_entity = match recv_kind {
         TyKind::Struct { entity, .. }
@@ -373,18 +391,11 @@ pub(crate) fn try_indirection_peel(
     let pointee_tv = ctx.fresh();
     ctx.associated_entity(receiver, target, pointee_tv, span.clone());
 
-    // Record the peel for MIR — append so nested wrappers build a chain.
-    // `target_tv` is resolved in `build_result`.
-    ctx.indirection_peels
-        .entry(expr)
-        .or_default()
-        .push(crate::ctx::PendingPeel {
-            read_method,
-            mut_method,
-            target_tv: pointee_tv,
-        });
-
-    Some(pointee_tv)
+    Some(crate::ctx::PendingPeel {
+        read_method,
+        mut_method,
+        target_tv: pointee_tv,
+    })
 }
 
 pub(super) fn solve_member(
@@ -1478,11 +1489,17 @@ pub(super) fn solve_member(
     // Equate each explicitly-provided argument's type with the type of the
     // parameter it bound to (per `plan`). Skipped params take their defaults,
     // which are checked at their definition site.
+    // Operators, `for` and `try` dispatch by conformance, never by peeling
+    // (R7): their arguments don't peel either, or `a == rc` would work
+    // while `rc == a` doesn't.
+    let protocol_dispatch = ctx.protocol_dispatch_members.contains(&expr);
     for (param_idx, binding) in plan.iter().enumerate() {
         if let Binding::Arg(ai) = binding {
             let param_info = &resolution.param_types[param_idx];
             let param_tv = lower_hir_ty_sub(ctx, &param_info.ty, self_entity, receiver, &subs);
-            ctx.coerce(args[*ai].ty, param_tv, args[*ai].value, span.clone());
+            let arg = &args[*ai];
+            let view = param_info.view.filter(|_| !protocol_dispatch);
+            ctx.coerce_arg(arg.ty, param_tv, arg.value, view, span.clone());
         }
     }
     let param_hir_tys: Vec<Option<kestrel_hir::HirTy>> = resolution
@@ -1787,7 +1804,7 @@ pub(super) fn solve_implicit(
     let self_entity = resolution.self_type;
     for (arg, param_info) in args.iter().zip(&resolution.param_types) {
         let param_tv = lower_hir_ty_sub(ctx, &param_info.ty, self_entity, expected, &subs);
-        ctx.coerce(arg.ty, param_tv, arg.value, span.clone());
+        ctx.coerce_arg(arg.ty, param_tv, arg.value, param_info.view, span.clone());
     }
 
     // Equate result with the expected type

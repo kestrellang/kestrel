@@ -208,6 +208,15 @@ impl AstParam {
     pub fn takes_closure(&self) -> bool {
         matches!(self.ty, Some(AstType::Function { .. }))
     }
+
+    /// A borrowed param (`x: T`, `x: &T`) is `Some(false)`, a mutably
+    /// borrowed one (`mutating x: T`, `x: &mutating T`) `Some(true)`, and a
+    /// `consuming` one `None`. A borrowed param's argument may reach it by
+    /// peeling through `Indirection` (`f(xs: &Slice[T])` accepts an
+    /// `Array[T]`, `f(a: Account)` an `RcBox[Account]`).
+    pub fn view(&self) -> Option<bool> {
+        (!self.is_consuming).then_some(self.is_mut)
+    }
 }
 
 /// A parameter destructuring pattern — lightweight tree that doesn't need arena allocation.

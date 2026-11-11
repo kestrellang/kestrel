@@ -1810,8 +1810,16 @@ fn record_call_arg_slots(
     let Some(plan) = crate::solver::call::binding_plan_for(ctx.query_ctx, *entity, args) else {
         return;
     };
-    ctx.call_arg_slots
-        .insert(call, arg_slots(&plan, args.len()));
+    let slots = arg_slots(&plan, args.len());
+    // Arguments filling a borrowed param may peel through `Indirection`.
+    if let Some(callable) = ctx.query_ctx.get::<kestrel_ast_builder::Callable>(*entity) {
+        for (arg, &slot) in args.iter().zip(&slots) {
+            if let Some(mutating) = callable.params.get(slot).and_then(|p| p.view()) {
+                ctx.view_args.insert(arg.value, mutating);
+            }
+        }
+    }
+    ctx.call_arg_slots.insert(call, slots);
 }
 
 /// The parameter slot of each argument under `plan`, in argument order.

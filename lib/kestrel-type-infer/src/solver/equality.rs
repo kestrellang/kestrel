@@ -360,6 +360,10 @@ pub(super) fn solve_coerce(
         return SolveResult::Solved;
     }
 
+    if let Some(result) = try_view_arg_peel(ctx, from, to, expr, &span) {
+        return result;
+    }
+
     // Stage-1 transparent place: the two ref coercion arms, BEFORE the unify
     // attempt (unify(unresolved_from, Ref_to) would bind the body var to the
     // ref wholesale).
@@ -915,6 +919,61 @@ fn optional_value_payload(ctx: &InferCtx<'_>, tv: TyVar) -> bool {
 /// argument (`print("\(xs.first())")`), or a method receiver
 /// (`xs.first().map(f)`: `Optional`'s methods aren't written for a
 /// reference payload).
+/// An argument bound to a borrowed param whose nominal type differs from the
+/// param's reaches it through `Indirection`:
+/// `takes(xs)` with `takes(xs: &Slice[T])` and `xs: Array[T]` passes
+/// `xs.value`. Records one peel level for MIR and re-coerces the pointee, so
+/// nested wrappers peel again. `None` (no peel) for any other argument, a
+/// non-nominal side, the same nominal on both sides, or a wrapper that isn't
+/// `Indirection` — the ordinary coercion then decides.
+fn try_view_arg_peel(
+    ctx: &mut InferCtx<'_>,
+    from: TyVar,
+    to: TyVar,
+    expr: kestrel_hir::body::HirExprId,
+    span: &Span,
+) -> Option<SolveResult> {
+    let &mutating = ctx.view_args.get(&expr)?;
+    let nominal = |kind: &TyKind| match kind {
+        TyKind::Struct { entity, .. } | TyKind::Enum { entity, .. } => Some(*entity),
+        _ => None,
+    };
+    let TySlot::Resolved(to_kind) = ctx.slot(ctx.resolve(to)) else {
+        return None;
+    };
+    let target_entity = nominal(to_kind)?;
+    // A ref-typed argument (`let r = &xs; takes(r)`) peels its pointee.
+    let mut wrapper = ctx.resolve(from);
+    if let TySlot::Resolved(TyKind::Ref { pointee, .. }) = ctx.slot(wrapper) {
+        wrapper = ctx.resolve(*pointee);
+    }
+    let TySlot::Resolved(wrapper_kind) = ctx.slot(wrapper) else {
+        return None;
+    };
+    let wrapper_kind = wrapper_kind.clone();
+    if nominal(&wrapper_kind)? == target_entity {
+        return None;
+    }
+    let peel = super::member::indirection_peel_step(ctx, &wrapper_kind, wrapper, span)?;
+    // A `&mutating` view needs the wrapper's `mutating ref`.
+    if mutating && peel.mut_method.is_none() {
+        return Some(SolveResult::Error(mismatch_error(
+            ctx,
+            to,
+            from,
+            span.clone(),
+        )));
+    }
+    let pointee = peel.target_tv;
+    kestrel_debug::ktrace!("arg-peel", "expr {expr:?} peels to {pointee:?}");
+    ctx.arg_indirection_peels
+        .entry(expr)
+        .or_default()
+        .push(peel);
+    ctx.coerce(pointee, to, expr, span.clone());
+    Some(SolveResult::Solved)
+}
+
 pub(crate) fn optional_ref_decay_site(
     ctx: &InferCtx<'_>,
     expr: kestrel_hir::body::HirExprId,
