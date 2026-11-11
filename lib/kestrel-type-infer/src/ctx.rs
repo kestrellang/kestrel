@@ -208,6 +208,11 @@ pub struct InferCtx<'a> {
     /// passes its pointee. Drops after the defaults, so an argument only the
     /// param can type (`show(.none)`) still unifies with it.
     pub(crate) view_link_gate: bool,
+    /// Vars that carry a `T: Sized` bound from the declaration they were
+    /// instantiated from (the implicit one on every generic param unless
+    /// relaxed with `where T: not Sized`). Recorded when the bound is
+    /// emitted, so the answer never depends on whether it was solved yet.
+    pub(crate) sized_bound_vars: Vec<TyVar>,
     /// Tail leaves of optional-chain arms. Their pending coerce waits for
     /// the leaf's own type even after `synth_gate` drops: unifying first
     /// would assume flattening, a silent miscompile when the tail is not an
@@ -572,6 +577,7 @@ impl<'a> InferCtx<'a> {
             synth_gate: true,
             view_peel_gate: true,
             view_link_gate: true,
+            sized_bound_vars: Vec::new(),
             interpolation_depth: 0,
             solving_depth: 0,
             formation_site: None,
@@ -1334,6 +1340,19 @@ impl<'a> InferCtx<'a> {
         });
     }
 
+    /// Record a declared `ty: Sized` bound (see `sized_bound_vars`).
+    fn note_sized_bound(&mut self, ty: TyVar, protocol: Entity) {
+        if crate::solver::is_sized_builtin(self, protocol) {
+            self.sized_bound_vars.push(ty);
+        }
+    }
+
+    /// Does `tv` carry a declared `Sized` bound?
+    pub(crate) fn requires_sized(&self, tv: TyVar) -> bool {
+        let tv = self.resolve(tv);
+        self.sized_bound_vars.iter().any(|&v| self.resolve(v) == tv)
+    }
+
     pub fn conforms(&mut self, ty: TyVar, protocol: Entity, span: Span) {
         self.emit(Constraint::Conforms {
             ty,
@@ -1376,6 +1395,7 @@ impl<'a> InferCtx<'a> {
         protocol_args: Vec<TyVar>,
         span: Span,
     ) {
+        self.note_sized_bound(ty, protocol);
         self.emit(Constraint::Conforms {
             ty,
             protocol,
@@ -1393,6 +1413,7 @@ impl<'a> InferCtx<'a> {
     /// formation wellformedness, alias bounds): a ref judged here is the
     /// ref ITSELF, never its pointee — see `ConformsOrigin`.
     pub fn conforms_typearg(&mut self, ty: TyVar, protocol: Entity, span: Span) {
+        self.note_sized_bound(ty, protocol);
         self.emit(Constraint::Conforms {
             ty,
             protocol,
