@@ -388,8 +388,13 @@ public struct String[A = GlobalAllocator]: Iterable, Equatable, Equal[String[A]]
             return
         }
         let myLen = self.len();
+        // `other` may lend this string's own bytes (`s.append(s.trimmed())`).
+        // Growing frees that buffer, so find them again in the new one.
+        let src = other._rawPtr().address;
+        let mine = self.ptr().address;
+        let inSelf = myLen > 0 and src >= mine and src < mine + UInt64(truncating: myLen);
         self.grow(myLen + otherLen);
-        let srcPtr = other._rawPtr();
+        let srcPtr = if inSelf { self.ptr().offset(by: Int64(truncating: src - mine)) } else { other._rawPtr() };
         let s = &mutating self.storage.value.bytes;
         _memcpyBytes(dst: s.ptr.offset(by: s.len), src: srcPtr, n: otherLen);
         s.len = s.len + otherLen
