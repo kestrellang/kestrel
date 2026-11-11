@@ -396,14 +396,6 @@ public protocol Formattable {
     func formatted(options: FormatOptions = FormatOptions.default()) -> String
 }
 
-/// A shared reference formats as its pointee, like `&T: Equatable`, so
-/// `print(s.trimmed())` prints the text of the `&StringSlice` it lends.
-extend &T: Formattable where T: Formattable, T: not Sized {
-    public func format(mutating into writer: some Formatter, options: FormatOptions = FormatOptions.default()) {
-        self.format(into: writer, options)
-    }
-}
-
 extend Formattable {
     public func formatted(options: FormatOptions = FormatOptions.default()) -> String {
         var b = StringBuilder();
@@ -616,7 +608,7 @@ public struct DefaultStringInterpolation: Interpolatable, Cloneable {
     }
 
     /// Formats one interpolation hole directly into the buffer.
-    public mutating func appendInterpolation(value: some Formattable and not Static, options: FormatOptions = FormatOptions.default()) {
+    public mutating func appendInterpolation(value: &some Formattable and not Copyable and not Static and not Sized, options: FormatOptions = FormatOptions.default()) {
         value.format(into: self.builder, options);
     }
 

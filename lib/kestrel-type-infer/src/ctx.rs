@@ -202,6 +202,12 @@ pub struct InferCtx<'a> {
     /// argument only the param can type (`x.f(1 << 26)`) still unifies with
     /// it ahead of defaulting.
     pub(crate) view_peel_gate: bool,
+    /// While up, a borrowed argument whose type is still open is not linked
+    /// to an equally open param type (`show(sl)` with `let sl = xs(0..<2)`
+    /// still deferred): the argument may yet turn out to be a ref, which
+    /// passes its pointee. Drops after the defaults, so an argument only the
+    /// param can type (`show(.none)`) still unifies with it.
+    pub(crate) view_link_gate: bool,
     /// Tail leaves of optional-chain arms. Their pending coerce waits for
     /// the leaf's own type even after `synth_gate` drops: unifying first
     /// would assume flattening, a silent miscompile when the tail is not an
@@ -565,6 +571,7 @@ impl<'a> InferCtx<'a> {
             chain_modes: HashMap::default(),
             synth_gate: true,
             view_peel_gate: true,
+            view_link_gate: true,
             interpolation_depth: 0,
             solving_depth: 0,
             formation_site: None,

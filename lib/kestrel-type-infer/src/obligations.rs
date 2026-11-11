@@ -82,6 +82,11 @@ pub fn finish_body(ctx: &mut InferCtx<'_>, hir: &HirBody) {
     ctx.synth_gate = false;
     fixpoint(ctx);
 
+    // Borrowed arguments still open link to their open params now.
+    ctx.view_link_gate = false;
+    fixpoint(ctx);
+    apply_defaults(ctx);
+
     // Type-parameter defaults (`H = DefaultHasher`) for vars nothing pinned.
     if solver::apply_type_param_defaults(ctx) {
         fixpoint(ctx);

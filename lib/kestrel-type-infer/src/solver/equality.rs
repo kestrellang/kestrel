@@ -331,50 +331,6 @@ pub(super) fn solve_assign_target(
 /// the system is at a fixpoint and waiting longer cannot help. This keeps
 /// assignment-driven inference (`x = 5` pinning `x`) working for locals
 /// whose type has no other source.
-/// Does a pending obligation require `tv: Sized` — the implicit bound of a
-/// generic parameter it was instantiated from? (A `where T: not Sized`
-/// parameter, an intrinsic's, or an operator protocol's `Rhs` has none.)
-pub(crate) fn requires_sized(ctx: &InferCtx<'_>, tv: TyVar) -> bool {
-    let tv = ctx.resolve(tv);
-    ctx.constraints.iter().any(|c| {
-        matches!(c, Constraint::Conforms { ty, protocol, .. }
-            if ctx.resolve(*ty) == tv && super::is_sized_builtin(ctx, *protocol))
-    })
-}
-
-/// A borrowed unsized value (a `&Slice[T]` / `&StringSlice` parameter, whose
-/// local is typed as the pointee) passed to a generic parameter that keeps
-/// its implicit `T: Sized` bound goes as the reference: `print(s)` binds
-/// `T = &Slice[T]`. Same two words either way, so nothing is copied. A
-/// parameter relaxed with `where T: not Sized` (`lang.ptr_to(self)`) takes
-/// the unsized type itself.
-fn try_lend_unsized_arg(
-    ctx: &mut InferCtx<'_>,
-    from: TyVar,
-    to: TyVar,
-    expr: kestrel_hir::body::HirExprId,
-    span: &Span,
-) -> Option<SolveResult> {
-    if !ctx.call_arg_exprs.contains(&expr) {
-        return None;
-    }
-    let (fr, tr) = (ctx.resolve(from), ctx.resolve(to));
-    if !matches!(ctx.slot(tr), TySlot::Unresolved { literal: None })
-        || !matches!(ctx.slot(fr), TySlot::Resolved(TyKind::Struct { .. }))
-        || super::solver_ty_is_sized(ctx, fr, 0)
-    {
-        return None;
-    }
-    if !requires_sized(ctx, tr) {
-        return None;
-    }
-    let lent = ctx.ref_ty(fr, false);
-    Some(match unify::unify(ctx, to, lent) {
-        Ok(()) => SolveResult::Solved,
-        Err(_) => SolveResult::Error(mismatch_error(ctx, to, from, span.clone())),
-    })
-}
-
 pub(super) fn solve_coerce(
     ctx: &mut InferCtx<'_>,
     from: TyVar,
@@ -574,10 +530,6 @@ pub(super) fn solve_coerce(
     {
         ctx.errored_coerce_exprs.insert(expr);
         return SolveResult::Error(err);
-    }
-
-    if let Some(result) = try_lend_unsized_arg(ctx, from, to, expr, &span) {
-        return result;
     }
 
     // Try unification first (handles the common case)
@@ -987,6 +939,19 @@ fn try_view_arg_peel(
         _ => None,
     };
     let TySlot::Resolved(to_kind) = ctx.slot(ctx.resolve(to)) else {
+        // An open argument into an open param (`show(sl)`, `sl` a pending
+        // binding) waits for its own type: a ref argument passes its pointee
+        // (`T = Slice[Int64]`), which linking now would turn into `T = &…`.
+        let open = |tv| matches!(ctx.slot(ctx.resolve(tv)), TySlot::Unresolved { literal: None });
+        if ctx.view_link_gate && open(from) && open(to) {
+            return Some(SolveResult::Deferred(Constraint::Coerce {
+                from,
+                to,
+                expr,
+                span: span.clone(),
+                reason: Reason::Unspecified,
+            }));
+        }
         return None;
     };
     let target_entity = nominal(to_kind)?;
