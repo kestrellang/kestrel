@@ -19,7 +19,7 @@ struct Labeled {
 
 struct AcceptsSlices {
     var n: Int64
-    init(text: some Formattable and not Static) { self.n = if text.formatted().isEmpty { 0 } else { 5 } }
+    init(text: &some Formattable and not Copyable and not Static and not Sized) { self.n = if text.formatted().isEmpty { 0 } else { 5 } }
 }
 
 @main
