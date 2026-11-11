@@ -954,6 +954,12 @@ fn try_view_arg_peel(
     if nominal(&wrapper_kind)? == target_entity {
         return None;
     }
+    // Existentials in different boxes stay different types (E147): an
+    // `any[OwnedBox] P` must not peel to its payload and rebox as `any P`.
+    let to_kind = to_kind.clone();
+    if is_existential_box(ctx, &wrapper_kind) || is_existential_box(ctx, &to_kind) {
+        return None;
+    }
     let peel = super::member::indirection_peel_step(ctx, &wrapper_kind, wrapper, span)?;
     // A `&mutating` view needs the wrapper's `mutating ref`.
     if mutating && peel.mut_method.is_none() {
@@ -972,6 +978,19 @@ fn try_view_arg_peel(
         .push(peel);
     ctx.coerce(pointee, to, expr, span.clone());
     Some(SolveResult::Solved)
+}
+
+/// A box holding an existential payload (`any P`, `any[OwnedBox] P`).
+fn is_existential_box(ctx: &InferCtx<'_>, kind: &TyKind) -> bool {
+    let (TyKind::Struct { args, .. } | TyKind::Enum { args, .. }) = kind else {
+        return false;
+    };
+    args.first().is_some_and(|&arg| {
+        matches!(
+            ctx.slot(ctx.resolve(arg)),
+            TySlot::Resolved(TyKind::RawExistential { .. })
+        )
+    })
 }
 
 pub(crate) fn optional_ref_decay_site(
