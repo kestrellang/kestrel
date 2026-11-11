@@ -2899,6 +2899,7 @@ fn gen_call_args_phased(
                 placeholder
             } else if is_collection_literal(hir, arg.value) {
                 let placeholder = ctx.fresh();
+                ctx.postponed_literal_args.insert(arg.value);
                 postponed.push((placeholder, arg.value));
                 placeholder
             } else {

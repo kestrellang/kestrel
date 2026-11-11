@@ -428,6 +428,10 @@ pub struct InferCtx<'a> {
     /// convention upgrade to literals only — a named function value's
     /// conventions reflect its real ABI and must not be rewritten.
     pub(crate) closure_literal_exprs: HashSet<HirExprId>,
+    /// Collection-literal arguments generated as a placeholder and checked
+    /// against the param's type later (`gen_call_args_phased`). Their
+    /// coercion is what hands them that type, so it never waits.
+    pub(crate) postponed_literal_args: HashSet<HirExprId>,
 
     /// TyVars that were unified with `Never` while still unresolved.
     /// `unify(Never, Unresolved)` is intentionally a no-op — Never is
@@ -605,6 +609,7 @@ impl<'a> InferCtx<'a> {
             type_tests: HashMap::default(),
             literal_pats: HashMap::default(),
             closure_literal_exprs: HashSet::default(),
+            postponed_literal_args: HashSet::default(),
             never_fallback_targets: HashSet::default(),
             expectation: None,
             expectation_pushed: false,

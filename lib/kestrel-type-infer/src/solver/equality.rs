@@ -955,7 +955,9 @@ fn try_view_arg_peel(
     //   param) while `synth_gate` is up, so it defaults to `Array` and peels.
     let wait = match ctx.slot(wrapper) {
         TySlot::Resolved(_) => false,
-        TySlot::Unresolved { literal: None } => ctx.view_peel_gate,
+        TySlot::Unresolved { literal: None } => {
+            ctx.view_peel_gate && !ctx.postponed_literal_args.contains(&expr)
+        },
         TySlot::Unresolved { literal: Some(lit) } => {
             ctx.synth_gate && !crate::unify::conforms_to_literal_protocol(ctx, to_kind, *lit)
         },

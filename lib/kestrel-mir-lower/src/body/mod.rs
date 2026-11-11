@@ -490,6 +490,18 @@ pub(crate) struct OssaBodyCtx<'a, 'w> {
     /// returned borrow still chains to it is a verify consume-while-borrowed
     /// ICE (and E498 would blame the temp instead of the real storage).
     pub(crate) addr_anchors: HashMap<ValueId, ValueId>,
+    /// Borrowed arguments that peeled through `Indirection`: the final view
+    /// → the wrapper receiver it was lent from, its type, and the read
+    /// chain. `snapshot_overlapping_borrows` re-peels from a copy of the
+    /// wrapper when it overlaps a `mutating` argument.
+    pub(crate) peeled_arg_views: HashMap<
+        ValueId,
+        (
+            ValueId,
+            TyId,
+            Vec<kestrel_type_infer::result::IndirectionPeel>,
+        ),
+    >,
     /// Active while inline-lowering a default-argument expression (#148): maps
     /// the callee's type params to the call site's concrete type args. The
     /// default body was inferred against the callee's *generic* params, so every
@@ -596,6 +608,7 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
             ref_binding_reads: std::collections::HashSet::new(),
             pending_writebacks: Vec::new(),
             addr_anchors: HashMap::new(),
+            peeled_arg_views: HashMap::new(),
             default_arg_subst: None,
         }
     }
@@ -3411,11 +3424,25 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
             let Some(root) = self.storage_root(a.value) else {
                 continue;
             };
+            if !mut_roots.contains(&root) {
+                continue;
+            }
+            // A peeled view (`xs.append(contentsOf: xs)` lends `xs.value`)
+            // snapshots its wrapper and peels again from the copy.
+            if let Some((base, base_ty, peels)) = self.peeled_arg_views.get(&a.value).cloned() {
+                if self.is_non_copyable(base_ty) || self.copy_behavior_is_mono_dependent(base_ty) {
+                    continue;
+                }
+                let snapshot = self.emit_copy_value(base);
+                let recv = CallArg {
+                    value: self.emit_begin_borrow(snapshot),
+                    convention: ParamConvention::Borrow,
+                };
+                a.value = self.apply_indirection_chain(recv, base_ty, &peels, false);
+                continue;
+            }
             let ty = self.body.value(a.value).ty;
-            if !mut_roots.contains(&root)
-                || self.is_non_copyable(ty)
-                || self.copy_behavior_is_mono_dependent(ty)
-            {
+            if self.is_non_copyable(ty) || self.copy_behavior_is_mono_dependent(ty) {
                 continue;
             }
             let snapshot = self.emit_copy_value(a.value);

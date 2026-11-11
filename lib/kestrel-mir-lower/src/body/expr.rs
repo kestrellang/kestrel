@@ -668,8 +668,15 @@ impl OssaBodyCtx<'_, '_> {
         let Some(peels) = self.arg_indirection_peels_of(expr_id) else {
             return self.prepare_call_arg_for_expr(expr_id, conv);
         };
-        let view =
-            self.lower_indirection_chain(expr_id, &peels, conv == ParamConvention::MutBorrow);
+        let mutating = conv == ParamConvention::MutBorrow;
+        let base_ty = self.resolve_expr_type(expr_id);
+        let base = self.prepare_call_arg_for_expr(expr_id, conv);
+        let base_value = base.value;
+        let view = self.apply_indirection_chain(base, base_ty, &peels, mutating);
+        if !mutating {
+            self.peeled_arg_views
+                .insert(view, (base_value, base_ty, peels));
+        }
         CallArg {
             value: view,
             convention: conv,
@@ -693,10 +700,27 @@ impl OssaBodyCtx<'_, '_> {
         } else {
             ParamConvention::Borrow
         };
-        // Level 0 receiver is the wrapper expression; later levels receive the
-        // previous level's pointee view.
-        let mut recv_ty = self.resolve_expr_type(base);
-        let mut recv_arg = self.prepare_call_arg_for_expr(base, conv);
+        // Level 0 receiver is the wrapper expression.
+        let recv_ty = self.resolve_expr_type(base);
+        let recv_arg = self.prepare_call_arg_for_expr(base, conv);
+        self.apply_indirection_chain(recv_arg, recv_ty, peels, mutating)
+    }
+
+    /// The accessor calls of an `Indirection` peel on an already-lowered
+    /// wrapper receiver `recv_arg` of type `recv_ty`: each level's result
+    /// is the next level's receiver; returns the last pointee view.
+    pub(crate) fn apply_indirection_chain(
+        &mut self,
+        mut recv_arg: CallArg,
+        mut recv_ty: TyId,
+        peels: &[IndirectionPeel],
+        mutating: bool,
+    ) -> ValueId {
+        let conv = if mutating {
+            ParamConvention::MutBorrow
+        } else {
+            ParamConvention::Borrow
+        };
         let mut last: Option<ValueId> = None;
         for peel in peels {
             // `mut_method` is guaranteed Some at a write site (D2 rejects the
