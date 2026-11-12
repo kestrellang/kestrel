@@ -1344,6 +1344,23 @@ impl OssaBodyCtx<'_, '_> {
         }
     }
 
+    /// An @owned scrutinee's component of type `ty` is moved out rather than
+    /// borrow-extract-copied when copying it would be wrong or wasteful:
+    /// NotCopyable (no clone shim, copy is illegal), Cloneable (the copy would
+    /// redundantly clone an already-owned temporary — bug #180), or
+    /// mono-dependent (pre-mono Bitwise but may resolve to move-only).
+    ///
+    /// `needs_drop` catches the Cloneable case for types whose clone is only
+    /// derived structurally later (the clone-shim pass): pre-mono a plain
+    /// `struct Box { var s: String }` still reports `Bitwise`, so without it
+    /// `try` and `match f() { .Ok(b) => .. }` clone every struct payload (an
+    /// AST node's whole subtree) and then drop the original.
+    fn payload_moves_out(&self, ty: TyId) -> bool {
+        !self.is_copy_type(ty)
+            || self.copy_behavior_is_mono_dependent(ty)
+            || kestrel_mir::ty_query::needs_drop(&self.ctx.module.ty_arena, &self.ctx.module, ty)
+    }
+
     /// True if applying `path` to a value of `root_ty` extracts a component
     /// that an @owned scrutinee must **move out** (via `emit_moveout`) rather
     /// than borrow-extract-copy. That holds when a step's type either:
@@ -1379,14 +1396,7 @@ impl OssaBodyCtx<'_, '_> {
                     if matches!(self.ctx.module.ty_arena.get(field_ty), MirTy::Ref { .. }) {
                         return false;
                     }
-                    // Move out any non-bitwise-Copyable payload: NotCopyable
-                    // (no clone shim, copy is illegal), Cloneable (borrow-
-                    // extract-copy would redundantly clone an already-owned
-                    // temporary — bug #180), or mono-dependent (pre-mono
-                    // Bitwise but may resolve to move-only post-mono).
-                    if !self.is_copy_type(field_ty)
-                        || self.copy_behavior_is_mono_dependent(field_ty)
-                    {
+                    if self.payload_moves_out(field_ty) {
                         return true;
                     }
                     current_ty = field_ty;
@@ -1411,9 +1421,7 @@ impl OssaBodyCtx<'_, '_> {
                     if matches!(self.ctx.module.ty_arena.get(field_ty), MirTy::Ref { .. }) {
                         return false;
                     }
-                    if !self.is_copy_type(field_ty)
-                        || self.copy_behavior_is_mono_dependent(field_ty)
-                    {
+                    if self.payload_moves_out(field_ty) {
                         return true;
                     }
                     current_ty = field_ty;
