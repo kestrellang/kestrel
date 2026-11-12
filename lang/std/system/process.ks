@@ -526,18 +526,6 @@ public struct Command: not Copyable {
     }
 }
 
-/// Runs `program` with `args`, inheriting stdio, and waits for it. Short
-/// for `Command(program).arguments(args).run()`.
-///
-/// # Examples
-///
-/// ```
-/// let status = try run("git", ["fetch", "origin"]);
-/// ```
-public func run(program: String, args: Array[String]) -> Result[ExitStatus, IoError] {
-    Command(program).arguments(args).run()
-}
-
 internal func pipeReader(fd: Int32) -> Optional[PipeReader] {
     if fd < 0 { .None } else { .Some(PipeReader(fd: fd)) }
 }

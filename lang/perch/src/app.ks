@@ -243,7 +243,7 @@ public struct App[Ctx]: Cloneable {
     /// Serves requests on `port` until accepting fails. Each connection
     /// handles one request (`Connection: close`).
     public func listen(port: UInt16) -> () throws ServerError {
-        var listener = try TcpListener.bind(port);
+        var listener = try TcpListener.bind(port: port);
         println("Perch listening on port \(port)");
         loop {
             // match instead of try: a `try` in a loop deferred

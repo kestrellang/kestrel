@@ -2056,7 +2056,7 @@ Writes `value` to standard output.
 
 Printing can't fail quietly: if the write fails (say, standard output is
 a file on a full disk), the process stops with a fatal error. To handle the error
-instead, write through `standardOutput()`.
+instead, write through `StandardOutput()`.
 
 _Defined in `lang/std/streams/standard.ks`._
 
@@ -2100,36 +2100,6 @@ public func readLine() -> Result[Optional[String], IoError]
 ```
 
 Reads a line from standard input. `None` at end of input.
-
-_Defined in `lang/std/streams/standard.ks`._
-
-## function `standardError`
-
-```kestrel
-public func standardError() -> StandardError
-```
-
-The process's standard error.
-
-_Defined in `lang/std/streams/standard.ks`._
-
-## function `standardInput`
-
-```kestrel
-public func standardInput() -> StandardInput
-```
-
-The process's standard input.
-
-_Defined in `lang/std/streams/standard.ks`._
-
-## function `standardOutput`
-
-```kestrel
-public func standardOutput() -> StandardOutput
-```
-
-The process's standard output.
 
 _Defined in `lang/std/streams/standard.ks`._
 

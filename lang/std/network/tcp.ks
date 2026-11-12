@@ -189,7 +189,7 @@ func connectToAny(host: String, port: UInt16, timeoutMilliseconds: Int64) -> Res
 /// # Examples
 ///
 /// ```
-/// let listener = try TcpListener.bind(8080);
+/// let listener = try TcpListener.bind(port: 8080);
 /// loop {
 ///     var (client, peer) = try listener.accept();
 ///     try client.write(line: "hello, \(peer)");
@@ -212,7 +212,7 @@ public struct TcpListener: not Copyable {
     /// where IPv6 is unavailable), so a dev server isn't reachable from the
     /// network by accident. Use `bind(anyInterface:)` to accept outside
     /// connections.
-    public static func bind(port: UInt16) -> Result[TcpListener, IoError] {
+    public static func bind(port port: UInt16) -> Result[TcpListener, IoError] {
         bindDualStack(IpAddress.V6(Ipv6Address.localhost), IpAddress.V4(Ipv4Address.localhost), port)
     }
 

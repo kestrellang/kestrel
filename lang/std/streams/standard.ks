@@ -114,19 +114,6 @@ internal func flushStandardOutput() -> Result[(), IoError] {
 }
 
 // ============================================================================
-// ACCESSORS
-// ============================================================================
-
-/// The process's standard input.
-public func standardInput() -> StandardInput { StandardInput() }
-
-/// The process's standard output.
-public func standardOutput() -> StandardOutput { StandardOutput() }
-
-/// The process's standard error.
-public func standardError() -> StandardError { StandardError() }
-
-// ============================================================================
 // PRINTING AND READING
 // ============================================================================
 
@@ -134,7 +121,7 @@ public func standardError() -> StandardError { StandardError() }
 ///
 /// Printing can't fail quietly: if the write fails (say, standard output is
 /// a file on a full disk), the process stops with a fatal error. To handle the error
-/// instead, write through `standardOutput()`.
+/// instead, write through `StandardOutput()`.
 public func print(value: &some Formattable and not Static and not Sized) {
     var out = StandardOutput();
     expectPrinted(out.write(formatted: value));

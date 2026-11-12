@@ -762,10 +762,10 @@ extend StringSlice {
     /// # Examples
     ///
     /// ```
-    /// "Content-Type".equalsIgnoreAsciiCase("content-type");  // true
-    /// "Content-Type".equalsIgnoreAsciiCase("Host");          // false
+    /// "Content-Type".equalsCaseInsensitiveAscii("content-type");  // true
+    /// "Content-Type".equalsCaseInsensitiveAscii("Host");          // false
     /// ```
-    public func equalsIgnoreAsciiCase(other: &StringSlice) -> Bool {
+    public func equalsCaseInsensitiveAscii(other: &StringSlice) -> Bool {
         let a = self.asByteSlice();
         let b = other.asByteSlice();
         if a.count != b.count {

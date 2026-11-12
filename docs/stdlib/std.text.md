@@ -3291,7 +3291,7 @@ _Defined in `lang/std/text/views.ks`._
 #### field `first`
 
 ```kestrel
-public var first: String? { get }
+public var first: &StringSlice? { get }
 ```
 
 The first line (without terminator), or `None` if the view is empty.
@@ -5444,10 +5444,10 @@ and `e\u{0301}` are still considered different.
 
 _Defined in `lang/std/text/str.ks`._
 
-#### function `equalsIgnoreAsciiCase`
+#### function `equalsCaseInsensitiveAscii`
 
 ```kestrel
-public func equalsIgnoreAsciiCase(&StringSlice) -> Bool
+public func equalsCaseInsensitiveAscii(&StringSlice) -> Bool
 ```
 
 ASCII case-insensitive equality — folds only `A`–`Z` ↔ `a`–`z`;
@@ -5461,8 +5461,8 @@ such as HTTP header names, where Unicode folding is unnecessary.
 ##### Examples
 
 ```
-"Content-Type".equalsIgnoreAsciiCase("content-type");  // true
-"Content-Type".equalsIgnoreAsciiCase("Host");          // false
+"Content-Type".equalsCaseInsensitiveAscii("content-type");  // true
+"Content-Type".equalsCaseInsensitiveAscii("Host");          // false
 ```
 
 _Defined in `lang/std/text/str.ks`._

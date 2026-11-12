@@ -9,7 +9,7 @@ import std.network.(TcpListener)
 // `not Copyable`: a copy would run that deinit twice and close the same fd
 // twice. Copying is a move, so using the original afterwards is E500.
 func main() {
-    if let .Ok(a) = TcpListener.bind(0) {
+    if let .Ok(a) = TcpListener.bind(port: 0) {
         let b = a;
         let fd = a.rawDescriptor;       // ERROR: use of moved value
     }

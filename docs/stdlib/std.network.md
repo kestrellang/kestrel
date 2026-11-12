@@ -620,7 +620,7 @@ A TCP server socket. Closed when dropped.
 ### Examples
 
 ```
-let listener = try TcpListener.bind(8080);
+let listener = try TcpListener.bind(port: 8080);
 loop {
     var (client, peer) = try listener.accept();
     try client.write(line: "hello, \(peer)");
@@ -655,7 +655,7 @@ _Defined in `lang/std/network/tcp.ks`._
 #### function `bind`
 
 ```kestrel
-public static func bind(UInt16) -> Result[TcpListener, IoError]
+public static func bind(port: UInt16) -> Result[TcpListener, IoError]
 ```
 
 Listens on `port` on this machine only (`[::1]`, or `127.0.0.1`

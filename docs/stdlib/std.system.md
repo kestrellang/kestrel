@@ -1569,20 +1569,3 @@ if not configFound {
 
 _Defined in `lang/std/system/exit.ks`._
 
-## function `run`
-
-```kestrel
-public func run(String, Array[String]) -> Result[ExitStatus, IoError]
-```
-
-Runs `program` with `args`, inheriting stdio, and waits for it. Short
-for `Command(program).arguments(args).run()`.
-
-### Examples
-
-```
-let status = try run("git", ["fetch", "origin"]);
-```
-
-_Defined in `lang/std/system/process.ks`._
-

@@ -9,7 +9,7 @@ module Test
 // `bind(anyInterface:)` keeps the old, network-facing behaviour.
 @main
 func main() -> lang.i64 {
-    let local = match TcpListener.bind(0) { .Ok(l) => l, .Err(_) => return 1 };
+    let local = match TcpListener.bind(port: 0) { .Ok(l) => l, .Err(_) => return 1 };
     let address = local.localAddress().unwrap();
     if not address.ip.isLoopback { return 2 }
     // "localhost" resolves to the same loopback family, so a client finds it.

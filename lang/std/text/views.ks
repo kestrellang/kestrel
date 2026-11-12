@@ -3458,12 +3458,9 @@ extend LinesView {
     /// The first line (without terminator), or `None` if the view is empty.
     ///
     /// O(first line length) — scans for the first terminator.
-    public var first: String? {
+    public var first: (&StringSlice)? {
         var it = self.iter();
-        if let .Some(line) = it.next() {
-            return .Some(line.toOwned())
-        }
-        .None
+        it.next()
     }
 }
 
