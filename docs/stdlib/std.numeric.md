@@ -533,6 +533,18 @@ which is reserved for exact conversions.
 
 _Defined in `lang/std/numeric/float32.ks`._
 
+#### initializer `Rounding Integer`
+
+```kestrel
+public init(rounding: UInt64)
+```
+
+Converts from `UInt64`, rounding to the nearest `Float32`: values
+with magnitude above 2^24 lose low-order bits. Not `init(from:)`,
+which is reserved for exact conversions.
+
+_Defined in `lang/std/numeric/float32.ks`._
+
 #### function `abs`
 
 ```kestrel
@@ -1264,17 +1276,6 @@ Tau ≈ 6.28318530717958… — equal to `2π`, often more natural for
 
 _Defined in `lang/std/numeric/float32.ks`._
 
-#### function `toFloat64`
-
-```kestrel
-public func toFloat64() -> Float64
-```
-
-Converts to the sibling float type. Widening (32→64) is exact;
-narrowing (64→32) rounds and may overflow to ±infinity.
-
-_Defined in `lang/std/numeric/float32.ks`._
-
 ### Implements `FloatingPoint`
 
 #### function `ceil`
@@ -1987,6 +1988,18 @@ public init(rounding: Int64)
 ```
 
 Converts from `Int64`, rounding to the nearest `Float64`: values
+with magnitude above 2^53 lose low-order bits. Not `init(from:)`,
+which is reserved for exact conversions.
+
+_Defined in `lang/std/numeric/float64.ks`._
+
+#### initializer `Rounding Integer`
+
+```kestrel
+public init(rounding: UInt64)
+```
+
+Converts from `UInt64`, rounding to the nearest `Float64`: values
 with magnitude above 2^53 lose low-order bits. Not `init(from:)`,
 which is reserved for exact conversions.
 
@@ -2753,17 +2766,6 @@ public static var tau: Float64 { get }
 
 Tau ≈ 6.28318530717958… — equal to `2π`, often more natural for
 "one full turn" rotational math.
-
-_Defined in `lang/std/numeric/float64.ks`._
-
-#### function `toFloat32`
-
-```kestrel
-public func toFloat32() -> Float32
-```
-
-Converts to the sibling float type. Widening (32→64) is exact;
-narrowing (64→32) rounds and may overflow to ±infinity.
 
 _Defined in `lang/std/numeric/float64.ks`._
 

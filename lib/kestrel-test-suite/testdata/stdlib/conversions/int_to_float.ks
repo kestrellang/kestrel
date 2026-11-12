@@ -26,5 +26,15 @@ func main() -> lang.i64 {
     if Float64(from: d) != d { return 7 }
     let n: Int64 = 5;
     if Int64(from: n) != 5 { return 8 }
+    // UInt64 has no unsigned cast underneath: the upper half is halved with
+    // a sticky bit, converted, and doubled, so it still rounds correctly.
+    let top: UInt64 = 18_446_744_073_709_551_615;
+    if Float64(rounding: top) != 18_446_744_073_709_551_616.0 { return 9 }
+    let up: UInt64 = 9_223_372_036_854_777_857;     // 2^63 + 2049 rounds up
+    if Float64(rounding: up) != 9_223_372_036_854_777_856.0 { return 10 }
+    let tie: UInt64 = 9_223_372_036_854_776_832;    // 2^63 + 1024: tie, to even
+    if Float64(rounding: tie) != 9_223_372_036_854_775_808.0 { return 11 }
+    let small: UInt64 = 12_345;
+    if Float32(rounding: small) != 12_345.0 { return 12 }
     0
 }

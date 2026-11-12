@@ -83,6 +83,7 @@ public struct Float32:
     RoundsFrom[Int32],
     RoundsFrom[Int64],
     RoundsFrom[UInt32],
+    RoundsFrom[UInt64],
     RoundsFrom[Float64],
     FFISafe
 {
@@ -305,6 +306,20 @@ public struct Float32:
     /// which is reserved for exact conversions.
     public init(rounding value: UInt32) {
         self.raw = lang.cast_i64_f32(Int64(from: value).raw)
+    }
+
+    /// @name Rounding Integer
+    /// Converts from `UInt64`, rounding to the nearest `Float32`: values
+    /// with magnitude above 2^24 lose low-order bits. Not `init(from:)`,
+    /// which is reserved for exact conversions.
+    public init(rounding value: UInt64) {
+        if value <= UInt64(truncating: Int64.maxValue) {
+            self.raw = lang.cast_i64_f32(Int64(truncating: value).raw)
+        } else {
+            let half = (value >> 1) | (value & 1);
+            let h = Float32(raw: lang.cast_i64_f32(Int64(truncating: half).raw));
+            self.raw = h.add(h).raw
+        }
     }
 
     /// @name Rounding Float
@@ -960,16 +975,6 @@ public struct Float32:
     /// ```
     public func lerp(to other: Float32, t: Float32) -> Float32 {
         self.add(other.subtract(self).multiply(t))
-    }
-
-    // ========================================================================
-    // CONVERSION
-    // ========================================================================
-
-    /// Converts to the sibling float type. Widening (32→64) is exact;
-    /// narrowing (64→32) rounds and may overflow to ±infinity.
-    public func toFloat64() -> Float64 {
-        Float64(raw: lang.cast_f32_f64(self.raw))
     }
 
     // ========================================================================

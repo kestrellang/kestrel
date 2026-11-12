@@ -1707,9 +1707,7 @@ def float_conversions(type_name: str, bits: int) -> tuple[str, str]:
         magnitude = ibits - 1 if signed else ibits
         if magnitude <= mantissa:
             exact.append((name, ibits, signed))
-        elif signed or ibits < 64:
-            # No `UInt64` source: there is no unsigned 64-bit cast to widen
-            # through. (None existed before `Convertible` went lossless.)
+        else:
             rounded.append((name, ibits, signed))
 
     def int_cast(name: str, ibits: int, signed: bool) -> str:
@@ -1718,6 +1716,17 @@ def float_conversions(type_name: str, bits: int) -> tuple[str, str]:
         if signed:
             return f"lang.cast_i{ibits}_{lang_type}(value.raw)"
         return f"lang.cast_i64_{lang_type}(Int64(from: value).raw)"
+
+    # There is no unsigned cast. Below 2^63 the signed one is exact; above,
+    # halve (keeping the shifted-out bit as a sticky bit, so the halved value
+    # rounds the same way the full one would), convert, and double — exact.
+    uint64_rounding = f"""if value <= UInt64(truncating: Int64.maxValue) {{
+            self.raw = lang.cast_i64_{lang_type}(Int64(truncating: value).raw)
+        }} else {{
+            let half = (value >> 1) | (value & 1);
+            let h = {type_name}(raw: lang.cast_i64_{lang_type}(Int64(truncating: half).raw));
+            self.raw = h.add(h).raw
+        }}"""
 
     conformances = [type_name] + [n for n, _, _ in exact]
     out = [
@@ -1746,7 +1755,7 @@ def float_conversions(type_name: str, bits: int) -> tuple[str, str]:
     /// with magnitude above 2^{mantissa} lose low-order bits. Not `init(from:)`,
     /// which is reserved for exact conversions.
     public init(rounding value: {name}) {{
-        self.raw = {int_cast(name, ibits, signed)}
+        {uint64_rounding if name == "UInt64" else "self.raw = " + int_cast(name, ibits, signed)}
     }}""")
     if other_bits < bits:
         conformances.append(other_float)
@@ -1844,13 +1853,7 @@ public type Float = {type_name}"""
     default_float = "Float64"
     type_name_upper = type_name.upper()
 
-    # Conversion to other float type
-    if bits == 64:
-        to_other_float = f"Float32(raw: lang.cast_f64_f32(self.raw))"
-        libm_suffix = ""  # f64 functions: sin, cos, etc.
-    else:
-        to_other_float = f"Float64(raw: lang.cast_f32_f64(self.raw))"
-        libm_suffix = "f"  # f32 functions: sinf, cosf, etc.
+    libm_suffix = "" if bits == 64 else "f"  # sin/cos vs sinf/cosf
 
     result = template
     result = result.replace("{{TYPE_NAME}}", type_name)
@@ -1873,7 +1876,6 @@ public type Float = {type_name}"""
     result = result.replace("{{RANGE_APPROX}}", range_approx)
     result = result.replace("{{SIG_DIGITS}}", sig_digits)
     result = result.replace("{{DEFAULT_FLOAT}}", default_float)
-    result = result.replace("{{TO_OTHER_FLOAT}}", to_other_float)
     result = result.replace("{{LIBM_SUFFIX}}", libm_suffix)
     result = result.replace("{{PARSE_METHOD}}", parse_method)
     float_conformances, float_inits = float_conversions(type_name, bits)

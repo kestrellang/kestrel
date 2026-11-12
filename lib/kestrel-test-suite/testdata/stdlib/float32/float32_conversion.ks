@@ -50,7 +50,7 @@ module Test
 
             // toFloat64 — widening conversion
             let small: std.numeric.Float32 = 1.5;
-            let asF64 = small.toFloat64();
+            let asF64 = Float64(from: small);
             // 1.5 is exactly representable in both Float32 and Float64
             let onePointFiveF64: std.numeric.Float64 = 1.5;
             if asF64.isEqual(to: onePointFiveF64) == false { return 10 }

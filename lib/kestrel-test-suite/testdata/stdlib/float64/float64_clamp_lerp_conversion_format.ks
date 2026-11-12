@@ -50,7 +50,7 @@ module Test
 
             // toFloat32
             let f64val: std.numeric.Float64 = 3.14;
-            let f32val = f64val.toFloat32();
+            let f32val = Float32(rounding: f64val);
             // Verify it's approximately correct by converting back
             let backToF64 = std.numeric.Float64(from: f32val);
             let convDiff = backToF64.subtract(f64val).abs();

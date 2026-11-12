@@ -853,16 +853,6 @@ public struct {{TYPE_NAME}}:
     }
 
     // ========================================================================
-    // CONVERSION
-    // ========================================================================
-
-    /// Converts to the sibling float type. Widening (32→64) is exact;
-    /// narrowing (64→32) rounds and may overflow to ±infinity.
-    public func to{{OTHER_FLOAT}}() -> {{OTHER_FLOAT}} {
-        {{TO_OTHER_FLOAT}}
-    }
-
-    // ========================================================================
     // PARSING
     // ========================================================================
 
