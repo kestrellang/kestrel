@@ -10,7 +10,7 @@ import std.memory.(Allocator, GlobalAllocator, Layout, Pointer, RawPointer, RcBo
 import std.iter.(Iterator, Iterable)
 import std.collections.(Slice)
 import std.numeric.(UInt32)
-import std.text.(Char, decodeUtf8, encodeUtf8, BytesView, CharsView, CharsIterator, GraphemesView, LinesView, CharsSubstringIndex, StringSlice, SplitView, SplitWhereView)
+import std.text.(Char, decodeUtf8, encodeUtf8, BytesView, CharsView, CharsIterator, GraphemesView, LinesView, AsciiView, StringSlice, SplitView, SplitWhereView)
 import std.text.unicode as unicode
 import std.ffi.(memcpy, memmove, memcmp, memmem)
 
@@ -300,6 +300,10 @@ public struct String[A = GlobalAllocator]: Iterable, Equatable, Equal[String[A]]
 
     /// A view over the lines of the string, recognising `\n`, `\r\n`, and `\r`.
     public var lines: LinesView { LinesView(slice: self.asSlice()) }
+
+    /// `s.ascii` — view over an ASCII string by character, O(1) to index;
+    /// `.None` when any byte is non-ASCII. Checks the string once, O(n).
+    public var ascii: AsciiView? { self.asSlice().ascii }
 
     // ========================================================================
     // SLICE VIEW
@@ -627,7 +631,7 @@ public struct String[A = GlobalAllocator]: Iterable, Equatable, Equal[String[A]]
     /// Replaces this string with its lowercase form using full Unicode case mapping.
     public mutating func lowercase() {
         // ASCII-only text maps byte for byte: convert in place.
-        if self.isAsciiBytes() {
+        if self.isAscii {
             self.lowercaseAscii();
             return
         }
@@ -639,7 +643,7 @@ public struct String[A = GlobalAllocator]: Iterable, Equatable, Equal[String[A]]
     /// Locale-independent. Handles multi-character expansions —
     /// e.g. German `ß` → `SS`.
     public mutating func uppercase() {
-        if self.isAsciiBytes() {
+        if self.isAscii {
             self.uppercaseAscii();
             return
         }
@@ -651,17 +655,6 @@ public struct String[A = GlobalAllocator]: Iterable, Equatable, Equal[String[A]]
     private mutating func setContents(text: String) {
         self.clear();
         self.append(text)
-    }
-
-    // True when every byte is below 0x80, so ASCII case mapping is exact.
-    private func isAsciiBytes() -> Bool {
-        let p = self.ptr();
-        for i in 0..<self.len() {
-            if unsafe p.offset(by: i).read() > 127 {
-                return false
-            }
-        }
-        true
     }
 
     // ========================================================================

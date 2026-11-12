@@ -4756,6 +4756,49 @@ the bucket array.
 
 _Defined in `lang/std/collections/dictionary.ks`._
 
+## enum `RangeBound`
+
+```kestrel
+public enum RangeBound
+```
+
+One end of a range: a position it includes, a position it stops
+before, or no limit (Rust's `Bound`).
+
+_Defined in `lang/std/collections/slice_methods.ks`._
+
+### Members
+
+#### case `Excluded`
+
+```kestrel
+case Excluded(Int64)
+```
+
+The range stops just before this position.
+
+_Defined in `lang/std/collections/slice_methods.ks`._
+
+#### case `Included`
+
+```kestrel
+case Included(Int64)
+```
+
+The range includes this position.
+
+_Defined in `lang/std/collections/slice_methods.ks`._
+
+#### case `Unbounded`
+
+```kestrel
+case Unbounded
+```
+
+The range runs to the collection's edge.
+
+_Defined in `lang/std/collections/slice_methods.ks`._
+
 ## struct `ReversedSliceIterator`
 
 ```kestrel
@@ -4878,20 +4921,52 @@ _Defined in `lang/std/collections/views.ks`._
 public protocol SeqRange
 ```
 
-Resolves any range-like type to a half-open `Range[Int64]` given a
-collection length. Used by `removeSubrange` and `replaceSubrange` so
-they accept `Range`, `ClosedRange`, `RangeFrom`, `RangeUpTo`, and
-`RangeThrough` through a single generic parameter.
+Any range-like `Int64` type: `Range`, `ClosedRange`, `RangeFrom`,
+`RangeUpTo` and `RangeThrough`, through one generic parameter.
+
+A conformer states its two ends; `resolve(count:)` turns them into a
+half-open `Range[Int64]` against a collection's length. Text views read
+the ends directly, so they can slice without counting first.
+
+### Examples
+
+```
+(2..).resolve(5);    // 2..<5
+(..=3).resolve(5);   // 0..<4
+```
 
 _Defined in `lang/std/collections/slice_methods.ks`._
 
 ### Members
 
+#### field `endBound`
+
+```kestrel
+var endBound: RangeBound { get }
+```
+
+The upper end.
+
+_Defined in `lang/std/collections/slice_methods.ks`._
+
 #### function `resolve`
 
 ```kestrel
-func resolve(Int64) -> Range[Int64]
+public func resolve(Int64) -> Range[Int64]
 ```
+
+The range as half-open `[start, end)` positions in a collection of
+`count` elements. Unbounded ends become `0` and `count`.
+
+_Defined in `lang/std/collections/slice_methods.ks`._
+
+#### field `startBound`
+
+```kestrel
+var startBound: RangeBound { get }
+```
+
+The lower end.
 
 _Defined in `lang/std/collections/slice_methods.ks`._
 

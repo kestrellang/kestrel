@@ -88,6 +88,291 @@ _Defined in `lang/std/text/format.ks`._
 
 ### Implements `Matchable`
 
+## struct `AsciiIterator`
+
+```kestrel
+public struct AsciiIterator { /* private fields */ }
+```
+
+Single-pass forward iterator over an ASCII string's characters.
+
+Yielded by `AsciiView.iter()`. Each byte is one `Char`, so the walk is
+byte by byte with no decoding.
+
+### Examples
+
+```
+var it = "hi".ascii!.iter();
+it.next();  // Some('h')
+it.next();  // Some('i')
+it.next();  // None
+```
+
+### Memory Model
+
+Borrows the source `String` and reads its current buffer on every
+`next()`, so it can't outlive the string and never reads freed memory.
+
+_Defined in `lang/std/text/views.ks`._
+
+### Members
+
+#### field `source`
+
+```kestrel
+let source: &StringSlice
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+### Implements `Iterator`
+
+#### typealias `Item`
+
+```kestrel
+type Item = Char
+```
+
+The element type yielded by `next()` — always `Char`.
+
+_Defined in `lang/std/text/views.ks`._
+
+#### function `next`
+
+```kestrel
+public mutating func next() -> Char?
+```
+
+Returns the next character, or `None` at the end.
+
+_Defined in `lang/std/text/views.ks`._
+
+## struct `AsciiView`
+
+```kestrel
+public struct AsciiView { /* private fields */ }
+```
+
+A read-only view over an ASCII string, indexed by character in O(1).
+
+Returned by `s.ascii`, which checks the string once and gives `.None`
+when any byte is non-ASCII. Every byte is then one `Char`, so `view(i)`,
+`count` and range slicing cost the same as on `BytesView` while reading
+as characters: `view(i) == ','` rather than `bytes(i) == 0x2C`.
+
+### Examples
+
+```
+guard let .Some(text) = "a,b".ascii else { return }
+text(1);              // ','
+text(2..).toOwned();  // "b"
+text.count;           // 3
+```
+
+### Memory Model
+
+Borrows the source `String` and reads its current buffer on every
+access, so it can't outlive the string. Copy out (`toOwned`,
+`substring`) for an independent value.
+
+_Defined in `lang/std/text/views.ks`._
+
+### Members
+
+#### subscript `Checked Index`
+
+```kestrel
+public subscript[I](checked: I) -> I.Output? where I: ViewIndex[AsciiView] { get }
+```
+
+Reads at `index`, returning `.None` on out-of-bounds.
+
+_Defined in `lang/std/text/views.ks`._
+
+#### subscript `Clamping`
+
+```kestrel
+public subscript(clamped: Int64) -> Char? { get }
+```
+
+The character at `index` saturated into `[0, count)`, or `.None`
+when the view is empty.
+
+_Defined in `lang/std/text/views.ks`._
+
+#### subscript `Indexed Char / Sub-view`
+
+```kestrel
+public subscript[I](I) -> I.Output where I: ViewIndex[AsciiView] { get }
+```
+
+The character at an `Int64` index, or a zero-copy `AsciiView` for a
+range. O(1). Panics on out-of-bounds.
+
+_Defined in `lang/std/text/views.ks`._
+
+#### subscript `Unchecked Index`
+
+```kestrel
+public subscript[I](unchecked: I) -> I.Output where I: ViewIndex[AsciiView] { get }
+```
+
+Reads at `index` with no bounds check.
+
+##### Safety
+
+Caller must guarantee `0 <= index < count`; for ranges, endpoints in
+`0..=count`.
+
+_Defined in `lang/std/text/views.ks`._
+
+#### subscript `Within`
+
+```kestrel
+public subscript[R](within: R) -> AsciiView where R: SeqRange { get }
+```
+
+The sub-view of `range` clamped into `[0, count)` (always valid,
+possibly empty).
+
+_Defined in `lang/std/text/views.ks`._
+
+#### subscript `Wrapping`
+
+```kestrel
+public subscript[I](wrapped: I) -> I.WrappedOutput where I: ViewWrappable[AsciiView] { get }
+```
+
+Reads at `index` with modulo wrap-around: `view(wrapped: -1)` is the
+last character. `None` on an empty view.
+
+_Defined in `lang/std/text/views.ks`._
+
+#### field `isEmpty`
+
+```kestrel
+public var isEmpty: Bool { get }
+```
+
+`true` if the view is empty.
+
+_Defined in `lang/std/text/views.ks`._
+
+#### field `slice`
+
+```kestrel
+let slice: &StringSlice
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+#### function `substring`
+
+```kestrel
+public func substring[R](R) -> String where R: SeqRange
+```
+
+The character range as an owned `String`: `self(range).toOwned()`
+for any range form. Panics when the range doesn't fit.
+
+_Defined in `lang/std/text/views.ks`._
+
+#### function `toOwned`
+
+```kestrel
+public func toOwned() -> String
+```
+
+The view as an owned `String`.
+
+_Defined in `lang/std/text/views.ks`._
+
+### Implements `Iterable`
+
+#### typealias `Item`
+
+```kestrel
+type Item = Char
+```
+
+The element type yielded by iteration — always `Char`.
+
+_Defined in `lang/std/text/views.ks`._
+
+#### typealias `TargetIterator`
+
+```kestrel
+type TargetIterator = AsciiIterator
+```
+
+The iterator type returned by `iter()`.
+
+_Defined in `lang/std/text/views.ks`._
+
+#### function `iter`
+
+```kestrel
+public func iter() -> AsciiIterator
+```
+
+Returns an `AsciiIterator` positioned at the start.
+
+_Defined in `lang/std/text/views.ks`._
+
+### Implements `Cloneable`
+
+#### function `clone`
+
+```kestrel
+public func clone() -> AsciiView
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+### Implements `TextView`
+
+#### typealias `Element`
+
+```kestrel
+type Element = Char
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+#### function `_byteOffset`
+
+```kestrel
+func _byteOffset(Int64) -> Int64?
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+#### function `_unitAt`
+
+```kestrel
+func _unitAt(Int64) -> Char?
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+#### function `_unitUnchecked`
+
+```kestrel
+func _unitUnchecked(Int64) -> Char
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+#### field `count`
+
+```kestrel
+public var count: Int64 { get }
+```
+
+Number of characters, which is the byte count. O(1).
+
+_Defined in `lang/std/text/views.ks`._
+
 ## struct `ByteIndex`
 
 ```kestrel
@@ -173,12 +458,12 @@ public func format(into: mutating some Formatter, FormatOptions)
 
 _Defined in `lang/std/text/views.ks`._
 
-### Implements `BytesIndex`
+### Implements `ViewIndex`
 
-#### typealias `BytesYield`
+#### typealias `Output`
 
 ```kestrel
-type BytesYield = UInt8
+type Output = UInt8
 ```
 
 _Defined in `lang/std/text/views.ks`._
@@ -251,29 +536,6 @@ Each call reads one byte and advances the cursor by 1.
 
 _Defined in `lang/std/text/views.ks`._
 
-## protocol `BytesSubstringIndex`
-
-```kestrel
-public protocol BytesSubstringIndex
-```
-
-Range-only index for `BytesView.substring`. Conformed by every
-range type so a single generic `substring` can dispatch over all of
-them. Single-element indexes (`Int64`) deliberately don't conform —
-`substring` is range-flavored only.
-
-_Defined in `lang/std/text/views.ks`._
-
-### Members
-
-#### function `readBytesSubstring`
-
-```kestrel
-func readBytesSubstring(from: BytesView) -> String
-```
-
-_Defined in `lang/std/text/views.ks`._
-
 ## struct `BytesView`
 
 ```kestrel
@@ -315,7 +577,7 @@ _Defined in `lang/std/text/views.ks`._
 #### subscript `Checked Index`
 
 ```kestrel
-public subscript[I](checked: I) -> I.BytesYield? where I: BytesIndex { get }
+public subscript[I](checked: I) -> I.Output? where I: ViewIndex[BytesView] { get }
 ```
 
 Reads at `index`, returning `.None` on out-of-bounds.
@@ -336,7 +598,7 @@ _Defined in `lang/std/text/views.ks`._
 #### subscript `Indexed Byte / Sub-view`
 
 ```kestrel
-public subscript[I](I) -> I.BytesYield where I: BytesIndex { get }
+public subscript[I](I) -> I.Output where I: ViewIndex[BytesView] { get }
 ```
 
 Reads a single byte (`UInt8`) for `Int64` indexes, or a zero-copy
@@ -350,7 +612,7 @@ _Defined in `lang/std/text/views.ks`._
 #### subscript `Unchecked Index`
 
 ```kestrel
-public subscript[I](unchecked: I) -> I.BytesYield where I: BytesIndex { get }
+public subscript[I](unchecked: I) -> I.Output where I: ViewIndex[BytesView] { get }
 ```
 
 Reads at `index` with no bounds check.
@@ -366,7 +628,7 @@ _Defined in `lang/std/text/views.ks`._
 #### subscript `Within`
 
 ```kestrel
-public subscript[I](within: I) -> I.BytesClampedYield where I: BytesClampable { get }
+public subscript[R](within: R) -> BytesView where R: SeqRange { get }
 ```
 
 The sub-view of `range` clamped into `[0, count)` (always valid,
@@ -377,7 +639,7 @@ _Defined in `lang/std/text/views.ks`._
 #### subscript `Wrapping`
 
 ```kestrel
-public subscript[I](wrapped: I) -> I.BytesWrappedYield where I: BytesWrappable { get }
+public subscript[I](wrapped: I) -> I.WrappedOutput where I: ViewWrappable[BytesView] { get }
 ```
 
 Reads at `index` with modulo wrap-around. Negative indices wrap
@@ -396,19 +658,6 @@ Returns the raw pointer to the underlying byte buffer.
 
 Intended for FFI bridges; the pointer is only valid as long as
 the source string remains live and unmutated.
-
-_Defined in `lang/std/text/views.ks`._
-
-#### field `count`
-
-```kestrel
-public var count: Int64 { get }
-```
-
-Number of bytes in the view.
-
-O(1). This is **byte** count, not character count — see
-`CharsView.count` for the latter (which is O(n)).
 
 _Defined in `lang/std/text/views.ks`._
 
@@ -483,13 +732,11 @@ _Defined in `lang/std/text/views.ks`._
 #### function `substring`
 
 ```kestrel
-public func substring(some BytesSubstringIndex) -> String
+public func substring[R](R) -> String where R: SeqRange
 ```
 
-Convenience: dispatches to a `BytesSubstringIndex` to produce
-an owned `String` covering the requested byte range. Equivalent
-to `self(range).toOwned()` for both `Range[Int64]` and
-`ClosedRange[Int64]`.
+The byte range as an owned `String`: `self(range).toOwned()`
+for any range form. Panics when the range doesn't fit.
 
 _Defined in `lang/std/text/views.ks`._
 
@@ -549,6 +796,53 @@ _Defined in `lang/std/text/views.ks`._
 ```kestrel
 public func clone() -> BytesView
 ```
+
+_Defined in `lang/std/text/views.ks`._
+
+### Implements `TextView`
+
+#### typealias `Element`
+
+```kestrel
+type Element = UInt8
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+#### function `_byteOffset`
+
+```kestrel
+func _byteOffset(Int64) -> Int64?
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+#### function `_unitAt`
+
+```kestrel
+func _unitAt(Int64) -> UInt8?
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+#### function `_unitUnchecked`
+
+```kestrel
+func _unitUnchecked(Int64) -> UInt8
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+#### field `count`
+
+```kestrel
+public var count: Int64 { get }
+```
+
+Number of bytes in the view.
+
+O(1). This is **byte** count, not character count — see
+`CharsView.count` for the latter (which is O(n)).
 
 _Defined in `lang/std/text/views.ks`._
 
@@ -1186,12 +1480,12 @@ public func format(into: mutating some Formatter, FormatOptions)
 
 _Defined in `lang/std/text/views.ks`._
 
-### Implements `CharsIndex`
+### Implements `ViewIndex`
 
-#### typealias `CharsYield`
+#### typealias `Output`
 
 ```kestrel
-type CharsYield = Char
+type Output = Char
 ```
 
 _Defined in `lang/std/text/views.ks`._
@@ -1283,26 +1577,6 @@ progress without aborting.
 
 _Defined in `lang/std/text/views.ks`._
 
-## protocol `CharsSubstringIndex`
-
-```kestrel
-public protocol CharsSubstringIndex
-```
-
-Range-only index for `CharsView.substring`. See `BytesSubstringIndex`.
-
-_Defined in `lang/std/text/views.ks`._
-
-### Members
-
-#### function `readCharsSubstring`
-
-```kestrel
-func readCharsSubstring(from: CharsView) -> String
-```
-
-_Defined in `lang/std/text/views.ks`._
-
 ## struct `CharsView`
 
 ```kestrel
@@ -1344,7 +1618,7 @@ _Defined in `lang/std/text/views.ks`._
 #### subscript `Checked Index`
 
 ```kestrel
-public subscript[I](checked: I) -> I.CharsYield? where I: CharsIndex { get }
+public subscript[I](checked: I) -> I.Output? where I: ViewIndex[CharsView] { get }
 ```
 
 Reads at `index`, returning `.None` on out-of-bounds.
@@ -1365,7 +1639,7 @@ _Defined in `lang/std/text/views.ks`._
 #### subscript `Indexed Char / Sub-view`
 
 ```kestrel
-public subscript[I](I) -> I.CharsYield where I: CharsIndex { get }
+public subscript[I](I) -> I.Output where I: ViewIndex[CharsView] { get }
 ```
 
 Reads a single code point (`Char`) for `Int64` indexes, or a
@@ -1378,7 +1652,7 @@ _Defined in `lang/std/text/views.ks`._
 #### subscript `Within`
 
 ```kestrel
-public subscript[I](within: I) -> I.CharsClampedYield where I: CharsClampable { get }
+public subscript[R](within: R) -> CharsView where R: SeqRange { get }
 ```
 
 The sub-view of `range` clamped into `[0, count)` (always valid,
@@ -1389,20 +1663,12 @@ _Defined in `lang/std/text/views.ks`._
 #### subscript `Wrapping`
 
 ```kestrel
-public subscript[I](wrapped: I) -> I.CharsWrappedYield where I: CharsWrappable { get }
+public subscript[I](wrapped: I) -> I.WrappedOutput where I: ViewWrappable[CharsView] { get }
 ```
 
 Reads at `index` with modulo wrap-around. Negative indices wrap
 from the end: `view.chars(wrapped: -1)` reads the last char.
 Returns `None` on an empty view.
-
-_Defined in `lang/std/text/views.ks`._
-
-#### field `count`
-
-```kestrel
-public var count: Int64 { get }
-```
 
 _Defined in `lang/std/text/views.ks`._
 
@@ -1549,13 +1815,11 @@ _Defined in `lang/std/text/views.ks`._
 #### function `substring`
 
 ```kestrel
-public func substring(some CharsSubstringIndex) -> String
+public func substring[R](R) -> String where R: SeqRange
 ```
 
-Convenience: dispatches to a `CharsSubstringIndex` to produce
-an owned `String` covering the requested code-point range.
-Equivalent to `self(range).toOwned()` for both `Range[Int64]`
-and `ClosedRange[Int64]`.
+The code-point range as an owned `String`: `self(range).toOwned()`
+for any range form. Panics when the range doesn't fit.
 
 _Defined in `lang/std/text/views.ks`._
 
@@ -1609,6 +1873,48 @@ _Defined in `lang/std/text/views.ks`._
 
 ```kestrel
 public func clone() -> CharsView
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+### Implements `TextView`
+
+#### typealias `Element`
+
+```kestrel
+type Element = Char
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+#### function `_byteOffset`
+
+```kestrel
+func _byteOffset(Int64) -> Int64?
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+#### function `_unitAt`
+
+```kestrel
+func _unitAt(Int64) -> Char?
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+#### function `_unitUnchecked`
+
+```kestrel
+func _unitUnchecked(Int64) -> Char
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+#### field `count`
+
+```kestrel
+public var count: Int64 { get }
 ```
 
 _Defined in `lang/std/text/views.ks`._
@@ -2917,26 +3223,6 @@ char that triggered the break is held back for the next call.
 
 _Defined in `lang/std/text/views.ks`._
 
-## protocol `GraphemesSubstringIndex`
-
-```kestrel
-public protocol GraphemesSubstringIndex
-```
-
-Range-only index for `GraphemesView.substring`. See `BytesSubstringIndex`.
-
-_Defined in `lang/std/text/views.ks`._
-
-### Members
-
-#### function `readGraphemesSubstring`
-
-```kestrel
-func readGraphemesSubstring(from: GraphemesView) -> String
-```
-
-_Defined in `lang/std/text/views.ks`._
-
 ## struct `GraphemesView`
 
 ```kestrel
@@ -2971,7 +3257,7 @@ _Defined in `lang/std/text/views.ks`._
 #### subscript `Checked Index`
 
 ```kestrel
-public subscript[I](checked: I) -> I.GraphemesYield? where I: GraphemesIndex { get }
+public subscript[I](checked: I) -> I.Output? where I: ViewIndex[GraphemesView] { get }
 ```
 
 Reads at `index`, returning `.None` on out-of-bounds.
@@ -2992,7 +3278,7 @@ _Defined in `lang/std/text/views.ks`._
 #### subscript `Indexed Grapheme / Sub-view`
 
 ```kestrel
-public subscript[I](I) -> I.GraphemesYield where I: GraphemesIndex { get }
+public subscript[I](I) -> I.Output where I: ViewIndex[GraphemesView] { get }
 ```
 
 `Int64` reads a single cluster; `Range[Int64]` /
@@ -3005,7 +3291,7 @@ _Defined in `lang/std/text/views.ks`._
 #### subscript `Within`
 
 ```kestrel
-public subscript[I](within: I) -> I.GraphemesClampedYield where I: GraphemesClampable { get }
+public subscript[R](within: R) -> GraphemesView where R: SeqRange { get }
 ```
 
 The sub-view of `range` clamped into `[0, count)` (always valid,
@@ -3016,24 +3302,12 @@ _Defined in `lang/std/text/views.ks`._
 #### subscript `Wrapping`
 
 ```kestrel
-public subscript[I](wrapped: I) -> I.GraphemesWrappedYield where I: GraphemesWrappable { get }
+public subscript[I](wrapped: I) -> I.WrappedOutput where I: ViewWrappable[GraphemesView] { get }
 ```
 
 Reads at `index` with modulo wrap-around. Negative indices wrap
 from the end: `view.graphemes(wrapped: -1)` reads the last
 grapheme cluster. Returns `None` on an empty view.
-
-_Defined in `lang/std/text/views.ks`._
-
-#### field `count`
-
-```kestrel
-public var count: Int64 { get }
-```
-
-Number of grapheme clusters. **O(n)** — walks the entire string
-through the UAX #29 segmenter. Cache the result if you need it
-more than once; each access re-walks the string.
 
 _Defined in `lang/std/text/views.ks`._
 
@@ -3145,13 +3419,11 @@ _Defined in `lang/std/text/views.ks`._
 #### function `substring`
 
 ```kestrel
-public func substring(some GraphemesSubstringIndex) -> String
+public func substring[R](R) -> String where R: SeqRange
 ```
 
-Convenience: dispatches to a `GraphemesSubstringIndex` to
-produce an owned `String` covering the requested cluster range.
-Equivalent to `self(range).toOwned()` for both `Range[Int64]`
-and `ClosedRange[Int64]`.
+The cluster range as an owned `String`: `self(range).toOwned()`
+for any range form. Panics when the range doesn't fit.
 
 _Defined in `lang/std/text/views.ks`._
 
@@ -3204,6 +3476,52 @@ _Defined in `lang/std/text/views.ks`._
 ```kestrel
 public func clone() -> GraphemesView
 ```
+
+_Defined in `lang/std/text/views.ks`._
+
+### Implements `TextView`
+
+#### typealias `Element`
+
+```kestrel
+type Element = Grapheme
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+#### function `_byteOffset`
+
+```kestrel
+func _byteOffset(Int64) -> Int64?
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+#### function `_unitAt`
+
+```kestrel
+func _unitAt(Int64) -> Grapheme?
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+#### function `_unitUnchecked`
+
+```kestrel
+func _unitUnchecked(Int64) -> Grapheme
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+#### field `count`
+
+```kestrel
+public var count: Int64 { get }
+```
+
+Number of grapheme clusters. **O(n)** — walks the entire string
+through the UAX #29 segmenter. Cache the result if you need it
+more than once; each access re-walks the string.
 
 _Defined in `lang/std/text/views.ks`._
 
@@ -3525,26 +3843,6 @@ to but not including the terminator.
 
 _Defined in `lang/std/text/views.ks`._
 
-## protocol `LinesSubstringIndex`
-
-```kestrel
-public protocol LinesSubstringIndex
-```
-
-Range-only index for `LinesView.substring`. See `BytesSubstringIndex`.
-
-_Defined in `lang/std/text/views.ks`._
-
-### Members
-
-#### function `readLinesSubstring`
-
-```kestrel
-func readLinesSubstring(from: LinesView) -> String
-```
-
-_Defined in `lang/std/text/views.ks`._
-
 ## struct `LinesView`
 
 ```kestrel
@@ -3585,7 +3883,7 @@ _Defined in `lang/std/text/views.ks`._
 #### subscript `Checked Index`
 
 ```kestrel
-public subscript[I](checked: I) -> I.LinesYield? where I: LinesIndex { get }
+public subscript[I](checked: I) -> I.Output? where I: ViewIndex[LinesView] { get }
 ```
 
 Reads at `index`, returning `.None` on out-of-bounds.
@@ -3606,7 +3904,7 @@ _Defined in `lang/std/text/views.ks`._
 #### subscript `Indexed Line / Sub-view`
 
 ```kestrel
-public subscript[I](I) -> I.LinesYield where I: LinesIndex { get }
+public subscript[I](I) -> I.Output where I: ViewIndex[LinesView] { get }
 ```
 
 `Int64` reads a single line as a `String` (without terminator).
@@ -3620,7 +3918,7 @@ _Defined in `lang/std/text/views.ks`._
 #### subscript `Within`
 
 ```kestrel
-public subscript[I](within: I) -> I.LinesClampedYield where I: LinesClampable { get }
+public subscript[R](within: R) -> LinesView where R: SeqRange { get }
 ```
 
 The sub-view of `range` clamped into `[0, count)` (always valid,
@@ -3631,24 +3929,12 @@ _Defined in `lang/std/text/views.ks`._
 #### subscript `Wrapping`
 
 ```kestrel
-public subscript[I](wrapped: I) -> I.LinesWrappedYield where I: LinesWrappable { get }
+public subscript[I](wrapped: I) -> I.WrappedOutput where I: ViewWrappable[LinesView] { get }
 ```
 
 Reads at `index` with modulo wrap-around. Negative indices wrap
 from the end: `view.lines(wrapped: -1)` reads the last line.
 Returns `None` on an empty view.
-
-_Defined in `lang/std/text/views.ks`._
-
-#### field `count`
-
-```kestrel
-public var count: Int64 { get }
-```
-
-Number of lines in the view. **O(n)** — walks the buffer
-scanning for terminators. Cache the result if you need it more
-than once.
 
 _Defined in `lang/std/text/views.ks`._
 
@@ -3738,14 +4024,11 @@ _Defined in `lang/std/text/views.ks`._
 #### function `substring`
 
 ```kestrel
-public func substring(some LinesSubstringIndex) -> String
+public func substring[R](R) -> String where R: SeqRange
 ```
 
-Convenience: dispatches to a `LinesSubstringIndex` to produce
-an owned `String` covering the requested line range, with their
-original terminators preserved. Equivalent to
-`self(range).toOwned()` for both `Range[Int64]` and
-`ClosedRange[Int64]`.
+The line range as an owned `String`, terminators included: `self(range).toOwned()`
+for any range form. Panics when the range doesn't fit.
 
 _Defined in `lang/std/text/views.ks`._
 
@@ -3799,6 +4082,52 @@ _Defined in `lang/std/text/views.ks`._
 ```kestrel
 public func clone() -> LinesView
 ```
+
+_Defined in `lang/std/text/views.ks`._
+
+### Implements `TextView`
+
+#### typealias `Element`
+
+```kestrel
+type Element = String
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+#### function `_byteOffset`
+
+```kestrel
+func _byteOffset(Int64) -> Int64?
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+#### function `_unitAt`
+
+```kestrel
+func _unitAt(Int64) -> String?
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+#### function `_unitUnchecked`
+
+```kestrel
+func _unitUnchecked(Int64) -> String
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+#### field `count`
+
+```kestrel
+public var count: Int64 { get }
+```
+
+Number of lines in the view. **O(n)** — walks the buffer
+scanning for terminators. Cache the result if you need it more
+than once.
 
 _Defined in `lang/std/text/views.ks`._
 
@@ -4800,6 +5129,17 @@ through its `Indirection` peel.
 
 _Defined in `lang/std/text/string.ks`._
 
+#### field `ascii`
+
+```kestrel
+public var ascii: AsciiView? { get }
+```
+
+`s.ascii` — view over an ASCII string by character, O(1) to index;
+`.None` when any byte is non-ASCII. Checks the string once, O(n).
+
+_Defined in `lang/std/text/string.ks`._
+
 #### field `bytes`
 
 ```kestrel
@@ -5691,6 +6031,24 @@ Itself: a slice is already the in-place view.
 
 _Defined in `lang/std/text/slice.ks`._
 
+#### field `ascii`
+
+```kestrel
+public var ascii: AsciiView? { get }
+```
+
+View over an ASCII string by character, O(1) to index; `.None` when
+any byte is non-ASCII. Checks the string once, O(n).
+
+##### Examples
+
+```
+"a,b".ascii!(1);         // ','
+"caf\u{00E9}".ascii;    // None
+```
+
+_Defined in `lang/std/text/str.ks`._
+
 #### field `bytes`
 
 ```kestrel
@@ -5876,6 +6234,26 @@ View over grapheme clusters (user-perceived characters).
 
 ```
 "caf\u{00E9}".graphemes.count;  // 4
+```
+
+_Defined in `lang/std/text/str.ks`._
+
+#### field `isAscii`
+
+```kestrel
+public var isAscii: Bool { get }
+```
+
+True when every byte is ASCII (below `0x80`). O(n).
+
+An ASCII string's bytes, code points and grapheme clusters line up
+one to one, so `ascii` can index it in O(1).
+
+##### Examples
+
+```
+"hello".isAscii;         // true
+"caf\u{00E9}".isAscii;   // false
 ```
 
 _Defined in `lang/std/text/str.ks`._

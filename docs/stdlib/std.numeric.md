@@ -7761,6 +7761,14 @@ type Output = RangeThrough[Int64]
 
 _Defined in `lang/std/numeric/int64.ks`._
 
+#### typealias `Output`
+
+```kestrel
+type Output = V.Element where V: TextView
+```
+
+_Defined in `lang/std/text/views.ks`._
+
 #### function `add`
 
 ```kestrel
@@ -7955,82 +7963,18 @@ consuming func report() -> ExitCode
 
 _Defined in `lang/std/system/exitable.ks`._
 
-### Implements `BytesIndex`
+### Implements `ViewIndex`
 
-#### typealias `BytesYield`
+_Conditional: `where V: TextView`._
 
-```kestrel
-type BytesYield = UInt8
-```
+### Implements `ViewWrappable`
 
-_Defined in `lang/std/text/views.ks`._
+_Conditional: `where V: TextView`._
 
-### Implements `BytesWrappable`
-
-#### typealias `BytesWrappedYield`
+#### typealias `WrappedOutput`
 
 ```kestrel
-type BytesWrappedYield = UInt8?
-```
-
-_Defined in `lang/std/text/views.ks`._
-
-### Implements `CharsIndex`
-
-#### typealias `CharsYield`
-
-```kestrel
-type CharsYield = Char
-```
-
-_Defined in `lang/std/text/views.ks`._
-
-### Implements `CharsWrappable`
-
-#### typealias `CharsWrappedYield`
-
-```kestrel
-type CharsWrappedYield = Char?
-```
-
-_Defined in `lang/std/text/views.ks`._
-
-### Implements `GraphemesIndex`
-
-#### typealias `GraphemesYield`
-
-```kestrel
-type GraphemesYield = Grapheme
-```
-
-_Defined in `lang/std/text/views.ks`._
-
-### Implements `GraphemesWrappable`
-
-#### typealias `GraphemesWrappedYield`
-
-```kestrel
-type GraphemesWrappedYield = Grapheme?
-```
-
-_Defined in `lang/std/text/views.ks`._
-
-### Implements `LinesIndex`
-
-#### typealias `LinesYield`
-
-```kestrel
-type LinesYield = String
-```
-
-_Defined in `lang/std/text/views.ks`._
-
-### Implements `LinesWrappable`
-
-#### typealias `LinesWrappedYield`
-
-```kestrel
-type LinesWrappedYield = String?
+type WrappedOutput = V.Element? where V: TextView
 ```
 
 _Defined in `lang/std/text/views.ks`._

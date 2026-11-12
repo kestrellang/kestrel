@@ -9,7 +9,7 @@ import std.memory.(Pointer, RawPointer)
 import std.collections.(Array, Slice)
 import std.iter.(Iterable)
 import std.ffi.(memmem)
-import std.text.(Formattable, Formatter, FormatOptions, Char, decodeUtf8, String, StringBuilder, StringSlice, BytesView, CharsView, GraphemesView, LinesView, WordsView, ByteIndex, CharIndex, GraphemeIndex, LineIndex, SplitView, SplitWhereView, _bytesEqual)
+import std.text.(Formattable, Formatter, FormatOptions, Char, decodeUtf8, String, StringBuilder, StringSlice, BytesView, CharsView, GraphemesView, LinesView, AsciiView, WordsView, ByteIndex, CharIndex, GraphemeIndex, LineIndex, SplitView, SplitWhereView, _bytesEqual)
 import std.text.unicode as unicode
 
 // ============================================================================
@@ -58,6 +58,19 @@ extend StringSlice {
     /// "a\nb\nc".lines.count;  // 3
     /// ```
     public var lines: LinesView { LinesView(slice: self) }
+
+    /// View over an ASCII string by character, O(1) to index; `.None` when
+    /// any byte is non-ASCII. Checks the string once, O(n).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// "a,b".ascii!(1);         // ','
+    /// "caf\u{00E9}".ascii;    // None
+    /// ```
+    public var ascii: AsciiView? {
+        if self.isAscii { .Some(AsciiView(slice: self)) } else { .None }
+    }
 
     /// View over the whitespace-separated words. Runs of whitespace act as
     /// one break and never yield empty words (unlike `split(by: " ")`).
@@ -671,6 +684,27 @@ extend StringSlice {
             }
         }
         result
+    }
+
+    /// True when every byte is ASCII (below `0x80`). O(n).
+    ///
+    /// An ASCII string's bytes, code points and grapheme clusters line up
+    /// one to one, so `ascii` can index it in O(1).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// "hello".isAscii;         // true
+    /// "caf\u{00E9}".isAscii;   // false
+    /// ```
+    public var isAscii: Bool {
+        let basePtr = self._rawPtr();
+        for i in 0..<self._len {
+            if unsafe basePtr.offset(by: i).read() > 127 {
+                return false
+            }
+        }
+        true
     }
 
     /// Returns a copy with only ASCII letters lowercased; non-ASCII

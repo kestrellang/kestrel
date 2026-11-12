@@ -15,12 +15,53 @@ import std.iter.(Iterable)
 import std.text.(Formattable, Formatter, FormatOptions, StringBuilder, String)
 import std.collections.(Array, Set, Slice, SliceIndex, SliceClampable)
 
-/// Resolves any range-like type to a half-open `Range[Int64]` given a
-/// collection length. Used by `removeSubrange` and `replaceSubrange` so
-/// they accept `Range`, `ClosedRange`, `RangeFrom`, `RangeUpTo`, and
-/// `RangeThrough` through a single generic parameter.
+/// One end of a range: a position it includes, a position it stops
+/// before, or no limit (Rust's `Bound`).
+public enum RangeBound {
+    /// The range includes this position.
+    case Included(Int64)
+    /// The range stops just before this position.
+    case Excluded(Int64)
+    /// The range runs to the collection's edge.
+    case Unbounded
+}
+
+/// Any range-like `Int64` type: `Range`, `ClosedRange`, `RangeFrom`,
+/// `RangeUpTo` and `RangeThrough`, through one generic parameter.
+///
+/// A conformer states its two ends; `resolve(count:)` turns them into a
+/// half-open `Range[Int64]` against a collection's length. Text views read
+/// the ends directly, so they can slice without counting first.
+///
+/// # Examples
+///
+/// ```
+/// (2..).resolve(5);    // 2..<5
+/// (..=3).resolve(5);   // 0..<4
+/// ```
 public protocol SeqRange {
-    func resolve(count: Int64) -> Range[Int64]
+    /// The lower end.
+    var startBound: RangeBound { get }
+    /// The upper end.
+    var endBound: RangeBound { get }
+}
+
+extend SeqRange {
+    /// The range as half-open `[start, end)` positions in a collection of
+    /// `count` elements. Unbounded ends become `0` and `count`.
+    public func resolve(count: Int64) -> Range[Int64] {
+        let start = match self.startBound {
+            .Included(i) => i,
+            .Excluded(i) => i + 1,
+            .Unbounded => 0
+        };
+        let end = match self.endBound {
+            .Included(i) => i + 1,
+            .Excluded(i) => i,
+            .Unbounded => count
+        };
+        Range[Int64](start, end)
+    }
 }
 
 // ============================================================================
@@ -28,31 +69,28 @@ public protocol SeqRange {
 // ============================================================================
 
 extend Range[Int64]: SeqRange {
-    public func resolve(count: Int64) -> Range[Int64] { self }
+    public var startBound: RangeBound { .Included(self.start) }
+    public var endBound: RangeBound { .Excluded(self.end) }
 }
 
 extend ClosedRange[Int64]: SeqRange {
-    public func resolve(count: Int64) -> Range[Int64] {
-        Range[Int64](self.start, self.end + 1)
-    }
+    public var startBound: RangeBound { .Included(self.start) }
+    public var endBound: RangeBound { .Included(self.end) }
 }
 
 extend RangeFrom[Int64]: SeqRange {
-    public func resolve(count: Int64) -> Range[Int64] {
-        Range[Int64](self.start, count)
-    }
+    public var startBound: RangeBound { .Included(self.start) }
+    public var endBound: RangeBound { .Unbounded }
 }
 
 extend RangeUpTo[Int64]: SeqRange {
-    public func resolve(count: Int64) -> Range[Int64] {
-        Range[Int64](0, self.end)
-    }
+    public var startBound: RangeBound { .Unbounded }
+    public var endBound: RangeBound { .Excluded(self.end) }
 }
 
 extend RangeThrough[Int64]: SeqRange {
-    public func resolve(count: Int64) -> Range[Int64] {
-        Range[Int64](0, self.end + 1)
-    }
+    public var startBound: RangeBound { .Unbounded }
+    public var endBound: RangeBound { .Included(self.end) }
 }
 
 // ============================================================================
