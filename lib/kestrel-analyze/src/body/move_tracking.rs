@@ -2340,10 +2340,13 @@ fn is_unsized_view(mcx: &MoveCtx<'_>, ty: &ResolvedTy) -> bool {
     let ResolvedTy::Named { entity, .. } = ty else {
         return false;
     };
-    let sizedness = mcx.cx.query.query(kestrel_semantics::sizedness::NominalSizedness {
-        entity: *entity,
-        root: mcx.cx.root,
-    });
+    let sizedness = mcx
+        .cx
+        .query
+        .query(kestrel_semantics::sizedness::NominalSizedness {
+            entity: *entity,
+            root: mcx.cx.root,
+        });
     sizedness == kestrel_semantics::Sizedness::Unsized
 }
 

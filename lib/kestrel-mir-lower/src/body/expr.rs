@@ -1316,6 +1316,50 @@ impl OssaBodyCtx<'_, '_> {
     // Assign
     // ================================================================
 
+    /// Does assigning to `local` rebind it — a `var` holding a shared ref?
+    fn rebinds_shared_ref(&self, local: super::HirLocalId) -> bool {
+        self.hir.locals[local].is_mut
+            && self.typed.as_ref().is_some_and(|t| {
+                matches!(
+                    t.local_types.get(&local),
+                    Some(kestrel_type_infer::result::ResolvedTy::Ref {
+                        mutating: false,
+                        ..
+                    })
+                )
+            })
+    }
+
+    /// `a = s.trimmedStart()` on a shared-ref `var`: end the old borrow and
+    /// bind the local to the new ref. The binding keeps its remaining read
+    /// budget, less the assignment target's own occurrence.
+    fn rebind_ref_local(&mut self, local: super::HirLocalId, value: HirExprId) -> ValueId {
+        // A rebind inside a branch or loop would have to carry the new ref
+        // across the merge, which v1 can't (E497): only the binding's own
+        // scope may rebind it.
+        let rhs = self.lower_expr(value);
+        if !self.in_ref_binding_scope(local) {
+            self.emit_rebind_across_merge_error(local, value);
+            self.end_ref_if_single_use(rhs);
+            return self.emit_literal(Immediate::unit());
+        }
+        let remaining = self
+            .ref_binding_remaining
+            .get(&local)
+            .copied()
+            .unwrap_or(0)
+            .saturating_sub(1);
+        if let Some(old) = self.local_map.get(&local).map(|b| b.value()) {
+            self.ref_binding_vals.remove(&old);
+            if self.is_borrow_tracked(old) {
+                self.end_ref(old);
+            }
+        }
+        self.register_ref_binding(rhs, local);
+        self.ref_binding_remaining.insert(local, remaining);
+        self.emit_literal(Immediate::unit())
+    }
+
     fn lower_assign(
         &mut self,
         _expr_id: HirExprId,
@@ -1342,6 +1386,12 @@ impl OssaBodyCtx<'_, '_> {
             // drain, which would silently drop the write.
             self.drain_writebacks(wb_mark);
             return result;
+        }
+
+        if let HirExpr::Local(local, _) = self.hir.exprs[target]
+            && self.rebinds_shared_ref(local)
+        {
+            return self.rebind_ref_local(local, value);
         }
 
         // Simple stored assignment

@@ -284,18 +284,20 @@ fn check_target(
         HirExpr::Local(local_id, _) => {
             // Named ref binding (stage 1.5 item 2): writability comes from
             // the REFERENCE type, not the binding's mutability — `r = v` on
-            // a `&mutating` binding is store-through (there is no rebind
-            // spelling); on a shared `&` binding it is the E208 family.
+            // a `&mutating` binding is store-through; on a shared `&` binding
+            // it rebinds a `var` and is the E208 family for a `let`.
             // Mirrors the Field arm's ref_place consult.
+            let local = &cx.hir.locals[*local_id];
             match util::ref_place(cx, target) {
                 Some(true) => return,
+                // A `var` holding a shared ref rebinds to the new ref.
+                Some(false) if local.is_mut => return,
                 Some(false) => {
                     push_assign_through_shared_ref(cx, target, &mut *diags);
                     return;
                 },
                 None => {},
             }
-            let local = &cx.hir.locals[*local_id];
             if !local.is_mut && !util::is_mut_borrow_param(cx, *local_id) {
                 diags.push(AnalyzeDiagnostic {
                     descriptor_id: DESCRIPTORS[0].id,

@@ -302,6 +302,10 @@ pub(super) fn solve_assign_target(
         return solve_coerce(ctx, value, decayed, expr, span);
     }
     match ctx.slot(ctx.resolve(target)) {
+        // A `var` holding a shared ref rebinds (`a = s.trimmedStart()`).
+        TySlot::Resolved(TyKind::Ref {
+            mutating: false, ..
+        }) if ctx.rebind_values.contains(&expr) => solve_coerce(ctx, value, target, expr, span),
         TySlot::Resolved(TyKind::Ref { pointee, .. }) => {
             let pointee = *pointee;
             solve_coerce(ctx, value, pointee, expr, span)
@@ -942,7 +946,12 @@ fn try_view_arg_peel(
         // An open argument into an open param (`show(sl)`, `sl` a pending
         // binding) waits for its own type: a ref argument passes its pointee
         // (`T = Slice[Int64]`), which linking now would turn into `T = &…`.
-        let open = |tv| matches!(ctx.slot(ctx.resolve(tv)), TySlot::Unresolved { literal: None });
+        let open = |tv| {
+            matches!(
+                ctx.slot(ctx.resolve(tv)),
+                TySlot::Unresolved { literal: None }
+            )
+        };
         if ctx.view_link_gate && open(from) && open(to) {
             return Some(SolveResult::Deferred(Constraint::Coerce {
                 from,

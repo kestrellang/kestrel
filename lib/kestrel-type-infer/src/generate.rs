@@ -1124,8 +1124,14 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
                 HirExpr::Local(..) | HirExpr::Call { .. } | HirExpr::MethodCall { .. }
             );
             if route_via_assign_target {
-                if !matches!(hir.exprs[*target], HirExpr::Local(..)) {
-                    ctx.place_assign_values.insert(*value);
+                match hir.exprs[*target] {
+                    HirExpr::Local(local, _) if hir.locals[local].is_mut => {
+                        ctx.rebind_values.insert(*value);
+                    },
+                    HirExpr::Local(..) => {},
+                    _ => {
+                        ctx.place_assign_values.insert(*value);
+                    },
                 }
                 ctx.assign_target(value_tv, target_tv, *value, span.clone());
             } else {
@@ -1483,8 +1489,10 @@ fn mark_sugar_primary(
 /// `&Slice[T]` / `&StringSlice` parameter, whose local is typed as the
 /// pointee? (A ref-returning call's unsized result is already a `Ref`.)
 fn init_is_unsized_view(ctx: &InferCtx<'_>, val_tv: TyVar) -> bool {
-    matches!(ctx.slot(ctx.resolve(val_tv)), TySlot::Resolved(TyKind::Struct { .. }))
-        && !crate::solver::solver_ty_is_sized(ctx, val_tv, 0)
+    matches!(
+        ctx.slot(ctx.resolve(val_tv)),
+        TySlot::Resolved(TyKind::Struct { .. })
+    ) && !crate::solver::solver_ty_is_sized(ctx, val_tv, 0)
 }
 
 // ===== Statement generation =====

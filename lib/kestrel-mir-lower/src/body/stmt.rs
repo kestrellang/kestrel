@@ -73,6 +73,7 @@ impl OssaBodyCtx<'_, '_> {
     /// local's read budget, and no decay copy is made.
     fn bind_ref_local(&mut self, v: ValueId, local: kestrel_hir::LocalId, name: String) {
         self.ref_results.insert(v);
+        self.ref_binding_depth.insert(local, self.scope_stack.len());
         self.ref_binding_vals.insert(v, local);
         let uses = self.local_use_count(local);
         self.ref_binding_remaining.insert(local, uses);
@@ -121,7 +122,8 @@ impl OssaBodyCtx<'_, '_> {
                     // A re-lent slice parameter (`let t = s`) is the
                     // parameter's own @guaranteed value: hold it the same way.
                     let lent = self.ref_results.contains(&init_val)
-                        || self.body.value(init_val).ownership == kestrel_mir::value::Ownership::Guaranteed;
+                        || self.body.value(init_val).ownership
+                            == kestrel_mir::value::Ownership::Guaranteed;
                     if lent && self.local_is_ref(*local) {
                         self.bind_ref_local(init_val, *local, name);
                     } else {

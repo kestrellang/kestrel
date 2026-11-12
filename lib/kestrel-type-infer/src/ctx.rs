@@ -217,6 +217,10 @@ pub struct InferCtx<'a> {
     /// `Indirection`: a miss reports the type the user wrote (`String`), not
     /// the pointee the lookup ended on (`StringSlice`).
     pub(crate) peel_receivers: HashMap<HirExprId, TyVar>,
+    /// Values assigned to a `var` local (`a = s.trimmedStart()`). When the
+    /// local holds a shared ref, the assignment REBINDS it to the new ref:
+    /// writing through a `&` is never legal, so nothing else can be meant.
+    pub(crate) rebind_values: HashSet<HirExprId>,
     /// Tail leaves of optional-chain arms. Their pending coerce waits for
     /// the leaf's own type even after `synth_gate` drops: unifying first
     /// would assume flattening, a silent miscompile when the tail is not an
@@ -583,6 +587,7 @@ impl<'a> InferCtx<'a> {
             view_link_gate: true,
             sized_bound_vars: Vec::new(),
             peel_receivers: HashMap::default(),
+            rebind_values: HashSet::default(),
             interpolation_depth: 0,
             solving_depth: 0,
             formation_site: None,

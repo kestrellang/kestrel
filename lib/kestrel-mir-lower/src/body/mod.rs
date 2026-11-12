@@ -471,6 +471,9 @@ pub(crate) struct OssaBodyCtx<'a, 'w> {
     /// terminator with remaining > 0 is the E497 binding error (bindings
     /// never cross blocks); remaining == 0 ends silently.
     pub(crate) ref_binding_remaining: HashMap<HirLocalId, usize>,
+    /// Scope depth each ref binding was declared at: a shared-ref `var` may
+    /// only be rebound there (a nested rebind would cross a merge, E497).
+    pub(crate) ref_binding_depth: HashMap<HirLocalId, usize>,
     /// Read exprs already counted against `ref_binding_remaining` — a
     /// re-lowered expr (desugar duplication) must not double-decrement.
     ref_binding_reads: std::collections::HashSet<kestrel_hir::body::HirExprId>,
@@ -605,6 +608,7 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
             ref_arg_borrows: HashMap::new(),
             ref_binding_vals: HashMap::new(),
             ref_binding_remaining: HashMap::new(),
+            ref_binding_depth: HashMap::new(),
             ref_binding_reads: std::collections::HashSet::new(),
             pending_writebacks: Vec::new(),
             addr_anchors: HashMap::new(),
@@ -1270,6 +1274,9 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
     /// scope-tracked, threads through control flow). The pattern-binding
     /// analog of `lower_borrow_init`'s registration.
     pub(crate) fn register_ref_binding(&mut self, v: ValueId, local: HirLocalId) {
+        self.ref_binding_depth
+            .entry(local)
+            .or_insert(self.scope_stack.len());
         self.ref_binding_vals.insert(v, local);
         let uses = self.local_use_count(local);
         self.ref_binding_remaining.insert(local, uses);
@@ -4338,7 +4345,7 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
             .collect()
     }
 
-    fn is_borrow_tracked(&self, v: ValueId) -> bool {
+    pub(crate) fn is_borrow_tracked(&self, v: ValueId) -> bool {
         self.scope_stack.iter().any(|s| {
             s.entries
                 .iter()
@@ -4539,6 +4546,33 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
     /// E497, binding wording: a named ref binding still has uses after an
     /// inside-fn terminator — bindings never cross blocks (no @guaranteed
     /// block params in this version).
+    /// Is `local` being rebound in the scope that declared it?
+    pub(crate) fn in_ref_binding_scope(&self, local: HirLocalId) -> bool {
+        self.ref_binding_depth.get(&local) == Some(&self.scope_stack.len())
+    }
+
+    /// E497 for rebinding a shared-ref `var` inside a nested scope.
+    pub(crate) fn emit_rebind_across_merge_error(&mut self, local: HirLocalId, value: HirExprId) {
+        let name = self.hir.locals[local].name.clone();
+        let span = expr_span(&self.hir, value);
+        self.ctx.query.accumulate(
+            Diagnostic::error()
+                .with_code("E497")
+                .with_message(format!(
+                    "ref binding '{name}' cannot be rebound inside a branch or loop in this version"
+                ))
+                .with_labels(vec![
+                    Label::primary(span.file_id, span.range())
+                        .with_message("the new reference would cross the merge"),
+                ])
+                .with_notes(vec![
+                    "rebind it in the scope that declared it, or bind the branch's \
+                     result (`let x = ...;`) instead"
+                        .into(),
+                ]),
+        );
+    }
+
     fn emit_binding_across_merge_error(&mut self, v: ValueId, local: HirLocalId) {
         let name = self.hir.locals[local].name.clone();
         let span = self
