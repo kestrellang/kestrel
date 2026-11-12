@@ -4377,8 +4377,18 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
             }
             if self.ref_results.contains(&a) {
                 self.end_ref(a);
-            } else {
-                self.emit_end_borrow(a);
+                continue;
+            }
+            self.emit_end_borrow(a);
+            // A sub-borrow of an unnamed ref (`xs(i).toOwned()` peeling
+            // through `xs(i)`'s `Indirection`) was that ref's single use:
+            // end it too, as `emit_call_inner` does for a plain call, or it
+            // reaches the next terminator as a false E497.
+            if let Some(src) = self.body.value(a).borrow_source
+                && self.ref_results.contains(&src)
+                && self.is_borrow_tracked(src)
+            {
+                self.end_ref_if_single_use(src);
             }
         }
     }
