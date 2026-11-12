@@ -2172,6 +2172,60 @@ mutating func append(char: Char)
 
 _Defined in `lang/std/text/format.ks`._
 
+#### function `pad`
+
+```kestrel
+public mutating func pad(&StringSlice, FormatOptions)
+```
+
+Writes `content` padded to `options.width` with `options.fill`,
+placed by `options.alignment`. A `precision` truncates `content` to
+that many characters first, as for strings (`"\(s:.3)"`).
+
+Width and precision count code points, not bytes.
+
+##### Examples
+
+```
+struct Pt: Formattable {
+    var x: Int64
+    func format(mutating into writer: some Formatter, options: FormatOptions = FormatOptions.default()) {
+        writer.pad("Pt(\(self.x))", options)
+    }
+}
+"[\(Pt(x: 7):>8)]";   // "[   Pt(7)]"
+```
+
+_Defined in `lang/std/text/format.ks`._
+
+#### function `padIntegral`
+
+```kestrel
+public mutating func padIntegral(nonNegative: Bool, prefix: &StringSlice, digits: &StringSlice, FormatOptions)
+```
+
+Writes a number as its sign, then `prefix`, then `digits`, padded to
+`options.width`. The sign follows `options.sign` (`-` only when
+`nonNegative` is false, by default). A `'0'` fill puts every padding
+zero between the prefix and the digits, whatever the alignment:
+`-0x002a`, not `000-0x2a` or `-0x2a000`.
+
+The caller decides the prefix (`"0x"` only under `alternate`, say)
+and passes `""` for none.
+
+##### Examples
+
+```
+var options = FormatOptions();
+options.width = .Some(4);
+options.fill = '0';
+var b = StringBuilder();
+b.padIntegral(nonNegative: false, prefix: "", digits: "5", options);
+b.build();   // "-005"
+```
+
+_Defined in `lang/std/text/format.ks`._
+
 ## struct `Grapheme`
 
 ```kestrel
@@ -6333,23 +6387,6 @@ public func clone() -> WordsView
 ```
 
 _Defined in `lang/std/text/views.ks`._
-
-## function `_writePadded`
-
-```kestrel
-public func _writePadded[A](into: mutating some Formatter, String[A], FormatOptions) where A: Allocator
-```
-
-Writes `content` into `writer` with width/alignment/fill padding applied.
-Used by String, integer, and float `format(into:)` implementations.
-
-When `fill == '0'` and padding goes on the left (right-align / center),
-any sign character (`-`, `+`, ` `) or radix prefix (`0b`, `0o`, `0x`,
-`0X`) that appears at the start of `content` is emitted *before* the
-zero-padding so the result matches the C `printf` "%08d" convention,
-e.g. `-5` with width 8 → `-0000005` rather than `000000-5`.
-
-_Defined in `lang/std/text/format.ks`._
 
 ## function `decodeUtf8`
 

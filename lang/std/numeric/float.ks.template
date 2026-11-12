@@ -16,7 +16,7 @@ import std.core.(
     AddAssign, SubtractAssign, MultiplyAssign, DivideAssign,
     ExpressibleByFloatLiteral, ExpressibleByIntLiteral, Convertible, RoundsFrom, Defaultable
 )
-import std.text.(String, StringSlice, StringBuilder, Formatter, Formattable, FormatOptions, _writePadded)
+import std.text.(String, StringSlice, StringBuilder, Formatter, Formattable, FormatOptions)
 import std.numeric.(Int64, {{UINT_TYPE}}, {{OTHER_FLOAT}})
 import std.collections.Array
 

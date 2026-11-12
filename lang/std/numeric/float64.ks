@@ -16,7 +16,7 @@ import std.core.(
     AddAssign, SubtractAssign, MultiplyAssign, DivideAssign,
     ExpressibleByFloatLiteral, ExpressibleByIntLiteral, Convertible, RoundsFrom, Defaultable
 )
-import std.text.(String, StringSlice, StringBuilder, Formatter, Formattable, FormatOptions, _writePadded)
+import std.text.(String, StringSlice, StringBuilder, Formatter, Formattable, FormatOptions)
 import std.numeric.(Int64, UInt64, Float32)
 import std.collections.Array
 
@@ -1263,6 +1263,7 @@ public struct Float64:
         }
 
         var number = String();
+        var prefix = "";
         var isNegative = false;
         var allowSign = true;
         var suffixPercent = false;
@@ -1312,6 +1313,7 @@ public struct Float64:
 
             if options.radix == 16 {
                 // `:x` / `:X`: exact hexadecimal floating point (C's `%a`).
+                prefix = if options.uppercase { "0X" } else { "0x" };
                 number = floatHexString(rawExp, rawMant, 52, 1023, options.uppercase)
             } else if precisionProvided == false and suffixPercent == false {
                 // No explicit precision: print the SHORTEST decimal that round-
@@ -1353,16 +1355,6 @@ public struct Float64:
             }
         }
 
-        var result = String();
-        if allowSign {
-            if isNegative {
-                result.append(char: '-')
-            } else if options.sign == .Always {
-                result.append(char: '+')
-            } else if options.sign == .Space {
-                result.append(char: ' ')
-            }
-        }
         if trimTrailingZeros {
             let len = number.bytes.count;
             var dotIndex: Int64 = -1;
@@ -1407,12 +1399,16 @@ public struct Float64:
             }
         }
 
-        result.append(number);
         if suffixPercent {
-            result.append(char: '%')
+            number.append(char: '%')
         }
 
-        _writePadded(into: writer, result, options)
+        // NaN carries no sign, even under `sign: .Always`.
+        var numberOptions = options;
+        if allowSign == false {
+            numberOptions.sign = .Negative
+        }
+        writer.padIntegral(nonNegative: isNegative == false, prefix: prefix, digits: number, numberOptions)
     }}
 
 

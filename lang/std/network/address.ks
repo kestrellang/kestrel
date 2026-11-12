@@ -4,7 +4,7 @@ module std.network
 
 import std.numeric.(Int64, UInt8, UInt16, UInt32, UInt64)
 import std.collections.(Array, Slice)
-import std.text.(String, Formatter, Formattable, FormatOptions, _writePadded)
+import std.text.(String, Formatter, Formattable, FormatOptions)
 import std.core.(Bool, Equatable, Hashable, Hasher)
 import std.result.(Optional)
 import std.memory.(RawPointer, UnsafeSlice)
@@ -141,7 +141,7 @@ public struct Ipv4Address: Equatable, Hashable, Formattable {
     /// `a.b.c.d`.
     public func format(mutating into writer: some Formatter, options: FormatOptions = FormatOptions.default()) {
         let (a, b, c, d) = self.octets;
-        _writePadded(into: writer, "\(a).\(b).\(c).\(d)", options)
+        writer.pad("\(a).\(b).\(c).\(d)", options)
     }
 }
 
@@ -338,7 +338,7 @@ public struct Ipv6Address: Equatable, Hashable, Formattable {
         if self.scopeId != 0 {
             text.append("%\(self.scopeId)")
         }
-        _writePadded(into: writer, text, options)
+        writer.pad(text, options)
     }
 }
 
@@ -409,7 +409,7 @@ public struct SocketAddress: Equatable, Hashable, Formattable {
             .V4(a) => "\(a):\(self.port)",
             .V6(a) => "[\(a)]:\(self.port)"
         };
-        _writePadded(into: writer, text, options)
+        writer.pad(text, options)
     }
 
     /// Writes the address into a 40-byte `kestrel_address` for the shim.

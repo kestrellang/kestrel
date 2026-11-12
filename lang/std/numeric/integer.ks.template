@@ -16,7 +16,7 @@ import std.core.(
     RangeFromConstructible, RangeUpToConstructible, RangeThroughConstructible,
     RangeFrom, RangeUpTo, RangeThrough
 )
-import std.text.(String, StringSlice, StringBuilder, Formatter, Formattable, FormatOptions, _writePadded)
+import std.text.(String, StringSlice, StringBuilder, Formatter, Formattable, FormatOptions)
 import std.memory.(UnsafeSlice, Pointer)
 import std.collections.(Slice)
 import std.numeric.(UInt8, Int64, UInt64, Float32, Float64)

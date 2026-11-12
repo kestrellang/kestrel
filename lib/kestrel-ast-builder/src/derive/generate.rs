@@ -353,13 +353,16 @@ fn formattable(shape: &Shape) -> String {
             }
         },
     };
-    // Width and padding apply to the whole value: render it unpadded, then pad.
+    // Width and padding apply to the whole value: render it unpadded, then
+    // pad. Precision is the fields' business, so `pad` must not truncate.
     format!(
         "    public func format(mutating into writer: some Formatter, options: FormatOptions = FormatOptions.default()) {{
         if let .Some(_) = options.width {{
             var unpadded = options;
             unpadded.width = .None;
-            _writePadded(into: writer, self.formatted(unpadded), options);
+            var outer = options;
+            outer.precision = .None;
+            writer.pad(self.formatted(unpadded), outer);
             return
         }}
         let fieldOptions = FormatOptions.default();

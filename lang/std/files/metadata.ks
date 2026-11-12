@@ -5,7 +5,7 @@ module std.files
 import std.numeric.(Int32, Int64, UInt32, UInt64)
 import std.core.(Bool, Equatable)
 import std.result.(Result)
-import std.text.(String, Formatter, Formattable, FormatOptions, _writePadded)
+import std.text.(String, Formatter, Formattable, FormatOptions)
 import std.streams.(IoError)
 import std.ffi.(malloc, free)
 import std.memory.(RawPointer)
@@ -34,7 +34,7 @@ public enum FileKind: Equatable, Formattable {
             .SymbolicLink => "symbolic link",
             .Other => "other"
         };
-        _writePadded(into: writer, text, options)
+        writer.pad(text, options)
     }
 
     func code() -> Int64 {

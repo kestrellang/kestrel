@@ -16,7 +16,7 @@ import std.core.(
     RangeFromConstructible, RangeUpToConstructible, RangeThroughConstructible,
     RangeFrom, RangeUpTo, RangeThrough
 )
-import std.text.(String, StringSlice, StringBuilder, Formatter, Formattable, FormatOptions, _writePadded)
+import std.text.(String, StringSlice, StringBuilder, Formatter, Formattable, FormatOptions)
 import std.memory.(UnsafeSlice, Pointer)
 import std.collections.(Slice)
 import std.numeric.(UInt8, Int64, UInt64, Float32, Float64)
@@ -1401,33 +1401,26 @@ public struct Int16:
         }
         }
 
-        // Build content: sign + prefix + reversed digits
-        var result = String();
-
-        if isNegative {
-            result.append(char: '-')
-        } else if options.sign == .Always {
-            result.append(char: '+')
-        } else if options.sign == .Space {
-            result.append(char: ' ')
-        }
-
+        // The radix prefix shows only under `alternate` (`0xff`).
+        var prefix = "";
         if options.alternate {
             if radix == 2 {
-                result.append("0b")
+                prefix = "0b"
             } else if radix == 8 {
-                result.append("0o")
+                prefix = "0o"
             } else if radix == 16 {
-                result.append("0x")
+                prefix = "0x"
             }
         }
 
+        // The digits were built least significant first.
+        var result = String();
         var i = digits.bytes.count - 1;
         while i >= 0 {
             result.appendByte(unsafe digits.bytes(unchecked: i));
             i = i - 1
         }
 
-        _writePadded(into: writer, result, options)
+        writer.padIntegral(nonNegative: isNegative == false, prefix: prefix, digits: result, options)
     }}
 

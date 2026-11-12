@@ -3,7 +3,7 @@
 module std.text
 
 import std.core.(Bool, Equal, NotEqual, Equatable, Matchable, Comparable, Cloneable, Ordering, Addable, ExpressibleByStringLiteral, Hashable, Hasher, Defaultable, Indirection, DecaysFrom, fatalError)
-import std.text.(Formattable, Formatter, StringBuilder, _writePadded)
+import std.text.(Formattable, Formatter, StringBuilder)
 import std.numeric.(Int64, UInt8)
 import std.result.(Optional)
 import std.memory.(Allocator, GlobalAllocator, Layout, Pointer, RawPointer, RcBox, CowBox, UnsafeSlice)
@@ -810,7 +810,7 @@ public struct String[A = GlobalAllocator]: Iterable, Equatable, Equal[String[A]]
     /// "test".formatted(opts);   // "   test   "
     /// ```
     public func format(mutating into writer: some Formatter, options: FormatOptions = FormatOptions.default()) {
-        _writePadded(into: writer, self, options)
+        writer.pad(self, options)
     }
 }
 

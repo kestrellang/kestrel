@@ -415,14 +415,6 @@ def generate_integer_format_method(type_name: str, bits: int, signed: bool) -> s
         digit_to_i64 = "Int64(truncating: digit)" if bits == 64 else "Int64(from: digit)"
         sign_handling = f'''
         let isNegative = n < 0;'''
-        sign_prefix = '''
-        if isNegative {
-            result.append(char: '-')
-        } else if options.sign == .Always {
-            result.append(char: '+')
-        } else if options.sign == .Space {
-            result.append(char: ' ')
-        }'''
         digit_body = f'''
         // Convert to unsigned magnitude so minValue formats correctly.
         // negate() overflows on minValue; unsigned subtraction from zero does not.
@@ -451,12 +443,6 @@ def generate_integer_format_method(type_name: str, bits: int, signed: bool) -> s
         uint_name = type_name
         sign_handling = '''
         let isNegative = false;'''
-        sign_prefix = '''
-        if options.sign == .Always {
-            result.append(char: '+')
-        } else if options.sign == .Space {
-            result.append(char: ' ')
-        }'''
         if bits == 64:
             radix_as_type = "UInt64(truncating: radix)"
             digit_as_i64 = "Int64(truncating: digit)"
@@ -510,27 +496,27 @@ def generate_integer_format_method(type_name: str, bits: int, signed: bool) -> s
         }} else {{{digit_body}
         }}
 
-        // Build content: sign + prefix + reversed digits
-        var result = String();
-{sign_prefix}
-
+        // The radix prefix shows only under `alternate` (`0xff`).
+        var prefix = "";
         if options.alternate {{
             if radix == 2 {{
-                result.append("0b")
+                prefix = "0b"
             }} else if radix == 8 {{
-                result.append("0o")
+                prefix = "0o"
             }} else if radix == 16 {{
-                result.append("0x")
+                prefix = "0x"
             }}
         }}
 
+        // The digits were built least significant first.
+        var result = String();
         var i = digits.bytes.count - 1;
         while i >= 0 {{
             result.appendByte(unsafe digits.bytes(unchecked: i));
             i = i - 1
         }}
 
-        _writePadded(into: writer, result, options)
+        writer.padIntegral(nonNegative: isNegative == false, prefix: prefix, digits: result, options)
     }}'''
 
 
@@ -1523,6 +1509,7 @@ def generate_float_format_method(type_name: str, bits: int) -> str:
         }
 
         var number = String();
+        var prefix = "";
         var isNegative = false;
         var allowSign = true;
         var suffixPercent = false;
@@ -1572,6 +1559,7 @@ def generate_float_format_method(type_name: str, bits: int) -> str:
 
             if options.radix == 16 {
                 // `:x` / `:X`: exact hexadecimal floating point (C's `%a`).
+                prefix = if options.uppercase { "0X" } else { "0x" };
                 number = floatHexString(rawExp, rawMant, __PSHIFT__, __BIAS__, options.uppercase)
             } else if precisionProvided == false and suffixPercent == false {
                 // No explicit precision: print the SHORTEST decimal that round-
@@ -1613,16 +1601,6 @@ def generate_float_format_method(type_name: str, bits: int) -> str:
             }
         }
 
-        var result = String();
-        if allowSign {
-            if isNegative {
-                result.append(char: '-')
-            } else if options.sign == .Always {
-                result.append(char: '+')
-            } else if options.sign == .Space {
-                result.append(char: ' ')
-            }
-        }
         if trimTrailingZeros {
             let len = number.bytes.count;
             var dotIndex: Int64 = -1;
@@ -1667,12 +1645,16 @@ def generate_float_format_method(type_name: str, bits: int) -> str:
             }
         }
 
-        result.append(number);
         if suffixPercent {
-            result.append(char: '%')
+            number.append(char: '%')
         }
 
-        _writePadded(into: writer, result, options)
+        // NaN carries no sign, even under `sign: .Always`.
+        var numberOptions = options;
+        if allowSign == false {
+            numberOptions.sign = .Negative
+        }
+        writer.padIntegral(nonNegative: isNegative == false, prefix: prefix, digits: number, numberOptions)
     }'''
 
     return (
