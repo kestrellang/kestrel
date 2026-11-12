@@ -36,8 +36,8 @@ struct Noise {
     func sample(x: Float32, y: Float32) -> Float32 {
         let fx = x.floor();
         let fy = y.floor();
-        let xi = (fx.toInt64() ?? 0) & 255;
-        let yi = (fy.toInt64() ?? 0) & 255;
+        let xi = (Int64(exactly: fx.trunc()) ?? 0) & 255;
+        let yi = (Int64(exactly: fy.trunc()) ?? 0) & 255;
         let dx = x - fx;
         let dy = y - fy;
         let u = fade(dx);

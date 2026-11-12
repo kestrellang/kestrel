@@ -46,7 +46,7 @@ public struct Crc32 {
     static func makeTable() -> Array[UInt32] {
         var table = Array[UInt32](repeating: 0, count: 256);
         for n in 0..<256 {
-            var c = UInt32(from: n);
+            var c = UInt32(truncating: n);
             for _ in 0..<8 {
                 if (c & 1) == 1 {
                     c = 0xEDB88320 ^ (c >> 1);

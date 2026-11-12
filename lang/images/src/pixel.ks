@@ -16,15 +16,15 @@ public protocol Pixel: Copyable {
 // Sample conversions. 8- and 16-bit values round to nearest, never truncate.
 // ---------------------------------------------------------------------------
 
-func unitFrom8(value: UInt8) -> Float32 { Float32(from: Int64(from: value)) / 255.0 }
-func unitFrom16(value: UInt16) -> Float32 { Float32(from: Int64(from: value)) / 65535.0 }
+func unitFrom8(value: UInt8) -> Float32 { Float32(from: value) / 255.0 }
+func unitFrom16(value: UInt16) -> Float32 { Float32(from: value) / 65535.0 }
 
 func quantize(value: Float32, maximum: Float32) -> Int64 {
     let clamped = value.clamp(0.0, 1.0);
-    (clamped * maximum + 0.5).toInt64() ?? 0
+    Int64(truncating: clamped * maximum + 0.5)
 }
 func to8(value: Float32) -> UInt8 { UInt8(truncating: quantize(value, 255.0)) }
-func to16(value: Float32) -> UInt16 { UInt16(from: quantize(value, 65535.0)) }
+func to16(value: Float32) -> UInt16 { UInt16(truncating: quantize(value, 65535.0)) }
 
 /// IEEE half-precision bits to a float.
 public func halfToFloat(bits: UInt16) -> Float32 {
@@ -34,7 +34,7 @@ public func halfToFloat(bits: UInt16) -> Float32 {
     let mantissa = h & 0x3FF;
     if exponent == 0 {
         // Zero or subnormal: mantissa × 2^-24.
-        let magnitude = Float32(from: Int64(from: mantissa)) / 16777216.0;
+        let magnitude = Float32(rounding: mantissa) / 16777216.0;
         if sign != 0 { return 0.0 - magnitude; }
         return magnitude;
     }
@@ -54,24 +54,25 @@ public func floatToHalf(value: Float32) -> UInt16 {
         // Infinity or NaN.
         var nan: UInt32 = 0;
         if mantissa != 0 { nan = 0x200; }
-        return UInt16(from: sign | 0x7C00 | nan);
+        return UInt16(truncating: sign | 0x7C00 | nan);
     }
     let halfExponent = exponent - 112;
-    if halfExponent >= 31 { return UInt16(from: sign | 0x7C00); }
+    if halfExponent >= 31 { return UInt16(truncating: sign | 0x7C00); }
     if halfExponent <= 0 {
-        if halfExponent < -10 { return UInt16(from: sign); }
+        if halfExponent < -10 { return UInt16(truncating: sign); }
         mantissa = mantissa | 0x800000;
         let shift = 14 - halfExponent;
         var half = mantissa >> shift;
-        let remainder = mantissa & ((UInt32(from: 1) << shift) - 1);
-        let midpoint = UInt32(from: 1) << (shift - 1);
+        let one: UInt32 = 1;
+        let remainder = mantissa & ((one << shift) - 1);
+        let midpoint = one << (shift - 1);
         if remainder > midpoint or (remainder == midpoint and (half & 1) == 1) { half = half + 1; }
-        return UInt16(from: sign | half);
+        return UInt16(truncating: sign | half);
     }
-    var half = (UInt32(from: halfExponent) << 10) | (mantissa >> 13);
+    var half = (UInt32(truncating: halfExponent) << 10) | (mantissa >> 13);
     let remainder = mantissa & 0x1FFF;
     if remainder > 0x1000 or (remainder == 0x1000 and (half & 1) == 1) { half = half + 1; }
-    UInt16(from: sign | half)
+    UInt16(truncating: sign | half)
 }
 
 // ---------------------------------------------------------------------------

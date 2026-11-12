@@ -349,12 +349,12 @@ func floatRoundDecimal(D: Array[UInt32], k: Int64, sigBits: Int64, minE: Int64, 
 
     // Cheap magnitude estimate (no big-integer work yet) to short-circuit clear
     // over/underflow — otherwise an absurd exponent would build a giant 5^k.
-    let log2val = Float64(from: bnBitLen(D) - 1)
-        .add(Float64(from: k).multiply(Float64(floatLiteral: 3.321928094887362)));
-    if log2val > Float64(from: maxE + sigBits + 3) {
+    let log2val = Float64(rounding: bnBitLen(D) - 1)
+        .add(Float64(rounding: k).multiply(Float64(floatLiteral: 3.321928094887362)));
+    if log2val > Float64(rounding: maxE + sigBits + 3) {
         return FloatParts(m: UInt64.zero, e: 0, overflow: true)
     };
-    if log2val < Float64(from: minE - 3) {
+    if log2val < Float64(rounding: minE - 3) {
         return FloatParts(m: UInt64.zero, e: 0, overflow: false)
     };
 
@@ -441,7 +441,7 @@ func floatSigDigits(m: UInt64, e: Int64, sig: Int64) -> FloatSig {
         while i < sig { zeros.append(0); i = i + 1 };
         return FloatSig(digits: zeros, decExp: 0)
     };
-    let approx = Float64(from: e + bitLen64(m) - 1)
+    let approx = Float64(rounding: e + bitLen64(m) - 1)
         .multiply(Float64(floatLiteral: 0.30102999566398114));
     var decExp = Int64(raw: lang.cast_f64_i64(approx.floor().raw));
 

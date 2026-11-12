@@ -302,7 +302,7 @@ public struct GzipEncoder: Compressor {
         var output = self.header();
         output.append(contentsOf: self.deflater.finish());
         appendUInt32LittleEndian(output, self.checksum.value);
-        appendUInt32LittleEndian(output, UInt32(from: self.length & 0xFFFFFFFF));
+        appendUInt32LittleEndian(output, UInt32(truncating: self.length & 0xFFFFFFFF));
         output
     }
 

@@ -1629,6 +1629,15 @@ pub(super) fn solve_member(
         },
         _ => ret_tv,
     };
+    // An init called on its type produces the receiver, wrapped by its
+    // effect (`Self?` for a failable `init(exactly:)?`, `Self throws E`) —
+    // not its declared `()`. Same-label inits picked here by argument type
+    // rely on it. A delegating `self.init(...)` (instance context) stays `()`.
+    let ret_tv = if is_static_context && matches!(resolution.kind, crate::resolve::MemberKind::Init) {
+        super::call::wrap_init_call_result(ctx, resolution.entity, receiver, &subs, &span)
+    } else {
+        ret_tv
+    };
     let args_decay = !matches!(resolution.kind, crate::resolve::MemberKind::Field { .. });
     bind_call_result(ctx, result, ret_tv, expr, span.clone(), args_decay);
 

@@ -667,7 +667,7 @@ public struct Child: not Copyable {
             return .Ok(.None)
         }
         let status: ExitStatus = if cells.read(at: 0) == 1 {
-            .Exited(ExitCode(UInt8(from: cells.read(at: 1))))
+            .Exited(ExitCode(UInt8(exactly: cells.read(at: 1))!))
         } else {
             .Terminated(signal: cells.read(at: 1))
         };
@@ -729,7 +729,7 @@ public struct Child: not Copyable {
                     self.killForTimeout();
                     return .Ok(Output(status: .TimedOut, standardOutput: outBytes, standardError: errBytes))
                 }
-                wait = Int32(from: left)
+                wait = Int32(clamping: left)
             }
             if unsafe native_poll_two(outFd, errFd, wait, ready.asNative()) < 0 {
                 return .Err(IoError.last())

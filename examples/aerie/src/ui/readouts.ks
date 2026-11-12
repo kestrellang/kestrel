@@ -20,7 +20,7 @@ struct FpsCounter {
         if self.seconds < 0.5 {
             return;
         }
-        self.rate = (Float32(from: self.frames) / self.seconds + 0.5).toInt64() ?? 0;
+        self.rate = Int64(exactly: (Float32(from: self.frames) / self.seconds + 0.5).trunc()) ?? 0;
         self.frames = 0;
         self.seconds = 0.0;
     }

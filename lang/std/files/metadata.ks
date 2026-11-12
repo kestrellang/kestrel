@@ -124,7 +124,7 @@ internal func metadataFrom(out: RawPointer) -> Metadata {
     Metadata(
         kind: FileKind.of(unsafe cells.offset(by: 0).read()),
         size: unsafe cells.offset(by: 1).read(),
-        permissions: Permissions(UInt32(from: unsafe cells.offset(by: 2).read())),
+        permissions: Permissions(UInt32(truncating: unsafe cells.offset(by: 2).read())),
         modified: unsafe cells.offset(by: 3).read(),
         accessed: unsafe cells.offset(by: 4).read(),
         device: UInt64(truncating: unsafe cells.offset(by: 5).read()),

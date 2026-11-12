@@ -59,7 +59,7 @@ struct HuffmanDecoder {
             if length > fastBits { continue; }
             // The stream is read LSB first, so index by the reversed code and
             // fill every slot whose low bits match it.
-            var slot = Int64(from: reverseBits(UInt64(from: symbolCode), length));
+            var slot = Int64(truncating: reverseBits(UInt64(truncating: symbolCode), length));
             while slot < fastSize {
                 fast(slot) = (symbol << 4) | length;
                 slot = slot + (1 << length);
@@ -71,7 +71,7 @@ struct HuffmanDecoder {
 
     /// Decodes one symbol, or returns -1 for a code the table doesn't define.
     func decode(mutating reader: BitReader) -> Int64 {
-        let entry = self.fast(Int64(from: reader.peek(fastBits)));
+        let entry = self.fast(Int64(truncating: reader.peek(fastBits)));
         if entry != 0 {
             reader.consume(entry & 15);
             return entry >> 4;
@@ -249,7 +249,7 @@ func canonicalCodes(lengths: Array[Int64]) -> Array[UInt64] {
     for symbol in 0..<lengths.count {
         let length = lengths(symbol);
         if length != 0 {
-            codes(symbol) = UInt64(from: nextCode(length));
+            codes(symbol) = UInt64(truncating: nextCode(length));
             nextCode(length) = nextCode(length) + 1;
         }
     }

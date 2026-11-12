@@ -73,7 +73,9 @@ def generate_integer_conversion(
     """`init(from:)` from another integer type, plus `truncating:`,
     `clamping:` and (same width) `bitPattern:` when the conversion is lossy.
 
-    `init(from:)` is lossless or traps; the lossy spellings say what they do.
+    `init(from:)` exists only when lossless (`Convertible`); a lossy source
+    gets `exactly:` (failable) and the spellings that say what they do
+    (`NarrowsFrom`).
     """
     cast = f"self.raw = {get_cast(other_bits, bits, other_signed)}"
     if is_lossless(other_bits, other_signed, bits, signed):
@@ -104,17 +106,14 @@ def generate_integer_conversion(
         chain.append(f"if {above} {{\n            self.raw = {type_name}.maxValue.raw\n        }}")
     chain.append(f"{{\n            {cast}\n        }}")
     clamp = " else ".join(chain)
-    out = f"""    /// @name From Integer
-    /// Converts from `{other_name}`, trapping when the value doesn't fit in
-    /// `{type_name}`. Use `init(truncating:)` or `init(clamping:)` when
-    /// out-of-range values are expected.
-    ///
-    /// # Errors
-    ///
-    /// Panics when `other` is outside `{type_name}.minValue...{type_name}.maxValue`.
-    public init(from other: {other_name}) {{
+    out = f"""    /// @name Exactly
+    /// Converts from `{other_name}` when the value fits in `{type_name}`, and
+    /// is `nil` when it doesn't. `{other_name}` doesn't always fit, so there is
+    /// no `init(from:)`: use `init(truncating:)` or `init(clamping:)` to say
+    /// what an out-of-range value should become.
+    public init(exactly other: {other_name})? {{
         if {fits} {{
-            fatalError("integer conversion overflow: value doesn't fit in {type_name}")
+            return null
         }}
         {cast}
     }}
@@ -135,6 +134,64 @@ def generate_integer_conversion(
     public init(bitPattern other: {other_name}) {{ {cast} }}"""
     return out
 
+
+
+def generate_float_to_int_conversion(type_name: str, bits: int, signed: bool, float_name: str) -> str:
+    """`NarrowsFrom[Float*]` for an integer: `exactly:` (nil for a fraction,
+    NaN or out of range), and `truncating:` / `clamping:`, which both drop
+    the fraction toward zero, saturate out of range, and send NaN to 0 —
+    the same answer as Rust's `as`.
+    """
+    f = "f64" if float_name == "Float64" else "f32"
+    # Bounds are powers of two, so they're exact in either float type.
+    lo = f"-{2 ** (bits - 1)}.0" if signed else "0.0"
+    hi = f"{2 ** (bits - 1) if signed else 2 ** bits}.0"
+    if signed:
+        # `cast_f*_i*` is LLVM's `fptosi.sat`: already saturating, NaN -> 0.
+        clamp = f"self.raw = lang.cast_{f}_i{bits}(other.raw)"
+    elif bits < 64:
+        # Saturate to Int64 first, then clamp the integer into range.
+        clamp = f"self.raw = {type_name}(clamping: Int64(raw: lang.cast_{f}_i64(other.raw))).raw"
+    else:
+        # Int64 can't hold the upper half: shift it down by 2^63, convert,
+        # and set the top bit back. Past 2^64 the shifted cast saturates to
+        # 2^63 - 1, so the result saturates to `maxValue`.
+        top = "9223372036854775808.0"
+        clamp = (
+            f"if other >= {top} {{\n"
+            f"            let low = Int64(raw: lang.cast_{f}_i64(other.subtract({top}).raw));\n"
+            f"            self.raw = UInt64(bitPattern: low).bitwiseOr(UInt64(intLiteral: 1).shiftLeft(by: 63)).raw\n"
+            f"        }} else {{\n"
+            f"            self.raw = UInt64(clamping: Int64(raw: lang.cast_{f}_i64(other.raw))).raw\n"
+            f"        }}"
+        )
+    return f"""    /// @name Exactly
+    /// Converts from `{float_name}` when the value is a whole number in
+    /// `{type_name}`'s range, and is `nil` otherwise (a fraction, NaN, an
+    /// infinity, or out of range).
+    public init(exactly other: {float_name})? {{
+        // Written so a NaN fails the range test too.
+        if not (other >= {lo} and other < {hi}) {{
+            return null
+        }}
+        if other.trunc() != other {{
+            return null
+        }}
+        {clamp}
+    }}
+    /// @name Truncating
+    /// Converts from `{float_name}`, dropping any fraction toward zero.
+    /// Out-of-range values saturate to `{type_name}.minValue` /
+    /// `{type_name}.maxValue` and NaN becomes 0. Never traps.
+    public init(truncating other: {float_name}) {{
+        {clamp}
+    }}
+    /// @name Clamping
+    /// Same as `init(truncating:)`: drops the fraction, saturates out of
+    /// range, and NaN becomes 0. Never traps.
+    public init(clamping other: {float_name}) {{
+        {clamp}
+    }}"""
 
 # `{{IF_SIGNED}}` ... [`{{ELSE}}` ...] `{{END_IF}}`, each marker on its own
 # line: keeps the signed or the unsigned text. Not nestable.
@@ -295,11 +352,11 @@ def generate_step_distance(type_name: str, bits: int, signed: bool, lang_type: s
         return "other.subtract(self)"
     if type_name == "UInt64":
         return """if other >= self {
-            return Int64(from: other.subtract(self))
+            return Int64(exactly: other.subtract(self))!
         }
         let back = self.subtract(other);
         // 2^63 back is exactly Int64.minValue; anything larger traps.
-        if back == UInt64(bitPattern: Int64.minValue) { Int64.minValue } else { Int64(from: back).negate() }"""
+        if back == UInt64(bitPattern: Int64.minValue) { Int64.minValue } else { Int64(exactly: back)!.negate() }"""
     prefix = "i" if signed else "u"
     return (
         f"Int64(raw: lang.i64_sub("
@@ -962,12 +1019,24 @@ def generate_integer(type_name: str, bits: int, signed: bool, is_default: bool) 
     # Generate Convertible conformances and inits for all other integer types
     other_types = [(name, b, s) for name, b, s, _ in INTEGERS if name != type_name]
 
-    conformances = [f"    Convertible[{name}]" for name, _, _ in other_types]
-    lossy = [(n, b, sg) for n, b, sg in other_types if not is_lossless(b, sg, bits, signed)]
-    conformances += [f"    LossyConvertible[{name}]" for name, _, _ in lossy]
-    inits = [
+    # `Convertible` is lossless: the identity and every source that always
+    # fits. Every other source is `NarrowsFrom` only.
+    lossless = [n for n, b, sg in other_types if is_lossless(b, sg, bits, signed)]
+    lossy = [n for n, b, sg in other_types if not is_lossless(b, sg, bits, signed)]
+    conformances = [f"    Convertible[{name}]" for name in [type_name] + lossless]
+    conformances += [f"    NarrowsFrom[{name}]" for name in lossy]
+    conformances += [f"    NarrowsFrom[{name}]" for name, _, _ in FLOATS]
+    identity = (
+        f"    /// @name Identity\n"
+        f"    /// `{type_name}` from itself, so a `Convertible[T]` bound accepts `{type_name}`.\n"
+        f"    public init(from other: {type_name}) {{ self.raw = other.raw }}"
+    )
+    inits = [identity] + [
         generate_integer_conversion(type_name, bits, signed, other_name, other_bits, other_signed)
         for other_name, other_bits, other_signed in other_types
+    ] + [
+        generate_float_to_int_conversion(type_name, bits, signed, float_name)
+        for float_name, _, _ in FLOATS
     ]
 
     # Join with comma+newline, no trailing comma
@@ -1611,6 +1680,85 @@ def generate_float_format_method(type_name: str, bits: int) -> str:
     )
 
 
+# Mantissa bits (including the implicit one): an integer of at most this
+# many magnitude bits converts exactly.
+FLOAT_MANTISSA = {64: 53, 32: 24}
+
+
+def float_conversions(type_name: str, bits: int) -> tuple[str, str]:
+    """`Convertible` conformances and inits for a float: the identity, the
+    other float when it widens, and every integer whose values all fit the
+    mantissa. Everything else converts with `init(rounding:)`, which says it
+    may lose low-order bits."""
+    lang_type = f"f{bits}"
+    other_float, other_bits = ("Float32", 32) if bits == 64 else ("Float64", 64)
+    mantissa = FLOAT_MANTISSA[bits]
+    exact, rounded = [], []
+    for name, ibits, signed, _ in INTEGERS:
+        magnitude = ibits - 1 if signed else ibits
+        if magnitude <= mantissa:
+            exact.append((name, ibits, signed))
+        elif signed or ibits < 64:
+            # No `UInt64` source: there is no unsigned 64-bit cast to widen
+            # through. (None existed before `Convertible` went lossless.)
+            rounded.append((name, ibits, signed))
+
+    def int_cast(name: str, ibits: int, signed: bool) -> str:
+        # Signed sources up to 64 bits have a direct cast; unsigned ones
+        # widen to `Int64` first (lossless below 64 bits).
+        if signed:
+            return f"lang.cast_i{ibits}_{lang_type}(value.raw)"
+        return f"lang.cast_i64_{lang_type}(Int64(from: value).raw)"
+
+    conformances = [type_name] + [n for n, _, _ in exact]
+    out = [
+        f"""    /// @name Identity
+    /// `{type_name}` from itself, so a `Convertible[T]` bound accepts `{type_name}`.
+    public init(from value: {type_name}) {{
+        self.raw = value.raw
+    }}"""
+    ]
+    for name, ibits, signed in exact:
+        out.append(f"""    /// @name From Integer
+    /// Converts from `{name}`. Exact: every `{name}` fits `{type_name}`'s mantissa.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let n: {name} = 42;
+    /// let f = {type_name}(from: n);  // 42.0
+    /// ```
+    public init(from value: {name}) {{
+        self.raw = {int_cast(name, ibits, signed)}
+    }}""")
+    for name, ibits, signed in rounded:
+        out.append(f"""    /// @name Rounding Integer
+    /// Converts from `{name}`, rounding to the nearest `{type_name}`: values
+    /// with magnitude above 2^{mantissa} lose low-order bits. Not `init(from:)`,
+    /// which is reserved for exact conversions.
+    public init(rounding value: {name}) {{
+        self.raw = {int_cast(name, ibits, signed)}
+    }}""")
+    if other_bits < bits:
+        conformances.append(other_float)
+        out.append(f"""    /// @name From Float
+    /// Converts from `{other_float}`. Exact: every `{other_float}` is a `{type_name}`.
+    public init(from value: {other_float}) {{
+        self.raw = lang.cast_f{other_bits}_{lang_type}(value.raw)
+    }}""")
+    else:
+        out.append(f"""    /// @name Rounding Float
+    /// Converts from `{other_float}`, rounding to the nearest `{type_name}`;
+    /// values beyond `{type_name}.maxValue` become ±infinity.
+    public init(rounding value: {other_float}) {{
+        self.raw = lang.cast_f{other_bits}_{lang_type}(value.raw)
+    }}""")
+    conf = "".join(f"    Convertible[{n}],\n" for n in conformances)
+    rounding = [n for n, _, _ in rounded] + ([] if other_bits < bits else [other_float])
+    conf += "".join(f"    RoundsFrom[{n}],\n" for n in rounding)
+    return conf, "\n\n".join(out) + "\n"
+
+
 def generate_float(type_name: str, bits: int, is_default: bool) -> str:
     template = (SCRIPT_DIR / "float.ks.template").read_text()
 
@@ -1705,6 +1853,9 @@ public type Float = {type_name}"""
     result = result.replace("{{TO_OTHER_FLOAT}}", to_other_float)
     result = result.replace("{{LIBM_SUFFIX}}", libm_suffix)
     result = result.replace("{{PARSE_METHOD}}", parse_method)
+    float_conformances, float_inits = float_conversions(type_name, bits)
+    result = result.replace("{{FLOAT_CONFORMANCES}}", float_conformances)
+    result = result.replace("{{FLOAT_CONVERSIONS}}", float_inits)
 
     return result
 

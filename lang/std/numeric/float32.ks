@@ -14,7 +14,7 @@ import std.core.(
     Less, LessOrEqual, Greater, GreaterOrEqual,
     Addable, Subtractable, Multipliable, Divisible, Negatable,
     AddAssign, SubtractAssign, MultiplyAssign, DivideAssign,
-    ExpressibleByFloatLiteral, ExpressibleByIntLiteral, Convertible, Defaultable
+    ExpressibleByFloatLiteral, ExpressibleByIntLiteral, Convertible, RoundsFrom, Defaultable
 )
 import std.text.(String, StringSlice, StringBuilder, Formatter, Formattable, FormatOptions, _writePadded)
 import std.numeric.(Int64, UInt32, Float64)
@@ -75,8 +75,15 @@ public struct Float32:
     ExpressibleByFloatLiteral,
     ExpressibleByIntLiteral,
     Defaultable,
-    Convertible[Int64],
-    Convertible[Float64],
+    Convertible[Float32],
+    Convertible[Int8],
+    Convertible[Int16],
+    Convertible[UInt8],
+    Convertible[UInt16],
+    RoundsFrom[Int32],
+    RoundsFrom[Int64],
+    RoundsFrom[UInt32],
+    RoundsFrom[Float64],
     FFISafe
 {
     /// The underlying primitive `lang.f32` value (IEEE 754 bit
@@ -218,31 +225,92 @@ public struct Float32:
         self.raw = value
     }
 
-    /// @name From Int
-    /// Converts an `Int64` to a float. Values with magnitude greater than
-    /// 2^53 lose low-order bits.
+    /// @name Identity
+    /// `Float32` from itself, so a `Convertible[T]` bound accepts `Float32`.
+    public init(from value: Float32) {
+        self.raw = value.raw
+    }
+
+    /// @name From Integer
+    /// Converts from `Int8`. Exact: every `Int8` fits `Float32`'s mantissa.
     ///
     /// # Examples
     ///
     /// ```
-    /// let n: Int64 = 42;
-    /// let f = Float64(from: n);  // 42.0
+    /// let n: Int8 = 42;
+    /// let f = Float32(from: n);  // 42.0
     /// ```
-    public init(from value: Int64) {
+    public init(from value: Int8) {
+        self.raw = lang.cast_i8_f32(value.raw)
+    }
+
+    /// @name From Integer
+    /// Converts from `Int16`. Exact: every `Int16` fits `Float32`'s mantissa.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let n: Int16 = 42;
+    /// let f = Float32(from: n);  // 42.0
+    /// ```
+    public init(from value: Int16) {
+        self.raw = lang.cast_i16_f32(value.raw)
+    }
+
+    /// @name From Integer
+    /// Converts from `UInt8`. Exact: every `UInt8` fits `Float32`'s mantissa.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let n: UInt8 = 42;
+    /// let f = Float32(from: n);  // 42.0
+    /// ```
+    public init(from value: UInt8) {
+        self.raw = lang.cast_i64_f32(Int64(from: value).raw)
+    }
+
+    /// @name From Integer
+    /// Converts from `UInt16`. Exact: every `UInt16` fits `Float32`'s mantissa.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let n: UInt16 = 42;
+    /// let f = Float32(from: n);  // 42.0
+    /// ```
+    public init(from value: UInt16) {
+        self.raw = lang.cast_i64_f32(Int64(from: value).raw)
+    }
+
+    /// @name Rounding Integer
+    /// Converts from `Int32`, rounding to the nearest `Float32`: values
+    /// with magnitude above 2^24 lose low-order bits. Not `init(from:)`,
+    /// which is reserved for exact conversions.
+    public init(rounding value: Int32) {
+        self.raw = lang.cast_i32_f32(value.raw)
+    }
+
+    /// @name Rounding Integer
+    /// Converts from `Int64`, rounding to the nearest `Float32`: values
+    /// with magnitude above 2^24 lose low-order bits. Not `init(from:)`,
+    /// which is reserved for exact conversions.
+    public init(rounding value: Int64) {
         self.raw = lang.cast_i64_f32(value.raw)
     }
 
-    /// @name From Float
-    /// Converts between `Float32` and `Float64`. The 32→64 direction is
-    /// exact; the 64→32 direction rounds and may overflow to ±infinity.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// let f32: Float32 = 3.14;
-    /// let f64 = Float64(from: f32);
-    /// ```
-    public init(from value: Float64) {
+    /// @name Rounding Integer
+    /// Converts from `UInt32`, rounding to the nearest `Float32`: values
+    /// with magnitude above 2^24 lose low-order bits. Not `init(from:)`,
+    /// which is reserved for exact conversions.
+    public init(rounding value: UInt32) {
+        self.raw = lang.cast_i64_f32(Int64(from: value).raw)
+    }
+
+    /// @name Rounding Float
+    /// Converts from `Float64`, rounding to the nearest `Float32`;
+    /// values beyond `Float32.maxValue` become ±infinity.
+    public init(rounding value: Float64) {
         self.raw = lang.cast_f64_f32(value.raw)
     }
 
@@ -884,31 +952,6 @@ public struct Float32:
     // ========================================================================
     // CONVERSION
     // ========================================================================
-
-    /// Truncates toward zero into an `Int64`. Returns `None` for NaN,
-    /// infinity, or values that fall outside the `Int64` range.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// (3.7).toInt64();              // Some(3)
-    /// (-3.7).toInt64();             // Some(-3)
-    /// Float64.nan.toInt64();        // None
-    /// Float64.infinity.toInt64();   // None
-    /// ```
-    public func toInt64() -> Int64? {
-        if self.isNaN or self.isInfinite {
-            return .None
-        };
-        let truncated = self.trunc();
-        if truncated >= 9223372036854775808.0 {
-            return .None
-        };
-        if truncated < -9223372036854775808.0 {
-            return .None
-        };
-        .Some(Int64(raw: lang.cast_f32_i64(truncated.raw)))
-    }
 
     /// Converts to the sibling float type. Widening (32→64) is exact;
     /// narrowing (64→32) rounds and may overflow to ±infinity.

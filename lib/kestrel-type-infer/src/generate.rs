@@ -2159,18 +2159,21 @@ fn gen_struct_init(
             // resolve_member will detect the ambiguity and try protocol-based
             // resolution, letting the solver disambiguate via type inference.
             let recv_tv = ctx.named(struct_entity, fresh_args.clone());
-            let init_result = ctx.fresh(); // init return type (discarded — result is struct type)
-            ctx.member(
+            // The member's result is the struct, wrapped by the winning
+            // init's effect (`UInt32(exactly: x)` is `UInt32?`).
+            let init_result = ctx.fresh();
+            ctx.member_static(
                 recv_tv,
                 "init",
                 args.to_vec(),
                 init_result,
                 expr_id,
                 true,
+                Vec::new(),
                 span.clone(),
             );
-            ctx.expr_types.insert(expr_id, result_tv);
-            return result_tv;
+            ctx.expr_types.insert(expr_id, init_result);
+            return init_result;
         }
     } else if qctx.get::<NodeKind>(struct_entity) == Some(&NodeKind::Enum) {
         // An enum has no memberwise init: it is built through its cases.

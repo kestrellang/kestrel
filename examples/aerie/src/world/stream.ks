@@ -9,7 +9,7 @@ import linalg.(Vec3)
 /// The chunk column holding world position `v`, as (cx, cz).
 func columnOf(v: Vec3) -> (Int64, Int64) {
     let size = Float32(from: chunkSize);
-    ((v.x / size).floor().toInt64() ?? 0, (v.z / size).floor().toInt64() ?? 0)
+    (Int64(exactly: (v.x / size).floor()) ?? 0, Int64(exactly: (v.z / size).floor()) ?? 0)
 }
 
 /// The first column, nearest (cx, cz) first, within `radius` chunks for
@@ -131,7 +131,7 @@ extend Game {
     /// and neighbors whose border or corner shading includes it. A glowing
     /// block changes the lights of every chunk it can reach.
     mutating func remeshAround(x: Int64, y: Int64, z: Int64, light light: Bool) {
-        let spread = if light { (lightRadius.toInt64() ?? 10) + 1 } else { 1 };
+        let spread = if light { (Int64(exactly: lightRadius.trunc()) ?? 10) + 1 } else { 1 };
         for (cx, cy, cz) in chunksAround(x, y, z, spread: spread) {
             if World.inRange(cy) and self.renderer.chunks.hasColumn(cx, cz) {
                 self.renderer.upload(cx, cy, cz, self.world.padded(cx, cy, cz).mesh(), self.world.lights(cx, cy, cz));

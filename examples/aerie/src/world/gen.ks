@@ -61,7 +61,7 @@ struct Generator {
             let spike = self.detail.fractal(fx * 0.31 + 5.0, fz * 0.31 - 9.0, octaves: 1);
             keel = keel + strength * 22.0 * (spike * 2.0).clamp(0.0, 1.0);
         }
-        Column(top: top.floor().toInt64() ?? 0, bottom: (top - keel).floor().toInt64() ?? 0, strength: strength, lair: lair)
+        Column(top: Int64(exactly: top.floor()) ?? 0, bottom: Int64(exactly: (top - keel).floor()) ?? 0, strength: strength, lair: lair)
     }
 
     /// The columns covering chunk column (cx, cz) plus a `treeReach`

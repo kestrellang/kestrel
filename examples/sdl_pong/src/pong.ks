@@ -47,8 +47,8 @@ struct Ball {
 
     func render(renderer: Renderer) {
         let rect = Rectangle(
-            x: self.position.x.toInt64().unwrap(),
-            y: self.position.y.toInt64().unwrap(),
+            x: Int64(exactly: self.position.x.trunc()).unwrap(),
+            y: Int64(exactly: self.position.y.trunc()).unwrap(),
             width: self.size,
             height: self.size
         );
@@ -104,7 +104,7 @@ struct Paddle {
     }
 
     func render(renderer: Renderer) {
-        let rect = Rectangle(x: self.x, y: self.y.toInt64().unwrap(), width: self.width, height: self.height);
+        let rect = Rectangle(x: self.x, y: Int64(exactly: self.y.trunc()).unwrap(), width: self.width, height: self.height);
         renderer.fill(rect, self.color);
     }
 }

@@ -92,7 +92,7 @@ extend RandomNumberGenerator {
         // Top 53 bits fit a Float64 mantissa exactly; the Int64 view of the
         // shifted value is always non-negative.
         let bits = Int64(truncating: self.nextUInt64().shiftRight(by: 11));
-        Float64(from: bits) * (1.0 / 9007199254740992.0)
+        Float64(rounding: bits) * (1.0 / 9007199254740992.0)
     }
 
     /// Returns a uniformly distributed `Float32` in `[0, 1)`.
@@ -100,7 +100,7 @@ extend RandomNumberGenerator {
     /// Uses the top 24 bits of one `nextUInt64()` draw scaled by `2^-24`.
     public mutating func nextFloat32() -> Float32 {
         let bits = Int64(truncating: self.nextUInt64().shiftRight(by: 40));
-        Float32(from: Float64(from: bits) * (1.0 / 16777216.0))
+        Float32(rounding: Float64(rounding: bits) * (1.0 / 16777216.0))
     }
 
     /// Returns `true` or `false` with equal probability.

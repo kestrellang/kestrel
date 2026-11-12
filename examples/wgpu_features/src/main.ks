@@ -24,10 +24,10 @@ struct Quad: FFISafe {
 }
 
 /// Pixel column `px` in clip space.
-func clipX(px: Int64) -> Float32 { Float32(from: px) / (Float32(from: size) / 2.0) - 1.0 }
+func clipX(px: Int64) -> Float32 { Float32(rounding: px) / (Float32(rounding: size) / 2.0) - 1.0 }
 
 /// Pixel row `py` in clip space, where y points up.
-func clipY(py: Int64) -> Float32 { 1.0 - Float32(from: py) / (Float32(from: size) / 2.0) }
+func clipY(py: Int64) -> Float32 { 1.0 - Float32(rounding: py) / (Float32(rounding: size) / 2.0) }
 
 /// A quad over pixels `left` to `right` and `top` to `bottom` of the target.
 func quad(left: Int64, top: Int64, right: Int64, bottom: Int64, color color: Vec4, depth depth: Float32 = 0.5) -> Quad {
@@ -469,8 +469,8 @@ func checkOcclusionQueries(device: Device, shader: ShaderModule) -> Int64 throws
     };
     device.submit(encoder.finish());
     let counts = try device.readQueries(queries);
-    let visible = Int64(from: counts(0));
-    let hidden = Int64(from: counts(1));
+    let visible = Int64(exactly: counts(0))!;
+    let hidden = Int64(exactly: counts(1))!;
     .Ok(report("occlusion queries", visible == 64 and hidden == 0, "visible \(visible), hidden \(hidden)"))
 }
 

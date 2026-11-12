@@ -35,18 +35,18 @@ module Test
 
             // toInt64: truncates toward zero
             let pos: std.numeric.Float64 = 3.7;
-            let intResult = pos.toInt64();
+            let intResult = Int64(exactly: pos.trunc());
             if intResult.isNone { return 9 }
             if intResult.unwrap() != 3 { return 10 }
             let neg: std.numeric.Float64 = -3.7;
-            let negIntResult = neg.toInt64();
+            let negIntResult = Int64(exactly: neg.trunc());
             if negIntResult.isNone { return 11 }
             if negIntResult.unwrap() != -3 { return 12 }
             // toInt64: NaN returns None
-            if nan.toInt64().isSome { return 13 }
+            if Int64(exactly: nan.trunc()).isSome { return 13 }
             // toInt64: infinity returns None
             let inf = std.numeric.Float64.infinity;
-            if inf.toInt64().isSome { return 14 }
+            if Int64(exactly: inf.trunc()).isSome { return 14 }
 
             // toFloat32
             let f64val: std.numeric.Float64 = 3.14;

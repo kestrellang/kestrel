@@ -298,7 +298,7 @@ struct PngDecoder: ImageDecoder {
             return .Ok(());
         }
         if t == "gAMA" {
-            if body.count == 4 { self.metadata.gamma = .Some(Float64(from: readUInt32BE(body, 0)) / 100000.0); }
+            if body.count == 4 { self.metadata.gamma = .Some(Float64(rounding: readUInt32BE(body, 0)) / 100000.0); }
             return .Ok(());
         }
         if t == "pHYs" {

@@ -52,7 +52,8 @@ struct BitReader {
     /// The next `count` bits without consuming them. `count` must be at most 32.
     mutating func peek(count: Int64) -> UInt64 {
         if self.bitCount < count { self.refill(); }
-        self.buffer & ((UInt64(from: 1) << count) - 1)
+        let one: UInt64 = 1;
+        self.buffer & ((one << count) - 1)
     }
 
     mutating func consume(count: Int64) {
@@ -65,7 +66,7 @@ struct BitReader {
         if count == 0 { return 0; }
         let value = self.peek(count);
         self.consume(count);
-        Int64(from: value)
+        Int64(truncating: value)
     }
 
     /// Drops the bits left in the current byte.

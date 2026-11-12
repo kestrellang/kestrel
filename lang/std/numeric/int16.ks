@@ -11,7 +11,7 @@ import std.core.(
     BitwiseAnd, BitwiseOr, BitwiseXor, BitwiseNot, LeftShift, RightShift,
     AddAssign, SubtractAssign, MultiplyAssign, DivideAssign, RemainderAssign,
     BitwiseAndAssign, BitwiseOrAssign, BitwiseXorAssign, LeftShiftAssign, RightShiftAssign,
-    ExpressibleByIntLiteral, Convertible, LossyConvertible, Defaultable,
+    ExpressibleByIntLiteral, Convertible, NarrowsFrom, Defaultable,
     RangeConstructible, ClosedRangeConstructible, Range, ClosedRange,
     RangeFromConstructible, RangeUpToConstructible, RangeThroughConstructible,
     RangeFrom, RangeUpTo, RangeThrough
@@ -19,7 +19,7 @@ import std.core.(
 import std.text.(String, StringSlice, StringBuilder, Formatter, Formattable, FormatOptions, _writePadded)
 import std.memory.(UnsafeSlice, Pointer)
 import std.collections.(Slice)
-import std.numeric.(UInt8, Int64, UInt64)
+import std.numeric.(UInt8, Int64, UInt64, Float32, Float64)
 
 /// A 16-bit signed integer.
 ///
@@ -89,18 +89,16 @@ public struct Int16:
     RangeFromConstructible,
     RangeUpToConstructible,
     RangeThroughConstructible,
+    Convertible[Int16],
     Convertible[Int8],
-    Convertible[Int32],
-    Convertible[Int64],
     Convertible[UInt8],
-    Convertible[UInt16],
-    Convertible[UInt32],
-    Convertible[UInt64],
-    LossyConvertible[Int32],
-    LossyConvertible[Int64],
-    LossyConvertible[UInt16],
-    LossyConvertible[UInt32],
-    LossyConvertible[UInt64]
+    NarrowsFrom[Int32],
+    NarrowsFrom[Int64],
+    NarrowsFrom[UInt16],
+    NarrowsFrom[UInt32],
+    NarrowsFrom[UInt64],
+    NarrowsFrom[Float32],
+    NarrowsFrom[Float64]
 {
     /// The underlying primitive `lang.i16` value. Exposed for FFI
     /// and intrinsic use; prefer the typed surface for everything else.
@@ -168,20 +166,20 @@ public struct Int16:
         self.raw = value
     }
 
+    /// @name Identity
+    /// `Int16` from itself, so a `Convertible[T]` bound accepts `Int16`.
+    public init(from other: Int16) { self.raw = other.raw }
     /// @name From Integer
     /// Converts from `Int8`. Lossless: every `Int8` fits in `Int16`.
     public init(from other: Int8) { self.raw = lang.cast_i8_i16(other.raw) }
-    /// @name From Integer
-    /// Converts from `Int32`, trapping when the value doesn't fit in
-    /// `Int16`. Use `init(truncating:)` or `init(clamping:)` when
-    /// out-of-range values are expected.
-    ///
-    /// # Errors
-    ///
-    /// Panics when `other` is outside `Int16.minValue...Int16.maxValue`.
-    public init(from other: Int32) {
+    /// @name Exactly
+    /// Converts from `Int32` when the value fits in `Int16`, and
+    /// is `nil` when it doesn't. `Int32` doesn't always fit, so there is
+    /// no `init(from:)`: use `init(truncating:)` or `init(clamping:)` to say
+    /// what an out-of-range value should become.
+    public init(exactly other: Int32)? {
         if other < Int32(from: Int16.minValue) or other > Int32(from: Int16.maxValue) {
-            fatalError("integer conversion overflow: value doesn't fit in Int16")
+            return null
         }
         self.raw = lang.cast_i32_i16(other.raw)
     }
@@ -201,17 +199,14 @@ public struct Int16:
             self.raw = lang.cast_i32_i16(other.raw)
         }
     }
-    /// @name From Integer
-    /// Converts from `Int64`, trapping when the value doesn't fit in
-    /// `Int16`. Use `init(truncating:)` or `init(clamping:)` when
-    /// out-of-range values are expected.
-    ///
-    /// # Errors
-    ///
-    /// Panics when `other` is outside `Int16.minValue...Int16.maxValue`.
-    public init(from other: Int64) {
+    /// @name Exactly
+    /// Converts from `Int64` when the value fits in `Int16`, and
+    /// is `nil` when it doesn't. `Int64` doesn't always fit, so there is
+    /// no `init(from:)`: use `init(truncating:)` or `init(clamping:)` to say
+    /// what an out-of-range value should become.
+    public init(exactly other: Int64)? {
         if other < Int64(from: Int16.minValue) or other > Int64(from: Int16.maxValue) {
-            fatalError("integer conversion overflow: value doesn't fit in Int16")
+            return null
         }
         self.raw = lang.cast_i64_i16(other.raw)
     }
@@ -234,17 +229,14 @@ public struct Int16:
     /// @name From Integer
     /// Converts from `UInt8`. Lossless: every `UInt8` fits in `Int16`.
     public init(from other: UInt8) { self.raw = lang.cast_u8_i16(other.raw) }
-    /// @name From Integer
-    /// Converts from `UInt16`, trapping when the value doesn't fit in
-    /// `Int16`. Use `init(truncating:)` or `init(clamping:)` when
-    /// out-of-range values are expected.
-    ///
-    /// # Errors
-    ///
-    /// Panics when `other` is outside `Int16.minValue...Int16.maxValue`.
-    public init(from other: UInt16) {
+    /// @name Exactly
+    /// Converts from `UInt16` when the value fits in `Int16`, and
+    /// is `nil` when it doesn't. `UInt16` doesn't always fit, so there is
+    /// no `init(from:)`: use `init(truncating:)` or `init(clamping:)` to say
+    /// what an out-of-range value should become.
+    public init(exactly other: UInt16)? {
         if other > UInt16(truncating: Int16.maxValue) {
-            fatalError("integer conversion overflow: value doesn't fit in Int16")
+            return null
         }
         self.raw = other.raw
     }
@@ -265,17 +257,14 @@ public struct Int16:
     /// @name Bit Pattern
     /// Reinterprets the bits of a same-width `UInt16` as `Int16`. Never traps.
     public init(bitPattern other: UInt16) { self.raw = other.raw }
-    /// @name From Integer
-    /// Converts from `UInt32`, trapping when the value doesn't fit in
-    /// `Int16`. Use `init(truncating:)` or `init(clamping:)` when
-    /// out-of-range values are expected.
-    ///
-    /// # Errors
-    ///
-    /// Panics when `other` is outside `Int16.minValue...Int16.maxValue`.
-    public init(from other: UInt32) {
+    /// @name Exactly
+    /// Converts from `UInt32` when the value fits in `Int16`, and
+    /// is `nil` when it doesn't. `UInt32` doesn't always fit, so there is
+    /// no `init(from:)`: use `init(truncating:)` or `init(clamping:)` to say
+    /// what an out-of-range value should become.
+    public init(exactly other: UInt32)? {
         if other > UInt32(truncating: Int16.maxValue) {
-            fatalError("integer conversion overflow: value doesn't fit in Int16")
+            return null
         }
         self.raw = lang.cast_u32_i16(other.raw)
     }
@@ -293,17 +282,14 @@ public struct Int16:
             self.raw = lang.cast_u32_i16(other.raw)
         }
     }
-    /// @name From Integer
-    /// Converts from `UInt64`, trapping when the value doesn't fit in
-    /// `Int16`. Use `init(truncating:)` or `init(clamping:)` when
-    /// out-of-range values are expected.
-    ///
-    /// # Errors
-    ///
-    /// Panics when `other` is outside `Int16.minValue...Int16.maxValue`.
-    public init(from other: UInt64) {
+    /// @name Exactly
+    /// Converts from `UInt64` when the value fits in `Int16`, and
+    /// is `nil` when it doesn't. `UInt64` doesn't always fit, so there is
+    /// no `init(from:)`: use `init(truncating:)` or `init(clamping:)` to say
+    /// what an out-of-range value should become.
+    public init(exactly other: UInt64)? {
         if other > UInt64(truncating: Int16.maxValue) {
-            fatalError("integer conversion overflow: value doesn't fit in Int16")
+            return null
         }
         self.raw = lang.cast_u64_i16(other.raw)
     }
@@ -320,6 +306,60 @@ public struct Int16:
         } else {
             self.raw = lang.cast_u64_i16(other.raw)
         }
+    }
+    /// @name Exactly
+    /// Converts from `Float32` when the value is a whole number in
+    /// `Int16`'s range, and is `nil` otherwise (a fraction, NaN, an
+    /// infinity, or out of range).
+    public init(exactly other: Float32)? {
+        // Written so a NaN fails the range test too.
+        if not (other >= -32768.0 and other < 32768.0) {
+            return null
+        }
+        if other.trunc() != other {
+            return null
+        }
+        self.raw = lang.cast_f32_i16(other.raw)
+    }
+    /// @name Truncating
+    /// Converts from `Float32`, dropping any fraction toward zero.
+    /// Out-of-range values saturate to `Int16.minValue` /
+    /// `Int16.maxValue` and NaN becomes 0. Never traps.
+    public init(truncating other: Float32) {
+        self.raw = lang.cast_f32_i16(other.raw)
+    }
+    /// @name Clamping
+    /// Same as `init(truncating:)`: drops the fraction, saturates out of
+    /// range, and NaN becomes 0. Never traps.
+    public init(clamping other: Float32) {
+        self.raw = lang.cast_f32_i16(other.raw)
+    }
+    /// @name Exactly
+    /// Converts from `Float64` when the value is a whole number in
+    /// `Int16`'s range, and is `nil` otherwise (a fraction, NaN, an
+    /// infinity, or out of range).
+    public init(exactly other: Float64)? {
+        // Written so a NaN fails the range test too.
+        if not (other >= -32768.0 and other < 32768.0) {
+            return null
+        }
+        if other.trunc() != other {
+            return null
+        }
+        self.raw = lang.cast_f64_i16(other.raw)
+    }
+    /// @name Truncating
+    /// Converts from `Float64`, dropping any fraction toward zero.
+    /// Out-of-range values saturate to `Int16.minValue` /
+    /// `Int16.maxValue` and NaN becomes 0. Never traps.
+    public init(truncating other: Float64) {
+        self.raw = lang.cast_f64_i16(other.raw)
+    }
+    /// @name Clamping
+    /// Same as `init(truncating:)`: drops the fraction, saturates out of
+    /// range, and NaN becomes 0. Never traps.
+    public init(clamping other: Float64) {
+        self.raw = lang.cast_f64_i16(other.raw)
     }
 
     // ========================================================================

@@ -97,7 +97,7 @@ public struct BindingLayout {
     static func empty(binding: Int64, visibility: [ShaderStage]) -> raw.WGPUBindGroupLayoutEntry {
         raw.WGPUBindGroupLayoutEntry(
             nextInChain: Pointer.nullPointer(),
-            binding: UInt32(from: binding),
+            binding: UInt32(exactly: binding)!,
             visibility: stageBits(visibility),
             buffer: raw.WGPUBufferBindingLayout(nextInChain: Pointer.nullPointer(), kind: raw.WGPUBufferBindingType_BindingNotUsed, hasDynamicOffset: 0, minBindingSize: 0),
             sampler: raw.WGPUSamplerBindingLayout(nextInChain: Pointer.nullPointer(), kind: raw.WGPUSamplerBindingType_BindingNotUsed),
@@ -114,7 +114,7 @@ public struct BindingLayout {
             nextInChain: Pointer.nullPointer(),
             kind: raw.WGPUBufferBindingType_Uniform,
             hasDynamicOffset: if dynamic { 1 } else { 0 },
-            minBindingSize: UInt64(from: minSize)
+            minBindingSize: UInt64(exactly: minSize)!
         );
         BindingLayout(entry: e)
     }
@@ -126,7 +126,7 @@ public struct BindingLayout {
             nextInChain: Pointer.nullPointer(),
             kind: if readOnly { raw.WGPUBufferBindingType_ReadOnlyStorage } else { raw.WGPUBufferBindingType_Storage },
             hasDynamicOffset: if dynamic { 1 } else { 0 },
-            minBindingSize: UInt64(from: minSize)
+            minBindingSize: UInt64(exactly: minSize)!
         );
         BindingLayout(entry: e)
     }
@@ -236,7 +236,7 @@ extend Device {
         let descriptor = raw.WGPUBindGroupLayoutDescriptor(
             nextInChain: Pointer.nullPointer(),
             label: view(label),
-            entryCount: UInt64(from: list.count),
+            entryCount: UInt64(exactly: list.count)!,
             entries: list.asPointer()
         );
         unsafe raw.wgpuDeviceCreateBindGroupLayout(self.handle, descriptor)
@@ -251,17 +251,17 @@ extend Device {
         }
         var ranges: [raw.WGPUPushConstantRange] = [];
         for r in pushConstants {
-            ranges.append(raw.WGPUPushConstantRange(stages: stageBits(r.stages), start: UInt32(from: r.start), end: UInt32(from: r.end)));
+            ranges.append(raw.WGPUPushConstantRange(stages: stageBits(r.stages), start: UInt32(exactly: r.start)!, end: UInt32(exactly: r.end)!));
         }
         var extras = raw.WGPUPipelineLayoutExtras(
             chain: raw.WGPUChainedStruct(next: Pointer.nullPointer(), sType: raw.WGPUSType_PipelineLayoutExtras),
-            pushConstantRangeCount: UInt64(from: ranges.count),
+            pushConstantRangeCount: UInt64(exactly: ranges.count)!,
             pushConstantRanges: ranges.asPointer()
         );
         let descriptor = raw.WGPUPipelineLayoutDescriptor(
             nextInChain: if ranges.count > 0 { Pointer(to: extras).cast[raw.WGPUChainedStruct]() } else { Pointer.nullPointer() },
             label: view(label),
-            bindGroupLayoutCount: UInt64(from: handles.count),
+            bindGroupLayoutCount: UInt64(exactly: handles.count)!,
             bindGroupLayouts: handles.asPointer()
         );
         PipelineLayout(handle: unsafe raw.wgpuDeviceCreatePipelineLayout(self.handle, descriptor), groups: handles)
@@ -328,9 +328,9 @@ public struct Limits {
             maxVertexBuffers: Int64(from: l.maxVertexBuffers),
             maxVertexAttributes: Int64(from: l.maxVertexAttributes),
             maxColorAttachments: Int64(from: l.maxColorAttachments),
-            maxBufferSize: Int64(from: l.maxBufferSize),
-            maxUniformBufferBindingSize: Int64(from: l.maxUniformBufferBindingSize),
-            maxStorageBufferBindingSize: Int64(from: l.maxStorageBufferBindingSize),
+            maxBufferSize: Int64(exactly: l.maxBufferSize)!,
+            maxUniformBufferBindingSize: Int64(exactly: l.maxUniformBufferBindingSize)!,
+            maxStorageBufferBindingSize: Int64(exactly: l.maxStorageBufferBindingSize)!,
             minUniformBufferOffsetAlignment: Int64(from: l.minUniformBufferOffsetAlignment),
             minStorageBufferOffsetAlignment: Int64(from: l.minStorageBufferOffsetAlignment),
             maxComputeWorkgroupsPerDimension: Int64(from: l.maxComputeWorkgroupsPerDimension),

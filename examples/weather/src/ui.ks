@@ -139,15 +139,15 @@ public func weatherPageHtml(json: Value, cityName: String) -> String {
     let currentTime = getString(getField(current, "time"));
     let currentHour = parseHourFromIso(currentTime);
 
-    let humInt = match humidity.toInt64() {
+    let humInt = match Int64(exactly: humidity.trunc()) {
         .Some(n) => n,
         .None => 0
     };
-    let uvInt = match uv.toInt64() {
+    let uvInt = match Int64(exactly: uv.trunc()) {
         .Some(n) => n,
         .None => 0
     };
-    let pressureInt = match pressure.toInt64() {
+    let pressureInt = match Int64(exactly: pressure.trunc()) {
         .Some(n) => n,
         .None => 0
     };
@@ -249,11 +249,11 @@ public func weatherPageHtml(json: Value, cityName: String) -> String {
 
                         let barLeftF = if range > 0.0 { (low - globalMin) / range * 100.0 } else { 0.0 };
                         let barWidthF = if range > 0.0 { (high - low) / range * 100.0 } else { 100.0 };
-                        let barLeft = match barLeftF.toInt64() {
+                        let barLeft = match Int64(exactly: barLeftF.trunc()) {
                             .Some(n) => n,
                             .None => 0
                         };
-                        let barWidth = match barWidthF.toInt64() {
+                        let barWidth = match Int64(exactly: barWidthF.trunc()) {
                             .Some(n) => if n < 5 { 5 } else { n },
                             .None => 100
                         };

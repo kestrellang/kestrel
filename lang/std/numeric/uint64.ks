@@ -11,7 +11,7 @@ import std.core.(
     BitwiseAnd, BitwiseOr, BitwiseXor, BitwiseNot, LeftShift, RightShift,
     AddAssign, SubtractAssign, MultiplyAssign, DivideAssign, RemainderAssign,
     BitwiseAndAssign, BitwiseOrAssign, BitwiseXorAssign, LeftShiftAssign, RightShiftAssign,
-    ExpressibleByIntLiteral, Convertible, LossyConvertible, Defaultable,
+    ExpressibleByIntLiteral, Convertible, NarrowsFrom, Defaultable,
     RangeConstructible, ClosedRangeConstructible, Range, ClosedRange,
     RangeFromConstructible, RangeUpToConstructible, RangeThroughConstructible,
     RangeFrom, RangeUpTo, RangeThrough
@@ -19,7 +19,7 @@ import std.core.(
 import std.text.(String, StringSlice, StringBuilder, Formatter, Formattable, FormatOptions, _writePadded)
 import std.memory.(UnsafeSlice, Pointer)
 import std.collections.(Slice)
-import std.numeric.(UInt8, Int64, UInt64)
+import std.numeric.(UInt8, Int64, UInt64, Float32, Float64)
 
 /// A 64-bit unsigned integer.
 ///
@@ -89,17 +89,16 @@ public struct UInt64:
     RangeFromConstructible,
     RangeUpToConstructible,
     RangeThroughConstructible,
-    Convertible[Int8],
-    Convertible[Int16],
-    Convertible[Int32],
-    Convertible[Int64],
+    Convertible[UInt64],
     Convertible[UInt8],
     Convertible[UInt16],
     Convertible[UInt32],
-    LossyConvertible[Int8],
-    LossyConvertible[Int16],
-    LossyConvertible[Int32],
-    LossyConvertible[Int64]
+    NarrowsFrom[Int8],
+    NarrowsFrom[Int16],
+    NarrowsFrom[Int32],
+    NarrowsFrom[Int64],
+    NarrowsFrom[Float32],
+    NarrowsFrom[Float64]
 {
     /// The underlying primitive `lang.i64` value. Exposed for FFI
     /// and intrinsic use; prefer the typed surface for everything else.
@@ -167,17 +166,17 @@ public struct UInt64:
         self.raw = value
     }
 
-    /// @name From Integer
-    /// Converts from `Int8`, trapping when the value doesn't fit in
-    /// `UInt64`. Use `init(truncating:)` or `init(clamping:)` when
-    /// out-of-range values are expected.
-    ///
-    /// # Errors
-    ///
-    /// Panics when `other` is outside `UInt64.minValue...UInt64.maxValue`.
-    public init(from other: Int8) {
+    /// @name Identity
+    /// `UInt64` from itself, so a `Convertible[T]` bound accepts `UInt64`.
+    public init(from other: UInt64) { self.raw = other.raw }
+    /// @name Exactly
+    /// Converts from `Int8` when the value fits in `UInt64`, and
+    /// is `nil` when it doesn't. `Int8` doesn't always fit, so there is
+    /// no `init(from:)`: use `init(truncating:)` or `init(clamping:)` to say
+    /// what an out-of-range value should become.
+    public init(exactly other: Int8)? {
         if other < 0 {
-            fatalError("integer conversion overflow: value doesn't fit in UInt64")
+            return null
         }
         self.raw = lang.cast_i8_i64(other.raw)
     }
@@ -195,17 +194,14 @@ public struct UInt64:
             self.raw = lang.cast_i8_i64(other.raw)
         }
     }
-    /// @name From Integer
-    /// Converts from `Int16`, trapping when the value doesn't fit in
-    /// `UInt64`. Use `init(truncating:)` or `init(clamping:)` when
-    /// out-of-range values are expected.
-    ///
-    /// # Errors
-    ///
-    /// Panics when `other` is outside `UInt64.minValue...UInt64.maxValue`.
-    public init(from other: Int16) {
+    /// @name Exactly
+    /// Converts from `Int16` when the value fits in `UInt64`, and
+    /// is `nil` when it doesn't. `Int16` doesn't always fit, so there is
+    /// no `init(from:)`: use `init(truncating:)` or `init(clamping:)` to say
+    /// what an out-of-range value should become.
+    public init(exactly other: Int16)? {
         if other < 0 {
-            fatalError("integer conversion overflow: value doesn't fit in UInt64")
+            return null
         }
         self.raw = lang.cast_i16_i64(other.raw)
     }
@@ -223,17 +219,14 @@ public struct UInt64:
             self.raw = lang.cast_i16_i64(other.raw)
         }
     }
-    /// @name From Integer
-    /// Converts from `Int32`, trapping when the value doesn't fit in
-    /// `UInt64`. Use `init(truncating:)` or `init(clamping:)` when
-    /// out-of-range values are expected.
-    ///
-    /// # Errors
-    ///
-    /// Panics when `other` is outside `UInt64.minValue...UInt64.maxValue`.
-    public init(from other: Int32) {
+    /// @name Exactly
+    /// Converts from `Int32` when the value fits in `UInt64`, and
+    /// is `nil` when it doesn't. `Int32` doesn't always fit, so there is
+    /// no `init(from:)`: use `init(truncating:)` or `init(clamping:)` to say
+    /// what an out-of-range value should become.
+    public init(exactly other: Int32)? {
         if other < 0 {
-            fatalError("integer conversion overflow: value doesn't fit in UInt64")
+            return null
         }
         self.raw = lang.cast_i32_i64(other.raw)
     }
@@ -251,17 +244,14 @@ public struct UInt64:
             self.raw = lang.cast_i32_i64(other.raw)
         }
     }
-    /// @name From Integer
-    /// Converts from `Int64`, trapping when the value doesn't fit in
-    /// `UInt64`. Use `init(truncating:)` or `init(clamping:)` when
-    /// out-of-range values are expected.
-    ///
-    /// # Errors
-    ///
-    /// Panics when `other` is outside `UInt64.minValue...UInt64.maxValue`.
-    public init(from other: Int64) {
+    /// @name Exactly
+    /// Converts from `Int64` when the value fits in `UInt64`, and
+    /// is `nil` when it doesn't. `Int64` doesn't always fit, so there is
+    /// no `init(from:)`: use `init(truncating:)` or `init(clamping:)` to say
+    /// what an out-of-range value should become.
+    public init(exactly other: Int64)? {
         if other < 0 {
-            fatalError("integer conversion overflow: value doesn't fit in UInt64")
+            return null
         }
         self.raw = other.raw
     }
@@ -291,6 +281,90 @@ public struct UInt64:
     /// @name From Integer
     /// Converts from `UInt32`. Lossless: every `UInt32` fits in `UInt64`.
     public init(from other: UInt32) { self.raw = lang.cast_u32_i64(other.raw) }
+    /// @name Exactly
+    /// Converts from `Float32` when the value is a whole number in
+    /// `UInt64`'s range, and is `nil` otherwise (a fraction, NaN, an
+    /// infinity, or out of range).
+    public init(exactly other: Float32)? {
+        // Written so a NaN fails the range test too.
+        if not (other >= 0.0 and other < 18446744073709551616.0) {
+            return null
+        }
+        if other.trunc() != other {
+            return null
+        }
+        if other >= 9223372036854775808.0 {
+            let low = Int64(raw: lang.cast_f32_i64(other.subtract(9223372036854775808.0).raw));
+            self.raw = UInt64(bitPattern: low).bitwiseOr(UInt64(intLiteral: 1).shiftLeft(by: 63)).raw
+        } else {
+            self.raw = UInt64(clamping: Int64(raw: lang.cast_f32_i64(other.raw))).raw
+        }
+    }
+    /// @name Truncating
+    /// Converts from `Float32`, dropping any fraction toward zero.
+    /// Out-of-range values saturate to `UInt64.minValue` /
+    /// `UInt64.maxValue` and NaN becomes 0. Never traps.
+    public init(truncating other: Float32) {
+        if other >= 9223372036854775808.0 {
+            let low = Int64(raw: lang.cast_f32_i64(other.subtract(9223372036854775808.0).raw));
+            self.raw = UInt64(bitPattern: low).bitwiseOr(UInt64(intLiteral: 1).shiftLeft(by: 63)).raw
+        } else {
+            self.raw = UInt64(clamping: Int64(raw: lang.cast_f32_i64(other.raw))).raw
+        }
+    }
+    /// @name Clamping
+    /// Same as `init(truncating:)`: drops the fraction, saturates out of
+    /// range, and NaN becomes 0. Never traps.
+    public init(clamping other: Float32) {
+        if other >= 9223372036854775808.0 {
+            let low = Int64(raw: lang.cast_f32_i64(other.subtract(9223372036854775808.0).raw));
+            self.raw = UInt64(bitPattern: low).bitwiseOr(UInt64(intLiteral: 1).shiftLeft(by: 63)).raw
+        } else {
+            self.raw = UInt64(clamping: Int64(raw: lang.cast_f32_i64(other.raw))).raw
+        }
+    }
+    /// @name Exactly
+    /// Converts from `Float64` when the value is a whole number in
+    /// `UInt64`'s range, and is `nil` otherwise (a fraction, NaN, an
+    /// infinity, or out of range).
+    public init(exactly other: Float64)? {
+        // Written so a NaN fails the range test too.
+        if not (other >= 0.0 and other < 18446744073709551616.0) {
+            return null
+        }
+        if other.trunc() != other {
+            return null
+        }
+        if other >= 9223372036854775808.0 {
+            let low = Int64(raw: lang.cast_f64_i64(other.subtract(9223372036854775808.0).raw));
+            self.raw = UInt64(bitPattern: low).bitwiseOr(UInt64(intLiteral: 1).shiftLeft(by: 63)).raw
+        } else {
+            self.raw = UInt64(clamping: Int64(raw: lang.cast_f64_i64(other.raw))).raw
+        }
+    }
+    /// @name Truncating
+    /// Converts from `Float64`, dropping any fraction toward zero.
+    /// Out-of-range values saturate to `UInt64.minValue` /
+    /// `UInt64.maxValue` and NaN becomes 0. Never traps.
+    public init(truncating other: Float64) {
+        if other >= 9223372036854775808.0 {
+            let low = Int64(raw: lang.cast_f64_i64(other.subtract(9223372036854775808.0).raw));
+            self.raw = UInt64(bitPattern: low).bitwiseOr(UInt64(intLiteral: 1).shiftLeft(by: 63)).raw
+        } else {
+            self.raw = UInt64(clamping: Int64(raw: lang.cast_f64_i64(other.raw))).raw
+        }
+    }
+    /// @name Clamping
+    /// Same as `init(truncating:)`: drops the fraction, saturates out of
+    /// range, and NaN becomes 0. Never traps.
+    public init(clamping other: Float64) {
+        if other >= 9223372036854775808.0 {
+            let low = Int64(raw: lang.cast_f64_i64(other.subtract(9223372036854775808.0).raw));
+            self.raw = UInt64(bitPattern: low).bitwiseOr(UInt64(intLiteral: 1).shiftLeft(by: 63)).raw
+        } else {
+            self.raw = UInt64(clamping: Int64(raw: lang.cast_f64_i64(other.raw))).raw
+        }
+    }
 
     // ========================================================================
     // SIGN INSPECTION (Properties)
@@ -441,11 +515,11 @@ public struct UInt64:
     /// ranges iterate with a counter instead of a "finished" flag.
     public func distance(to other: UInt64) -> Int64 {
         if other >= self {
-            return Int64(from: other.subtract(self))
+            return Int64(exactly: other.subtract(self))!
         }
         let back = self.subtract(other);
         // 2^63 back is exactly Int64.minValue; anything larger traps.
-        if back == UInt64(bitPattern: Int64.minValue) { Int64.minValue } else { Int64(from: back).negate() }
+        if back == UInt64(bitPattern: Int64.minValue) { Int64.minValue } else { Int64(exactly: back)!.negate() }
     }
 
     /// Builds a half-open range `self..<end`. Sugar for the `..<` operator.

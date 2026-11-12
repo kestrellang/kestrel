@@ -28,24 +28,24 @@ module Test
 
             // toInt64 — normal case
             let f32val: std.numeric.Float32 = 3.7;
-            let asInt = f32val.toInt64();
+            let asInt = Int64(exactly: f32val.trunc());
             if asInt.isNone { return 4 }
             if asInt.unwrap() != 3 { return 5 }
 
             // toInt64 — negative truncation toward zero
             let negFloat: std.numeric.Float32 = -3.7;
-            let negAsInt = negFloat.toInt64();
+            let negAsInt = Int64(exactly: negFloat.trunc());
             if negAsInt.isNone { return 6 }
             if negAsInt.unwrap() != -3 { return 7 }
 
             // toInt64 — NaN returns None
             let nan = std.numeric.Float32.nan;
-            let nanAsInt = nan.toInt64();
+            let nanAsInt = Int64(exactly: nan.trunc());
             if nanAsInt.isSome { return 8 }
 
             // toInt64 — infinity returns None
             let inf = std.numeric.Float32.infinity;
-            let infAsInt = inf.toInt64();
+            let infAsInt = Int64(exactly: inf.trunc());
             if infAsInt.isSome { return 9 }
 
             // toFloat64 — widening conversion
