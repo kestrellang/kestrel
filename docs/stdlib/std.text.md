@@ -1613,6 +1613,326 @@ public func clone() -> CharsView
 
 _Defined in `lang/std/text/views.ks`._
 
+## struct `DebugList`
+
+```kestrel
+public struct DebugList { /* private fields */ }
+```
+
+Writes a list-shaped debug form: `[1, 2, 3]`.
+
+### Examples
+
+```
+var l = DebugList(options);
+for item in self.items { l.entry(item, into: writer) }
+l.finish(into: writer);   // "[1, 2, 3]"
+```
+
+_Defined in `lang/std/text/debug.ks`._
+
+### Members
+
+#### field `entries`
+
+```kestrel
+var entries: DebugEntries
+```
+
+_Defined in `lang/std/text/debug.ks`._
+
+#### function `entry`
+
+```kestrel
+public mutating func entry(&some Formattable and not Static and not Sized, into: mutating some Formatter)
+```
+
+Writes the next element.
+
+_Defined in `lang/std/text/debug.ks`._
+
+#### function `finish`
+
+```kestrel
+public consuming func finish(into: mutating some Formatter)
+```
+
+Closes the list; `[]` when empty.
+
+_Defined in `lang/std/text/debug.ks`._
+
+#### initializer `init`
+
+```kestrel
+public init(FormatOptions)
+```
+
+Starts a list.
+
+_Defined in `lang/std/text/debug.ks`._
+
+## struct `DebugMap`
+
+```kestrel
+public struct DebugMap { /* private fields */ }
+```
+
+Writes a map-shaped debug form: `{a: 1, b: 2}`, as `Dictionary` prints.
+
+### Examples
+
+```
+var m = DebugMap(options);
+m.entry("a", 1, into: writer);
+m.finish(into: writer);   // "{a: 1}"
+```
+
+_Defined in `lang/std/text/debug.ks`._
+
+### Members
+
+#### field `entries`
+
+```kestrel
+var entries: DebugEntries
+```
+
+_Defined in `lang/std/text/debug.ks`._
+
+#### function `entry`
+
+```kestrel
+public mutating func entry(&some Formattable and not Static and not Sized, &some Formattable and not Static and not Sized, into: mutating some Formatter)
+```
+
+Writes the entry `key: value`.
+
+_Defined in `lang/std/text/debug.ks`._
+
+#### function `finish`
+
+```kestrel
+public consuming func finish(into: mutating some Formatter)
+```
+
+Closes the map; `{}` when empty.
+
+_Defined in `lang/std/text/debug.ks`._
+
+#### initializer `init`
+
+```kestrel
+public init(FormatOptions)
+```
+
+Starts a map.
+
+_Defined in `lang/std/text/debug.ks`._
+
+## struct `DebugSet`
+
+```kestrel
+public struct DebugSet { /* private fields */ }
+```
+
+Writes a set-shaped debug form: `{1, 2, 3}`.
+
+### Examples
+
+```
+var s = DebugSet(options);
+for item in self.items { s.entry(item, into: writer) }
+s.finish(into: writer);   // "{1, 2, 3}"
+```
+
+_Defined in `lang/std/text/debug.ks`._
+
+### Members
+
+#### field `entries`
+
+```kestrel
+var entries: DebugEntries
+```
+
+_Defined in `lang/std/text/debug.ks`._
+
+#### function `entry`
+
+```kestrel
+public mutating func entry(&some Formattable and not Static and not Sized, into: mutating some Formatter)
+```
+
+Writes the next element.
+
+_Defined in `lang/std/text/debug.ks`._
+
+#### function `finish`
+
+```kestrel
+public consuming func finish(into: mutating some Formatter)
+```
+
+Closes the set; `{}` when empty.
+
+_Defined in `lang/std/text/debug.ks`._
+
+#### initializer `init`
+
+```kestrel
+public init(FormatOptions)
+```
+
+Starts a set.
+
+_Defined in `lang/std/text/debug.ks`._
+
+## struct `DebugStruct`
+
+```kestrel
+public struct DebugStruct { /* private fields */ }
+```
+
+Writes a struct-shaped debug form: `Pt(x: 1, y: 2)`, or `Pt` with no
+fields.
+
+Pass the options your `format(into:)` received, so `"\(pt:#?)"`
+pretty-prints and nested values see the same flags.
+
+### Examples
+
+```
+struct Pt: Formattable {
+    var x: Int64
+    var y: Int64
+    func format(mutating into writer: some Formatter, options: FormatOptions = FormatOptions.default()) {
+        var s = DebugStruct("Pt", options);
+        s.field("x", self.x, into: writer);
+        s.field("y", self.y, into: writer);
+        s.finish(into: writer)
+    }
+}
+"\(Pt(x: 1, y: 2))";     // "Pt(x: 1, y: 2)"
+"\(Pt(x: 1, y: 2):#?)";  // "Pt(\n    x: 1,\n    y: 2,\n)"
+```
+
+_Defined in `lang/std/text/debug.ks`._
+
+### Members
+
+#### field `entries`
+
+```kestrel
+var entries: DebugEntries
+```
+
+_Defined in `lang/std/text/debug.ks`._
+
+#### function `field`
+
+```kestrel
+public mutating func field(&StringSlice, &some Formattable and not Static and not Sized, into: mutating some Formatter)
+```
+
+Writes the field `name: value`.
+
+_Defined in `lang/std/text/debug.ks`._
+
+#### function `finish`
+
+```kestrel
+public consuming func finish(into: mutating some Formatter)
+```
+
+Closes the form; with no fields, writes just the name.
+
+_Defined in `lang/std/text/debug.ks`._
+
+#### initializer `init`
+
+```kestrel
+public init(&StringSlice, FormatOptions)
+```
+
+Starts the debug form of a struct called `name`.
+
+_Defined in `lang/std/text/debug.ks`._
+
+#### field `name`
+
+```kestrel
+let name: String
+```
+
+_Defined in `lang/std/text/debug.ks`._
+
+## struct `DebugTuple`
+
+```kestrel
+public struct DebugTuple { /* private fields */ }
+```
+
+Writes a tuple-shaped debug form: `Wrapper(1, "a")`, or `(1, "a")` with
+an empty name.
+
+### Examples
+
+```
+var t = DebugTuple("Meters", options);
+t.field(self.value, into: writer);
+t.finish(into: writer);   // "Meters(5)"
+```
+
+_Defined in `lang/std/text/debug.ks`._
+
+### Members
+
+#### field `entries`
+
+```kestrel
+var entries: DebugEntries
+```
+
+_Defined in `lang/std/text/debug.ks`._
+
+#### function `field`
+
+```kestrel
+public mutating func field(&some Formattable and not Static and not Sized, into: mutating some Formatter)
+```
+
+Writes the next positional field.
+
+_Defined in `lang/std/text/debug.ks`._
+
+#### function `finish`
+
+```kestrel
+public consuming func finish(into: mutating some Formatter)
+```
+
+Closes the form; with no fields, writes just the name.
+
+_Defined in `lang/std/text/debug.ks`._
+
+#### initializer `init`
+
+```kestrel
+public init(&StringSlice, FormatOptions)
+```
+
+Starts the debug form of a tuple-like value called `name`.
+
+_Defined in `lang/std/text/debug.ks`._
+
+#### field `name`
+
+```kestrel
+let name: String
+```
+
+_Defined in `lang/std/text/debug.ks`._
+
 ## struct `DefaultStringInterpolation`
 
 ```kestrel

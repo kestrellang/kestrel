@@ -216,6 +216,26 @@ var inner: R
 
 _Defined in `lang/std/streams/buffered.ks`._
 
+#### function `innerMutable`
+
+```kestrel
+public mutating func innerMutable() -> &mutating R
+```
+
+The wrapped reader, for writing a reply on the same stream or
+reading its state (Rust's `get_mut`). Reading from it directly skips
+whatever this reader has buffered.
+
+##### Examples
+
+```
+var reader = BufferedReader(socket);
+let request = try reader.readLine();
+try reader.innerMutable().write(line: "OK");
+```
+
+_Defined in `lang/std/streams/buffered.ks`._
+
 #### function `intoInner`
 
 ```kestrel
