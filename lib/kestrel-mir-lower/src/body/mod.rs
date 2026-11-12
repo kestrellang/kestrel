@@ -2463,8 +2463,21 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
             return None;
         }
         // A merge param can't carry a borrow — materialize an @owned result.
-        let result = if self.body.value(result).ownership == Ownership::Guaranteed {
-            let owned = self.emit_copy_value(result);
+        // An unsized one (`if c { s.trimmed() } else { … }`, a `StringSlice`)
+        // has no value to copy out: it is a ref crossing the merge (E497).
+        // Moving the borrow keeps the IR well-formed; the error aborts.
+        let guaranteed = self.body.value(result).ownership == Ownership::Guaranteed;
+        let ty = self.body.value(result).ty;
+        let unsized_ref = guaranteed && self.ctx.module.is_unsized(ty);
+        if unsized_ref {
+            self.emit_ref_across_merge_error(result);
+        }
+        let result = if guaranteed {
+            let owned = if unsized_ref {
+                self.emit_move_value(result)
+            } else {
+                self.emit_copy_value(result)
+            };
             // Arm-value decay: when the arm value is a tracked ref (ret_borrow
             // call result), the copy-out above was its single use — end its
             // borrow before the jump to the merge, or `set_terminator`'s sweep

@@ -314,6 +314,7 @@ pub(crate) fn try_indirection_peel(
 ) -> Option<TyVar> {
     let peel = indirection_peel_step(ctx, recv_kind, receiver, span)?;
     let pointee_tv = peel.target_tv;
+    ctx.peel_receivers.entry(expr).or_insert(receiver);
     // Record the peel for MIR — append so nested wrappers build a chain.
     // `target_tv` is resolved in `build_result`.
     ctx.indirection_peels.entry(expr).or_default().push(peel);
@@ -716,8 +717,9 @@ pub(super) fn solve_member(
                         ctx.poison(result);
                         return SolveResult::Solved;
                     }
+                    let written = ctx.peel_receivers.get(&expr).copied().unwrap_or(receiver);
                     return SolveResult::Error(member_not_found_error(
-                        ctx, receiver, &recv_kind, name, is_call, span,
+                        ctx, written, &recv_kind, name, is_call, span,
                     ));
                 },
             }

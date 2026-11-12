@@ -969,7 +969,14 @@ fn try_view_arg_peel(
     let wait = match ctx.slot(wrapper) {
         TySlot::Resolved(_) => false,
         TySlot::Unresolved { literal: None } => {
-            ctx.view_peel_gate && !ctx.postponed_literal_args.contains(&expr)
+            (ctx.view_peel_gate && !ctx.postponed_literal_args.contains(&expr))
+                || awaits_ref_decay(ctx, wrapper)
+                // A call's result typed by a literal default
+                // (`Float64(parsing: pieces(2))`) waits through the
+                // defaults; an operator's (`1 << 26`) is the param's to type.
+                || (ctx.view_link_gate
+                    && ctx.call_return_tvs.contains_key(&expr)
+                    && !ctx.operator_members.contains_key(&expr))
         },
         TySlot::Unresolved { literal: Some(lit) } => {
             ctx.synth_gate && !crate::unify::conforms_to_literal_protocol(ctx, to_kind, *lit)
@@ -1030,6 +1037,21 @@ fn try_view_arg_peel(
         .push(peel);
     ctx.coerce(pointee, to, expr, span.clone());
     Some(SolveResult::Solved)
+}
+
+/// Is `tv` a binding still owed its type by a pending ref decay
+/// (`let p = pieces(2)`, typed by the end-of-body ref-decay defaults)? An
+/// argument reading it waits for that type rather than pinning the binding
+/// to the param's.
+fn awaits_ref_decay(ctx: &InferCtx<'_>, tv: TyVar) -> bool {
+    let tv = ctx.resolve(tv);
+    ctx.constraints.iter().any(|c| match c {
+        Constraint::EqualDecayed { target, .. } => ctx.resolve(*target) == tv,
+        Constraint::Coerce { to, expr, .. } => {
+            ctx.binding_init_exprs.contains(expr) && ctx.resolve(*to) == tv
+        },
+        _ => false,
+    })
 }
 
 /// A box holding an existential payload (`any P`, `any[OwnedBox] P`).

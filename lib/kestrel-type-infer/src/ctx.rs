@@ -213,6 +213,10 @@ pub struct InferCtx<'a> {
     /// relaxed with `where T: not Sized`). Recorded when the bound is
     /// emitted, so the answer never depends on whether it was solved yet.
     pub(crate) sized_bound_vars: Vec<TyVar>,
+    /// The receiver a member lookup started on, for one that peeled through
+    /// `Indirection`: a miss reports the type the user wrote (`String`), not
+    /// the pointee the lookup ended on (`StringSlice`).
+    pub(crate) peel_receivers: HashMap<HirExprId, TyVar>,
     /// Tail leaves of optional-chain arms. Their pending coerce waits for
     /// the leaf's own type even after `synth_gate` drops: unifying first
     /// would assume flattening, a silent miscompile when the tail is not an
@@ -578,6 +582,7 @@ impl<'a> InferCtx<'a> {
             view_peel_gate: true,
             view_link_gate: true,
             sized_bound_vars: Vec::new(),
+            peel_receivers: HashMap::default(),
             interpolation_depth: 0,
             solving_depth: 0,
             formation_site: None,
