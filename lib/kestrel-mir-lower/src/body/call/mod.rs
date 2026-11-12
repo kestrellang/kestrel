@@ -686,10 +686,7 @@ impl OssaBodyCtx<'_, '_> {
         // below must skip it, or the outer call re-dispatches to the inner
         // callee (#175 re-calls the method with the closure as self; #176
         // emits a Slice/user subscript witness on the FuncThick) (#175/#176).
-        let callee_is_call = matches!(
-            &self.hir.exprs[callee_expr],
-            HirExpr::Call { .. } | HirExpr::MethodCall { .. }
-        );
+        let callee_is_call = self.callee_is_call_result(callee_expr);
         let entity = if let Some(&resolved) = self
             .typed
             .as_ref()
@@ -1293,14 +1290,28 @@ impl OssaBodyCtx<'_, '_> {
         (self.lower_expr(callee_expr), true)
     }
 
+    /// Whether `callee_expr` is itself a call whose RESULT is the value the
+    /// outer `()` invokes: `s.mk()()`, `fs(0)()`, and desugared operator
+    /// calls such as `f!(2)` (a `forceUnwrap` protocol call, behind its
+    /// `Sugar` wrapper). Its recorded resolution is the inner call's callee,
+    /// never what the outer call dispatches to.
+    fn callee_is_call_result(&self, callee_expr: HirExprId) -> bool {
+        let mut expr = callee_expr;
+        while let HirExpr::Sugar { inner, .. } = &self.hir.exprs[expr] {
+            expr = *inner;
+        }
+        matches!(
+            &self.hir.exprs[expr],
+            HirExpr::Call { .. } | HirExpr::MethodCall { .. } | HirExpr::ProtocolCall { .. }
+        )
+    }
+
     fn resolve_callee_entity_from_expr(&self, callee_expr: HirExprId) -> Option<Entity> {
         // A call/method-call callee_expr produces a closure VALUE — its
         // resolution is the inner call's own callee, not an entity the outer
         // call dispatches to. Don't surface it (mirrors emit_resolved_call).
-        if !matches!(
-            &self.hir.exprs[callee_expr],
-            HirExpr::Call { .. } | HirExpr::MethodCall { .. }
-        ) && let Some(&resolved) = self
+        if !self.callee_is_call_result(callee_expr)
+            && let Some(&resolved) = self
             .typed
             .as_ref()
             .and_then(|t| t.resolutions.get(&callee_expr))

@@ -6,9 +6,9 @@ module Test
 
 func inc(x: Int64) -> Int64 { x + 1 }
 
-// `f!(2)` calls the unwrapped function. `let g = f!; g(2)` works, but the
-// direct call fails today: post-mono verification finds `forceUnwrap`
-// dispatched on the function type itself instead of on the Optional.
+// `f!(2)` calls the unwrapped function. The outer call must not reuse the
+// inner `forceUnwrap` resolution as its callee: that dispatched
+// `forceUnwrap` on the function type and failed post-mono verification.
 @main
 func main() -> lang.i64 {
     let f: (escaping (Int64) -> Int64)? = .Some(inc);
