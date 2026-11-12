@@ -410,7 +410,7 @@ _Defined in `lang/std/numeric/float32.ks`._
 #### initializer `Parsing`
 
 ```kestrel
-public init[S](parsing: S)? where S: Str, S: not Static
+public init(parsing: &StringSlice)?
 ```
 
 Parses a `Float32` from a string. Recognises decimal
@@ -1776,7 +1776,7 @@ _Defined in `lang/std/numeric/float64.ks`._
 #### initializer `Parsing`
 
 ```kestrel
-public init[S](parsing: S)? where S: Str, S: not Static
+public init(parsing: &StringSlice)?
 ```
 
 Parses a `Float64` from a string. Recognises decimal
@@ -3488,7 +3488,7 @@ _Defined in `lang/std/numeric/int16.ks`._
 #### initializer `Parsing`
 
 ```kestrel
-public init[S](parsing: S)? where S: Str, S: not Static
+public init(parsing: &StringSlice)?
 ```
 
 Parses a base-10 integer literal, optionally prefixed with `+` or `-`.
@@ -3508,7 +3508,7 @@ _Defined in `lang/std/numeric/int16.ks`._
 #### initializer `Parsing with Radix`
 
 ```kestrel
-public init[S](parsing: S, radix: Int64)? where S: Str, S: not Static
+public init(parsing: &StringSlice, radix: Int64)?
 ```
 
 Parses an integer in `radix` (base 2-36 inclusive). Letters a-z are
@@ -4945,7 +4945,7 @@ _Defined in `lang/std/numeric/int32.ks`._
 #### initializer `Parsing`
 
 ```kestrel
-public init[S](parsing: S)? where S: Str, S: not Static
+public init(parsing: &StringSlice)?
 ```
 
 Parses a base-10 integer literal, optionally prefixed with `+` or `-`.
@@ -4965,7 +4965,7 @@ _Defined in `lang/std/numeric/int32.ks`._
 #### initializer `Parsing with Radix`
 
 ```kestrel
-public init[S](parsing: S, radix: Int64)? where S: Str, S: not Static
+public init(parsing: &StringSlice, radix: Int64)?
 ```
 
 Parses an integer in `radix` (base 2-36 inclusive). Letters a-z are
@@ -6346,7 +6346,7 @@ _Defined in `lang/std/numeric/int64.ks`._
 #### initializer `Parsing`
 
 ```kestrel
-public init[S](parsing: S)? where S: Str, S: not Static
+public init(parsing: &StringSlice)?
 ```
 
 Parses a base-10 integer literal, optionally prefixed with `+` or `-`.
@@ -6366,7 +6366,7 @@ _Defined in `lang/std/numeric/int64.ks`._
 #### initializer `Parsing with Radix`
 
 ```kestrel
-public init[S](parsing: S, radix: Int64)? where S: Str, S: not Static
+public init(parsing: &StringSlice, radix: Int64)?
 ```
 
 Parses an integer in `radix` (base 2-36 inclusive). Letters a-z are
@@ -7935,7 +7935,7 @@ _Defined in `lang/std/numeric/int8.ks`._
 #### initializer `Parsing`
 
 ```kestrel
-public init[S](parsing: S)? where S: Str, S: not Static
+public init(parsing: &StringSlice)?
 ```
 
 Parses a base-10 integer literal, optionally prefixed with `+` or `-`.
@@ -7955,7 +7955,7 @@ _Defined in `lang/std/numeric/int8.ks`._
 #### initializer `Parsing with Radix`
 
 ```kestrel
-public init[S](parsing: S, radix: Int64)? where S: Str, S: not Static
+public init(parsing: &StringSlice, radix: Int64)?
 ```
 
 Parses an integer in `radix` (base 2-36 inclusive). Letters a-z are
@@ -9960,7 +9960,7 @@ _Defined in `lang/std/numeric/uint16.ks`._
 #### initializer `Parse`
 
 ```kestrel
-public init[S](parsing: S)? where S: Str, S: not Static
+public init(parsing: &StringSlice)?
 ```
 
 Parses a base-10 unsigned integer literal, optionally prefixed
@@ -9980,7 +9980,7 @@ _Defined in `lang/std/numeric/uint16.ks`._
 #### initializer `Parse Radix`
 
 ```kestrel
-public init[S](parsing: S, radix: Int64)? where S: Str, S: not Static
+public init(parsing: &StringSlice, radix: Int64)?
 ```
 
 Parses an unsigned integer in `radix` (base 2-36 inclusive). Letters
@@ -11349,7 +11349,7 @@ _Defined in `lang/std/numeric/uint32.ks`._
 #### initializer `Parse`
 
 ```kestrel
-public init[S](parsing: S)? where S: Str, S: not Static
+public init(parsing: &StringSlice)?
 ```
 
 Parses a base-10 unsigned integer literal, optionally prefixed
@@ -11369,7 +11369,7 @@ _Defined in `lang/std/numeric/uint32.ks`._
 #### initializer `Parse Radix`
 
 ```kestrel
-public init[S](parsing: S, radix: Int64)? where S: Str, S: not Static
+public init(parsing: &StringSlice, radix: Int64)?
 ```
 
 Parses an unsigned integer in `radix` (base 2-36 inclusive). Letters
@@ -12710,7 +12710,7 @@ _Defined in `lang/std/numeric/uint64.ks`._
 #### initializer `Parse`
 
 ```kestrel
-public init[S](parsing: S)? where S: Str, S: not Static
+public init(parsing: &StringSlice)?
 ```
 
 Parses a base-10 unsigned integer literal, optionally prefixed
@@ -12730,7 +12730,7 @@ _Defined in `lang/std/numeric/uint64.ks`._
 #### initializer `Parse Radix`
 
 ```kestrel
-public init[S](parsing: S, radix: Int64)? where S: Str, S: not Static
+public init(parsing: &StringSlice, radix: Int64)?
 ```
 
 Parses an unsigned integer in `radix` (base 2-36 inclusive). Letters
@@ -14120,7 +14120,7 @@ _Defined in `lang/std/numeric/uint8.ks`._
 #### initializer `Parse`
 
 ```kestrel
-public init[S](parsing: S)? where S: Str, S: not Static
+public init(parsing: &StringSlice)?
 ```
 
 Parses a base-10 unsigned integer literal, optionally prefixed
@@ -14140,7 +14140,7 @@ _Defined in `lang/std/numeric/uint8.ks`._
 #### initializer `Parse Radix`
 
 ```kestrel
-public init[S](parsing: S, radix: Int64)? where S: Str, S: not Static
+public init(parsing: &StringSlice, radix: Int64)?
 ```
 
 Parses an unsigned integer in `radix` (base 2-36 inclusive). Letters

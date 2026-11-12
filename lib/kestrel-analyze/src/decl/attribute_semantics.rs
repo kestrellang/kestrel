@@ -216,16 +216,24 @@ fn c_enum_with_payload(cx: &DeclContext<'_>, attrs: &ParsedAttrs) -> Option<Anal
 fn packed_struct(cx: &DeclContext<'_>, attrs: &ParsedAttrs) -> Vec<AnalyzeDiagnostic> {
     let packed_span = layout_span(attrs);
     let mut diags = Vec::new();
+    let fields = stored_fields(cx);
+    // An unsized tail reports E910 alone: being `not Sized` also makes it
+    // not Copyable, and a second error on the same field says nothing new.
+    let mut skip_tail = None;
     if let Some(tail) = last_stored_field_type(cx.query, cx.entity, cx.root)
         && !hir_type_is_sized(cx.query, &tail, cx.entity, cx.root)
     {
+        skip_tail = fields.last().copied();
         diags.push(invalid_for_type(
             packed_span.clone(),
             "'@layout(.Packed)' cannot be applied to a type with an unsized tail".into(),
             "packed types have a fixed size",
         ));
     }
-    for field in stored_fields(cx) {
+    for field in fields {
+        if skip_tail == Some(field) {
+            continue;
+        }
         let Some(ty) = cx.query.query(LowerTypeAnnotation {
             entity: field,
             root: cx.root,

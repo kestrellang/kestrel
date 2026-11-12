@@ -734,6 +734,7 @@ pub(crate) fn report_unsolved(ctx: &mut InferCtx<'_>) {
                         name,
                         is_call,
                         span,
+                        searched_pointee: None,
                     },
                     Some(result),
                 )
@@ -754,6 +755,7 @@ pub(crate) fn report_unsolved(ctx: &mut InferCtx<'_>) {
                         name: "subscript".into(),
                         is_call: true,
                         span,
+                        searched_pointee: None,
                     },
                     Some(result),
                 )
@@ -778,6 +780,7 @@ pub(crate) fn report_unsolved(ctx: &mut InferCtx<'_>) {
                         name,
                         is_call: true,
                         span,
+                        searched_pointee: None,
                     },
                     Some(result),
                 )
@@ -861,6 +864,7 @@ pub(crate) fn report_unsolved(ctx: &mut InferCtx<'_>) {
                         name,
                         is_call,
                         span,
+                        searched_pointee: None,
                     },
                     None,
                 )

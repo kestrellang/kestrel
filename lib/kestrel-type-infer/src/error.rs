@@ -43,6 +43,10 @@ pub enum InferError {
         name: String,
         is_call: bool,
         span: Span,
+        /// The pointee also searched when `receiver` is an `Indirection`
+        /// wrapper that peeled (`rc.missing` on an `RcBox[Account]`): the
+        /// message names the receiver as written, then this.
+        searched_pointee: Option<TyVar>,
     },
 
     /// Multiple candidates for a member — ambiguous.

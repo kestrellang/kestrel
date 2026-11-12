@@ -1984,7 +1984,7 @@ _Defined in `lang/std/streams/writable.ks`._
 #### function `write`
 
 ```kestrel
-public mutating func write(formatted: some Formattable and not Static) -> Result[(), IoError]
+public mutating func write(formatted: &some Formattable and not Static and not Sized) -> Result[(), IoError]
 ```
 
 Writes `value` formatted with its default options.
@@ -2027,7 +2027,7 @@ _Defined in `lang/std/streams/copy.ks`._
 ## function `eprint`
 
 ```kestrel
-public func eprint(some Formattable and not Static)
+public func eprint(&some Formattable and not Static and not Sized)
 ```
 
 Writes `value` to standard error. If the write fails, the process traps:
@@ -2038,7 +2038,7 @@ _Defined in `lang/std/streams/standard.ks`._
 ## function `eprintln`
 
 ```kestrel
-public func eprintln(some Formattable and not Static)
+public func eprintln(&some Formattable and not Static and not Sized)
 ```
 
 Writes `value` and a `"\n"` to standard error. Traps if the write fails,
@@ -2049,7 +2049,7 @@ _Defined in `lang/std/streams/standard.ks`._
 ## function `print`
 
 ```kestrel
-public func print(some Formattable and not Static)
+public func print(&some Formattable and not Static and not Sized)
 ```
 
 Writes `value` to standard output.
@@ -2063,7 +2063,7 @@ _Defined in `lang/std/streams/standard.ks`._
 ## function `println`
 
 ```kestrel
-public func println(some Formattable and not Static)
+public func println(&some Formattable and not Static and not Sized)
 ```
 
 Writes `value` and a `"\n"` to standard output. Stops the process with a

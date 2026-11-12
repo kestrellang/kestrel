@@ -842,6 +842,7 @@ pub(crate) fn describe_error(ctx: &InferCtx<'_>, err: &InferError) -> String {
             receiver,
             name,
             is_call,
+            searched_pointee,
             ..
         } => {
             // Wording mirrors lib1: delegating-init misses say "no method
@@ -860,11 +861,15 @@ pub(crate) fn describe_error(ctx: &InferCtx<'_>, err: &InferError) -> String {
             } else {
                 "member"
             };
+            let pointee = searched_pointee
+                .map(|p| format!(" or its pointee '{}'", describe_tyvar(ctx, p)))
+                .unwrap_or_default();
             format!(
-                "no {} '{}' on type '{}'",
+                "no {} '{}' on type '{}'{}",
                 kind,
                 name,
-                describe_tyvar(ctx, *receiver)
+                describe_tyvar(ctx, *receiver),
+                pointee
             )
         },
         InferError::AmbiguousMember { receiver, name, .. } => match receiver {

@@ -242,6 +242,7 @@ pub(super) fn member_not_found_error(
     name: &str,
     is_call: bool,
     span: Span,
+    searched_pointee: Option<TyVar>,
 ) -> InferError {
     if let Some(family) = primitive_family(ctx, recv_kind) {
         if !is_call && is_known_primitive_method(family, name) {
@@ -290,6 +291,7 @@ pub(super) fn member_not_found_error(
         name: name.to_string(),
         is_call,
         span,
+        searched_pointee,
     }
 }
 
@@ -717,9 +719,17 @@ pub(super) fn solve_member(
                         ctx.poison(result);
                         return SolveResult::Solved;
                     }
-                    let written = ctx.peel_receivers.get(&expr).copied().unwrap_or(receiver);
+                    // Name the receiver as written (`rc`), and the pointee
+                    // the peel searched too.
+                    let written = ctx.peel_receivers.get(&expr).copied();
                     return SolveResult::Error(member_not_found_error(
-                        ctx, written, &recv_kind, name, is_call, span,
+                        ctx,
+                        written.unwrap_or(receiver),
+                        &recv_kind,
+                        name,
+                        is_call,
+                        span,
+                        written.map(|_| receiver),
                     ));
                 },
             }
@@ -747,6 +757,7 @@ pub(super) fn solve_member(
                     name: name.to_string(),
                     is_call,
                     span,
+                    searched_pointee: None,
                 });
             }
 
@@ -823,6 +834,7 @@ pub(super) fn solve_member(
                             name: name.to_string(),
                             is_call,
                             span,
+                            searched_pointee: None,
                         });
                     },
                     super::call::Narrowed::ByLabels(picks)
@@ -963,6 +975,7 @@ pub(super) fn solve_member(
                     name: name.to_string(),
                     is_call,
                     span,
+                    searched_pointee: None,
                 });
             },
             kestrel_entail::Tri::Fails | kestrel_entail::Tri::Unknown => {
@@ -1034,6 +1047,7 @@ pub(super) fn solve_member(
                     name: name.to_string(),
                     is_call,
                     span,
+                    searched_pointee: None,
                 });
             }
         }

@@ -1056,8 +1056,15 @@ fn awaits_ref_decay(ctx: &InferCtx<'_>, tv: TyVar) -> bool {
     let tv = ctx.resolve(tv);
     ctx.constraints.iter().any(|c| match c {
         Constraint::EqualDecayed { target, .. } => ctx.resolve(*target) == tv,
-        Constraint::Coerce { to, expr, .. } => {
-            ctx.binding_init_exprs.contains(expr) && ctx.resolve(*to) == tv
+        // Only a ref (or still-open) initializer decays: a bound
+        // `Optional[&T]` (`let o2 = o`) is linked by its first use, as before.
+        Constraint::Coerce { from, to, expr, .. } => {
+            ctx.binding_init_exprs.contains(expr)
+                && ctx.resolve(*to) == tv
+                && matches!(
+                    ctx.slot(ctx.resolve(*from)),
+                    TySlot::Resolved(TyKind::Ref { .. }) | TySlot::Unresolved { .. }
+                )
         },
         _ => false,
     })

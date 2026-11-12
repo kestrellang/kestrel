@@ -202,6 +202,7 @@ pub(super) fn solve_call(
                 name: "subscript".to_string(),
                 is_call: true,
                 span,
+                searched_pointee: None,
             })
         },
     }
@@ -292,6 +293,7 @@ pub(super) fn solve_overloaded_call(
                 name: overload_name,
                 is_call: true,
                 span,
+                searched_pointee: None,
             }),
             [one] => emit_resolved_call(ctx, *one, &type_args, args, result, expr, span),
             // Receiver-less: an overloaded module-level function call has

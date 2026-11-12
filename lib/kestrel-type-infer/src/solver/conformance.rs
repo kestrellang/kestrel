@@ -27,6 +27,7 @@ pub(super) fn solve_applicable(
                 name,
                 is_call,
                 span,
+                searched_pointee: None,
             })
         },
         kestrel_entail::Tri::Fails | kestrel_entail::Tri::Unknown => {
