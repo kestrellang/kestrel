@@ -163,12 +163,15 @@ pub(crate) fn apply_ref_decay_defaults_into(ctx: &mut InferCtx<'_>, only: Option
             }
             continue;
         }
-        let (from, to, binds) = match c {
-            Constraint::Coerce { from, to, expr, .. } => {
-                (from, to, ctx.binding_init_exprs.contains(expr))
-            },
+        let (from, to, binds, view_arg) = match c {
+            Constraint::Coerce { from, to, expr, .. } => (
+                from,
+                to,
+                ctx.binding_init_exprs.contains(expr),
+                ctx.view_args.contains_key(expr),
+            ),
             // Arm results / tuple-literal elements wait on the same race.
-            Constraint::EqualDecayed { value, target, .. } => (value, target, true),
+            Constraint::EqualDecayed { value, target, .. } => (value, target, true, false),
             _ => continue,
         };
         let fr = ctx.resolve(*from);
@@ -198,7 +201,8 @@ pub(crate) fn apply_ref_decay_defaults_into(ctx: &mut InferCtx<'_>, only: Option
             let target = match (binds, pointee_sizedness(ctx, pointee)) {
                 (true, None) if only.is_none() => continue,
                 (true, Some(false)) => fr,
-                (false, _) if ctx.admits_ref(*to) => fr,
+                // (A `x: &T` param already takes the ref: `T` is its pointee.)
+                (false, _) if !view_arg && ctx.admits_ref(*to) => fr,
                 _ => pointee,
             };
             decays.push((*to, target));
