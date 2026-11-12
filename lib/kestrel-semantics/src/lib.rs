@@ -493,6 +493,13 @@ impl QueryFn for TypeParamCopyRequirement {
             builtin: Builtin::Cloneable,
             root: self.root,
         });
+        // `not Sized` relaxes Copyable too: a `T` that may be unsized is only
+        // ever used behind a borrow, so it is never copied (`print(value: &some
+        // Formattable and not Sized)` takes a non-Copyable `StringSlice`).
+        let sized = ctx.query(ResolveBuiltin {
+            builtin: Builtin::Sized,
+            root: self.root,
+        });
 
         // Every bound in scope is read before deciding: a positive `Copyable`
         // (or refining) bound WINS over a `not Copyable` relaxation — the
@@ -516,9 +523,8 @@ impl QueryFn for TypeParamCopyRequirement {
                         {
                             continue;
                         }
-                        if copyable.is_some()
-                            && resolve_type_entity(ctx, protocol, context, self.root) == copyable
-                        {
+                        let relaxed = resolve_type_entity(ctx, protocol, context, self.root);
+                        if relaxed.is_some() && (relaxed == copyable || relaxed == sized) {
                             negated = true;
                         }
                     },

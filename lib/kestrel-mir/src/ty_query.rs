@@ -264,7 +264,13 @@ pub fn copy_behavior_in(
                             type_param,
                             protocol,
                         } if *type_param == entity => {
-                            if env.copyable_protocol == Some(*protocol) {
+                            // `not Sized` relaxes Copyable too: a `T` that
+                            // may be unsized is never held by value, so it
+                            // can't be copied (mirrors
+                            // `TypeParamCopyRequirement`).
+                            if env.copyable_protocol == Some(*protocol)
+                                || env.sized_protocol == Some(*protocol)
+                            {
                                 // Defer: a positive bound later in the list
                                 // overrides this relaxation (positive wins).
                                 not_copyable = true;

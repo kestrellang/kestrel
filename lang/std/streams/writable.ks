@@ -82,7 +82,7 @@ extend Writable {
     }
 
     /// Writes `value` formatted with its default options.
-    public mutating func write(formatted value: &some Formattable and not Copyable and not Static and not Sized) -> Result[(), IoError] {
+    public mutating func write(formatted value: &some Formattable and not Static and not Sized) -> Result[(), IoError] {
         self.write(text: value.formatted())
     }
 
