@@ -36,7 +36,8 @@ public protocol Steppable {
     func distance(to other: Self) -> Int64
 }
 
-/// A number: arithmetic that stays in `Self`, ordering, and integer literals.
+/// A number: arithmetic that stays in `Self`, ordering, integer literals,
+/// and an exact conversion from `Int64`.
 ///
 /// Every integer and float type conforms. Generic code bound by `Numeric`
 /// can add, subtract, multiply and divide values and get `Self` back, so a
@@ -46,17 +47,23 @@ public protocol Steppable {
 /// # Examples
 ///
 /// ```
-/// func sum[T](xs: &Slice[T]) -> T where T: Numeric {
+/// func mean[T](xs: &Slice[T]) -> T where T: Numeric {
 ///     var total = T.zero;
 ///     for x in xs { total = total + x; }
-///     total
+///     total / T(exactly: xs.count)!
 /// }
 /// ```
 public protocol Numeric: Addable, Subtractable, Multipliable, Divisible, Comparable, ExpressibleByIntLiteral
     where Self.Addable.Output = Self,
           Self.Subtractable.Output = Self,
           Self.Multipliable.Output = Self,
-          Self.Divisible.Output = Self {}
+          Self.Divisible.Output = Self {
+    /// @name Exactly
+    /// Converts `value` when `Self` holds it exactly, and is `nil` when it
+    /// doesn't fit (or, for a float, would round). Generic code turns a
+    /// count into `Self` with it: `T(exactly: xs.count)!`.
+    init(exactly value: Int64)?
+}
 
 /// A number that can be negative: negation stays in `Self`, and `abs()`
 /// gives the magnitude.

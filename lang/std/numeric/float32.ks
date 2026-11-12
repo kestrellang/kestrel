@@ -314,6 +314,19 @@ public struct Float32:
         self.raw = lang.cast_f64_f32(value.raw)
     }
 
+    /// @name Exactly
+    /// Converts from `Int64` when `Float32` holds the value exactly, and
+    /// is `nil` when it would round (magnitudes above 2^24 that aren't
+    /// representable). Satisfies `Numeric`, so generic code can write
+    /// `T(exactly: xs.count)!`.
+    public init(exactly value: Int64)? {
+        let rounded = Float32(rounding: value);
+        if Int64(exactly: rounded) != value {
+            return null
+        }
+        self.raw = rounded.raw
+    }
+
     // ========================================================================
     // CLASSIFICATION (Properties)
     // ========================================================================

@@ -7,12 +7,14 @@ module Test
 import std.numeric.(Numeric)
 
 // A user type can join the family by binding each operator's `Output` to
-// itself; `sum` then works on it like on the built-in numbers.
+// itself and converting exactly from `Int64`; `sum` then works on it like
+// on the built-in numbers.
 struct Cents: Numeric {
     var value: Int64
 
     init(intLiteral value: lang.i64) { self.value = Int64(intLiteral: value) }
     init(value: Int64) { self.value = value }
+    init(exactly value: Int64)? { self.value = value }
 
     type Addable.Output = Cents
     type Subtractable.Output = Cents

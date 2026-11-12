@@ -360,6 +360,19 @@ Creates the zero value, satisfying `Defaultable`.
 
 _Defined in `lang/std/numeric/float32.ks`._
 
+#### initializer `Exactly`
+
+```kestrel
+public init(exactly: Int64)?
+```
+
+Converts from `Int64` when `Float32` holds the value exactly, and
+is `nil` when it would round (magnitudes above 2^24 that aren't
+representable). Satisfies `Numeric`, so generic code can write
+`T(exactly: xs.count)!`.
+
+_Defined in `lang/std/numeric/float32.ks`._
+
 #### initializer `From Integer`
 
 ```kestrel
@@ -1794,6 +1807,19 @@ public init()
 ```
 
 Creates the zero value, satisfying `Defaultable`.
+
+_Defined in `lang/std/numeric/float64.ks`._
+
+#### initializer `Exactly`
+
+```kestrel
+public init(exactly: Int64)?
+```
+
+Converts from `Int64` when `Float64` holds the value exactly, and
+is `nil` when it would round (magnitudes above 2^53 that aren't
+representable). Satisfies `Numeric`, so generic code can write
+`T(exactly: xs.count)!`.
 
 _Defined in `lang/std/numeric/float64.ks`._
 
@@ -6535,6 +6561,17 @@ _Defined in `lang/std/numeric/int64.ks`._
 #### initializer `Exactly`
 
 ```kestrel
+public init(exactly: Int64)?
+```
+
+Always succeeds: satisfies `Numeric.init(exactly:)`, which other
+numbers fail when the value doesn't fit.
+
+_Defined in `lang/std/numeric/int64.ks`._
+
+#### initializer `Exactly`
+
+```kestrel
 public init(exactly: UInt64)?
 ```
 
@@ -9752,7 +9789,8 @@ _Defined in `lang/std/numeric/random.ks`._
 public protocol Numeric where Self.Addable.Output == Self, Self.Subtractable.Output == Self, Self.Multipliable.Output == Self, Self.Divisible.Output == Self
 ```
 
-A number: arithmetic that stays in `Self`, ordering, and integer literals.
+A number: arithmetic that stays in `Self`, ordering, integer literals,
+and an exact conversion from `Int64`.
 
 Every integer and float type conforms. Generic code bound by `Numeric`
 can add, subtract, multiply and divide values and get `Self` back, so a
@@ -9762,12 +9800,26 @@ each operator protocol means, since all four declare one.
 ### Examples
 
 ```
-func sum[T](xs: &Slice[T]) -> T where T: Numeric {
+func mean[T](xs: &Slice[T]) -> T where T: Numeric {
     var total = T.zero;
     for x in xs { total = total + x; }
-    total
+    total / T(exactly: xs.count)!
 }
 ```
+
+_Defined in `lang/std/numeric/numeric.ks`._
+
+### Members
+
+#### initializer `Exactly`
+
+```kestrel
+init(exactly: Int64)?
+```
+
+Converts `value` when `Self` holds it exactly, and is `nil` when it
+doesn't fit (or, for a float, would round). Generic code turns a
+count into `Self` with it: `T(exactly: xs.count)!`.
 
 _Defined in `lang/std/numeric/numeric.ks`._
 

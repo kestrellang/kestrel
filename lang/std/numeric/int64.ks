@@ -169,6 +169,10 @@ public struct Int64:
     /// @name Identity
     /// `Int64` from itself, so a `Convertible[T]` bound accepts `Int64`.
     public init(from other: Int64) { self.raw = other.raw }
+    /// @name Exactly
+    /// Always succeeds: satisfies `Numeric.init(exactly:)`, which other
+    /// numbers fail when the value doesn't fit.
+    public init(exactly other: Int64)? { self.raw = other.raw }
     /// @name From Integer
     /// Converts from `Int8`. Lossless: every `Int8` fits in `Int64`.
     public init(from other: Int8) { self.raw = lang.cast_i8_i64(other.raw) }

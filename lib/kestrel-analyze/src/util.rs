@@ -401,8 +401,13 @@ pub fn same_label_witnesses_allowed(
     });
     let slots: Vec<(Entity, Entity, Vec<kestrel_hir::ty::HirTy>)> = insts
         .iter()
+        // An inherited protocol's entry is attributed to the protocol that
+        // refines it (`Numeric` via `SignedInteger`); its witness is still the
+        // type's own, so it counts for every owner.
         .filter(|(protocol, source, _)| {
-            owners.contains(source) && declares_requirement(ctx, *protocol, name, labels)
+            let inherited = ctx.get::<NodeKind>(*source) == Some(&NodeKind::Protocol);
+            (owners.contains(source) || inherited)
+                && declares_requirement(ctx, *protocol, name, labels)
         })
         .map(|(protocol, source, ast_args)| {
             let args = kestrel_hir_lower::conformance_protocol_args(

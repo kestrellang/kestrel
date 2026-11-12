@@ -8,11 +8,11 @@ import std.numeric.(Numeric, SignedNumeric, Integer, SignedInteger, UnsignedInte
 
 // The numeric protocol family lets one generic body serve every number
 // type: `T: Numeric` pins each operator's `Output` to `T`, so sums and
-// quotients need no casts.
-func mean[T](xs: &Slice[T]) -> T where T: Numeric, T: Convertible[Int64] {
+// quotients need no casts, and `init(exactly:)` turns a count into `T`.
+func mean[T](xs: &Slice[T]) -> T where T: Numeric {
     var total = T.zero;
     for x in xs { total = total + x; }
-    total / T(from: xs.count)
+    total / T(exactly: xs.count)!
 }
 
 func magnitude[T](x: T) -> T where T: SignedNumeric { x.abs() }

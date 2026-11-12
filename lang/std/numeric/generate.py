@@ -1031,6 +1031,15 @@ def generate_integer(type_name: str, bits: int, signed: bool, is_default: bool) 
         f"    /// `{type_name}` from itself, so a `Convertible[T]` bound accepts `{type_name}`.\n"
         f"    public init(from other: {type_name}) {{ self.raw = other.raw }}"
     )
+    if type_name == "Int64":
+        # Every other number gets `Numeric.init(exactly: Int64)?` from
+        # `NarrowsFrom[Int64]` (or, for floats, its own); Int64 always fits.
+        identity += (
+            "\n    /// @name Exactly\n"
+            "    /// Always succeeds: satisfies `Numeric.init(exactly:)`, which other\n"
+            "    /// numbers fail when the value doesn't fit.\n"
+            "    public init(exactly other: Int64)? { self.raw = other.raw }"
+        )
     inits = [identity] + [
         generate_integer_conversion(type_name, bits, signed, other_name, other_bits, other_signed)
         for other_name, other_bits, other_signed in other_types
@@ -1752,6 +1761,20 @@ def float_conversions(type_name: str, bits: int) -> tuple[str, str]:
     /// values beyond `{type_name}.maxValue` become ±infinity.
     public init(rounding value: {other_float}) {{
         self.raw = lang.cast_f{other_bits}_{lang_type}(value.raw)
+    }}""")
+    # `Numeric.init(exactly: Int64)?`: generic code's count-to-`T`. Strict,
+    # like the integers' `exactly:` — `nil` when the value doesn't round-trip.
+    out.append(f"""    /// @name Exactly
+    /// Converts from `Int64` when `{type_name}` holds the value exactly, and
+    /// is `nil` when it would round (magnitudes above 2^{mantissa} that aren't
+    /// representable). Satisfies `Numeric`, so generic code can write
+    /// `T(exactly: xs.count)!`.
+    public init(exactly value: Int64)? {{
+        let rounded = {type_name}(rounding: value);
+        if Int64(exactly: rounded) != value {{
+            return null
+        }}
+        self.raw = rounded.raw
     }}""")
     conf = "".join(f"    Convertible[{n}],\n" for n in conformances)
     rounding = [n for n, _, _ in rounded] + ([] if other_bits < bits else [other_float])
