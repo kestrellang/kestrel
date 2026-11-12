@@ -622,8 +622,23 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
             if let Some(requirement) = requirement {
                 ctx.protocol_call_requirements.insert(id, *requirement);
             }
-            let recv_tv = gen_expr(ctx, hir, *receiver);
-            let arg_tvs = gen_call_args(ctx, hir, args);
+            // `.Case == x`: a bare implicit-member left operand has no type of
+            // its own, so type the right operand first and check `.Case`
+            // against it, as `x == .Case` already is through the parameter.
+            let (recv_tv, arg_tvs) = if *from_operator
+                && is_bare_implicit_member(hir, *receiver)
+                && is_homogeneous_comparison(ctx, *protocol)
+            {
+                let arg_tvs = gen_call_args(ctx, hir, args);
+                let recv_tv = match arg_tvs.as_slice() {
+                    [arg] => check_expr(ctx, hir, *receiver, arg.ty, Reason::Unspecified).0,
+                    _ => gen_expr(ctx, hir, *receiver),
+                };
+                (recv_tv, arg_tvs)
+            } else {
+                let recv_tv = gen_expr(ctx, hir, *receiver);
+                (recv_tv, gen_call_args(ctx, hir, args))
+            };
             let result_tv = ctx.fresh();
 
             // A `for` loop's `iter()`: whether it is called at all depends on
@@ -1096,7 +1111,23 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
             // A collection literal is checked against a target whose type is
             // already known (`shapes = [Sq(), Rc()]` into `[any Shape]`), as
             // in a `let` with an annotation; the store below still coerces.
-            let value_tv = if is_collection_literal(hir, *value) {
+            // A closure literal is checked against the target too, so its
+            // parameters are typed (`handlers(k) = { it.count }`). A
+            // subscript target's place type is bound by its member
+            // resolution, so solve that first, as for a postponed argument.
+            let value_tv = if is_closure_literal(hir, *value) {
+                // Solve the target first: a subscript place is typed by its
+                // member resolution, as for a postponed closure argument.
+                crate::solver::fixpoint(ctx);
+                check_expr(
+                    ctx,
+                    hir,
+                    *value,
+                    target_tv,
+                    Reason::Assign(expr_span(hir, *target)),
+                )
+                .0
+            } else if is_collection_literal(hir, *value) {
                 check_expr(
                     ctx,
                     hir,
@@ -2617,6 +2648,35 @@ fn unify_literal_operands(ctx: &mut InferCtx<'_>, protocol: Entity, recv: TyVar,
     }
 }
 
+/// A `.Case` / `.case(args)` with no written owner: its type comes only from
+/// context.
+fn is_bare_implicit_member(hir: &HirBody, id: HirExprId) -> bool {
+    matches!(
+        hir.exprs[id],
+        HirExpr::ImplicitMember {
+            owner: None,
+            requirement: None,
+            ..
+        }
+    )
+}
+
+/// `==` `!=` `<` `>` `<=` `>=`: both operands are the same type in the
+/// ordinary case, so either one can type an implicit-member operand.
+fn is_homogeneous_comparison(ctx: &InferCtx<'_>, protocol: Entity) -> bool {
+    use kestrel_hir::builtin::Builtin;
+    [
+        Builtin::EqualsOperatorProtocol,
+        Builtin::NotEqualsOperatorProtocol,
+        Builtin::LessThanOperatorProtocol,
+        Builtin::GreaterThanOperatorProtocol,
+        Builtin::LessOrEqualOperatorProtocol,
+        Builtin::GreaterOrEqualOperatorProtocol,
+    ]
+    .iter()
+    .any(|&b| ctx.resolver.builtin(b) == Some(protocol))
+}
+
 /// The type `.name` resolves on when checked against `expected`: `expected`
 /// itself when its nominal declares a member `name`, else the first type
 /// argument that does (the `FromValue` promotion target of `Optional[T]` /
@@ -2823,6 +2883,12 @@ fn expected_closure_shape(
     params: &[HirClosureParam],
     expected: TyVar,
 ) -> Option<ClosureShape> {
+    // Only the shape is read here; the caller's coercion still decides the
+    // conversion. So look through an Optional (`let f: (F)? = { … }`, or a
+    // `dict(k)` place, typed by the getter's `(&V)?` until the setter is
+    // picked) and a ref to the function type inside.
+    let expected = optional_payload(ctx, expected).unwrap_or(expected);
+    let expected = peel_ref_var(ctx, expected);
     let TySlot::Resolved(TyKind::Function {
         kind,
         params: eparams,
@@ -2842,6 +2908,19 @@ fn expected_closure_shape(
         conventions: conventions.clone(),
         ret: *ret,
     })
+}
+
+/// `T` when `tv` is `Optional[T]`.
+fn optional_payload(ctx: &InferCtx<'_>, tv: TyVar) -> Option<TyVar> {
+    let optional = ctx.resolver.builtin(kestrel_hir::Builtin::OptionalEnum)?;
+    match ctx.slot(ctx.resolve(tv)) {
+        TySlot::Resolved(TyKind::Enum { entity, args } | TyKind::Struct { entity, args })
+            if *entity == optional =>
+        {
+            args.first().copied()
+        },
+        _ => None,
+    }
 }
 
 /// `check(closure, E)` (bidi §8): parameters, conventions, kind and return
