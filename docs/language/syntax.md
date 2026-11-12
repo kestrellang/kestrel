@@ -275,6 +275,7 @@ private struct C { ... }    // Visible in this file/scope
 // Ranges — usable as values, in for-in loops, and in match arms
 let r = 0..<10;          // half-open range
 for i in 0..=9 { }       // inclusive range
+let tail = xs(n - 2..);  // from `n - 2` to the end; `..<n` / `..=n` up to `n`
 // In match arms:
 //   0..<10 => "under ten",
 //   10..=100 => "up to hundred",
@@ -312,7 +313,7 @@ Loosest first. Every binary operator is left-associative except `??`.
 | `??` | right-associative |
 | `and` | |
 | `==` `!=` `<` `>` `<=` `>=` `is` | |
-| `..=` `..<` | |
+| `..=` `..<` | also the one-sided `a..`, `..<b`, `..=b` |
 | `+` `-` `\|` `^` | |
 | `*` `/` `%` `&` | |
 | `<<` `>>` | |
@@ -320,6 +321,10 @@ Loosest first. Every binary operator is left-associative except `??`.
 
 Because `|>` binds loosest, `x |> f ?? d` is `x |> (f ?? d)`. Write
 `(x |> f) ?? d` to default the result.
+
+A one-sided range groups like a binary range missing an end, so arithmetic
+stays inside it: `x + 1..` is `(x + 1)..`, `..<n - 1` is `..<(n - 1)`, and
+`-2..` starts at `-2`.
 
 ## Error Handling
 
