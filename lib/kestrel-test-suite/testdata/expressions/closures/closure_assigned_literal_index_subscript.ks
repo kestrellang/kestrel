@@ -5,8 +5,8 @@
 module Test
 
 // Same as closure_assigned_takes_target_type.ks, with a literal index: the
-// subscript can't resolve until the literal `0` is typed, so the closure is
-// generated with no expected type and `it` is unknown. Fails today (E106).
+// subscript can't resolve until the literal `0` is typed, so the target is
+// settled (literal index included) before the closure is checked against it.
 @main
 func main() -> lang.i64 {
     let s = "abcd";
