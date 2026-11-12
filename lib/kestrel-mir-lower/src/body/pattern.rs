@@ -86,9 +86,8 @@ impl OssaBodyCtx<'_, '_> {
         // ref-typed scrutinee (ret_borrow call result) is copied out and its
         // borrow ends here, BEFORE the decision tree's branch terminators
         // (a live ref at the first Branch would be a false E497). A named
-        // binding scrutinee copies too but its borrow stays — and it had
-        // better be the binding's LAST use, or the branch terminator
-        // reports the binding E497 (bindings never cross blocks).
+        // binding scrutinee is not copied: its borrow threads through the
+        // arms as a @guaranteed block param.
         if self.ref_results.contains(&val) {
             // A ref call result (`match xs(i)`, `xs(1) is A`, an `any P`
             // element) is pinned as an address so no view reaches the
@@ -106,10 +105,12 @@ impl OssaBodyCtx<'_, '_> {
             if !self.ref_binding_vals.contains_key(&val) && (!copyable || !has_guard) {
                 return (self.pin_view_address(val), true);
             }
-            // A named ref binding with a non-copyable pointee can't be
-            // copied out: it matches through the view itself, like a
-            // borrowed parameter.
-            if !copyable {
+            // A named ref binding matches through the view itself, like a
+            // borrowed parameter: arms copy only the payloads they bind.
+            // Copying it out first cloned the whole referent, so
+            // `let x = &xs(i); match x` cost more than `match xs(i)`. The
+            // binding's borrow keeps the referent frozen across a guard.
+            if self.ref_binding_vals.contains_key(&val) {
                 return (val, false);
             }
             let owned = self.emit_copy_value(val);
