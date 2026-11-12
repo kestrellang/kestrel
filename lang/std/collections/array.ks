@@ -2,7 +2,7 @@
 
 module std.collections
 
-import std.core.(Bool, Equatable, Comparable, Ordering, Cloneable, ArrayMatchable, Defaultable, fatalError)
+import std.core.(Bool, Equatable, Comparable, Ordering, Cloneable, Copyable, ArrayMatchable, Defaultable, DecaysFrom, fatalError)
 import std.core.(ExpressibleByArrayLiteral, _ExpressibleByArrayLiteral)
 import std.core.(Range, ClosedRange, Hashable)
 import std.collections.(SeqRange)
@@ -1967,5 +1967,17 @@ extend Array[T, A]: MutableIndirection {
     public var value: Slice[T] {
         ref { self.asSlice() }
         mutating ref { self.asMutableSlice() }
+    }
+}
+
+/// `DecaysFrom[Slice[T]]`: a borrowed slice converts to an owned `Array`
+/// where an `Array` is named (`let lo: Array[Int64] = xs(0..<2)`, an `Array`
+/// parameter, field or return type). Each element is copied (a `Cloneable`
+/// one is cloned). An unannotated binding keeps the view.
+extend Array[T]: DecaysFrom[Slice[T]] where T: Copyable {
+    /// Copies `value`'s elements into a new `Array`. Called by the compiler
+    /// at the conversion site; write `toOwned()` to convert explicitly.
+    public static func decaying(from value: &Slice[T]) -> Array[T] {
+        value.toOwned()
     }
 }

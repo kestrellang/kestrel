@@ -2,7 +2,7 @@
 
 module std.text
 
-import std.core.(Bool, Equal, NotEqual, Equatable, Matchable, Comparable, Cloneable, Ordering, Addable, ExpressibleByStringLiteral, Hashable, Hasher, Defaultable, Indirection, fatalError)
+import std.core.(Bool, Equal, NotEqual, Equatable, Matchable, Comparable, Cloneable, Ordering, Addable, ExpressibleByStringLiteral, Hashable, Hasher, Defaultable, Indirection, DecaysFrom, fatalError)
 import std.text.(Formattable, Formatter, StringBuilder, _writePadded)
 import std.numeric.(Int64, UInt8)
 import std.result.(Optional)
@@ -1046,5 +1046,16 @@ extend String[A]: Indirection {
     type Target = StringSlice
     public var value: StringSlice {
         ref { self.asSlice() }
+    }
+}
+
+/// `DecaysFrom[StringSlice]`: a borrowed slice converts to an owned `String`
+/// where a `String` is named (`let s: String = text.trimmed()`, a `String`
+/// parameter, field or return type). An unannotated binding keeps the view.
+extend String: DecaysFrom[StringSlice] {
+    /// Copies `value`'s bytes into a new `String`. Called by the compiler at
+    /// the conversion site; write `toOwned()` to convert explicitly.
+    public static func decaying(from value: &StringSlice) -> String {
+        value.toOwned()
     }
 }

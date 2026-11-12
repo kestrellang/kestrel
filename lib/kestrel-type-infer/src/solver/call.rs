@@ -422,6 +422,14 @@ pub(super) fn bind_call_result(
 ) {
     ctx.call_return_tvs.insert(expr, ret_tv);
     let rr = ctx.resolve(ret_tv);
+    kestrel_debug::ktrace!(
+        "decays-from",
+        "bind_call_result expr {expr:?}: ret {:?} result {:?} bind={} annotated={}",
+        ctx.slot(rr),
+        ctx.slot(ctx.resolve(result)),
+        ctx.binding_init_exprs.contains(&expr),
+        ctx.annotated_init_exprs.contains(&expr)
+    );
     // A return not known yet (`-> I.Ref` before `I` resolves) may still turn
     // out a ref: an unannotated binding decides once it does (the deferred
     // decay). An annotated one (`let a: Int64 = pick()`) must flow its type
@@ -465,6 +473,12 @@ pub(super) fn bind_call_result(
             || (ctx.always_decay_exprs.contains(&expr) && !ctx.collection_elements.contains(&expr));
         if keeps_unsized && !pinned_non_ref {
             match super::pointee_sizedness(ctx, pointee) {
+                // An annotated binding (`let lo: Array[Int64] = xs(0..<2)`)
+                // coerces, so a view pointee can convert to the named type.
+                None if ctx.annotated_init_exprs.contains(&expr) => {
+                    ctx.coerce(ret_tv, result, expr, span);
+                    return;
+                },
                 None => {
                     ctx.equal_decayed(ret_tv, result, span);
                     return;
@@ -483,6 +497,15 @@ pub(super) fn bind_call_result(
             || (args_decay && ctx.call_arg_exprs.contains(&expr) && !arg_targets_ref(ctx, expr))
             || pinned_non_ref
         {
+            // An unsized pointee pinned to a named owned type (`let s: String
+            // = t.trimmed()`, a `String` param) reaches it by conversion
+            // (`DecaysFrom`), so it coerces rather than equates.
+            // A pointee not known yet (`I.SliceOutput`) coerces whole: the
+            // coercion waits for it rather than pinning it to the target.
+            if pinned_non_ref && super::pointee_sizedness(ctx, pointee) != Some(true) {
+                ctx.coerce(ret_tv, result, expr, span);
+                return;
+            }
             ctx.equal(result, pointee, span);
             return;
         }
@@ -494,6 +517,13 @@ pub(super) fn bind_call_result(
     if super::equality::optional_ref_decay_site(ctx, expr)
         && super::equality::optional_ref_pointee(ctx, rr).is_some()
     {
+        ctx.coerce(ret_tv, result, expr, span);
+        return;
+    }
+    // A return still projected (`I.SliceOutput`) into a `DecaysFrom` target
+    // (`let lo: Array[Int64] = xs(0..<2)`) may yet be a view's ref:
+    // coercing lets it wait for the projection and convert.
+    if super::equality::awaits_projection_into_decay(ctx, ret_tv, result) {
         ctx.coerce(ret_tv, result, expr, span);
         return;
     }

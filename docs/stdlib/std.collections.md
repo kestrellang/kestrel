@@ -1563,6 +1563,10 @@ public var value: Slice[T] { ref mutating ref }
 
 _Defined in `lang/std/collections/array.ks`._
 
+### Implements `DecaysFrom`
+
+_Conditional: `where T: Copyable`._
+
 ## struct `ArrayBuilder`
 
 ```kestrel

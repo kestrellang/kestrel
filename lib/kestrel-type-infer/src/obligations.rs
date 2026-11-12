@@ -100,6 +100,12 @@ pub fn finish_body(ctx: &mut InferCtx<'_>, hir: &HirBody) {
         apply_defaults(ctx);
     }
 
+    // A ref whose pointee no default resolved coerces into its
+    // `DecaysFrom` target now, which may pin the pointee itself.
+    ctx.decay_wait_gate = false;
+    fixpoint(ctx);
+    apply_defaults(ctx);
+
     // Reports. Unresolved generic type params first, so their vars are
     // poisoned before cascades; the never-fallback (Rust's
     // `never_type_fallback`) before unsolved constraints; unsolved

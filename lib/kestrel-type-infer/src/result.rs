@@ -346,6 +346,10 @@ pub enum ResolvedTy {
 pub struct ResolvedPromotion {
     pub method: Entity,
     pub target: ResolvedTy,
+    /// A `DecaysFrom` conversion of an argument to a borrowed param
+    /// (`see(x: String)` given a slice): the copy a `&View` param would
+    /// avoid. The `view_conversion` lint reports it.
+    pub borrowed_view: bool,
 }
 
 /// Resolve a TyVar into a fully concrete ResolvedTy.
@@ -484,11 +488,27 @@ fn kind_to_resolved(ctx: &InferCtx<'_>, kind: &TyKind) -> ResolvedTy {
 
 /// Build the final TypedBody from the completed InferCtx.
 pub fn build_result(ctx: &InferCtx<'_>) -> TypedBody {
-    let expr_types = ctx
+    let mut expr_types: HashMap<HirExprId, ResolvedTy> = ctx
         .expr_types
         .iter()
         .map(|(&id, &tv)| (id, resolve_to_concrete(ctx, tv)))
         .collect();
+    // A converted view's expression whose type the conversion target pinned
+    // (`let s: String = t.trimmed()` links the call's result to `String`
+    // before its ref return is known) still yields the view's ref: the
+    // conversion is applied on top of it, like any promotion.
+    for (id, info) in &ctx.promotions {
+        let Some(view) = info.view else { continue };
+        let target = resolve_to_concrete(ctx, info.target_ty);
+        if let Some(ty) = expr_types.get_mut(id)
+            && *ty == target
+        {
+            *ty = ResolvedTy::Ref {
+                pointee: Box::new(resolve_to_concrete(ctx, view)),
+                mutating: false,
+            };
+        }
+    }
 
     let local_types = ctx
         .local_types
@@ -507,6 +527,7 @@ pub fn build_result(ctx: &InferCtx<'_>) -> TypedBody {
                 ResolvedPromotion {
                     method: info.method,
                     target: resolve_to_concrete(ctx, info.target_ty),
+                    borrowed_view: ctx.borrowed_decay_args.contains(&id),
                 },
             )
         })
@@ -1236,6 +1257,7 @@ mod tests {
                         ResolvedPromotion {
                             method: a,
                             target: ty(b),
+                            borrowed_view: false,
                         },
                     )]
                     .into_iter()

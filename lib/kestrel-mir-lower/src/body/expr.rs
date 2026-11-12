@@ -37,6 +37,15 @@ impl OssaBodyCtx<'_, '_> {
         self.apply_promotion(expr_id, value)
     }
 
+    /// Is the promotion at `expr_id` a `DecaysFrom.decaying(from:)`
+    /// conversion (a view converted to its owned type)?
+    fn is_decays_from(&self, method: Entity) -> bool {
+        self.ctx.query.query(kestrel_name_res::ResolveBuiltin {
+            builtin: kestrel_hir::Builtin::DecaysFromMethod,
+            root: self.ctx.root,
+        }) == Some(method)
+    }
+
     /// Lower `expr_id` while `held` values, lowered earlier, stay in use
     /// after it. An expression that branches (`if`, `match`, `try`) threads
     /// every scope-tracked value through block params and renames it in the
@@ -169,7 +178,21 @@ impl OssaBodyCtx<'_, '_> {
             return value;
         };
         self.ctx.register_name(protocol);
+        let decays = self.is_decays_from(requirement);
+        // A `DecaysFrom` source is an unsized view, held by reference: the
+        // protocol arg is the view type, not the ref.
         let source_ty = self.body.value(value).ty;
+        let source_ty = if decays {
+            self.ctx.module.ty_arena.peel_ref(source_ty)
+        } else {
+            source_ty
+        };
+        kestrel_debug::ktrace!(
+            "decays-from",
+            "promotion at {expr_id:?}: decays={decays} source {:?} target {:?}",
+            self.ctx.module.ty_arena.get(source_ty),
+            self.ctx.module.ty_arena.get(target_ty)
+        );
         let callee = Callee::Witness {
             protocol,
             method: self.ctx.witness_method_key(requirement),
@@ -183,7 +206,13 @@ impl OssaBodyCtx<'_, '_> {
         // result (a heap `Array`/`String` var tail promoted at a `throws`/
         // optional return). Scalars masked it via a bitwise register copy.
         // Consume the value so ownership transfers into the wrapped enum.
-        let arg = self.prepare_call_arg(value, ParamConvention::Consuming);
+        // `DecaysFrom.decaying(from: &View)` borrows the view it copies.
+        let convention = if decays {
+            ParamConvention::Borrow
+        } else {
+            ParamConvention::Consuming
+        };
+        let arg = self.prepare_call_arg(value, convention);
         self.emit_call_returning(callee, vec![arg], target_ty)
     }
 

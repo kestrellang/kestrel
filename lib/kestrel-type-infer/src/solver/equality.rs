@@ -364,6 +364,16 @@ pub(super) fn solve_coerce(
         return SolveResult::Solved;
     }
 
+    if ctx.decay_wait_gate && awaits_projection_into_decay(ctx, from, to) {
+        return SolveResult::Deferred(Constraint::Coerce {
+            from,
+            to,
+            expr,
+            span,
+            reason: Reason::Unspecified,
+        });
+    }
+
     if let Some(result) = try_view_arg_peel(ctx, from, to, expr, &span) {
         return result;
     }
@@ -492,6 +502,24 @@ pub(super) fn solve_coerce(
             });
         }
         let fp = *fp;
+        // A pointee not known yet (`xs(0..<2)` before the range's literals
+        // default) into a `DecaysFrom` target (`let lo: Array[Int64] = …`)
+        // waits: unifying now would pin the view to the owned type.
+        if ctx.decay_wait_gate
+            && matches!(
+                ctx.slot(ctx.resolve(fp)),
+                TySlot::Unresolved { literal: None }
+            )
+            && accepts_decay(ctx, to)
+        {
+            return SolveResult::Deferred(Constraint::Coerce {
+                from,
+                to,
+                expr,
+                span,
+                reason: Reason::Unspecified,
+            });
+        }
         return solve_coerce(ctx, fp, to, expr, span);
     }
 
@@ -615,6 +643,10 @@ pub(super) fn solve_coerce(
         return result;
     }
 
+    if let Some(result) = try_decays_from(ctx, from, to, &from_kind, &to_kind, expr, &span) {
+        return result;
+    }
+
     if let Some(method) = ctx.resolver.check_promotion(&from_kind, &to_kind) {
         // The source must be the target's `FromValue[Output]` arg — the
         // conformance's protocol arg, pinned at the target (`Optional[Int64]:
@@ -645,6 +677,7 @@ pub(super) fn solve_coerce(
             crate::ctx::PromotionInfo {
                 method,
                 target_ty: to,
+                view: None,
             },
         );
         return SolveResult::Solved;
@@ -1045,6 +1078,90 @@ fn try_view_arg_peel(
         .or_default()
         .push(peel);
     ctx.coerce(pointee, to, expr, span.clone());
+    Some(SolveResult::Solved)
+}
+
+/// Is `from` an associated-type projection still pending (`I.SliceOutput`)
+/// that `to`, a `DecaysFrom` target, would pin if linked now? It may yet
+/// resolve to a view's ref, which converts instead.
+pub(super) fn awaits_projection_into_decay(ctx: &InferCtx<'_>, from: TyVar, to: TyVar) -> bool {
+    let from = ctx.resolve(from);
+    matches!(ctx.slot(from), TySlot::Unresolved { literal: None })
+        && accepts_decay(ctx, to)
+        && ctx.constraints.iter().any(
+            |c| matches!(c, Constraint::Associated { result, .. } if ctx.resolve(*result) == from),
+        )
+}
+
+/// Does `to` name an owned type some view converts into (`DecaysFrom`)?
+fn accepts_decay(ctx: &InferCtx<'_>, to: TyVar) -> bool {
+    let Some(protocol) = ctx.resolver.builtin(Builtin::DecaysFromProtocol) else {
+        return false;
+    };
+    match ctx.slot(ctx.resolve(to)) {
+        TySlot::Resolved(kind @ (TyKind::Struct { .. } | TyKind::Enum { .. })) => {
+            ctx.resolver.conforms_to(kind, protocol)
+        },
+        _ => false,
+    }
+}
+
+/// Target-directed view conversion: an unsized view (`StringSlice`,
+/// `Slice[T]`; a `&View` source already peeled to it above) coerced into a
+/// named owned type conforming to `DecaysFrom[View]` builds that type with
+/// the conformance's `decaying(from:)`. Recorded as a promotion, so MIR
+/// applies it at the same value boundary. A `mutating` argument never
+/// converts (its writes would land in a temporary): it stays a mismatch.
+fn try_decays_from(
+    ctx: &mut InferCtx<'_>,
+    from: TyVar,
+    to: TyVar,
+    from_kind: &TyKind,
+    to_kind: &TyKind,
+    expr: kestrel_hir::body::HirExprId,
+    span: &Span,
+) -> Option<SolveResult> {
+    let nominal = |k: &TyKind| matches!(k, TyKind::Struct { .. } | TyKind::Enum { .. });
+    if !nominal(from_kind) || !nominal(to_kind) {
+        return None;
+    }
+    let protocol = ctx.resolver.builtin(Builtin::DecaysFromProtocol)?;
+    let method = ctx.resolver.builtin(Builtin::DecaysFromMethod)?;
+    if super::conformance::solver_ty_is_sized(ctx, from, 0)
+        || !ctx.resolver.conforms_to(to_kind, protocol)
+    {
+        return None;
+    }
+    let view = ctx.view_args.get(&expr).copied();
+    if view == Some(true) {
+        return None;
+    }
+    // The source must be the conformance's protocol arg, pinned at the
+    // target (`String: DecaysFrom[StringSlice]`).
+    let source = ctx.fresh();
+    let to_resolved = ctx.resolve(to);
+    let pinned =
+        super::conformance::unify_bound_protocol_args(ctx, to_resolved, protocol, &[source]);
+    if pinned.is_err() || unify::unify(ctx, from, source).is_err() {
+        ctx.errored_coerce_exprs.insert(expr);
+        return Some(SolveResult::Error(mismatch_error(
+            ctx,
+            to,
+            from,
+            span.clone(),
+        )));
+    }
+    if view == Some(false) {
+        ctx.borrowed_decay_args.insert(expr);
+    }
+    ctx.promotions.insert(
+        expr,
+        crate::ctx::PromotionInfo {
+            method,
+            target_ty: to,
+            view: Some(from),
+        },
+    );
     Some(SolveResult::Solved)
 }
 

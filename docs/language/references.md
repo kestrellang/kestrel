@@ -122,11 +122,24 @@ A lent `Optional[&T]` (`xs.first`, `xs(checked: i)`) decays the same way to `Opt
 
 ### References to unsized types
 
-A reference to an unsized type (`&StringSlice`, `&Slice[T]`) never decays: there is no value to copy out. A binding or tuple element keeps the reference, so `let word = text.subslice(0, 5)` is a `&StringSlice` that borrows `text`. Call `toOwned()` (or `String(...)`) when you need an owned copy.
+A reference to an unsized type (`&StringSlice`, `&Slice[T]`) never decays on its own: there is no value to copy out. A binding or tuple element keeps the reference, so `let word = text.subslice(from: 0, to: 5)` is a `&StringSlice` that borrows `text`.
+
+Where the target *names* an owned type, the view converts to it instead. The owned type opts in by conforming to `DecaysFrom[View]`; the standard library ships `String: DecaysFrom[StringSlice]` and `Array[T]: DecaysFrom[Slice[T]] where T: Copyable`:
+
+```kestrel
+let owned: String = text.trimmed();     // annotation
+let firstTwo: Array[Int64] = xs(0..<2); // annotation
+let p = Person(name: text.trimmed());   // field
+func label(s: String) -> String { s.trimmed() } // return type
+var t: String = ""; t = text.trimmed(); // assignment
+let parts: Array[String] = [a.trimmed(), b.trimmed()]; // annotated elements
+```
+
+A `consuming` parameter converts, since the callee takes ownership. A borrowed parameter converts too, but warns (E512): the callee only reads, so taking `&StringSlice` would avoid the copy. A `mutating` parameter never converts (the writes would land in a temporary) and stays a type mismatch. `toOwned()` still converts explicitly.
 
 - **Branches.** A `match` / `if` arm whose result is such a reference cannot carry it across the merge in this version (E497). Bind the slice before the branch, or produce an owned value in each arm.
-- **Collection literals.** `Array` and `Dictionary` require `Static` elements, so `[a.subslice(0, 2)]` is rejected with an "it is unsized" note. Convert each element to its owned type.
-- **Rebinding.** A `var` holding a shared reference rebinds on assignment: `var s = a.subslice(0, 2); s = b.subslice(1, 3)` points `s` at the new slice and writes nothing through the old one. A rebind inside a branch or loop is rejected (E497), and a `let` cannot be reassigned (E208).
+- **Collection literals.** `Array` and `Dictionary` require `Static` elements, so `[a.subslice(from: 0, to: 2)]` is rejected with an "it is unsized" note, unless the literal's element type is named (`let xs: Array[String] = [...]`), which converts each element.
+- **Rebinding.** A `var` holding a shared reference rebinds on assignment: `var s = a.subslice(from: 0, to: 2); s = b.subslice(from: 1, to: 3)` points `s` at the new slice and writes nothing through the old one. A rebind inside a branch or loop is rejected (E497), and a `let` cannot be reassigned (E208).
 - **Generics.** Every generic parameter is implicitly `Sized`, `Static` and `Copyable`, so passing a slice to a plain `T` is rejected with an "it is unsized" note. A borrow-only parameter opts in with `not Sized`, which also drops the implicit `Copyable`: `func show(x: &some Formattable and not Static and not Sized)`, or `func show[T](x: &T) where T: Formattable, T: not Static, T: not Sized` (a slice borrows its owner, so it also needs `not Static`). The parameter must be written with `&`; a bare `T` that is `not Sized` is taken by value (E403). `print`, `println` and string interpolation take their argument this way, so `println(word)` prints a slice in place.
 
 ## References in Structs and Tuples

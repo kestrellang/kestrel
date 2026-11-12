@@ -41,6 +41,7 @@ pub enum AnalyzerId {
     CFunction,
     PackedFieldBorrow,
     OptionalChain,
+    ViewConversion,
 
     // Decl checks
     FunctionBody,
@@ -129,6 +130,7 @@ impl AnalyzerId {
             AnalyzerId::CFunction => "c_function",
             AnalyzerId::PackedFieldBorrow => "packed_field_borrow",
             AnalyzerId::OptionalChain => "optional_chain",
+            AnalyzerId::ViewConversion => "view_conversion",
             AnalyzerId::FunctionBody => "function_body",
             AnalyzerId::ProtocolMethod => "protocol_method",
             AnalyzerId::StaticContext => "static_context",

@@ -4996,6 +4996,8 @@ public var value: StringSlice { ref }
 
 _Defined in `lang/std/text/string.ks`._
 
+### Implements `DecaysFrom`
+
 ## struct `StringBuilder`
 
 ```kestrel

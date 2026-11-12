@@ -249,6 +249,10 @@ pub enum Builtin {
     // ===== Value promotion =====
     FromValueProtocol,
     FromValueMethod,
+    /// `DecaysFrom[Source]`: a borrowed unsized view converts to its owned
+    /// type where that type is named (`let s: String = t.trimmed()`).
+    DecaysFromProtocol,
+    DecaysFromMethod,
 
     // ===== Iterator / Iterable =====
     IteratorProtocol,
@@ -572,6 +576,8 @@ impl Builtin {
             // Value promotion
             Self::FromValueProtocol => "FromValue",
             Self::FromValueMethod => "FromValueMethod",
+            Self::DecaysFromProtocol => "DecaysFrom",
+            Self::DecaysFromMethod => "DecaysFromMethod",
 
             // Iterator / Iterable
             Self::IteratorProtocol => "IteratorProtocol",
@@ -838,6 +844,8 @@ impl Builtin {
             // Value promotion
             "FromValueProtocol" => Some(Self::FromValueProtocol),
             "FromValueMethod" => Some(Self::FromValueMethod),
+            "DecaysFromProtocol" => Some(Self::DecaysFromProtocol),
+            "DecaysFromMethod" => Some(Self::DecaysFromMethod),
 
             // Iterator / Iterable
             "IteratorProtocol" => Some(Self::IteratorProtocol),
@@ -1111,6 +1119,8 @@ impl Builtin {
             // Value promotion
             Self::FromValueProtocol => BuiltinKind::protocol(),
             Self::FromValueMethod => BuiltinKind::ProtocolMethod,
+            Self::DecaysFromProtocol => BuiltinKind::protocol(),
+            Self::DecaysFromMethod => BuiltinKind::ProtocolMethod,
 
             // Iterator / Iterable
             Self::IteratorProtocol | Self::IterableProtocol => BuiltinKind::protocol(),

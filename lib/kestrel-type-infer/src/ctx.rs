@@ -327,6 +327,16 @@ pub struct InferCtx<'a> {
     /// (`solve_coerce`); a `consuming` argument never does.
     pub(crate) view_args: HashMap<HirExprId, bool>,
 
+    /// Borrowed arguments converted by `DecaysFrom` (`see(x: String)` given a
+    /// slice): the call copies a view it could have borrowed, so a lint
+    /// suggests taking `&View` instead.
+    pub(crate) borrowed_decay_args: HashSet<HirExprId>,
+
+    /// While up, a ref whose pointee is still open waits before coercing
+    /// into a `DecaysFrom` target, so the view isn't pinned to the owned
+    /// type. Dropped once every default has run.
+    pub(crate) decay_wait_gate: bool,
+
     /// `Indirection`-peel chain per ARGUMENT expr (`takes(xs)` with
     /// `takes(xs: &Slice[T])` and `xs: Array[T]`). Kept apart from
     /// `indirection_peels`, which an argument that is itself a peeled member
@@ -531,6 +541,9 @@ pub struct PromotionInfo {
     pub method: Entity,
     /// Target type (what we're promoting to).
     pub target_ty: TyVar,
+    /// A `DecaysFrom` conversion's view type (`StringSlice`), held by
+    /// reference; `None` for a `FromValue` promotion.
+    pub view: Option<TyVar>,
 }
 
 /// Metadata for a function with an opaque return type (`some P`).
@@ -606,6 +619,8 @@ impl<'a> InferCtx<'a> {
             resolutions: HashMap::default(),
             indirection_peels: HashMap::default(),
             view_args: HashMap::default(),
+            borrowed_decay_args: HashSet::default(),
+            decay_wait_gate: true,
             arg_indirection_peels: HashMap::default(),
             field_subscripts: HashMap::default(),
             promotions: HashMap::default(),
