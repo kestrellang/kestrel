@@ -136,7 +136,12 @@ impl OssaBodyCtx<'_, '_> {
 
         // Lower explicit args in source order, each with its bound param's convention.
         let mut prepared = Vec::with_capacity(args.len());
-        for (arg, &conv) in args.iter().zip(&arg_convs) {
+        for (ai, (arg, &conv)) in args.iter().zip(&arg_convs).enumerate() {
+            let slot = conv_offset + arg_slot[ai];
+            if self.param_instantiated_at_ref(callee_entity, slot, callee_type_args) {
+                prepared.push(self.prepare_ref_instantiated_arg(arg.value, conv));
+                continue;
+            }
             prepared.push(self.prepare_bound_call_arg(arg.value, conv));
         }
 
@@ -168,6 +173,50 @@ impl OssaBodyCtx<'_, '_> {
             }
         }
         result
+    }
+
+    /// Whether the callee's param `slot` is one of its type params that this
+    /// call instantiates at a ref (`take[&mutating StringBuilder](r)`).
+    fn param_instantiated_at_ref(&self, callee: Entity, slot: usize, type_args: &[TyId]) -> bool {
+        if type_args.is_empty() {
+            return false;
+        }
+        let Some(param_ty) = self
+            .ctx
+            .module
+            .functions
+            .get(&callee)
+            .and_then(|f| f.params.get(slot))
+            .map(|p| p.ty)
+        else {
+            return false;
+        };
+        let MirTy::TypeParam(tp) = *self.ctx.module.ty_arena.get(param_ty) else {
+            return false;
+        };
+        let Some(index) = self
+            .ctx
+            .world
+            .get::<kestrel_ast_builder::TypeParams>(callee)
+            .and_then(|tps| tps.0.iter().position(|&p| p == tp))
+        else {
+            return false;
+        };
+        type_args
+            .get(index)
+            .is_some_and(|&t| matches!(self.ctx.module.ty_arena.get(t), MirTy::Ref { .. }))
+    }
+
+    /// An argument for a type param instantiated at a ref: the argument IS
+    /// the ref, so pass the binding's view of its pointee as-is, like a ref
+    /// struct slot (`prep_ref_slot_element`). The value path would copy the
+    /// POINTEE, and the callee would then write to the copy.
+    fn prepare_ref_instantiated_arg(&mut self, expr: HirExprId, conv: ParamConvention) -> CallArg {
+        let value = self.lower_expr_for_borrow(expr);
+        CallArg {
+            value,
+            convention: conv,
+        }
     }
 
     /// The convention each EXPLICIT argument binds to, in source order —

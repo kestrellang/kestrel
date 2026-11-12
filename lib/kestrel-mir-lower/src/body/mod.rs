@@ -711,8 +711,32 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
             // All params stamp Param(i) — Consuming included, so a borrow of
             // a consuming param carries it to the escape check (E496 there).
             let root = RootProvenance::Param(i as u32);
-            let val = match convention {
-                ParamConvention::MutBorrow => {
+            // A REF-typed signature param, borrowed or `mutating` (an
+            // `extend &T` / `extend &mutating T` method's self): the ABI
+            // value is the ref SLOT either way. A ref is never rebound, so
+            // a `mutating` one reads like a borrowed one: peel the slot into
+            // the let-ref view below, and calls on `self` reach the pointee
+            // instead of the slot holding the address.
+            let sig_ref = matches!(convention, ParamConvention::Borrow | ParamConvention::MutBorrow)
+                .then(|| param_sig_tys.get(i))
+                .flatten()
+                .and_then(|&t| match self.ctx.module.ty_arena.get(t) {
+                    MirTy::Ref { pointee, .. } => Some((t, *pointee)),
+                    _ => None,
+                });
+            let val = match (convention, sig_ref) {
+                (_, Some((ref_ty, pointee))) => {
+                    let val = self.body.alloc_value(ValueDef {
+                        ty: ref_ty,
+                        ownership: Ownership::Guaranteed,
+                        borrow_source: None,
+                        root,
+                        span: None,
+                    });
+                    pending_ref_param_views.push((val, pointee, *hir_id));
+                    val
+                },
+                (ParamConvention::MutBorrow, None) => {
                     let val = self.body.alloc_value(ValueDef {
                         ty,
                         ownership: Ownership::Guaranteed,
@@ -743,44 +767,23 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
                     }
                     val
                 },
-                ParamConvention::Borrow => {
-                    // A REF-typed SIGNATURE param (`extend &T` methods'
-                    // self/`other: Self`): the ABI value is the ref SLOT
-                    // (resolve_local_type peels to the pointee — the expr
-                    // seam — so it can't type this). Allocate the param at
-                    // its signature type; the entry peel into the let-ref
-                    // VIEW representation is deferred below the loop — the
-                    // first `params_len` ValueIds must be exactly the params.
-                    let sig_ref =
-                        param_sig_tys
-                            .get(i)
-                            .and_then(|&t| match self.ctx.module.ty_arena.get(t) {
-                                MirTy::Ref { pointee, .. } => Some((t, *pointee)),
-                                _ => None,
-                            });
-                    if let Some((ref_ty, pointee)) = sig_ref {
-                        let val = self.body.alloc_value(ValueDef {
-                            ty: ref_ty,
-                            ownership: Ownership::Guaranteed,
-                            borrow_source: None,
-                            root,
-                            span: None,
-                        });
-                        pending_ref_param_views.push((val, pointee, *hir_id));
-                        val
-                    } else {
-                        let val = self.body.alloc_value(ValueDef {
-                            ty,
-                            ownership: Ownership::Guaranteed,
-                            borrow_source: None,
-                            root,
-                            span: None,
-                        });
-                        self.local_map.insert(*hir_id, LocalBinding::Ssa(val));
-                        val
-                    }
+                (ParamConvention::Borrow, None) => {
+                    // (Ref-typed signature params took the arm above:
+                    // resolve_local_type peels to the pointee — the expr
+                    // seam — so it can't type them. The entry peel into the
+                    // let-ref VIEW is deferred below the loop — the first
+                    // `params_len` ValueIds must be exactly the params.)
+                    let val = self.body.alloc_value(ValueDef {
+                        ty,
+                        ownership: Ownership::Guaranteed,
+                        borrow_source: None,
+                        root,
+                        span: None,
+                    });
+                    self.local_map.insert(*hir_id, LocalBinding::Ssa(val));
+                    val
                 },
-                ParamConvention::Consuming => {
+                (ParamConvention::Consuming, None) => {
                     let ownership = self.ownership_for(ty);
                     let val = self.alloc_value(ty, ownership);
                     self.body.values[val.index()].root = root;
