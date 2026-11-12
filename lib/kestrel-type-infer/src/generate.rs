@@ -2191,8 +2191,11 @@ fn gen_struct_init(
             // resolution, letting the solver disambiguate via type inference.
             let recv_tv = ctx.named(struct_entity, fresh_args.clone());
             // The member's result is the struct, wrapped by the winning
-            // init's effect (`UInt32(exactly: x)` is `UInt32?`).
-            let init_result = ctx.fresh();
+            // init's effect (`UInt32(exactly: x)` is `UInt32?`). When no
+            // candidate has an effect the result is known now: the struct
+            // itself, typed at once so later reads (`a.n`) needn't wait.
+            let any_effect = matched.iter().any(|&m| qctx.get::<InitEffect>(m).is_some());
+            let init_result = if any_effect { ctx.fresh() } else { result_tv };
             ctx.member_static(
                 recv_tv,
                 "init",

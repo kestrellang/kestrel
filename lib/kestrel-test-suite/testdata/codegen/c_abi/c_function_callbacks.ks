@@ -46,7 +46,7 @@ func swapPair(v: I32x2) -> I32x2 { I32x2(a: v.b, b: v.a) }
 func reverseVec(v: F32x3) -> F32x3 { F32x3(x: v.z, y: v.y, z: v.x) }
 
 @export(.C, mangleName: "kestrel_view_length")
-func viewLength(v: View) -> Int64 { Int64(from: v.length) }
+func viewLength(v: View) -> Int64 { Int64(exactly: v.length)! }
 
 @extern(.C, mangleName: "cb_apply")
 func apply(f: IntFn, userdata: Pointer[Int64], x: Int64) -> Int64

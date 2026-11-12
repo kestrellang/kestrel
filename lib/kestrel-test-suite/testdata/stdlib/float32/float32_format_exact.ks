@@ -28,7 +28,7 @@ func main() -> lang.i32 {
     if f(0.125).formatted(fixedOpts(2)) != "0.12" { return 3 };   // exact, half-even
     if f(2.5).formatted(fixedOpts(0)) != "2" { return 4 };         // half-even
     // bitPattern: 1.0f = 0x3F800000
-    if f(1.0).bitPattern != UInt32(from: 1065353216) { return 5 };
-    if Float32(bitPattern: UInt32(from: 1065353216)) != f(1.0) { return 6 };
+    if f(1.0).bitPattern != UInt32(exactly: 1065353216)! { return 5 };
+    if Float32(bitPattern: UInt32(exactly: 1065353216)!) != f(1.0) { return 6 };
     0
 }

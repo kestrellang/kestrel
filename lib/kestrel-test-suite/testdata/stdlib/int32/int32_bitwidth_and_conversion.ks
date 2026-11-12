@@ -46,7 +46,7 @@ module Test
 
             // init(from:) — from Int64
             let i64val: std.numeric.Int64 = 100000;
-            let fromI64 = std.numeric.Int32(from: i64val);
+            let fromI64 = std.numeric.Int32(exactly: i64val)!;
             let expectedFromI64: std.numeric.Int32 = 100000;
             if fromI64 != expectedFromI64 { return 12 }
 

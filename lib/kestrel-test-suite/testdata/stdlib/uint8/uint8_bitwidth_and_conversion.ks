@@ -41,13 +41,13 @@ module Test
 
             // init(from:) — from Int64
             let fromI64Val: std.numeric.Int64 = 200;
-            let fromI64 = std.numeric.UInt8(from: fromI64Val);
+            let fromI64 = std.numeric.UInt8(exactly: fromI64Val)!;
             let lit200: std.numeric.UInt8 = 200;
             if fromI64.isEqual(to: lit200) == false { return 11 }
 
             // init(from:) — from UInt64
             let fromU64Val: std.numeric.UInt64 = 100;
-            let fromU64 = std.numeric.UInt8(from: fromU64Val);
+            let fromU64 = std.numeric.UInt8(exactly: fromU64Val)!;
             let lit100: std.numeric.UInt8 = 100;
             if fromU64.isEqual(to: lit100) == false { return 12 }
 

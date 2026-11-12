@@ -46,7 +46,7 @@ module Test
 
             // init(from:) — from Int64
             let fromI64Val: std.numeric.Int64 = 50000;
-            let fromI64 = std.numeric.UInt16(from: fromI64Val);
+            let fromI64 = std.numeric.UInt16(exactly: fromI64Val)!;
             let lit50000: std.numeric.UInt16 = 50000;
             if fromI64.isEqual(to: lit50000) == false { return 11 }
 

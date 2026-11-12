@@ -7,7 +7,7 @@ module Test
         func main() -> lang.i64 {
             // init(from: Float64) — narrowing conversion
             let f64val: std.numeric.Float64 = 3.14;
-            let f32fromF64 = std.numeric.Float32(from: f64val);
+            let f32fromF64 = std.numeric.Float32(rounding: f64val);
             // Should be approximately 3.14 (Float32 precision)
             let f32ThreePtOneFour: std.numeric.Float32 = 3.14;
             let diff = f32fromF64.subtract(f32ThreePtOneFour).abs();
@@ -16,13 +16,13 @@ module Test
 
             // init(from: Int64)
             let i64val: std.numeric.Int64 = 42;
-            let f32fromI64 = std.numeric.Float32(from: i64val);
+            let f32fromI64 = std.numeric.Float32(rounding: i64val);
             let fortyTwoF: std.numeric.Float32 = 42.0;
             if f32fromI64.isEqual(to: fortyTwoF) == false { return 2 }
 
             // init(from: Int64) with negative
             let negI64: std.numeric.Int64 = -100;
-            let f32fromNeg = std.numeric.Float32(from: negI64);
+            let f32fromNeg = std.numeric.Float32(rounding: negI64);
             let negHundredF: std.numeric.Float32 = -100.0;
             if f32fromNeg.isEqual(to: negHundredF) == false { return 3 }
 
