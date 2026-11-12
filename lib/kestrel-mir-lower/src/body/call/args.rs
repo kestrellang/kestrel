@@ -88,6 +88,30 @@ impl OssaBodyCtx<'_, '_> {
         conv_offset: usize,
         callee_type_args: &[TyId],
     ) -> Vec<CallArg> {
+        self.lower_call_args_instantiated(
+            args,
+            callee_entity,
+            conventions,
+            conv_offset,
+            callee_type_args,
+            callee_type_args,
+        )
+    }
+
+    /// [`Self::lower_call_args_bound`] with the callee's full instantiation
+    /// (`instantiation`, aligned with its MIR type params) given apart from
+    /// the default-argument substitution args: an init's own default args
+    /// stay unsubstituted, but its owner's params still decide which
+    /// arguments are refs.
+    pub(crate) fn lower_call_args_instantiated(
+        &mut self,
+        args: &[HirCallArg],
+        callee_entity: Entity,
+        conventions: &[ParamConvention],
+        conv_offset: usize,
+        callee_type_args: &[TyId],
+        instantiation: &[TyId],
+    ) -> Vec<CallArg> {
         // Snapshot the parameter shape (owned) so the world borrow is released
         // before we lower any argument expressions.
         let shape: Option<Vec<kestrel_ast_builder::AstParam>> = self
@@ -138,7 +162,7 @@ impl OssaBodyCtx<'_, '_> {
         let mut prepared = Vec::with_capacity(args.len());
         for (ai, (arg, &conv)) in args.iter().zip(&arg_convs).enumerate() {
             let slot = conv_offset + arg_slot[ai];
-            if self.param_instantiated_at_ref(callee_entity, slot, callee_type_args) {
+            if self.param_instantiated_at_ref(callee_entity, slot, instantiation) {
                 prepared.push(self.prepare_ref_instantiated_arg(arg.value, conv));
                 continue;
             }
@@ -177,34 +201,26 @@ impl OssaBodyCtx<'_, '_> {
 
     /// Whether the callee's param `slot` is one of its type params that this
     /// call instantiates at a ref (`take[&mutating StringBuilder](r)`).
+    /// `type_args` must be the callee's whole instantiation, aligned with its
+    /// MIR type params (an init's include its owner's); any other list is
+    /// ignored rather than misread.
     fn param_instantiated_at_ref(&self, callee: Entity, slot: usize, type_args: &[TyId]) -> bool {
-        if type_args.is_empty() {
+        let Some(f) = self.ctx.module.functions.get(&callee) else {
+            return false;
+        };
+        if type_args.is_empty() || type_args.len() != f.type_params.len() {
             return false;
         }
-        let Some(param_ty) = self
-            .ctx
-            .module
-            .functions
-            .get(&callee)
-            .and_then(|f| f.params.get(slot))
-            .map(|p| p.ty)
-        else {
+        let Some(param_ty) = f.params.get(slot).map(|p| p.ty) else {
             return false;
         };
         let MirTy::TypeParam(tp) = *self.ctx.module.ty_arena.get(param_ty) else {
             return false;
         };
-        let Some(index) = self
-            .ctx
-            .world
-            .get::<kestrel_ast_builder::TypeParams>(callee)
-            .and_then(|tps| tps.0.iter().position(|&p| p == tp))
-        else {
+        let Some(index) = f.type_params.iter().position(|p| p.entity == tp) else {
             return false;
         };
-        type_args
-            .get(index)
-            .is_some_and(|&t| matches!(self.ctx.module.ty_arena.get(t), MirTy::Ref { .. }))
+        matches!(self.ctx.module.ty_arena.get(type_args[index]), MirTy::Ref { .. })
     }
 
     /// An argument for a type param instantiated at a ref: the argument IS

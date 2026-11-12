@@ -41,6 +41,21 @@ public struct BufferedReader[R]: Readable where R: Readable, R: not Copyable, R:
     /// Bytes read ahead and not yet handed out.
     public var buffered: Int64 { self.end - self.start }
 
+    /// The wrapped reader, for writing a reply on the same stream or
+    /// reading its state (Rust's `get_mut`). Reading from it directly skips
+    /// whatever this reader has buffered.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// var reader = BufferedReader(socket);
+    /// let request = try reader.readLine();
+    /// try reader.innerMutable().write(line: "OK");
+    /// ```
+    public mutating func innerMutable() -> &mutating R {
+        self.inner
+    }
+
     /// Refills the buffer if it's empty. `false` at end of stream.
     internal mutating func fill() -> Result[Bool, IoError] {
         if self.start < self.end {

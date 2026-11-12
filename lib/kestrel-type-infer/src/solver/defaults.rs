@@ -185,16 +185,20 @@ pub(crate) fn apply_ref_decay_defaults_into(ctx: &mut InferCtx<'_>, only: Option
             // An unsized pointee (`&Slice[T]`) has no value to copy out, so a
             // binding keeps the reference. A generic argument still takes the
             // pointee (`String(fromUtf8: buf(0..<n))` binds `S = Slice[UInt8]`):
-            // it is passed by borrow, so nothing is copied. (A ref couldn't
-            // bind a generic param anyway: it is never `Static`.)
+            // it is passed by borrow, so nothing is copied. (A ref can't bind
+            // a `Static` generic param anyway; a `not Static` one keeps it.)
             // A binding whose pointee is still unresolved (`let s = xs(0..<2)`
             // before the literal defaults pick the range's type) waits: it
             // may yet be unsized. A stalled receiver (`only`) needs the type
             // now, and takes the pointee.
+            // A `not Static` generic param can hold the ref itself, so a ref
+            // argument binds it to the ref (Rust's `T = &mut S`): copying
+            // the pointee would send the callee's writes to the copy.
             let pointee = *pointee;
             let target = match (binds, pointee_sizedness(ctx, pointee)) {
                 (true, None) if only.is_none() => continue,
                 (true, Some(false)) => fr,
+                (false, _) if ctx.admits_ref(*to) => fr,
                 _ => pointee,
             };
             decays.push((*to, target));

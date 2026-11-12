@@ -8,8 +8,7 @@ import std.text.(Formatter, StringBuilder)
 
 // A `not Static` param may hold a reference, so a ref argument binds it to
 // the ref (as Rust binds `T = &mut S`), not to a copy of the pointee: the
-// writes reach `b`. Fails today: `W` infers as `StringBuilder` and the
-// holder writes to a clone.
+// writes reach `b`. (An enum's params still snapshot: `.Some(r)` decays.)
 extend &mutating F: Formatter where F: Formatter {
     public mutating func append(other: &StringSlice) { self.append(other) }
     public mutating func append(char c: Char) { self.append(char: c) }

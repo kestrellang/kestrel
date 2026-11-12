@@ -520,6 +520,10 @@ pub struct InferCtx<'a> {
     /// Applied after constraint solving: only type vars still unconstrained
     /// get their default, so generic bodies like `Set.init()` keep `H` free.
     pub(crate) type_param_defaults: Vec<(TyVar, HirTy)>,
+    /// Vars instantiating a `not Static` type param: a ref argument binds
+    /// them to the ref itself, not to a copy of its pointee (see
+    /// `apply_ref_decay_defaults_into`).
+    pub(crate) ref_admitting_vars: Vec<TyVar>,
 
     /// De-dup set for TYPE-ARGUMENT conformance FAILURES, keyed by
     /// `(structural type string, protocol)`. The same wellformedness
@@ -656,6 +660,7 @@ impl<'a> InferCtx<'a> {
             loop_break_tys: Vec::new(),
             opaque_return: None,
             type_param_defaults: Vec::new(),
+            ref_admitting_vars: Vec::new(),
             reported_typearg_conformance: HashSet::default(),
         }
     }
@@ -730,6 +735,7 @@ impl<'a> InferCtx<'a> {
     /// Give `tv` type param `param`'s declared default (`A = GlobalAllocator`)
     /// if nothing pins it by the end of solving. No-op without a default.
     pub(crate) fn defer_type_param_default(&mut self, tv: TyVar, param: Entity) {
+        self.note_type_param_var(tv, param);
         if let Some(default_ty) = self
             .query_ctx
             .query(kestrel_hir_lower::LowerTypeAnnotation {
@@ -739,6 +745,33 @@ impl<'a> InferCtx<'a> {
         {
             self.type_param_defaults.push((tv, default_ty));
         }
+    }
+
+    /// Record that `tv` instantiates type param `param`. A `not Static`
+    /// param may hold a reference, so it joins `ref_admitting_vars`. An
+    /// enum's params don't: an unpinned payload (`.Some(r)`) is an owned
+    /// snapshot of the pointee, and `Optional[&T]` takes an annotation.
+    pub(crate) fn note_type_param_var(&mut self, tv: TyVar, param: Entity) {
+        let context = self.query_ctx.parent_of(param).unwrap_or(param);
+        if self.query_ctx.get::<kestrel_ast_builder::NodeKind>(context)
+            == Some(&kestrel_ast_builder::NodeKind::Enum)
+        {
+            return;
+        }
+        let requirement = self.query_ctx.query(kestrel_semantics::TypeParamStaticRequirement {
+            param,
+            context,
+            root: self.root,
+        });
+        if requirement == kestrel_semantics::StaticRequirement::MayBeNonStatic {
+            self.ref_admitting_vars.push(tv);
+        }
+    }
+
+    /// Whether `tv` instantiates a `not Static` type param.
+    pub(crate) fn admits_ref(&self, tv: TyVar) -> bool {
+        let tv = self.resolve(tv);
+        self.ref_admitting_vars.iter().any(|&v| self.resolve(v) == tv)
     }
 
     /// Allocate a fresh type variable with a literal marker.

@@ -941,6 +941,7 @@ impl OssaBodyCtx<'_, '_> {
         if let Some(init_effect) = init_effect {
             return self.emit_failable_init_call(entity, type_args, args, result_ty, init_effect);
         }
+        let instantiation = type_args.clone();
 
         let ptr_ty = self.ctx.module.ty_arena.pointer(result_ty);
         let one = self.emit_literal(Immediate::i64(1));
@@ -970,7 +971,14 @@ impl OssaBodyCtx<'_, '_> {
         }];
         // Init defaults referencing the init's own type params (rare) aren't
         // substituted here — pass no args (#148 covers the common free-fn case).
-        call_args.extend(self.lower_call_args_bound(args, entity, &conventions, 1, &[]));
+        call_args.extend(self.lower_call_args_instantiated(
+            args,
+            entity,
+            &conventions,
+            1,
+            &[],
+            &instantiation,
+        ));
 
         self.emit_call_void(callee, call_args);
         let ownership = self.ownership_for(result_ty);
@@ -993,6 +1001,7 @@ impl OssaBodyCtx<'_, '_> {
         result_ty: TyId,
         effect: InitEffect,
     ) -> ValueId {
+        let instantiation = type_args.clone();
         // result_ty is Optional[T] or Result[T, E]. Extract inner struct type.
         let (inner_ty, enum_entity, success_name, failure_name) = match &effect {
             InitEffect::Failable => {
@@ -1059,7 +1068,14 @@ impl OssaBodyCtx<'_, '_> {
             value: self_addr,
             convention: ParamConvention::MutBorrow,
         }];
-        call_args.extend(self.lower_call_args_bound(args, entity, &conventions, 1, &[]));
+        call_args.extend(self.lower_call_args_instantiated(
+            args,
+            entity,
+            &conventions,
+            1,
+            &[],
+            &instantiation,
+        ));
 
         // Call returns Optional[()] or Result[(), E]
         let init_ret = self.emit_call_returning(callee, call_args, init_ret_ty);

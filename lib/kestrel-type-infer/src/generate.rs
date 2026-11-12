@@ -3223,7 +3223,11 @@ fn instantiate_entity_inner(
             .map(|t| lower_hir_ty(ctx, t))
             .collect()
     } else {
-        type_param_entities.iter().map(|_| ctx.fresh()).collect()
+        let fresh: Vec<TyVar> = type_param_entities.iter().map(|_| ctx.fresh()).collect();
+        for (&tv, &param) in fresh.iter().zip(&type_param_entities) {
+            ctx.note_type_param_var(tv, param);
+        }
+        fresh
     };
     // The padded slots fall back to their declared defaults, and so does
     // every param of a nominal named bare (`String.make()`).
