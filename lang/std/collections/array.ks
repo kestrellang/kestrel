@@ -14,7 +14,7 @@ import std.memory.(Layout, Pointer, UnsafeSlice, UnsafeSliceIterator, RawPointer
 import std.ffi.(memcpy, memmove)
 import std.iter.(Iterator, Iterable)
 import std.text.(String)
-import std.collections.(Slice, SliceIndex, SliceClampable)
+import std.collections.(Slice, SliceIndex)
 import std.core.(MutableIndirection)
 
 /// Forward iterator over an `Array[T]`: an `UnsafeSliceIterator[T]` cursor plus
@@ -485,9 +485,9 @@ public struct Array[T, A = GlobalAllocator]: Iterable, Cloneable where A: Alloca
 
     /// The part of `range` that lies within the array, in place (always
     /// valid, possibly empty).
-    public subscript[R](within range: R) -> Slice[T] where R: SliceClampable[T] {
-        ref { R.lendWithin(range, self.asSlice()) }
-        mutating ref { R.lendMutatingWithin(range, self.asMutableSlice()) }
+    public subscript[R](within range: R) -> Slice[T] where R: SeqRange {
+        ref { self.asSlice().lendWithin(range.resolve(self.count)) }
+        mutating ref { self.asMutableSlice().lendMutatingWithin(range.resolve(self.count)) }
     }
 
     /// The element at `index` modulo `count` (negative indices count from

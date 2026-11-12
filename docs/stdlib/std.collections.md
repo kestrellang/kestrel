@@ -1329,7 +1329,7 @@ _Defined in `lang/std/collections/array.ks`._
 #### subscript `subscript`
 
 ```kestrel
-public subscript[R](within: R) -> Slice[T] where R: SliceClampable[T] { ref mutating ref }
+public subscript[R](within: R) -> Slice[T] where R: SeqRange { ref mutating ref }
 ```
 
 The part of `range` that lies within the array, in place (always
@@ -6892,6 +6892,16 @@ Like `lendClamped`, lent mutably.
 
 _Defined in `lang/std/collections/slice.ks`._
 
+#### function `lendMutatingWithin`
+
+```kestrel
+internal mutating func lendMutatingWithin(Range[Int64]) -> &mutating Slice[T]
+```
+
+Like `lendWithin`, lent mutably.
+
+_Defined in `lang/std/collections/slice.ks`._
+
 #### function `lendMutatingWrapped`
 
 ```kestrel
@@ -6899,6 +6909,16 @@ internal mutating func lendMutatingWrapped(consuming Int64) -> Optional[&mutatin
 ```
 
 Like `lendWrapped`, lent mutably.
+
+_Defined in `lang/std/collections/slice.ks`._
+
+#### function `lendWithin`
+
+```kestrel
+internal func lendWithin(Range[Int64]) -> &Slice[T]
+```
+
+Lends the part of `range` that `xs(within: range)` names.
 
 _Defined in `lang/std/collections/slice.ks`._
 
@@ -7249,7 +7269,7 @@ _Defined in `lang/std/collections/slice.ks`._
 #### subscript `subscript`
 
 ```kestrel
-public subscript[R](within: R) -> Slice[T] where R: SliceClampable[T] { ref mutating ref }
+public subscript[R](within: R) -> Slice[T] where R: SeqRange { ref mutating ref }
 ```
 
 The part of `range` that lies within the slice, in place (always
@@ -7424,34 +7444,6 @@ _Defined in `lang/std/collections/slice.ks`._
 
 ```kestrel
 type Rest = &Slice[T] where T: Copyable
-```
-
-_Defined in `lang/std/collections/slice.ks`._
-
-## protocol `SliceClampable`
-
-```kestrel
-public protocol SliceClampable[T]
-```
-
-A range that `xs(within: range)` clamps into the slice and lends.
-
-_Defined in `lang/std/collections/slice.ks`._
-
-### Members
-
-#### function `lendMutatingWithin`
-
-```kestrel
-static func lendMutatingWithin(consuming Self, mutating Slice[T]) -> &mutating Slice[T]
-```
-
-_Defined in `lang/std/collections/slice.ks`._
-
-#### function `lendWithin`
-
-```kestrel
-static func lendWithin(consuming Self, Slice[T]) -> &Slice[T]
 ```
 
 _Defined in `lang/std/collections/slice.ks`._

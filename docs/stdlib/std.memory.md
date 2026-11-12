@@ -2350,7 +2350,7 @@ _Defined in `lang/std/collections/slice_methods.ks`._
 #### subscript `subscript`
 
 ```kestrel
-public subscript[R](within: R) -> Slice[T] where R: SliceClampable[T] { ref mutating ref }
+public subscript[R](within: R) -> Slice[T] where R: SeqRange { ref mutating ref }
 ```
 
 _Defined in `lang/std/collections/slice_methods.ks`._

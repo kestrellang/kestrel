@@ -758,8 +758,6 @@ type SliceOutput = Slice[T]
 
 _Defined in `lang/std/collections/slice.ks`._
 
-### Implements `SliceClampable`
-
 ### Implements `SeqRange`
 
 #### field `endBound`
@@ -2696,8 +2694,6 @@ type SliceOutput = Slice[T]
 
 _Defined in `lang/std/collections/slice.ks`._
 
-### Implements `SliceClampable`
-
 ### Implements `SeqRange`
 
 #### field `endBound`
@@ -2891,8 +2887,6 @@ type SliceOutput = Slice[T]
 ```
 
 _Defined in `lang/std/collections/slice.ks`._
-
-### Implements `SliceClampable`
 
 ### Implements `SeqRange`
 
@@ -3197,8 +3191,6 @@ type SliceOutput = Slice[T]
 
 _Defined in `lang/std/collections/slice.ks`._
 
-### Implements `SliceClampable`
-
 ### Implements `SeqRange`
 
 #### field `endBound`
@@ -3347,8 +3339,6 @@ type SliceOutput = Slice[T]
 ```
 
 _Defined in `lang/std/collections/slice.ks`._
-
-### Implements `SliceClampable`
 
 ### Implements `SeqRange`
 

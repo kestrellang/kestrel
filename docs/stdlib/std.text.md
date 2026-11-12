@@ -339,10 +339,18 @@ type Element = Char
 
 _Defined in `lang/std/text/views.ks`._
 
-#### function `_byteOffset`
+#### field `_byteLength`
 
 ```kestrel
-func _byteOffset(Int64) -> Int64?
+var _byteLength: Int64 { get }
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+#### function `_byteOffsets`
+
+```kestrel
+func _byteOffsets(Int64, Int64) -> (Int64?, Int64?)
 ```
 
 _Defined in `lang/std/text/views.ks`._
@@ -809,10 +817,18 @@ type Element = UInt8
 
 _Defined in `lang/std/text/views.ks`._
 
-#### function `_byteOffset`
+#### field `_byteLength`
 
 ```kestrel
-func _byteOffset(Int64) -> Int64?
+var _byteLength: Int64 { get }
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+#### function `_byteOffsets`
+
+```kestrel
+func _byteOffsets(Int64, Int64) -> (Int64?, Int64?)
 ```
 
 _Defined in `lang/std/text/views.ks`._
@@ -1887,10 +1903,18 @@ type Element = Char
 
 _Defined in `lang/std/text/views.ks`._
 
-#### function `_byteOffset`
+#### field `_byteLength`
 
 ```kestrel
-func _byteOffset(Int64) -> Int64?
+var _byteLength: Int64 { get }
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+#### function `_byteOffsets`
+
+```kestrel
+func _byteOffsets(Int64, Int64) -> (Int64?, Int64?)
 ```
 
 _Defined in `lang/std/text/views.ks`._
@@ -3489,10 +3513,18 @@ type Element = Grapheme
 
 _Defined in `lang/std/text/views.ks`._
 
-#### function `_byteOffset`
+#### field `_byteLength`
 
 ```kestrel
-func _byteOffset(Int64) -> Int64?
+var _byteLength: Int64 { get }
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+#### function `_byteOffsets`
+
+```kestrel
+func _byteOffsets(Int64, Int64) -> (Int64?, Int64?)
 ```
 
 _Defined in `lang/std/text/views.ks`._
@@ -4095,10 +4127,18 @@ type Element = String
 
 _Defined in `lang/std/text/views.ks`._
 
-#### function `_byteOffset`
+#### field `_byteLength`
 
 ```kestrel
-func _byteOffset(Int64) -> Int64?
+var _byteLength: Int64 { get }
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+#### function `_byteOffsets`
+
+```kestrel
+func _byteOffsets(Int64, Int64) -> (Int64?, Int64?)
 ```
 
 _Defined in `lang/std/text/views.ks`._

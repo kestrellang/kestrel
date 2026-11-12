@@ -400,38 +400,29 @@ public struct CharsView: Iterable, Cloneable {
         }
     }
 
-    /// Internal: walk the buffer to find the byte offset of code-point
-    /// index `charIndex`. Returns the byte offset and `true` if found,
-    /// or `(byteIndex, false)` for an out-of-range character index.
-    /// Special cases: `charIndex == 0` returns `(0, true)`;
-    /// `charIndex == count` returns `(length, true)`.
-    fileprivate func _byteOffsetForCharIndex(charIndex charIndex: Int64) -> (Int64, Bool) {
-        if charIndex < 0 {
-            return (0, false)
-        }
-        if charIndex == 0 {
-            return (0, true)
+    /// Internal: the byte offsets where code points `first` and `second`
+    /// start, in one walk; `count` is the byte length and a position
+    /// outside `[0, count]` gives `.None`. Invalid bytes are skipped
+    /// without counting as a code point.
+    fileprivate func _charBoundaries(first: Int64, second: Int64) -> (Int64?, Int64?) {
+        var marks = UnitBoundaries(first, second);
+        if marks.see(0, 0) {
+            return marks.result
         }
         var ci: Int64 = 0;
         var bi: Int64 = 0;
         while bi < self.length {
-            let result = decodeUtf8(self.ptr, self.length, at: bi);
-            if let .Some(decoded) = result {
+            if let .Some(decoded) = decodeUtf8(self.ptr, self.length, at: bi) {
                 ci = ci + 1;
                 bi = bi + decoded.bytesConsumed;
-                if ci == charIndex {
-                    return (bi, true)
+                if marks.see(ci, bi) {
+                    return marks.result
                 }
             } else {
                 bi = bi + 1
             }
         }
-        // charIndex == count is a valid endpoint (one-past-the-end).
-        if ci == charIndex {
-            (bi, true)
-        } else {
-            (bi, false)
-        }
+        marks.result
     }
 
     /// Internal: build a sub-view over byte range `[startByte, endByte)`.
@@ -659,39 +650,25 @@ public struct GraphemesView: Iterable, Cloneable {
         get { I.readWrapped(index, self) }
     }
 
-    /// Internal: walk the segmenter to grapheme index `graphemeIndex`,
-    /// summing the UTF-8 byte length of each cluster. Returns the byte
-    /// offset of that grapheme's start and `true` if found, or
-    /// `(byteIdx, false)` for an out-of-range index. `graphemeIndex == 0`
-    /// returns `(0, true)`; `graphemeIndex == count` returns `(length, true)`.
-    fileprivate func _byteOffsetForGraphemeIndex(graphemeIndex graphemeIndex: Int64) -> (Int64, Bool) {
-        if graphemeIndex < 0 {
-            return (0, false)
-        }
-        if graphemeIndex == 0 {
-            return (0, true)
+    /// Internal: the byte offsets where clusters `first` and `second`
+    /// start, in one walk of the segmenter; `count` is the byte length and
+    /// a position outside `[0, count]` gives `.None`.
+    fileprivate func _graphemeBoundaries(first: Int64, second: Int64) -> (Int64?, Int64?) {
+        var marks = UnitBoundaries(first, second);
+        if marks.see(0, 0) {
+            return marks.result
         }
         var gi: Int64 = 0;
         var byteIdx: Int64 = 0;
         var it = self.iter();
-        while true {
-            let next = it.next();
-            if let .Some(g) = next {
-                byteIdx = byteIdx + g.utf8Length();
-                gi = gi + 1;
-                if gi == graphemeIndex {
-                    return (byteIdx, true)
-                }
-            } else {
-                break
+        while let .Some(g) = it.next() {
+            byteIdx = byteIdx + g.utf8Length();
+            gi = gi + 1;
+            if marks.see(gi, byteIdx) {
+                return marks.result
             }
         }
-        // graphemeIndex == count is a valid endpoint (one-past-the-end).
-        if gi == graphemeIndex {
-            (byteIdx, true)
-        } else {
-            (byteIdx, false)
-        }
+        marks.result
     }
 
     /// Internal: build a sub-view over byte range `[startByte, endByte)`.
@@ -939,73 +916,42 @@ public struct LinesView: Iterable, Cloneable {
         sliceOf(self, range).toOwned()
     }
 
-    /// Internal: walk the buffer to find the byte offset where line
-    /// `lineIndex` begins. Mirrors `_byteOffsetForCharIndex` —
-    /// `lineIndex == 0` returns `(0, true)`; `lineIndex == count`
-    /// returns `(length, true)` so range endpoints can be one-past-end;
-    /// negative or further-out indices return `(_, false)`. Recognises
-    /// `\n`, `\r\n`, and lone `\r` terminators (matching `LinesIterator`).
-    fileprivate func _byteOffsetForLineIndex(lineIndex lineIndex: Int64) -> (Int64, Bool) {
-        if lineIndex < 0 {
-            return (0, false)
-        }
-        if lineIndex == 0 {
-            return (0, true)
+    /// Internal: the byte offsets where lines `first` and `second` begin,
+    /// in one scan for terminators (`\n`, `\r\n`, `\r`); `count` is the
+    /// byte length and a position outside `[0, count]` gives `.None`. A
+    /// trailing line without a terminator still counts.
+    fileprivate func _lineBoundaries(first: Int64, second: Int64) -> (Int64?, Int64?) {
+        var marks = UnitBoundaries(first, second);
+        if marks.see(0, 0) {
+            return marks.result
         }
         var li: Int64 = 0;
         var bi: Int64 = 0;
         var lineStart: Int64 = 0;
         while bi < self.length {
-            let rawOffset: lang.i64 = bi.raw;
-            let bytePtr: lang.ptr[lang.i8] = lang.ptr_offset[lang.i8](self.ptr, rawOffset);
-            let byte: lang.i8 = unsafe lang.ptr_read(bytePtr);
-            let byteVal: lang.i32 = lang.cast_i8_i32(byte);
-            let unsignedByte: lang.i32 = lang.i32_and(byteVal, 0xFF);
-            if Bool(boolLiteral: lang.i32_eq(unsignedByte, 10)) {
-                bi = bi + 1;
-                li = li + 1;
-                if li == lineIndex {
-                    return (bi, true)
-                }
-                lineStart = bi
-            } else if Bool(boolLiteral: lang.i32_eq(unsignedByte, 13)) {
-                bi = bi + 1;
-                if bi < self.length {
-                    let nextOffset: lang.i64 = bi.raw;
-                    let nextBytePtr: lang.ptr[lang.i8] = lang.ptr_offset[lang.i8](self.ptr, nextOffset);
-                    let nextByte: lang.i8 = unsafe lang.ptr_read(nextBytePtr);
-                    let nextByteVal: lang.i32 = lang.cast_i8_i32(nextByte);
-                    let nextUnsigned: lang.i32 = lang.i32_and(nextByteVal, 0xFF);
-                    if Bool(boolLiteral: lang.i32_eq(nextUnsigned, 10)) {
-                        bi = bi + 1
-                    }
-                }
-                li = li + 1;
-                if li == lineIndex {
-                    return (bi, true)
-                }
-                lineStart = bi
-            } else {
+            let byte = self._byteAt(bi);
+            bi = bi + 1;
+            if byte == 13 and bi < self.length and self._byteAt(bi) == 10 {
                 bi = bi + 1
             }
+            if byte == 10 or byte == 13 {
+                li = li + 1;
+                if marks.see(li, bi) {
+                    return marks.result
+                }
+                lineStart = bi
+            }
         }
-        // Loop exited at end-of-buffer. If lineStart < length there is a
-        // trailing line with no terminator — count it as line `li` so the
-        // past-end endpoint (`lineIndex == count`) returns `(length, true)`.
+        // The trailing line's end is one past the last line.
         if lineStart < self.length {
-            if li == lineIndex {
-                return (lineStart, true)
-            }
-            if lineIndex == li + 1 {
-                return (self.length, true)
-            }
-            return (self.length, false)
+            marks.see(li + 1, self.length);
         }
-        if li == lineIndex {
-            (self.length, true)
-        } else {
-            (self.length, false)
-        }
+        marks.result
+    }
+
+    // The byte at `index`, unchecked.
+    fileprivate func _byteAt(index: Int64) -> UInt8 {
+        UInt8(raw: unsafe lang.ptr_read(lang.ptr_offset[lang.i8](self.ptr, index.raw)))
     }
 
     /// Internal: build a sub-view over byte range `[startByte, endByte)`.
@@ -1301,9 +1247,13 @@ internal protocol TextView {
     /// The unit at `index`, which the caller guarantees is in range.
     unsafe func _unitUnchecked(index: Int64) -> Element
 
-    /// The byte offset where unit `unit` starts (`count` gives the byte
-    /// length), or `.None` outside `[0, count]`.
-    func _byteOffset(unit: Int64) -> Int64?
+    /// The byte offsets where units `first` and `second` start, found in
+    /// one pass (`count` gives the byte length); `.None` for a position
+    /// outside `[0, count]`.
+    func _byteOffsets(first: Int64, second: Int64) -> (Int64?, Int64?)
+
+    /// The view's length in bytes. O(1).
+    var _byteLength: Int64 { get }
 
     /// The sub-view over bytes `[startByte, endByte)`.
     func _subView(startByte startByte: Int64, endByte endByte: Int64) -> Self
@@ -1365,26 +1315,22 @@ fileprivate func endUnit(bound: RangeBound) -> Int64? {
 }
 
 /// The sub-view over units `[start, end)`; `end` of `.None` runs to the end.
-/// `.None` unless `0 <= start <= end <= count`.
+/// `.None` unless `0 <= start <= end <= count`. One walk on walking views.
 fileprivate func sliceChecked[V, R](view: V, range: R) -> V? where V: TextView, V: not Static, R: SeqRange {
     let start = startUnit(range.startBound);
-    let end = endUnit(range.endBound);
     if start < 0 {
         return .None
     }
-    if let .Some(e) = end {
-        if start > e {
-            return .None
-        }
-    }
-    guard let .Some(startByte) = view._byteOffset(start) else {
+    // An open end needs only the start found, which proves it in range.
+    let end = endUnit(range.endBound) ?? start;
+    if start > end {
         return .None
     }
-    guard let .Some(e) = end else {
-        return .Some(view._subView(startByte: startByte, endByte: view._byteOffset(view.count) ?? startByte))
-    }
-    guard let .Some(endByte) = view._byteOffset(e) else {
+    guard let (.Some(startByte), .Some(endByte)) = view._byteOffsets(start, end) else {
         return .None
+    }
+    if let .Unbounded = range.endBound {
+        return .Some(view._subView(startByte: startByte, endByte: view._byteLength))
     }
     .Some(view._subView(startByte: startByte, endByte: endByte))
 }
@@ -1399,16 +1345,53 @@ fileprivate func sliceOf[V, R](view: V, range: R) -> V where V: TextView, V: not
 
 /// The sub-view over units `[start, end)`, which must already fit.
 fileprivate func sliceUnits[V](view: V, start: Int64, end: Int64) -> V where V: TextView, V: not Static {
-    let startByte = view._byteOffset(start) ?? 0;
-    let endByte = view._byteOffset(end) ?? startByte;
-    view._subView(startByte: startByte, endByte: endByte)
+    let (startByte, endByte) = view._byteOffsets(start, end);
+    let from = startByte ?? 0;
+    view._subView(startByte: from, endByte: endByte ?? from)
 }
 
 /// `view(unchecked: range)`: the sub-view with no bounds check; an open
 /// end runs to the end.
 fileprivate func sliceUnchecked[V, R](view: V, range: R) -> V where V: TextView, V: not Static, R: SeqRange {
     let start = startUnit(range.startBound);
-    sliceUnits(view, start, endUnit(range.endBound) ?? view.count)
+    if let .Some(end) = endUnit(range.endBound) {
+        return sliceUnits(view, start, end)
+    }
+    let (startByte, _) = view._byteOffsets(start, start);
+    view._subView(startByte: startByte ?? 0, endByte: view._byteLength)
+}
+
+/// Unit `unit`'s byte offset in a view whose units are bytes: itself, when
+/// in `[0, length]`.
+fileprivate func directOffset(unit: Int64, length: Int64) -> Int64? {
+    if unit < 0 or unit > length { .None } else { .Some(unit) }
+}
+
+/// Collects, during one walk over a view's unit boundaries, the byte
+/// offsets where two unit positions start.
+fileprivate struct UnitBoundaries {
+    let first: Int64
+    let second: Int64
+    var firstByte: Int64?
+    var secondByte: Int64?
+
+    init(first: Int64, second: Int64) {
+        self.first = first;
+        self.second = second;
+        self.firstByte = .None;
+        self.secondByte = .None
+    }
+
+    /// Records the boundary where unit `unit` starts, at byte `byte`; true
+    /// once the walk has passed both positions.
+    mutating func see(unit: Int64, byte: Int64) -> Bool {
+        if unit == self.first { self.firstByte = .Some(byte) }
+        if unit == self.second { self.secondByte = .Some(byte) }
+        unit >= self.first and unit >= self.second
+    }
+
+    /// The two offsets found so far.
+    var result: (Int64?, Int64?) { (self.firstByte, self.secondByte) }
 }
 
 /// `view(within: range)`: the range clamped into `[0, count]`; always
@@ -1472,9 +1455,11 @@ extend BytesView: TextView {
 
     unsafe func _unitUnchecked(index: Int64) -> UInt8 { self._readByteRaw(index: index) }
 
-    func _byteOffset(unit: Int64) -> Int64? {
-        if unit < 0 or unit > self.length { .None } else { .Some(unit) }
+    func _byteOffsets(first: Int64, second: Int64) -> (Int64?, Int64?) {
+        (directOffset(first, self.length), directOffset(second, self.length))
     }
+
+    var _byteLength: Int64 { self.length }
 }
 
 extend CharsView: TextView {
@@ -1485,10 +1470,9 @@ extend CharsView: TextView {
 
     func _unitAt(index: Int64) -> Char? { _charsViewCharAt(view: self, charIndex: index) }
 
-    func _byteOffset(unit: Int64) -> Int64? {
-        let (offset, found) = self._byteOffsetForCharIndex(charIndex: unit);
-        if found { .Some(offset) } else { .None }
-    }
+    func _byteOffsets(first: Int64, second: Int64) -> (Int64?, Int64?) { self._charBoundaries(first, second) }
+
+    var _byteLength: Int64 { self.length }
 }
 
 extend GraphemesView: TextView {
@@ -1499,10 +1483,9 @@ extend GraphemesView: TextView {
 
     func _unitAt(index: Int64) -> Grapheme? { _graphemesViewAt(view: self, graphemeIndex: index) }
 
-    func _byteOffset(unit: Int64) -> Int64? {
-        let (offset, found) = self._byteOffsetForGraphemeIndex(graphemeIndex: unit);
-        if found { .Some(offset) } else { .None }
-    }
+    func _byteOffsets(first: Int64, second: Int64) -> (Int64?, Int64?) { self._graphemeBoundaries(first, second) }
+
+    var _byteLength: Int64 { self.length }
 }
 
 extend AsciiView: TextView {
@@ -1517,9 +1500,11 @@ extend AsciiView: TextView {
 
     unsafe func _unitUnchecked(index: Int64) -> Char { asciiCharAt(self.ptr, index) }
 
-    func _byteOffset(unit: Int64) -> Int64? {
-        if unit < 0 or unit > self.length { .None } else { .Some(unit) }
+    func _byteOffsets(first: Int64, second: Int64) -> (Int64?, Int64?) {
+        (directOffset(first, self.length), directOffset(second, self.length))
     }
+
+    var _byteLength: Int64 { self.length }
 }
 
 extend LinesView: TextView {
@@ -1530,10 +1515,9 @@ extend LinesView: TextView {
 
     func _unitAt(index: Int64) -> String? { _linesViewAt(view: self, lineIndex: index) }
 
-    func _byteOffset(unit: Int64) -> Int64? {
-        let (offset, found) = self._byteOffsetForLineIndex(lineIndex: unit);
-        if found { .Some(offset) } else { .None }
-    }
+    func _byteOffsets(first: Int64, second: Int64) -> (Int64?, Int64?) { self._lineBoundaries(first, second) }
+
+    var _byteLength: Int64 { self.length }
 }
 
 // ============================================================================
@@ -1880,8 +1864,7 @@ extend CharsView {
 
     /// Resolves the n-th code point to its byte offset. O(n).
     public func index(at position: Int64) -> CharIndex? {
-        let (offset, found) = self._byteOffsetForCharIndex(charIndex: position);
-        if found { .Some(CharIndex(offset)) } else { .None }
+        self._charBoundaries(position, position).0.map({ (offset) in CharIndex(offset) })
     }
 
     /// Returns the index of the first code point matching `predicate`, or `.None`.
@@ -1937,8 +1920,7 @@ extend GraphemesView {
     /// Resolves the n-th grapheme cluster to its byte offset. O(n) —
     /// walks the segmenter from the start.
     public func index(at position: Int64) -> GraphemeIndex? {
-        let (offset, found) = self._byteOffsetForGraphemeIndex(graphemeIndex: position);
-        if found { .Some(GraphemeIndex(offset)) } else { .None }
+        self._graphemeBoundaries(position, position).0.map({ (offset) in GraphemeIndex(offset) })
     }
 }
 
@@ -1946,8 +1928,7 @@ extend LinesView {
     /// Resolves the n-th line to its byte offset. O(n) — scans for
     /// line terminators from the start.
     public func index(at position: Int64) -> LineIndex? {
-        let (offset, found) = self._byteOffsetForLineIndex(lineIndex: position);
-        if found { .Some(LineIndex(offset)) } else { .None }
+        self._lineBoundaries(position, position).0.map({ (offset) in LineIndex(offset) })
     }
 }
 

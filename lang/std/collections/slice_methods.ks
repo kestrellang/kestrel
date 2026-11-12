@@ -13,7 +13,7 @@ import std.result.(Optional)
 import std.memory.(UnsafeSlice, UnsafeSliceIterator, Pointer)
 import std.iter.(Iterable)
 import std.text.(Formattable, Formatter, FormatOptions, StringBuilder, String)
-import std.collections.(Array, Set, Slice, SliceIndex, SliceClampable)
+import std.collections.(Array, Set, Slice, SliceIndex)
 
 /// One end of a range: a position it includes, a position it stops
 /// before, or no limit (Rust's `Bound`).
@@ -129,9 +129,9 @@ extend UnsafeSlice[T] {
         mutating ref { self.asMutableSlice().lendMutatingClamped(index) }
     }
 
-    public subscript[R](within range: R) -> Slice[T] where R: SliceClampable[T] {
-        ref { R.lendWithin(range, self.asSlice()) }
-        mutating ref { R.lendMutatingWithin(range, self.asMutableSlice()) }
+    public subscript[R](within range: R) -> Slice[T] where R: SeqRange {
+        ref { self.asSlice().lendWithin(range.resolve(self.count)) }
+        mutating ref { self.asMutableSlice().lendMutatingWithin(range.resolve(self.count)) }
     }
 
     public subscript(wrapped index: Int64)? -> T {

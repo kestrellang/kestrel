@@ -118,9 +118,9 @@ extend Slice[T] {
 
     /// The part of `range` that lies within the slice, in place (always
     /// valid, possibly empty).
-    public subscript[R](within range: R) -> Slice[T] where R: SliceClampable[T] {
-        ref { R.lendWithin(range, self) }
-        mutating ref { R.lendMutatingWithin(range, self) }
+    public subscript[R](within range: R) -> Slice[T] where R: SeqRange {
+        ref { self.lendWithin(range.resolve(self.count)) }
+        mutating ref { self.lendMutatingWithin(range.resolve(self.count)) }
     }
 
     /// The element at `index` modulo `count` (negative indices count from
@@ -142,6 +142,18 @@ extend Slice[T] {
         let i = clampSliceIndex(index, self.count);
         if i < 0 { return .None; }
         .Some(unsafe self.pointer.offset(by: i).mutatingValue)
+    }
+
+    /// Lends the part of `range` that `xs(within: range)` names.
+    internal func lendWithin(range: Range[Int64]) -> &Slice[T] {
+        let r = clampSliceRange(range, self.count);
+        unsafe Slice.at(self.pointer.offset(by: r.start), r.end - r.start).value
+    }
+
+    /// Like `lendWithin`, lent mutably.
+    internal mutating func lendMutatingWithin(range: Range[Int64]) -> &mutating Slice[T] {
+        let r = clampSliceRange(range, self.count);
+        unsafe Slice.at(self.pointer.offset(by: r.start), r.end - r.start).mutatingValue
     }
 
     /// Lends the element `xs(wrapped: index)` names.
@@ -287,14 +299,6 @@ public protocol SliceIndex[T] {
     static func lendMutatingChecked(consuming index: Self, mutating base: Slice[T]) -> Optional[&mutating SliceOutput]
 }
 
-/// A range that `xs(within: range)` clamps into the slice and lends.
-public protocol SliceClampable[T] {
-    @sugarOnly
-    static func lendWithin(consuming range: Self, base: Slice[T]) -> &Slice[T]
-    @sugarOnly
-    static func lendMutatingWithin(consuming range: Self, mutating base: Slice[T]) -> &mutating Slice[T]
-}
-
 extend Int64: SliceIndex[T] {
     type SliceOutput = T
 
@@ -385,31 +389,6 @@ extend RangeThrough[Int64]: SliceIndex[T] {
     public static func lendMutatingChecked(consuming index: RangeThrough[Int64], mutating base: Slice[T]) -> Optional[&mutating Slice[T]] { checkedSubsliceMutating(base, index.resolve(base.count)) }
 }
 
-extend Range[Int64]: SliceClampable[T] {
-    public static func lendWithin(consuming range: Range[Int64], base: Slice[T]) -> &Slice[T] { unsafe subslice(base, clampSliceRange(range, base.count)).value }
-    public static func lendMutatingWithin(consuming range: Range[Int64], mutating base: Slice[T]) -> &mutating Slice[T] { unsafe subslice(base, clampSliceRange(range, base.count)).mutatingValue }
-}
-
-extend ClosedRange[Int64]: SliceClampable[T] {
-    public static func lendWithin(consuming range: ClosedRange[Int64], base: Slice[T]) -> &Slice[T] { unsafe subslice(base, clampSliceRange(range.resolve(base.count), base.count)).value }
-    public static func lendMutatingWithin(consuming range: ClosedRange[Int64], mutating base: Slice[T]) -> &mutating Slice[T] { unsafe subslice(base, clampSliceRange(range.resolve(base.count), base.count)).mutatingValue }
-}
-
-extend RangeFrom[Int64]: SliceClampable[T] {
-    public static func lendWithin(consuming range: RangeFrom[Int64], base: Slice[T]) -> &Slice[T] { unsafe subslice(base, clampSliceRange(range.resolve(base.count), base.count)).value }
-    public static func lendMutatingWithin(consuming range: RangeFrom[Int64], mutating base: Slice[T]) -> &mutating Slice[T] { unsafe subslice(base, clampSliceRange(range.resolve(base.count), base.count)).mutatingValue }
-}
-
-extend RangeUpTo[Int64]: SliceClampable[T] {
-    public static func lendWithin(consuming range: RangeUpTo[Int64], base: Slice[T]) -> &Slice[T] { unsafe subslice(base, clampSliceRange(range.resolve(base.count), base.count)).value }
-    public static func lendMutatingWithin(consuming range: RangeUpTo[Int64], mutating base: Slice[T]) -> &mutating Slice[T] { unsafe subslice(base, clampSliceRange(range.resolve(base.count), base.count)).mutatingValue }
-}
-
-extend RangeThrough[Int64]: SliceClampable[T] {
-    public static func lendWithin(consuming range: RangeThrough[Int64], base: Slice[T]) -> &Slice[T] { unsafe subslice(base, clampSliceRange(range.resolve(base.count), base.count)).value }
-    public static func lendMutatingWithin(consuming range: RangeThrough[Int64], mutating base: Slice[T]) -> &mutating Slice[T] { unsafe subslice(base, clampSliceRange(range.resolve(base.count), base.count)).mutatingValue }
-}
-
 // ============================================================================
 // HELPERS
 // ============================================================================
@@ -460,12 +439,16 @@ fileprivate func clampSliceIndex(index: Int64, count: Int64) -> Int64 {
     index
 }
 
-/// `range` clamped into `0..<count`.
+/// `range` clamped into `0..<count`; empty when it lies wholly outside.
 fileprivate func clampSliceRange(range: Range[Int64], count: Int64) -> Range[Int64] {
-    var lo = range.start;
-    var hi = range.end;
-    if lo < 0 { lo = 0 }
-    if hi > count { hi = count }
-    if lo > hi { lo = hi }
-    Range[Int64](lo, hi)
+    let hi = clampSlicePosition(range.end, count);
+    let lo = clampSlicePosition(range.start, count);
+    Range[Int64](if lo > hi { hi } else { lo }, hi)
+}
+
+/// `position` saturated into `[0, count]`.
+fileprivate func clampSlicePosition(position: Int64, count: Int64) -> Int64 {
+    if position < 0 { return 0; }
+    if position > count { return count; }
+    position
 }
