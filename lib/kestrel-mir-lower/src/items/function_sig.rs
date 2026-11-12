@@ -464,7 +464,7 @@ pub(crate) fn lower_where_clauses(ctx: &mut LowerCtx, owner: Entity, out: &mut W
                 };
                 let args = protocol_type_args
                     .iter()
-                    .filter_map(type_arg_entity)
+                    .map(|arg| crate::ty::lower_type(ctx, arg))
                     .collect();
                 out.add_constraint(WhereConstraint::implements_with_args(
                     subject, *protocol, args,
@@ -496,21 +496,6 @@ fn subject_entity(subject: &kestrel_type_infer::resolve::WhereSubject) -> Option
         WhereSubject::Param(p) => Some(*p),
         WhereSubject::Projection { assoc, .. } => Some(*assoc),
         WhereSubject::SelfType => None,
-    }
-}
-
-/// A protocol type argument as the entity mono keys it by (`T` in
-/// `SeqIndex[T]`, or a nominal).
-fn type_arg_entity(ty: &kestrel_hir::ty::HirTy) -> Option<Entity> {
-    use kestrel_hir::ty::HirTy;
-    match ty {
-        HirTy::Param(e, _)
-        | HirTy::Struct { entity: e, .. }
-        | HirTy::Enum { entity: e, .. }
-        | HirTy::Protocol { entity: e, .. }
-        | HirTy::AbstractAssoc { entity: e, .. } => Some(*e),
-        HirTy::Alias { expanded, .. } => type_arg_entity(expanded),
-        _ => None,
     }
 }
 

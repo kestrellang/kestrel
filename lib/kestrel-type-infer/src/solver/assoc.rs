@@ -149,6 +149,23 @@ pub(crate) fn solve_associated(
         return SolveResult::Solved;
     }
 
+    // A projection off a param bounded `where T: P[Args]` names the
+    // conformance those args select: a type conforming to `P[A]` and `P[B]`
+    // must project through the one the bound picked, not the first found.
+    let key = match key {
+        crate::constraint::AssocKey::Entity(assoc) => ctx
+            .query_ctx
+            .parent_of(assoc)
+            .and_then(|proto| witness_args_for(ctx, container, proto))
+            .map_or(
+                crate::constraint::AssocKey::Entity(assoc),
+                |protocol_args| crate::constraint::AssocKey::Conformance {
+                    assoc,
+                    protocol_args,
+                },
+            ),
+        other => other,
+    };
     let found = match &key {
         crate::constraint::AssocKey::Entity(assoc) => ctx
             .resolver
@@ -215,36 +232,7 @@ pub(crate) fn solve_associated(
                 // concrete type (e.g. multiple `arr(unchecked: i)` calls where
                 // every `I` collapses to `Int64`), and the fallback scan would
                 // pick whichever entry came first in HashMap iteration order.
-                let proto_args = ctx
-                    .witness_protocol_args
-                    .get(&(container, proto))
-                    .cloned()
-                    .or_else(|| {
-                        // The container may have been recorded under a
-                        // different-but-redirected TyVar (the body-level
-                        // emitter in `lib.rs` records against the body-scoped
-                        // param TyVar). Fall back to canonical match, but
-                        // only when it is unambiguous — multiple matches
-                        // mean separate call sites collapsed to the same
-                        // canonical and cannot be disambiguated by canonical
-                        // alone.
-                        let canonical = ctx.resolve(container);
-                        if let Some(args) = ctx.witness_protocol_args.get(&(canonical, proto)) {
-                            return Some(args.clone());
-                        }
-                        let mut iter =
-                            ctx.witness_protocol_args
-                                .iter()
-                                .filter(|((k_tv, k_proto), _)| {
-                                    *k_proto == proto && ctx.resolve(*k_tv) == canonical
-                                });
-                        let first = iter.next()?;
-                        if iter.next().is_some() {
-                            // Ambiguous — bail rather than pick arbitrarily.
-                            return None;
-                        }
-                        Some(first.1.clone())
-                    })?;
+                let proto_args = witness_args_for(ctx, container, proto)?;
                 let ext_params: Vec<Entity> = ctx
                     .query_ctx
                     .get::<TypeParams>(ext)
@@ -390,6 +378,42 @@ pub(crate) fn solve_associated(
             span,
         }),
     }
+}
+
+/// The protocol args a `where container: proto[Args]` clause recorded for
+/// this container: by the exact TyVar first (each call site's fresh param
+/// var), else by canonical type when only one entry collapses there —
+/// independent call sites unified to one type can't be told apart.
+fn witness_args_for(ctx: &InferCtx<'_>, container: TyVar, proto: Entity) -> Option<Vec<TyVar>> {
+    ctx.witness_protocol_args
+        .get(&(container, proto))
+        .cloned()
+        .or_else(|| {
+            // The container may have been recorded under a
+            // different-but-redirected TyVar (the body-level
+            // emitter in `lib.rs` records against the body-scoped
+            // param TyVar). Fall back to canonical match, but
+            // only when it is unambiguous — multiple matches
+            // mean separate call sites collapsed to the same
+            // canonical and cannot be disambiguated by canonical
+            // alone.
+            let canonical = ctx.resolve(container);
+            if let Some(args) = ctx.witness_protocol_args.get(&(canonical, proto)) {
+                return Some(args.clone());
+            }
+            let mut iter = ctx
+                .witness_protocol_args
+                .iter()
+                .filter(|((k_tv, k_proto), _)| {
+                    *k_proto == proto && ctx.resolve(*k_tv) == canonical
+                });
+            let first = iter.next()?;
+            if iter.next().is_some() {
+                // Ambiguous — bail rather than pick arbitrarily.
+                return None;
+            }
+            Some(first.1.clone())
+        })
 }
 
 /// Does `kind` declare conformance to the protocol that owns the associated

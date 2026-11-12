@@ -174,7 +174,10 @@ pub enum WhereConstraint {
     Implements {
         type_param: Entity,
         protocol: Entity,
-        protocol_type_args: Vec<Entity>,
+        /// The bound's protocol args as types (`T: P[Int64, U]`), in the
+        /// protocol's param order: they select which conformance the bound
+        /// names when the concrete type conforms to `P` more than once.
+        protocol_type_args: Vec<TyId>,
     },
     NotImplements {
         type_param: Entity,
@@ -202,7 +205,7 @@ impl WhereConstraint {
     pub fn implements_with_args(
         type_param: Entity,
         protocol: Entity,
-        protocol_type_args: Vec<Entity>,
+        protocol_type_args: Vec<TyId>,
     ) -> Self {
         Self::Implements {
             type_param,

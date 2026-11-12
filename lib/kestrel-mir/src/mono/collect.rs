@@ -724,32 +724,43 @@ pub fn build_subst(
 
                 subst.type_params.entry(*protocol).or_insert(concrete_ty);
 
-                for wit in witnesses.iter() {
+                // The bound's args, concrete at this instantiation, pick the
+                // conformance it names (`Int64: P[A]` vs `Int64: P[B]`) and
+                // bind the free params of `extend X: P[W]` to them.
+                let bound_args: Vec<TyId> = protocol_type_args
+                    .iter()
+                    .map(|&arg| substitute(arena, arg, &subst))
+                    .collect();
+                let selected = witnesses.iter().enumerate().find_map(|(i, wit)| {
                     if wit.protocol != *protocol {
-                        continue;
+                        return None;
                     }
                     let mut bindings = HashMap::new();
-                    if !witness::match_pattern(
+                    (witness::match_pattern(
                         arena,
                         wit.implementing_type,
                         concrete_ty,
                         &mut bindings,
-                    ) {
-                        continue;
-                    }
-                    for (pi, &wc_arg_entity) in protocol_type_args.iter().enumerate() {
-                        if let Some(&proto_expr) = wit.proto_type_args.get(pi)
-                            && let MirTy::TypeParam(ext_entity) = arena.get(proto_expr)
-                            && !subst.type_params.contains_key(ext_entity)
-                            && let Some(&cv) = subst.type_params.get(&wc_arg_entity)
-                        {
-                            subst.type_params.insert(*ext_entity, cv);
-                        }
-                    }
-                    for (entity, ty) in &bindings {
+                    ) && witness::witness_proto_args_match(arena, wit, &bound_args, &mut bindings))
+                    .then_some((i, bindings))
+                });
+                if let Some((_, bindings)) = &selected {
+                    for (entity, ty) in bindings {
                         subst.type_params.entry(*entity).or_insert(*ty);
                     }
-                    break;
+                }
+                if let Some((wit_idx, _)) = selected
+                    && !bound_args.is_empty()
+                {
+                    // Project through the selected conformance only.
+                    populate_assoc_types_from(
+                        arena,
+                        witnesses,
+                        &witnesses[wit_idx],
+                        concrete_ty,
+                        &mut subst,
+                    );
+                    continue;
                 }
 
                 populate_assoc_types(
@@ -833,6 +844,24 @@ pub fn populate_assoc_types(
             let final_ty = deep_resolve(arena, witnesses, resolved, 0);
             subst.assoc_types.insert(assoc_key, final_ty);
         }
+    }
+}
+
+/// [`populate_assoc_types`] through one chosen conformance: its bindings,
+/// with its pattern and protocol-arg params already in `subst`.
+fn populate_assoc_types_from(
+    arena: &mut TyArena,
+    witnesses: &[WitnessDef],
+    witness: &WitnessDef,
+    concrete_ty: TyId,
+    subst: &mut SubstMap,
+) {
+    for &(assoc, bound_ty) in &witness.type_bindings {
+        let resolved = substitute(arena, bound_ty, subst);
+        let final_ty = deep_resolve(arena, witnesses, resolved, 0);
+        subst
+            .assoc_types
+            .insert((concrete_ty, witness.protocol, assoc), final_ty);
     }
 }
 

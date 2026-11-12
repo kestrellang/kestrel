@@ -417,7 +417,7 @@ fn witness_more_specific(arena: &TyArena, a: &WitnessDef, b: &WitnessDef) -> boo
 /// call site's arg here, so the witness's `where` clauses are judged on it:
 /// left unbound, `extend Result[T, H]: FromResidual[E] where E: Reportable`
 /// read as "undecidable, permitted" and absorbed a non-Reportable residual.
-fn witness_proto_args_match(
+pub(crate) fn witness_proto_args_match(
     arena: &TyArena,
     witness: &WitnessDef,
     expected: &[TyId],
