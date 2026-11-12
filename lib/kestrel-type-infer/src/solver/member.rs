@@ -1420,9 +1420,11 @@ pub(super) fn solve_member(
     // The protocol's args ride along: `Int8(from: x)` resolves through
     // `Convertible[From]`, and `Int8: Convertible` alone holds for ANY
     // declared `From` — the obligation is `Int8: Convertible[typeof x]`.
-    if let Some(protocol) = resolution.via_protocol {
-        ctx.conforms_with_args(receiver, protocol, proto_type_args_tvs, span.clone());
-    }
+    // Emitted after the arguments bind (below), so a lone applicable
+    // conformance (`Int8: Convertible[Int8]`) can't pin the protocol args
+    // ahead of the call's real argument: `Int8(from: someInt64)` then fails
+    // as `Int8 !: Convertible[Int64]`, not as a bare argument mismatch.
+    let via_protocol_obligation = resolution.via_protocol.map(|p| (p, proto_type_args_tvs));
 
     // Bind arguments to parameters in declaration order, allowing defaulted
     // params to be skipped anywhere. Single source of truth: `arg_binding`.
@@ -1629,6 +1631,9 @@ pub(super) fn solve_member(
         },
         _ => ret_tv,
     };
+    if let Some((protocol, args)) = via_protocol_obligation {
+        ctx.conforms_with_args(receiver, protocol, args, span.clone());
+    }
     // An init called on its type produces the receiver, wrapped by its
     // effect (`Self?` for a failable `init(exactly:)?`, `Self throws E`) —
     // not its declared `()`. Same-label inits picked here by argument type

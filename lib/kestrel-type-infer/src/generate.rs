@@ -2109,7 +2109,14 @@ fn gen_struct_init(
         // Only emit arg constraints when exactly one init matches.
         // Multiple matches (e.g. Int64.init(from: Int8/UInt8/...)) need
         // type-directed disambiguation which happens during solving.
-        if let [init] = matched.as_slice() {
+        // A lone witness of a parameterized protocol's init (`Int8`'s only
+        // `init(from: Int8)`) goes through the protocol like the overloaded
+        // case below, so its argument is checked as a conformance.
+        let lone_witness = matches!(matched.as_slice(), [init]
+            if crate::resolve::witnesses_parameterized_requirement(qctx, root, struct_entity, *init));
+        if let [init] = matched.as_slice()
+            && !lone_witness
+        {
             let init = *init;
             // `@sugarOnly` init requirements (`init(intLiteral:)`) are built by
             // literal lowering, never by a written call outside their module.

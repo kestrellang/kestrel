@@ -932,6 +932,12 @@ impl TypeResolver for WorldResolver<'_> {
                     return Err(MemberError::NotFound);
                 }
             },
+            1 if witnesses_parameterized_requirement(self.ctx, self.root, entity, matches[0]) => {
+                match self.try_resolve_through_protocol(entity, name, args, &matches) {
+                    Some(proto_res) => return Ok(proto_res),
+                    None => matches[0],
+                }
+            },
             1 => matches[0],
             _ => {
                 // Same-label overloads that all witness one requirement of a
@@ -953,6 +959,49 @@ impl TypeResolver for WorldResolver<'_> {
 
         self.build_member_resolution(member)
     }
+}
+
+/// Whether init `member` of `type_entity` witnesses a requirement of a
+/// PARAMETERIZED protocol the type conforms to with args that appear in the
+/// member's own parameter types: `Int8.init(from: Int8)` for
+/// `Convertible[Int8]`. Such a call resolves through the protocol even with
+/// a single candidate, so it is checked like the multi-witness case
+/// (`Int64(from:)`): a wrong argument fails as `Int8 !: Convertible[Int64]`,
+/// which names the conversion that does exist, not as a bare mismatch.
+pub(crate) fn witnesses_parameterized_requirement(
+    ctx: &QueryContext<'_>,
+    root: Entity,
+    type_entity: Entity,
+    member: Entity,
+) -> bool {
+    // Inits only: an init's result is the type itself, so collapsing loses
+    // nothing. A method's result can name an associated type (`Equals.Output`)
+    // that the abstract requirement leaves open.
+    if ctx.get::<NodeKind>(member) != Some(&NodeKind::Initializer) {
+        return false;
+    }
+    let Some(param_tys) = ctx.query(LowerCallableTypes {
+        entity: member,
+        root,
+    }) else {
+        return false;
+    };
+    let param_tys: Vec<HirTy> = param_tys.into_iter().flatten().collect();
+    let insts = ctx.query(kestrel_name_res::ConformingProtocolInstantiations {
+        entity: type_entity,
+        root,
+    });
+    insts.iter().any(|(protocol, source, ast_args)| {
+        if ast_args.is_empty() {
+            return false;
+        }
+        let args =
+            kestrel_hir_lower::conformance_protocol_args(ctx, root, *protocol, *source, ast_args);
+        !args.is_empty()
+            && args
+                .iter()
+                .all(|a| param_tys.iter().any(|p| p.same_type(a)))
+    })
 }
 
 /// Compatibility check between a protocol method's parameter types and a
@@ -1475,6 +1524,12 @@ impl WorldResolver<'_> {
                         first
                     },
                     _ => return Err(MemberError::NotFound),
+                }
+            },
+            1 if witnesses_parameterized_requirement(self.ctx, self.root, *entity, matches[0]) => {
+                match self.try_resolve_through_protocol(*entity, name, _args, &matches) {
+                    Some(proto_res) => return Ok(proto_res),
+                    None => matches[0],
                 }
             },
             1 => matches[0],
