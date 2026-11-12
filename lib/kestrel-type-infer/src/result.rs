@@ -838,6 +838,9 @@ pub(crate) fn describe_error(ctx: &InferCtx<'_>, err: &InferError) -> String {
             }
             // Static failures get a "because" detail — deep in generic
             // instantiation chains the bare `T !: Static` is miserable.
+            if let Some(hint) = describe_lossy_conversion(ctx, *ty, *protocol, protocol_args) {
+                return format!("{} !: {} ({})", ty_name, proto_name, hint);
+            }
             if let Some(why) = describe_static_failure(ctx, *ty, *protocol)
                 .or_else(|| describe_unsized_value(ctx, *ty, *protocol))
                 .or_else(|| describe_sized_failure(ctx, *ty, *protocol))
@@ -1112,6 +1115,86 @@ fn describe_sized_failure(ctx: &InferCtx<'_>, ty: TyVar, protocol: Entity) -> Op
         TyKind::Struct { .. } => Some("its last stored field is unsized".into()),
         _ => None,
     }
+}
+
+/// Hint for a failed `T: Convertible[S]`: `init(from:)` is lossless only,
+/// so when `T` instead narrows or rounds from `S`, name the spellings that
+/// exist (`Int8(exactly:)` …) rather than leaving a bare `!: Convertible`.
+fn describe_lossy_conversion(
+    ctx: &InferCtx<'_>,
+    ty: TyVar,
+    protocol: Entity,
+    protocol_args: &[TyVar],
+) -> Option<String> {
+    use kestrel_hir::builtin::Builtin;
+    if ctx.resolver.builtin(Builtin::ConvertibleProtocol) != Some(protocol) {
+        return None;
+    }
+    let [source] = protocol_args else { return None };
+    let target = nominal_entity(ctx, ty)?;
+    let source_entity = nominal_entity(ctx, *source)?;
+    let declares = |builtin: Builtin| {
+        ctx.resolver
+            .builtin(builtin)
+            .is_some_and(|p| declares_conformance_from(ctx, target, p, source_entity))
+    };
+    let (ty_name, source_name) = (describe_tyvar(ctx, ty), describe_tyvar(ctx, *source));
+    if declares(Builtin::NarrowsFromProtocol) {
+        return Some(format!(
+            "not every '{source_name}' fits in '{ty_name}': use '{ty_name}(exactly:)', \
+             '{ty_name}(truncating:)' or '{ty_name}(clamping:)'"
+        ));
+    }
+    if declares(Builtin::RoundsFromProtocol) {
+        return Some(format!(
+            "'{source_name}' doesn't always convert exactly to '{ty_name}': use \
+             '{ty_name}(rounding:)'"
+        ));
+    }
+    None
+}
+
+/// The struct/enum entity `ty` resolves to, if any.
+fn nominal_entity(ctx: &InferCtx<'_>, ty: TyVar) -> Option<Entity> {
+    match ctx.slot(ctx.resolve(ty)) {
+        TySlot::Resolved(TyKind::Struct { entity, .. } | TyKind::Enum { entity, .. }) => {
+            Some(*entity)
+        },
+        _ => None,
+    }
+}
+
+/// Whether `entity` declares `protocol[Source]` for the nominal `source`
+/// (non-generic conformances only — enough for the numeric families).
+fn declares_conformance_from(
+    ctx: &InferCtx<'_>,
+    entity: Entity,
+    protocol: Entity,
+    source: Entity,
+) -> bool {
+    use kestrel_hir::ty::HirTy;
+    let insts = ctx
+        .query_ctx
+        .query(kestrel_name_res::ConformingProtocolInstantiations {
+            entity,
+            root: ctx.root,
+        });
+    insts
+        .iter()
+        .filter(|(p, ..)| *p == protocol)
+        .any(|(_, decl, ast_args)| {
+            let args = kestrel_hir_lower::conformance_protocol_args(
+                ctx.query_ctx,
+                ctx.root,
+                protocol,
+                *decl,
+                ast_args,
+            );
+            matches!(
+                args.as_slice(),
+                [HirTy::Struct { entity, .. } | HirTy::Enum { entity, .. }] if *entity == source
+            )
+        })
 }
 
 /// "Because" detail for a failed `Static` bound (references 2a): names the

@@ -253,6 +253,12 @@ pub enum Builtin {
     /// type where that type is named (`let s: String = t.trimmed()`).
     DecaysFromProtocol,
     DecaysFromMethod,
+    /// `Convertible[From]` (lossless `init(from:)`), `NarrowsFrom[From]`
+    /// and `RoundsFrom[From]`: named so a failed lossless conversion can
+    /// point at the spelling that does exist.
+    ConvertibleProtocol,
+    NarrowsFromProtocol,
+    RoundsFromProtocol,
 
     // ===== Iterator / Iterable =====
     IteratorProtocol,
@@ -578,6 +584,9 @@ impl Builtin {
             Self::FromValueMethod => "FromValueMethod",
             Self::DecaysFromProtocol => "DecaysFrom",
             Self::DecaysFromMethod => "DecaysFromMethod",
+            Self::ConvertibleProtocol => "Convertible",
+            Self::NarrowsFromProtocol => "NarrowsFrom",
+            Self::RoundsFromProtocol => "RoundsFrom",
 
             // Iterator / Iterable
             Self::IteratorProtocol => "IteratorProtocol",
@@ -846,6 +855,9 @@ impl Builtin {
             "FromValueMethod" => Some(Self::FromValueMethod),
             "DecaysFromProtocol" => Some(Self::DecaysFromProtocol),
             "DecaysFromMethod" => Some(Self::DecaysFromMethod),
+            "ConvertibleProtocol" => Some(Self::ConvertibleProtocol),
+            "NarrowsFromProtocol" => Some(Self::NarrowsFromProtocol),
+            "RoundsFromProtocol" => Some(Self::RoundsFromProtocol),
 
             // Iterator / Iterable
             "IteratorProtocol" => Some(Self::IteratorProtocol),
@@ -1121,6 +1133,9 @@ impl Builtin {
             Self::FromValueMethod => BuiltinKind::ProtocolMethod,
             Self::DecaysFromProtocol => BuiltinKind::protocol(),
             Self::DecaysFromMethod => BuiltinKind::ProtocolMethod,
+            Self::ConvertibleProtocol | Self::NarrowsFromProtocol | Self::RoundsFromProtocol => {
+                BuiltinKind::protocol()
+            },
 
             // Iterator / Iterable
             Self::IteratorProtocol | Self::IterableProtocol => BuiltinKind::protocol(),

@@ -20,6 +20,7 @@ module std.core
 /// let big: Int64 = 300;
 /// let n = Int8(exactly: big);   // nil: 300 doesn't fit
 /// ```
+@builtin(.ConvertibleProtocol)
 public protocol Convertible[From] {
     /// @name From Source
     /// Creates an instance from `value`.
@@ -45,6 +46,7 @@ public protocol Convertible[From] {
 /// Int8(clamping: big);     // 127
 /// Int64(truncating: -3.7); // -3
 /// ```
+@builtin(.NarrowsFromProtocol)
 public protocol NarrowsFrom[From] {
     /// @name Exactly
     /// Converts `value` when it fits in `Self`, and is `nil` when it doesn't.
@@ -71,6 +73,7 @@ public protocol NarrowsFrom[From] {
 /// let n: Int64 = 9_007_199_254_740_993;   // 2^53 + 1
 /// Float64(rounding: n);                   // 9007199254740992.0
 /// ```
+@builtin(.RoundsFromProtocol)
 public protocol RoundsFrom[From] {
     /// @name Rounding
     /// Converts `value`, rounding to the nearest `Self`.
