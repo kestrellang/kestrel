@@ -956,7 +956,7 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
             // Patterns are checked against a synthesized scrutinee (bidi
             // §6.1 / P3f): settle it first, so binders get their types here
             // rather than from a deferred ImplicitPat.
-            settle_scrutinee(ctx, scrut_tv);
+            settle_open_value(ctx, scrut_tv);
             let result_tv = ctx.fresh();
             // An optional-chain bind is always checked against `Optional[α]`
             // (wrap-or-flatten at the tail leaf); an outer expectation pins α.
@@ -1117,8 +1117,9 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
             // resolution, so solve that first, as for a postponed argument.
             let value_tv = if is_closure_literal(hir, *value) {
                 // Solve the target first: a subscript place is typed by its
-                // member resolution, as for a postponed closure argument.
-                crate::solver::fixpoint(ctx);
+                // member resolution, as for a postponed closure argument,
+                // which a literal index (`list(0) = { … }`) must not hold up.
+                settle_open_value(ctx, target_tv);
                 check_expr(
                     ctx,
                     hir,
@@ -2601,10 +2602,12 @@ fn require_known_receiver(ctx: &mut InferCtx<'_>, recv: TyVar, member: &str, spa
     ctx.poison(open);
 }
 
-/// Settle a match scrutinee before its patterns are generated: solve the
-/// left side and default the open literals it is built from (unless it is
-/// itself a literal, which literal patterns may still type).
-fn settle_scrutinee(ctx: &mut InferCtx<'_>, scrut: TyVar) {
+/// Settle a value before the code typed from it is generated (a match
+/// scrutinee before its patterns, an assignment target before its closure
+/// value): solve the left side and default the open literals it is built
+/// from (unless it is itself a literal, which literal patterns may still
+/// type).
+fn settle_open_value(ctx: &mut InferCtx<'_>, scrut: TyVar) {
     if !receiver_open(ctx, scrut) {
         return;
     }

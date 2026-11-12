@@ -27,8 +27,30 @@ pub(crate) fn rule_l_applies(
         return false;
     };
     kind.is_nominal_concrete()
+        && operand_defaults_to_self(ctx, protocol)
         && crate::unify::conforms_to_literal_protocol(ctx, kind, *lit)
         && ctx.resolver.conforms_to(kind, protocol)
+}
+
+/// Whether the operator protocol's operand parameter defaults to `Self`
+/// (`Addable[Other = Self]`): only then is the right operand evidence for
+/// the receiver's type. A shift's count (`LeftShift[Other = Int64]`) says
+/// nothing about the value shifted, so `let a: UInt32 = 1 << n` leaves the
+/// literal to its expected type.
+fn operand_defaults_to_self(ctx: &InferCtx<'_>, protocol: Entity) -> bool {
+    let Some(kestrel_ast_builder::TypeParams(params)) = ctx.query_ctx.get(protocol) else {
+        return false;
+    };
+    let [param] = params.as_slice() else {
+        return false;
+    };
+    matches!(
+        ctx.query_ctx.query(kestrel_hir_lower::LowerTypeAnnotation {
+            entity: *param,
+            root: ctx.root,
+        }),
+        Some(kestrel_hir::ty::HirTy::SelfType(..))
+    )
 }
 
 pub(crate) fn apply_operator_literal_adoption(ctx: &mut InferCtx<'_>) -> bool {
@@ -491,6 +513,7 @@ fn apply_receiver_literal_defaults(ctx: &mut InferCtx<'_>) -> bool {
 pub(crate) fn apply_context_literals(ctx: &mut InferCtx<'_>) -> bool {
     let mut picks: Vec<(TyVar, Entity)> = Vec::new();
     let mut context_types: Vec<(TyVar, TyVar)> = Vec::new();
+    let mut identity_picks: Vec<(TyVar, TyVar)> = Vec::new();
     for constraint in &ctx.constraints {
         match constraint {
             Constraint::Member {
@@ -514,6 +537,34 @@ pub(crate) fn apply_context_literals(ctx: &mut InferCtx<'_>) -> bool {
                 result,
                 ..
             } => collect_context_literal(ctx, *receiver, *result, &mut context_types),
+            // `UInt64(from: 1)`: `UInt64: Convertible[ℓ]` has several
+            // instantiations a literal could spell; the receiver's own
+            // identity one is the literal's natural type, not the default.
+            Constraint::Conforms {
+                ty,
+                protocol,
+                protocol_args,
+                ..
+            } => {
+                let [arg] = protocol_args.as_slice() else {
+                    continue;
+                };
+                let arg = ctx.resolve(*arg);
+                let TySlot::Unresolved { literal: Some(lit) } = ctx.slot(arg) else {
+                    continue;
+                };
+                let receiver = ctx.resolve(*ty);
+                let TySlot::Resolved(kind) = ctx.slot(receiver) else {
+                    continue;
+                };
+                if let Some(entity) = kind.entity()
+                    && kind.is_nominal_concrete()
+                    && crate::unify::conforms_to_literal_protocol(ctx, kind, *lit)
+                    && super::conformance::declares_identity_instantiation(ctx, entity, *protocol)
+                {
+                    identity_picks.push((arg, receiver));
+                }
+            },
             _ => {},
         }
     }
@@ -526,6 +577,15 @@ pub(crate) fn apply_context_literals(ctx: &mut InferCtx<'_>) -> bool {
             let ty = ctx.named(entity, Vec::new());
             kestrel_debug::ktrace!("lit-default", "rule C pick {recv:?}");
             progress |= unify::unify(ctx, recv, ty).is_ok();
+        }
+    }
+    for (literal_tv, receiver) in identity_picks {
+        if matches!(
+            ctx.slot(ctx.resolve(literal_tv)),
+            TySlot::Unresolved { literal: Some(_) }
+        ) {
+            kestrel_debug::ktrace!("lit-default", "identity protocol arg {literal_tv:?}");
+            progress |= unify::unify(ctx, literal_tv, receiver).is_ok();
         }
     }
     for (literal_tv, context_tv) in &context_types {
