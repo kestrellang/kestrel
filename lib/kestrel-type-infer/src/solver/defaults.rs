@@ -161,12 +161,10 @@ pub(crate) fn apply_ref_decay_defaults_into(ctx: &mut InferCtx<'_>, only: Option
             TySlot::Unresolved { literal: None }
         ) {
             // An unsized pointee (`&Slice[T]`) has no value to copy out, so a
-            // binding keeps the reference, and so does a target with a
-            // declared `Sized` bound (`[s.trimmed()]` binds
-            // `T = &StringSlice`): the pointee could never satisfy it. A
-            // generic argument relaxed with `not Sized` takes the pointee
-            // (`String(fromUtf8: buf(0..<n))` binds `S = Slice[UInt8]`): it is
-            // passed by borrow, so nothing is copied.
+            // binding keeps the reference. A generic argument still takes the
+            // pointee (`String(fromUtf8: buf(0..<n))` binds `S = Slice[UInt8]`):
+            // it is passed by borrow, so nothing is copied. (A ref couldn't
+            // bind a generic param anyway: it is never `Static`.)
             // A binding whose pointee is still unresolved (`let s = xs(0..<2)`
             // before the literal defaults pick the range's type) waits: it
             // may yet be unsized. A stalled receiver (`only`) needs the type
@@ -175,7 +173,6 @@ pub(crate) fn apply_ref_decay_defaults_into(ctx: &mut InferCtx<'_>, only: Option
             let target = match (binds, pointee_sizedness(ctx, pointee)) {
                 (true, None) if only.is_none() => continue,
                 (true, Some(false)) => fr,
-                (false, Some(false)) if ctx.requires_sized(*to) => fr,
                 _ => pointee,
             };
             decays.push((*to, target));

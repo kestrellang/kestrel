@@ -1188,6 +1188,7 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
             for (i, &e) in elements.iter().enumerate() {
                 // Literal elements always decay refs to owned (stage 1.5).
                 mark_arm_value(ctx, hir, e);
+                ctx.collection_elements.insert(e);
                 // Check mode: an element is a leaf checked against the
                 // expected element type, so it may promote (D7).
                 if let Some(h) = hint
@@ -1198,7 +1199,10 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
                 }
                 let e_tv = gen_expr(ctx, hir, e);
                 let e_span = expr_span(hir, e);
-                let e_tv = peel_value_ref_tv(ctx, e_tv);
+                // A slice element stays the pointee: a collection's element
+                // must be Static, which a ref never is, and the unsized
+                // pointee fails with the clearer "it is unsized" detail.
+                let e_tv = peel_ref_tv(ctx, e_tv);
                 let reason = match &first_span {
                     Some(first) if i > 0 && !hinted => Reason::Element(first.clone()),
                     _ => Reason::Unspecified,
@@ -1237,6 +1241,8 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
                 // Literal entries always decay refs to owned (stage 1.5).
                 mark_arm_value(ctx, hir, entry.key);
                 mark_arm_value(ctx, hir, entry.value);
+                ctx.collection_elements.insert(entry.key);
+                ctx.collection_elements.insert(entry.value);
                 if let Some((key, value)) = checked_entry {
                     check_leaf(ctx, hir, entry.key, key, Reason::Unspecified);
                     check_leaf(ctx, hir, entry.value, value, Reason::Unspecified);
@@ -1253,7 +1259,7 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
                                 && literal_kind_for_expr(hir, entry.value).is_none()
                         });
                 let k = gen_expr(ctx, hir, entry.key);
-                let k = peel_value_ref_tv(ctx, k);
+                let k = peel_ref_tv(ctx, k);
                 let key_span = expr_span(hir, entry.key);
                 let value_span = expr_span(hir, entry.value);
                 let expected_key = expected_entry
@@ -1276,7 +1282,7 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
                     continue;
                 }
                 let v = gen_expr(ctx, hir, entry.value);
-                let v = peel_value_ref_tv(ctx, v);
+                let v = peel_ref_tv(ctx, v);
                 if !emit_dict_literal_acceptance_error(
                     ctx,
                     hir,
@@ -4243,9 +4249,9 @@ fn return_reason(ctx: &InferCtx<'_>) -> Reason {
 /// unresolved here and decay via `bind_call_result` instead. A missed
 /// site surfaces as a `validate_ref_placement` diagnostic, never a
 /// miscompile.
-/// [`peel_ref_tv`] for a VALUE position (a literal element, an arm value):
-/// a ref to an unsized pointee has no value to copy out, so it stays the ref
-/// (`[s.trimmed()]` is an `Array[&StringSlice]`).
+/// [`peel_ref_tv`] for a VALUE position (a tuple element, an arm value): a
+/// ref to an unsized pointee has no value to copy out, so it stays the ref
+/// (`(s.trimmed(), 1)` is a `(&StringSlice, Int64)`).
 fn peel_value_ref_tv(ctx: &mut InferCtx<'_>, tv: TyVar) -> TyVar {
     let r = ctx.resolve(tv);
     match ctx.slot(r) {

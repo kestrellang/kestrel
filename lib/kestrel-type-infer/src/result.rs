@@ -818,6 +818,7 @@ pub(crate) fn describe_error(ctx: &InferCtx<'_>, err: &InferError) -> String {
             // Static failures get a "because" detail — deep in generic
             // instantiation chains the bare `T !: Static` is miserable.
             if let Some(why) = describe_static_failure(ctx, *ty, *protocol)
+                .or_else(|| describe_unsized_value(ctx, *ty, *protocol))
                 .or_else(|| describe_sized_failure(ctx, *ty, *protocol))
             {
                 return format!("{} !: {} ({})", ty_name, proto_name, why);
@@ -1039,6 +1040,30 @@ pub(crate) fn describe_error(ctx: &InferCtx<'_>, err: &InferError) -> String {
             crate::error::describe_fn_kind(*actual)
         ),
     }
+}
+
+/// "Because" detail for an unsized nominal (`StringSlice`, `Slice[T]`)
+/// failing a generic param's implicit `Copyable` / `Sized` bound: it can only
+/// be used in place, so point at the two ways to pass it.
+fn describe_unsized_value(ctx: &InferCtx<'_>, ty: TyVar, protocol: Entity) -> Option<String> {
+    let relevant = crate::solver::is_sized_builtin(ctx, protocol)
+        || crate::solver::copyable_builtin_kind(ctx, protocol).is_some();
+    if !relevant
+        || !matches!(
+            ctx.slot(ctx.resolve(ty)),
+            TySlot::Resolved(TyKind::Struct { .. })
+        )
+    {
+        return None;
+    }
+    if crate::solver::solver_ty_is_sized(ctx, ty, 0) {
+        return None;
+    }
+    Some(
+        "it is unsized, so a generic parameter takes it only when relaxed with 'not Sized' \
+         (`x: &T where T: not Sized`); otherwise convert it to its owned type"
+            .into(),
+    )
 }
 
 /// "Because" detail for a failed `Sized` bound (existentials).

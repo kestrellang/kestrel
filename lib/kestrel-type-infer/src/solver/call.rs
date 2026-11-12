@@ -457,11 +457,10 @@ pub(super) fn bind_call_result(
         // yet resolved (`I.SliceOutput` before `I` is known) decides later:
         // the deferred decay keeps the ref only if it turns out unsized
         // (`apply_ref_decay_defaults`).
-        // The same holds for every other always-decay value position (an
-        // arm, a literal element, a closure tail): `[s.trimmed()]` keeps the
-        // `&StringSlice`.
-        let keeps_unsized =
-            ctx.binding_init_exprs.contains(&expr) || ctx.always_decay_exprs.contains(&expr);
+        // The same holds for the other always-decay value positions (a
+        // tuple element, an arm), but not a collection literal's element.
+        let keeps_unsized = ctx.binding_init_exprs.contains(&expr)
+            || (ctx.always_decay_exprs.contains(&expr) && !ctx.collection_elements.contains(&expr));
         if keeps_unsized && !pinned_non_ref {
             match super::pointee_sizedness(ctx, pointee) {
                 None => {
@@ -474,16 +473,6 @@ pub(super) fn bind_call_result(
                 },
                 Some(true) => {},
             }
-        }
-        // An unsized argument into a param with a declared `Sized` bound
-        // keeps the ref (`show(s.trimmed())` binds `T = &StringSlice`): the
-        // pointee could never satisfy it.
-        if ctx.call_arg_exprs.contains(&expr)
-            && super::pointee_sizedness(ctx, pointee) == Some(false)
-            && arg_targets_sized(ctx, expr)
-        {
-            ctx.equal(result, ret_tv, span);
-            return;
         }
         if ctx.scrutinee_exprs.contains(&expr)
             || ctx.binding_init_exprs.contains(&expr)
@@ -507,13 +496,6 @@ pub(super) fn bind_call_result(
         return;
     }
     ctx.equal(result, ret_tv, span);
-}
-
-/// Is the argument `expr` coerced into a param with a declared `Sized` bound?
-fn arg_targets_sized(ctx: &InferCtx<'_>, expr: kestrel_hir::body::HirExprId) -> bool {
-    ctx.constraints.iter().any(|c| {
-        matches!(c, Constraint::Coerce { expr: e, to, .. } if *e == expr && ctx.requires_sized(*to))
-    })
 }
 
 /// Is the argument `expr` already coerced into a ref-typed param?
