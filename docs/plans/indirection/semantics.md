@@ -84,20 +84,37 @@ The chain follows the `Indirection` conformance and **stops at the first
 non-`Indirection` pointee** — never peeling through an arbitrary type. Depth is
 exactly the length of the chain. Each level still obeys R2 at that level.
 
-## R6 — The line that never moves: arguments never coerce
+## R6 — Borrowed arguments peel; nothing else coerces
 
-The peel rewrites the **receiver** of a member access and **nothing** else:
+Revised 2026-11. A call argument bound to a **borrowed** param peels when its
+nominal type differs from the param's and it conforms to `Indirection`:
 
 ```kestrel
-f(w)          // f expects T  →  TYPE ERROR. Write f(w.pointeeRef()).
-let t: T = w  // initialization  →  TYPE ERROR.
-return w      // function returns T  →  TYPE ERROR.
+f(w)          // f takes x: T or x: &T  →  passes w.value (the `ref`)
+g(w)          // g takes mutating x: T  →  w.value's `mutating ref`; a
+              // read-only wrapper is a type error
+h(w)          // h takes consuming x: T →  TYPE ERROR. Write h(w.value).
+let t: T = w  // initialization        →  TYPE ERROR.
+return w      // function returns T     →  TYPE ERROR.
 ```
 
-There is no `W → T` decay anywhere outside receiver-position member access. This
-is the half of Rust's `Deref` we keep; argument-position coercion is the half we
-reject. Because nothing coerces, there is no new coercion site — only the
-ordinary "type mismatch" the program would already get for any unrelated types.
+Nested wrappers peel once per level. Generic params never peel (`T` binds the
+wrapper). The type checker records the chain per argument
+(`TypedBody.arg_indirection_peels`) and MIR passes the last pointee view.
+
+Every way an argument reaches a borrowed param peels the same way: function,
+method and init calls, a defaulted param's value (`aad: &Slice[UInt8] =
+Array()`), and an overload that only fits through the peel (exact nominal
+matches win first; the peel fallback checks the wrapper's `Target`). An
+argument whose own type is still pending (a method call's result) waits for
+it until the body's first flush, before literal defaults. An array literal
+the param can't take (`total([1, 2])` with `&Slice[Int64]`) waits for its
+default, `Array`, and peels from that.
+
+The std uses this in place of a `Sliceable` protocol: `Array` and
+`UnsafeSlice` are `MutableIndirection`s with `Target = Slice[T]`, so a
+`&Slice[T]` param takes any of them, and `Slice`'s methods are theirs through
+the member peel.
 
 ## R7 — Operators and conformances do NOT ride the peel
 
@@ -111,9 +128,9 @@ w1 == w2      // requires `extend W: Equatable where T: Equatable` — NOT the p
 ```
 
 Mechanically: operators desugar to `HirExpr::ProtocolCall`, which the peel
-excludes (`protocol_dispatch_members`, compiler-arch Layer 2). The reason is R6:
-an operator takes the other operand as an *argument*, so peeling `==` would
-force the operand to peel too — argument coercion through the back door. The
+excludes (`protocol_dispatch_members`, compiler-arch Layer 2), for the receiver
+and the operand alike: peeling only the operand would make `a == rc` work while
+`rc == a` doesn't. The
 asymmetry is observable and intended: `w.someEquatableMethod()` peels (direct
 member access), but `w == other` does not (operator needing an argument). This
 is the concrete boundary between "ergonomic access" and "implicit conversion."

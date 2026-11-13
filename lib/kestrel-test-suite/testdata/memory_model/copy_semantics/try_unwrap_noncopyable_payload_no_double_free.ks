@@ -28,11 +28,11 @@ struct Conn: not Copyable {
     var cell: Pointer[Int64]
     static func open(value v: Int64) -> Result[Conn, OpenErr] {
         let p = SystemAllocator().allocate(Layout.of[Int64]()).unwrap().cast[Int64]();
-        p.write(v);
+        unsafe p.write(v);
         .Ok(Conn(cell: p))
     }
-    func value() -> Int64 { self.cell.read() }
-    deinit { self.cell.write(0 - 1); }
+    func value() -> Int64 { unsafe self.cell.read() }
+    deinit { unsafe self.cell.write(0 - 1); }
 }
 
 // `try`-unwrap a Result whose payload is non-Copyable, then read it.

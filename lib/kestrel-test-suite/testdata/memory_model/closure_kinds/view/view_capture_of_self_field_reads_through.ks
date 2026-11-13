@@ -8,6 +8,9 @@
 // write performed after the closure is created is visible through `f()`.
 module Test
 
+@builtin(.Copyable)
+protocol Copyable {}
+
 struct Counter: not Copyable {
     var n: lang.i64
 

@@ -23,6 +23,15 @@ enum Backend {
     Llvm,
 }
 
+/// Parses `--overflow-checks on|off`.
+fn parse_on_off(s: &str) -> Result<bool, String> {
+    match s {
+        "on" => Ok(true),
+        "off" => Ok(false),
+        _ => Err(format!("expected `on` or `off`, got `{s}`")),
+    }
+}
+
 impl Backend {
     /// `-O0` builds with Cranelift (compile speed); `-O1`/`-O2` with LLVM
     /// (code quality). The single place the backend is decided.
@@ -125,6 +134,11 @@ struct BuildArgs {
     )]
     opt_level: u8,
 
+    /// Trap on integer overflow (`on`) or wrap (`off`). Defaults to on at
+    /// `-O0` and off at `-O1`/`-O2`.
+    #[arg(long = "overflow-checks", value_name = "on|off", value_parser = parse_on_off)]
+    overflow_checks: Option<bool>,
+
     /// Link with a library (repeatable; use `:libname.a` for static).
     #[arg(short = 'l', long = "link", value_name = "LIBRARY")]
     libraries: Vec<String>,
@@ -136,6 +150,11 @@ struct BuildArgs {
     /// Link a macOS framework (repeatable).
     #[arg(long = "framework", value_name = "NAME")]
     frameworks: Vec<String>,
+
+    /// Pass an argument straight to the linker driver (repeatable), e.g.
+    /// `--link-arg=-sUSE_SDL=2` for Emscripten.
+    #[arg(long = "link-arg", value_name = "ARG", allow_hyphen_values = true)]
+    link_args: Vec<String>,
 }
 
 #[derive(Args)]
@@ -268,7 +287,9 @@ fn build(globals: &Globals, args: BuildArgs) -> Result<(), ExitCode> {
                 libraries: args.libraries,
                 library_paths: args.library_paths,
                 frameworks: args.frameworks,
+                link_args: args.link_args,
                 c_sources,
+                overflow_checks_override: args.overflow_checks,
                 ..Default::default()
             };
             compiler
@@ -281,7 +302,9 @@ fn build(globals: &Globals, args: BuildArgs) -> Result<(), ExitCode> {
                 libraries: args.libraries,
                 library_paths: args.library_paths,
                 frameworks: args.frameworks,
+                link_args: args.link_args,
                 c_sources,
+                overflow_checks_override: args.overflow_checks,
                 ..Default::default()
             };
             compiler
@@ -577,7 +600,7 @@ impl Globals {
             if self.verbose {
                 eprintln!("  Loading stdlib from {}", std_dir.display());
             }
-            compiler.load_dir(&std_dir);
+            compiler.load_std_dir(&std_dir);
             std_dir_out = Some(std_dir);
         }
 

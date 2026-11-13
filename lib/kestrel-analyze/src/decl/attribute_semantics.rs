@@ -9,6 +9,8 @@
 //! - `@layout(.C)` on an enum with a payload.
 //! - A field of a packed struct that is not bitwise `Copyable`: a read copies
 //!   the field out of its possibly misaligned slot, so it must be a plain copy.
+//! - `@existentialOnly` on anything but a default, in `extend P`, for one of
+//!   `P`'s own requirements.
 //!
 //! ## Diagnostics
 //!
@@ -19,6 +21,7 @@
 //! - "'@layout(.Packed)' cannot be applied to an enum"
 //! - "'@layout(.Packed)' cannot be applied to a type with an unsized tail"
 //! - "'@layout(.C)' on an enum needs every case to be payload-less; '{Enum.Case}' has a payload"
+//! - "'@existentialOnly' needs a default for a requirement of the protocol it extends"
 //!
 //! **Labels:**
 //! - Primary: the attribute (span from `AttrsOf`)
@@ -73,12 +76,13 @@ impl Describe for AttributeSemanticsAnalyzer {
 
 impl DeclCheck for AttributeSemanticsAnalyzer {
     fn target_kinds(&self) -> &'static [NodeKind] {
-        &[NodeKind::Struct, NodeKind::Enum]
+        &[NodeKind::Struct, NodeKind::Enum, NodeKind::Function]
     }
 
     fn check(&self, cx: &DeclContext<'_>) -> Vec<AnalyzeDiagnostic> {
         let attrs = attrs_of(cx.query, cx.entity);
         let mut diags = Vec::new();
+        diags.extend(misplaced_existential_only(cx, &attrs));
         diags.extend(non_exhaustive_without_effect(cx, &attrs));
         match (cx.query.get::<NodeKind>(cx.entity), attrs.layout()) {
             (Some(NodeKind::Enum), Some(LayoutOption::Packed)) => {
@@ -142,6 +146,45 @@ fn non_exhaustive_without_effect(
     Some(diag)
 }
 
+/// `@existentialOnly` only means something on a default in `extend P` that
+/// `any P` can stand in for one of `P`'s requirements with
+/// (`kestrel_semantics::existential_default`).
+fn misplaced_existential_only(
+    cx: &DeclContext<'_>,
+    attrs: &ParsedAttrs,
+) -> Option<AnalyzeDiagnostic> {
+    let span = attrs.span_of(|a| matches!(a, ParsedAttr::ExistentialOnly))?;
+    let protocol = cx
+        .query
+        .parent_of(cx.entity)
+        .filter(|&ext| cx.query.get::<NodeKind>(ext) == Some(&NodeKind::Extension))
+        .and_then(|extension| {
+            cx.query.query(kestrel_name_res::ExtensionTargetEntity {
+                extension,
+                root: cx.root,
+            })
+        })
+        .filter(|&p| cx.query.get::<NodeKind>(p) == Some(&NodeKind::Protocol));
+    let stands_in = protocol.is_some_and(|p| {
+        util::children_of_kind(cx.query, p, NodeKind::Function)
+            .into_iter()
+            .any(|r| {
+                kestrel_semantics::existential_default(cx.query, p, r, cx.root) == Some(cx.entity)
+            })
+    });
+    if stands_in {
+        return None;
+    }
+    let mut diag = invalid_for_type(
+        span,
+        "'@existentialOnly' needs a default for a requirement of the protocol it extends".into(),
+        "not a default for a requirement",
+    );
+    diag.notes
+        .push("write it in 'extend P', with the name and labels of a requirement of 'P'".into());
+    Some(diag)
+}
+
 /// `@layout(.C)` makes an enum a C `int`, which has no room for a payload.
 fn c_enum_with_payload(cx: &DeclContext<'_>, attrs: &ParsedAttrs) -> Option<AnalyzeDiagnostic> {
     let case = util::children_of_kind(cx.query, cx.entity, NodeKind::EnumCase)
@@ -173,16 +216,24 @@ fn c_enum_with_payload(cx: &DeclContext<'_>, attrs: &ParsedAttrs) -> Option<Anal
 fn packed_struct(cx: &DeclContext<'_>, attrs: &ParsedAttrs) -> Vec<AnalyzeDiagnostic> {
     let packed_span = layout_span(attrs);
     let mut diags = Vec::new();
+    let fields = stored_fields(cx);
+    // An unsized tail reports E910 alone: being `not Sized` also makes it
+    // not Copyable, and a second error on the same field says nothing new.
+    let mut skip_tail = None;
     if let Some(tail) = last_stored_field_type(cx.query, cx.entity, cx.root)
         && !hir_type_is_sized(cx.query, &tail, cx.entity, cx.root)
     {
+        skip_tail = fields.last().copied();
         diags.push(invalid_for_type(
             packed_span.clone(),
             "'@layout(.Packed)' cannot be applied to a type with an unsized tail".into(),
             "packed types have a fixed size",
         ));
     }
-    for field in stored_fields(cx) {
+    for field in fields {
+        if skip_tail == Some(field) {
+            continue;
+        }
         let Some(ty) = cx.query.query(LowerTypeAnnotation {
             entity: field,
             root: cx.root,

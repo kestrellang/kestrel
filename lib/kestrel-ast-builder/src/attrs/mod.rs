@@ -118,6 +118,18 @@ impl ParsedAttrs {
         })
     }
 
+    /// `@export(abi, mangleName:)`.
+    pub fn export_info(&self) -> Option<(Abi, Option<&str>)> {
+        self.attrs.iter().find_map(|e| match &e.attr {
+            ParsedAttr::Export { abi, mangle_name } => Some((*abi, mangle_name.as_deref())),
+            _ => None,
+        })
+    }
+
+    pub fn is_export(&self) -> bool {
+        self.export_info().is_some()
+    }
+
     pub fn is_extern(&self) -> bool {
         self.extern_info().is_some()
     }
@@ -166,6 +178,18 @@ impl ParsedAttrs {
         self.attrs
             .iter()
             .any(|e| matches!(e.attr, ParsedAttr::NonExhaustive))
+    }
+
+    pub fn is_sugar_only(&self) -> bool {
+        self.attrs
+            .iter()
+            .any(|e| matches!(e.attr, ParsedAttr::SugarOnly))
+    }
+
+    pub fn is_existential_only(&self) -> bool {
+        self.attrs
+            .iter()
+            .any(|e| matches!(e.attr, ParsedAttr::ExistentialOnly))
     }
 
     pub fn is_observable_drop(&self) -> bool {

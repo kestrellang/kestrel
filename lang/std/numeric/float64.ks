@@ -1,5 +1,6 @@
 // Float64 - 64-bit floating point (double precision)
-// Generated from float.ks.template - DO NOT EDIT
+// GENERATED FILE — never edit it directly. Edit lang/std/numeric/float.ks.template
+// (or generate.py) and rerun `python3 generate.py` from lang/std/numeric.
 
 // ============================================================================
 // FLOAT64
@@ -12,9 +13,10 @@ import std.core.(
     Equatable, Comparable, Ordering, Bool,
     Less, LessOrEqual, Greater, GreaterOrEqual,
     Addable, Subtractable, Multipliable, Divisible, Negatable,
-    ExpressibleByFloatLiteral, ExpressibleByIntLiteral, Convertible, Defaultable
+    AddAssign, SubtractAssign, MultiplyAssign, DivideAssign,
+    ExpressibleByFloatLiteral, ExpressibleByIntLiteral, Convertible, RoundsFrom, Defaultable
 )
-import std.text.(String, StringBuilder, Formatter, Formattable, FormatOptions, _writePadded)
+import std.text.(String, StringSlice, StringBuilder, Formatter, Formattable, FormatOptions)
 import std.numeric.(Int64, UInt64, Float32)
 import std.collections.Array
 
@@ -53,6 +55,7 @@ import std.collections.Array
 ///
 /// A single `lang.f64` field holding the raw IEEE 754 bit pattern.
 public struct Float64:
+    FloatingPoint,
     Comparable,
     Equatable,
     Less[Float64],
@@ -65,11 +68,23 @@ public struct Float64:
     Multipliable,
     Divisible,
     Negatable,
+    AddAssign,
+    SubtractAssign,
+    MultiplyAssign,
+    DivideAssign,
     ExpressibleByFloatLiteral,
     ExpressibleByIntLiteral,
     Defaultable,
-    Convertible[Int64],
+    Convertible[Float64],
+    Convertible[Int8],
+    Convertible[Int16],
+    Convertible[Int32],
+    Convertible[UInt8],
+    Convertible[UInt16],
+    Convertible[UInt32],
     Convertible[Float32],
+    RoundsFrom[Int64],
+    RoundsFrom[UInt64],
     FFISafe
 {
     /// The underlying primitive `lang.f64` value (IEEE 754 bit
@@ -205,38 +220,135 @@ public struct Float64:
     }
 
     /// @name From Raw
-    /// Wraps an existing `lang.f64` bit pattern. Internal; used
-    /// by intrinsics.
-    init(raw value: lang.f64) {
+    /// Wraps an existing `lang.f64` value. The FFI counterpart of
+    /// `raw`, for values coming back from intrinsics or C.
+    public init(raw value: lang.f64) {
         self.raw = value
     }
 
-    /// @name From Int
-    /// Converts an `Int64` to a float. Values with magnitude greater than
-    /// 2^53 lose low-order bits.
+    /// @name Identity
+    /// `Float64` from itself, so a `Convertible[T]` bound accepts `Float64`.
+    public init(from value: Float64) {
+        self.raw = value.raw
+    }
+
+    /// @name From Integer
+    /// Converts from `Int8`. Exact: every `Int8` fits `Float64`'s mantissa.
     ///
     /// # Examples
     ///
     /// ```
-    /// let n: Int64 = 42;
+    /// let n: Int8 = 42;
     /// let f = Float64(from: n);  // 42.0
     /// ```
-    public init(from value: Int64) {
+    public init(from value: Int8) {
+        self.raw = lang.cast_i8_f64(value.raw)
+    }
+
+    /// @name From Integer
+    /// Converts from `Int16`. Exact: every `Int16` fits `Float64`'s mantissa.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let n: Int16 = 42;
+    /// let f = Float64(from: n);  // 42.0
+    /// ```
+    public init(from value: Int16) {
+        self.raw = lang.cast_i16_f64(value.raw)
+    }
+
+    /// @name From Integer
+    /// Converts from `Int32`. Exact: every `Int32` fits `Float64`'s mantissa.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let n: Int32 = 42;
+    /// let f = Float64(from: n);  // 42.0
+    /// ```
+    public init(from value: Int32) {
+        self.raw = lang.cast_i32_f64(value.raw)
+    }
+
+    /// @name From Integer
+    /// Converts from `UInt8`. Exact: every `UInt8` fits `Float64`'s mantissa.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let n: UInt8 = 42;
+    /// let f = Float64(from: n);  // 42.0
+    /// ```
+    public init(from value: UInt8) {
+        self.raw = lang.cast_i64_f64(Int64(from: value).raw)
+    }
+
+    /// @name From Integer
+    /// Converts from `UInt16`. Exact: every `UInt16` fits `Float64`'s mantissa.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let n: UInt16 = 42;
+    /// let f = Float64(from: n);  // 42.0
+    /// ```
+    public init(from value: UInt16) {
+        self.raw = lang.cast_i64_f64(Int64(from: value).raw)
+    }
+
+    /// @name From Integer
+    /// Converts from `UInt32`. Exact: every `UInt32` fits `Float64`'s mantissa.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let n: UInt32 = 42;
+    /// let f = Float64(from: n);  // 42.0
+    /// ```
+    public init(from value: UInt32) {
+        self.raw = lang.cast_i64_f64(Int64(from: value).raw)
+    }
+
+    /// @name Rounding Integer
+    /// Converts from `Int64`, rounding to the nearest `Float64`: values
+    /// with magnitude above 2^53 lose low-order bits. Not `init(from:)`,
+    /// which is reserved for exact conversions.
+    public init(rounding value: Int64) {
         self.raw = lang.cast_i64_f64(value.raw)
     }
 
+    /// @name Rounding Integer
+    /// Converts from `UInt64`, rounding to the nearest `Float64`: values
+    /// with magnitude above 2^53 lose low-order bits. Not `init(from:)`,
+    /// which is reserved for exact conversions.
+    public init(rounding value: UInt64) {
+        if value <= UInt64(truncating: Int64.maxValue) {
+            self.raw = lang.cast_i64_f64(Int64(truncating: value).raw)
+        } else {
+            let half = (value >> 1) | (value & 1);
+            let h = Float64(raw: lang.cast_i64_f64(Int64(truncating: half).raw));
+            self.raw = h.add(h).raw
+        }
+    }
+
     /// @name From Float
-    /// Converts between `Float32` and `Float64`. The 32→64 direction is
-    /// exact; the 64→32 direction rounds and may overflow to ±infinity.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// let f32: Float32 = 3.14;
-    /// let f64 = Float64(from: f32);
-    /// ```
+    /// Converts from `Float32`. Exact: every `Float32` is a `Float64`.
     public init(from value: Float32) {
         self.raw = lang.cast_f32_f64(value.raw)
+    }
+
+    /// @name Exactly
+    /// Converts from `Int64` when `Float64` holds the value exactly, and
+    /// is `nil` when it would round (magnitudes above 2^53 that aren't
+    /// representable). Satisfies `Numeric`, so generic code can write
+    /// `T(exactly: xs.count)!`.
+    public init(exactly value: Int64)? {
+        let rounded = Float64(rounding: value);
+        if Int64(exactly: rounded) != value {
+            return null
+        }
+        self.raw = rounded.raw
     }
 
     // ========================================================================
@@ -348,6 +460,48 @@ public struct Float64:
         self == 0.0
     }}
 
+    /// True if the sign bit is set: negatives, `-0.0`, and NaNs with the
+    /// sign bit on. Unlike `isNegative`, this tells `-0.0` from `+0.0`.
+    public var isSignMinus: Bool { get {
+        self.bitPattern.shiftRight(by: 64 - 1) == 1
+    }}
+
+    /// The smaller of `self` and `other`, as IEEE 754-2019 `minimum`
+    /// defines it: NaN if either is NaN, and `-0.0` below `+0.0`.
+    /// For a min that skips NaN instead, compare with `compare`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// (1.0).minimum(2.0);               // 1.0
+    /// (1.0).minimum(Float64.nan);  // nan
+    /// (0.0).minimum(-0.0);              // -0.0
+    /// ```
+    public func minimum(other: Float64) -> Float64 {
+        if self.isNaN or other.isNaN { return Float64.nan }
+        if self < other { return self }
+        if other < self { return other }
+        // Equal: only the zeros' signs can differ.
+        if self.isSignMinus { self } else { other }
+    }
+
+    /// The larger of `self` and `other`, as IEEE 754-2019 `maximum`
+    /// defines it: NaN if either is NaN, and `+0.0` above `-0.0`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// (1.0).maximum(2.0);               // 2.0
+    /// (1.0).maximum(Float64.nan);  // nan
+    /// (-0.0).maximum(0.0);              // 0.0
+    /// ```
+    public func maximum(other: Float64) -> Float64 {
+        if self.isNaN or other.isNaN { return Float64.nan }
+        if self > other { return self }
+        if other > self { return other }
+        if self.isSignMinus { other } else { self }
+    }
+
     /// The raw IEEE-754 bit pattern reinterpreted as an unsigned integer
     /// (UInt64 for Float64). No value conversion — the bits are
     /// preserved exactly, so `sign`/`exponent`/`significand` can be extracted by
@@ -391,10 +545,12 @@ public struct Float64:
         Bool(boolLiteral: lang.f64_eq(self.raw, other.raw))
     }
 
-    /// Three-way comparison returning an `Ordering`. NaN is *not* an ordered
-    /// value — comparisons against NaN currently fall through to `.Equal`,
-    /// which is wrong; gate inputs with `isNaN` if you need a well-defined
-    /// answer.
+    /// Three-way comparison returning an `Ordering`. This is a total order,
+    /// so `sort`, `min`/`max` and `binarySearch` stay consistent with NaN in
+    /// the data: every NaN is equal to every other NaN and greater than any
+    /// number, so NaNs sort last. Numbers compare as IEEE 754 does, so
+    /// `-0.0` and `0.0` are `.Equal`. The `<`, `>`, `<=` and `>=` operators
+    /// stay IEEE comparisons, which are all `false` against NaN.
     ///
     /// # Examples
     ///
@@ -403,11 +559,15 @@ public struct Float64:
     /// (2.0).compare(2.0);              // .Equal
     /// (3.0).compare(2.0);              // .Greater
     /// (1.0).compare(Float64.infinity); // .Less
+    /// Float64.nan.compare(Float64.infinity); // .Greater
     /// ```
     public func compare(other: Float64) -> Ordering {
-        if Bool(boolLiteral: lang.f64_lt(self.raw, other.raw)) { .Less }
-        else if Bool(boolLiteral: lang.f64_gt(self.raw, other.raw)) { .Greater }
-        else { .Equal }
+        if Bool(boolLiteral: lang.f64_lt(self.raw, other.raw)) { return .Less }
+        if Bool(boolLiteral: lang.f64_gt(self.raw, other.raw)) { return .Greater }
+        // Neither is less: they're equal numbers, or at least one is NaN.
+        let selfNaN = self.isNaN;
+        if selfNaN == other.isNaN { return .Equal }
+        if selfNaN { .Greater } else { .Less }
     }
 
     // ========================================================================
@@ -494,6 +654,19 @@ public struct Float64:
     public consuming func negate() -> Float64 { Float64(raw: lang.f64_neg(self.raw)) }
 
     // ========================================================================
+    // COMPOUND ASSIGNMENT
+    // ========================================================================
+
+    /// `self += other`
+    public mutating func addAssign(other: Float64) { self = self.add(other) }
+    /// `self -= other`
+    public mutating func subtractAssign(other: Float64) { self = self.subtract(other) }
+    /// `self *= other`
+    public mutating func multiplyAssign(other: Float64) { self = self.multiply(other) }
+    /// `self /= other`
+    public mutating func divideAssign(other: Float64) { self = self.divide(other) }
+
+    // ========================================================================
     // BASIC MATHEMATICAL FUNCTIONS
     // ========================================================================
 
@@ -566,7 +739,7 @@ public struct Float64:
 
     /// Real cube root. Defined for negatives — `(-8.0).cbrt() == -2.0`.
     public func cbrt() -> Float64 {
-        Float64(raw: libm_cbrt(self.raw))
+        Float64(raw: unsafe libm_cbrt(self.raw))
     }
 
     /// Hypotenuse — `sqrt(self² + other²)`, computed via libm in a way that
@@ -578,7 +751,7 @@ public struct Float64:
     /// (3.0).hypot(4.0);  // 5.0
     /// ```
     public func hypot(other: Float64) -> Float64 {
-        Float64(raw: libm_hypot(self.raw, other.raw))
+        Float64(raw: unsafe libm_hypot(self.raw, other.raw))
     }
 
     // ========================================================================
@@ -586,14 +759,14 @@ public struct Float64:
     // ========================================================================
 
     /// `e^self` via libm. `(-inf).exp()` is `0.0`; `(inf).exp()` is `inf`.
-    public func exp() -> Float64 { Float64(raw: libm_exp(self.raw)) }
+    public func exp() -> Float64 { Float64(raw: unsafe libm_exp(self.raw)) }
 
     /// `2^self`. Useful for binary scaling.
-    public func exp2() -> Float64 { Float64(raw: libm_exp2(self.raw)) }
+    public func exp2() -> Float64 { Float64(raw: unsafe libm_exp2(self.raw)) }
 
     /// `e^self - 1`, computed without the cancellation that hurts
     /// `self.exp() - 1.0` for small `self`.
-    public func expm1() -> Float64 { Float64(raw: libm_expm1(self.raw)) }
+    public func expm1() -> Float64 { Float64(raw: unsafe libm_expm1(self.raw)) }
 
     /// Natural logarithm. Negatives return NaN; zero returns `-inf`.
     ///
@@ -605,17 +778,17 @@ public struct Float64:
     /// (0.0).ln();           // -inf
     /// (-1.0).ln();          //  nan
     /// ```
-    public func ln() -> Float64 { Float64(raw: libm_log(self.raw)) }
+    public func ln() -> Float64 { Float64(raw: unsafe libm_log(self.raw)) }
 
     /// `ln(1 + self)`, accurate for small `self` where `(1.0 + self).ln()`
     /// would lose digits.
-    public func ln1p() -> Float64 { Float64(raw: libm_log1p(self.raw)) }
+    public func ln1p() -> Float64 { Float64(raw: unsafe libm_log1p(self.raw)) }
 
     /// Base-2 logarithm.
-    public func log2() -> Float64 { Float64(raw: libm_log2(self.raw)) }
+    public func log2() -> Float64 { Float64(raw: unsafe libm_log2(self.raw)) }
 
     /// Base-10 logarithm.
-    public func log10() -> Float64 { Float64(raw: libm_log10(self.raw)) }
+    public func log10() -> Float64 { Float64(raw: unsafe libm_log10(self.raw)) }
 
     /// Logarithm with arbitrary base, computed as `self.ln() / base.ln()`.
     /// Pick `log2` or `log10` directly when you can — they avoid the second
@@ -635,7 +808,7 @@ public struct Float64:
     /// (-2.0).pow(0.5);   // nan
     /// ```
     public func pow(exponent: Float64) -> Float64 {
-        Float64(raw: libm_pow(self.raw, exponent.raw))
+        Float64(raw: unsafe libm_pow(self.raw, exponent.raw))
     }
 
     /// Integer-exponent power via repeated squaring. Faster and more accurate
@@ -669,25 +842,25 @@ public struct Float64:
     // ========================================================================
 
     /// Sine of `self` in radians.
-    public func sin() -> Float64 { Float64(raw: libm_sin(self.raw)) }
+    public func sin() -> Float64 { Float64(raw: unsafe libm_sin(self.raw)) }
 
     /// Cosine of `self` in radians.
-    public func cos() -> Float64 { Float64(raw: libm_cos(self.raw)) }
+    public func cos() -> Float64 { Float64(raw: unsafe libm_cos(self.raw)) }
 
     /// Tangent of `self` in radians. Diverges to ±large near `π/2 + kπ`.
-    public func tan() -> Float64 { Float64(raw: libm_tan(self.raw)) }
+    public func tan() -> Float64 { Float64(raw: unsafe libm_tan(self.raw)) }
 
     /// Arc sine, result in radians on `[-π/2, π/2]`. Returns NaN outside
     /// `[-1.0, 1.0]`.
-    public func asin() -> Float64 { Float64(raw: libm_asin(self.raw)) }
+    public func asin() -> Float64 { Float64(raw: unsafe libm_asin(self.raw)) }
 
     /// Arc cosine, result in radians on `[0, π]`. Returns NaN outside
     /// `[-1.0, 1.0]`.
-    public func acos() -> Float64 { Float64(raw: libm_acos(self.raw)) }
+    public func acos() -> Float64 { Float64(raw: unsafe libm_acos(self.raw)) }
 
     /// Arc tangent, result in radians on `[-π/2, π/2]`. For full-quadrant
     /// recovery use `atan2`.
-    public func atan() -> Float64 { Float64(raw: libm_atan(self.raw)) }
+    public func atan() -> Float64 { Float64(raw: unsafe libm_atan(self.raw)) }
 
     /// Two-argument arctangent — angle of the point `(x, self)` measured
     /// from the positive x-axis, on `[-π, π]`. Disambiguates quadrant where
@@ -701,7 +874,7 @@ public struct Float64:
     /// (-1.0).atan2(-1.0);  // -3π/4  (Q3)
     /// (-1.0).atan2(1.0);   // -π/4   (Q4)
     /// ```
-    public func atan2(x: Float64) -> Float64 { Float64(raw: libm_atan2(self.raw, x.raw)) }
+    public func atan2(x: Float64) -> Float64 { Float64(raw: unsafe libm_atan2(self.raw, x.raw)) }
 
     /// Sine and cosine in one call. Implemented via two libm calls today;
     /// kept for ergonomics and as a future optimisation point.
@@ -720,22 +893,22 @@ public struct Float64:
     // ========================================================================
 
     /// Hyperbolic sine.
-    public func sinh() -> Float64 { Float64(raw: libm_sinh(self.raw)) }
+    public func sinh() -> Float64 { Float64(raw: unsafe libm_sinh(self.raw)) }
 
     /// Hyperbolic cosine.
-    public func cosh() -> Float64 { Float64(raw: libm_cosh(self.raw)) }
+    public func cosh() -> Float64 { Float64(raw: unsafe libm_cosh(self.raw)) }
 
     /// Hyperbolic tangent. Saturates at ±1 for large magnitudes.
-    public func tanh() -> Float64 { Float64(raw: libm_tanh(self.raw)) }
+    public func tanh() -> Float64 { Float64(raw: unsafe libm_tanh(self.raw)) }
 
     /// Inverse hyperbolic sine. Defined on all real inputs.
-    public func asinh() -> Float64 { Float64(raw: libm_asinh(self.raw)) }
+    public func asinh() -> Float64 { Float64(raw: unsafe libm_asinh(self.raw)) }
 
     /// Inverse hyperbolic cosine. Returns NaN for inputs less than `1.0`.
-    public func acosh() -> Float64 { Float64(raw: libm_acosh(self.raw)) }
+    public func acosh() -> Float64 { Float64(raw: unsafe libm_acosh(self.raw)) }
 
     /// Inverse hyperbolic tangent. NaN outside `(-1.0, 1.0)`; `±inf` at ±1.
-    public func atanh() -> Float64 { Float64(raw: libm_atanh(self.raw)) }
+    public func atanh() -> Float64 { Float64(raw: unsafe libm_atanh(self.raw)) }
 
     // ========================================================================
     // IEEE 754 OPERATIONS
@@ -762,19 +935,19 @@ public struct Float64:
     /// Next representable value greater than `self`. `+inf` and `nan` are
     /// fixed points; the largest finite value steps up to `+inf`.
     public func nextUp() -> Float64 {
-        Float64(raw: libm_nextafter(self.raw, lang.f64_infinity()))
+        Float64(raw: unsafe libm_nextafter(self.raw, lang.f64_infinity()))
     }
 
     /// Next representable value less than `self`. Mirror of `nextUp`.
     public func nextDown() -> Float64 {
-        Float64(raw: libm_nextafter(self.raw, lang.f64_neg(lang.f64_infinity())))
+        Float64(raw: unsafe libm_nextafter(self.raw, lang.f64_neg(lang.f64_infinity())))
     }
 
     /// IEEE 754 remainder — uses round-to-nearest division, not truncation.
     /// Differs from `%`: `(5.0).remainder(dividingBy: 3.0)` is `-1.0`, not
     /// `2.0`.
     public func remainder(dividingBy other: Float64) -> Float64 {
-        Float64(raw: libm_remainder(self.raw, other.raw))
+        Float64(raw: unsafe libm_remainder(self.raw, other.raw))
     }
 
     // ========================================================================
@@ -814,41 +987,6 @@ public struct Float64:
     }
 
     // ========================================================================
-    // CONVERSION
-    // ========================================================================
-
-    /// Truncates toward zero into an `Int64`. Returns `None` for NaN,
-    /// infinity, or values that fall outside the `Int64` range.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// (3.7).toInt64();              // Some(3)
-    /// (-3.7).toInt64();             // Some(-3)
-    /// Float64.nan.toInt64();        // None
-    /// Float64.infinity.toInt64();   // None
-    /// ```
-    public func toInt64() -> Int64? {
-        if self.isNaN or self.isInfinite {
-            return .None
-        };
-        let truncated = self.trunc();
-        if truncated >= 9223372036854775808.0 {
-            return .None
-        };
-        if truncated < -9223372036854775808.0 {
-            return .None
-        };
-        .Some(Int64(raw: lang.cast_f64_i64(truncated.raw)))
-    }
-
-    /// Converts to the sibling float type. Widening (32→64) is exact;
-    /// narrowing (64→32) rounds and may overflow to ±infinity.
-    public func toFloat32() -> Float32 {
-        Float32(raw: lang.cast_f64_f32(self.raw))
-    }
-
-    // ========================================================================
     // PARSING
     // ========================================================================
 
@@ -868,16 +1006,18 @@ public struct Float64:
     /// Float64(parsing: "abc");       // None
     /// Float64(parsing: "");          // None
     /// ```
-    public init(parsing string: String)? {
-        let len = string.bytes.count;
+    public init(parsing text: &StringSlice)? {
+        // One view for the whole parse; a String argument lends its slice.
+        let bytes = text.bytes;
+        let len = bytes.count;
         if len == 0 {
             return null
         }
 
         if len == 3 {
-            let b0: UInt8 = string.bytes(unchecked: 0);
-            let b1: UInt8 = string.bytes(unchecked: 1);
-            let b2: UInt8 = string.bytes(unchecked: 2);
+            let b0: UInt8 = unsafe bytes(unchecked: 0);
+            let b1: UInt8 = unsafe bytes(unchecked: 1);
+            let b2: UInt8 = unsafe bytes(unchecked: 2);
             let isN0 = Int64(from: b0) == 110 or Int64(from: b0) == 78;
             let isA1 = Int64(from: b1) == 97 or Int64(from: b1) == 65;
             let isN2 = Int64(from: b2) == 110 or Int64(from: b2) == 78;
@@ -888,9 +1028,9 @@ public struct Float64:
         }
 
         if len == 3 {
-            let b0: UInt8 = string.bytes(unchecked: 0);
-            let b1: UInt8 = string.bytes(unchecked: 1);
-            let b2: UInt8 = string.bytes(unchecked: 2);
+            let b0: UInt8 = unsafe bytes(unchecked: 0);
+            let b1: UInt8 = unsafe bytes(unchecked: 1);
+            let b2: UInt8 = unsafe bytes(unchecked: 2);
             let isI = Int64(from: b0) == 105 or Int64(from: b0) == 73;
             let isN = Int64(from: b1) == 110 or Int64(from: b1) == 78;
             let isF = Int64(from: b2) == 102 or Int64(from: b2) == 70;
@@ -901,10 +1041,10 @@ public struct Float64:
         }
 
         if len == 4 {
-            let b0: UInt8 = string.bytes(unchecked: 0);
-            let b1: UInt8 = string.bytes(unchecked: 1);
-            let b2: UInt8 = string.bytes(unchecked: 2);
-            let b3: UInt8 = string.bytes(unchecked: 3);
+            let b0: UInt8 = unsafe bytes(unchecked: 0);
+            let b1: UInt8 = unsafe bytes(unchecked: 1);
+            let b2: UInt8 = unsafe bytes(unchecked: 2);
+            let b3: UInt8 = unsafe bytes(unchecked: 3);
             let isMinus = Int64(from: b0) == 45;
             let isI = Int64(from: b1) == 105 or Int64(from: b1) == 73;
             let isN = Int64(from: b2) == 110 or Int64(from: b2) == 78;
@@ -916,10 +1056,10 @@ public struct Float64:
         }
 
         if len == 4 {
-            let b0: UInt8 = string.bytes(unchecked: 0);
-            let b1: UInt8 = string.bytes(unchecked: 1);
-            let b2: UInt8 = string.bytes(unchecked: 2);
-            let b3: UInt8 = string.bytes(unchecked: 3);
+            let b0: UInt8 = unsafe bytes(unchecked: 0);
+            let b1: UInt8 = unsafe bytes(unchecked: 1);
+            let b2: UInt8 = unsafe bytes(unchecked: 2);
+            let b3: UInt8 = unsafe bytes(unchecked: 3);
             let isPlus = Int64(from: b0) == 43;
             let isI = Int64(from: b1) == 105 or Int64(from: b1) == 73;
             let isN = Int64(from: b2) == 110 or Int64(from: b2) == 78;
@@ -931,14 +1071,14 @@ public struct Float64:
         }
 
         if len == 8 {
-            let b0: UInt8 = string.bytes(unchecked: 0);
-            let b1: UInt8 = string.bytes(unchecked: 1);
-            let b2: UInt8 = string.bytes(unchecked: 2);
-            let b3: UInt8 = string.bytes(unchecked: 3);
-            let b4: UInt8 = string.bytes(unchecked: 4);
-            let b5: UInt8 = string.bytes(unchecked: 5);
-            let b6: UInt8 = string.bytes(unchecked: 6);
-            let b7: UInt8 = string.bytes(unchecked: 7);
+            let b0: UInt8 = unsafe bytes(unchecked: 0);
+            let b1: UInt8 = unsafe bytes(unchecked: 1);
+            let b2: UInt8 = unsafe bytes(unchecked: 2);
+            let b3: UInt8 = unsafe bytes(unchecked: 3);
+            let b4: UInt8 = unsafe bytes(unchecked: 4);
+            let b5: UInt8 = unsafe bytes(unchecked: 5);
+            let b6: UInt8 = unsafe bytes(unchecked: 6);
+            let b7: UInt8 = unsafe bytes(unchecked: 7);
             let isI0 = Int64(from: b0) == 105 or Int64(from: b0) == 73;
             let isN1 = Int64(from: b1) == 110 or Int64(from: b1) == 78;
             let isF2 = Int64(from: b2) == 102 or Int64(from: b2) == 70;
@@ -956,7 +1096,7 @@ public struct Float64:
         var index: Int64 = 0;
         var isNegative = false;
 
-        let firstByte: UInt8 = string.bytes(unchecked: 0);
+        let firstByte: UInt8 = unsafe bytes(unchecked: 0);
         let firstByteVal = Int64(from: firstByte);
         if firstByteVal == 45 {
             isNegative = true;
@@ -974,30 +1114,30 @@ public struct Float64:
         var mantissa = Array[UInt32]();
         var hasDigits = false;
         var fracCount: Int64 = 0;
-        var currentByte: Int64 = Int64(from: string.bytes(unchecked: index));
+        var currentByte: Int64 = Int64(from: unsafe bytes(unchecked: index));
 
         while index < len and currentByte >= 48 and currentByte <= 57 {
-            mantissa = bnMulSmall(mantissa, UInt32(from: 10));
-            mantissa = bnAddSmall(mantissa, UInt64(from: currentByte - 48));
+            mantissa = bnMulSmall(mantissa, UInt32(truncating: 10));
+            mantissa = bnAddSmall(mantissa, UInt64(truncating: currentByte - 48));
             hasDigits = true;
             index = index + 1;
             if index < len {
-                currentByte = Int64(from: string.bytes(unchecked: index))
+                currentByte = Int64(from: unsafe bytes(unchecked: index))
             }
         }
 
         if index < len and currentByte == 46 {
             index = index + 1;
             if index < len {
-                currentByte = Int64(from: string.bytes(unchecked: index));
+                currentByte = Int64(from: unsafe bytes(unchecked: index));
                 while index < len and currentByte >= 48 and currentByte <= 57 {
-                    mantissa = bnMulSmall(mantissa, UInt32(from: 10));
-                    mantissa = bnAddSmall(mantissa, UInt64(from: currentByte - 48));
+                    mantissa = bnMulSmall(mantissa, UInt32(truncating: 10));
+                    mantissa = bnAddSmall(mantissa, UInt64(truncating: currentByte - 48));
                     fracCount = fracCount + 1;
                     hasDigits = true;
                     index = index + 1;
                     if index < len {
-                        currentByte = Int64(from: string.bytes(unchecked: index))
+                        currentByte = Int64(from: unsafe bytes(unchecked: index))
                     }
                 }
             }
@@ -1017,18 +1157,18 @@ public struct Float64:
             }
 
             var expNegative = false;
-            currentByte = Int64(from: string.bytes(unchecked: index));
+            currentByte = Int64(from: unsafe bytes(unchecked: index));
 
             if currentByte == 45 {
                 expNegative = true;
                 index = index + 1;
                 if index < len {
-                    currentByte = Int64(from: string.bytes(unchecked: index))
+                    currentByte = Int64(from: unsafe bytes(unchecked: index))
                 }
             } else if currentByte == 43 {
                 index = index + 1;
                 if index < len {
-                    currentByte = Int64(from: string.bytes(unchecked: index))
+                    currentByte = Int64(from: unsafe bytes(unchecked: index))
                 }
             }
 
@@ -1049,7 +1189,7 @@ public struct Float64:
                 hasExpDigit = true;
                 index = index + 1;
                 if index < len {
-                    currentByte = Int64(from: string.bytes(unchecked: index))
+                    currentByte = Int64(from: unsafe bytes(unchecked: index))
                 }
             }
 
@@ -1071,13 +1211,13 @@ public struct Float64:
         let parts = floatRoundDecimal(mantissa, k, 52, -1074, 971);
         var rawBits = UInt64.zero;
         if parts.overflow {
-            rawBits = UInt64(from: 2047).shiftLeft(by: 52)
+            rawBits = UInt64(truncating: 2047).shiftLeft(by: 52)
         } else if parts.m == UInt64.zero {
             rawBits = UInt64.zero
-        } else if parts.m >= UInt64(from: 4503599627370496) {
+        } else if parts.m >= UInt64(truncating: 4503599627370496) {
             let rawExp = parts.e + 1075;
-            rawBits = UInt64(from: rawExp).shiftLeft(by: 52)
-                .bitwiseOr(parts.m.bitwiseAnd(UInt64(from: 4503599627370495)))
+            rawBits = UInt64(truncating: rawExp).shiftLeft(by: 52)
+                .bitwiseOr(parts.m.bitwiseAnd(UInt64(truncating: 4503599627370495)))
         } else {
             rawBits = parts.m
         }
@@ -1103,6 +1243,7 @@ public struct Float64:
     ///
     /// ```
     /// (3.14159).formatted();                                          // "3.14159"
+    /// (3.0).formatted();                                              // "3.0" (a whole float keeps its ".0")
     /// (3.14159).formatted(.{precision: 2});                  // "3.14"
     /// (1234.5).formatted(.{floatStyle: .Scientific});        // "1.2345e3"
     /// (0.756).formatted(.{floatStyle: .Percent});            // "75.6%"
@@ -1122,6 +1263,7 @@ public struct Float64:
         }
 
         var number = String();
+        var prefix = "";
         var isNegative = false;
         var allowSign = true;
         var suffixPercent = false;
@@ -1157,20 +1299,21 @@ public struct Float64:
             // Exact IEEE-754 decomposition of the non-negative `value` into
             // m * 2^e (m an integer significand, e a binary exponent).
             let bits = UInt64(raw: lang.f64_to_bits(value.raw));
-            let rawExp = Int64(from: bits.shiftRight(by: 52).bitwiseAnd(UInt64(from: 2047)));
-            let rawMant = bits.bitwiseAnd(UInt64(from: 4503599627370495));
+            let rawExp = Int64(truncating: bits.shiftRight(by: 52).bitwiseAnd(UInt64(truncating: 2047)));
+            let rawMant = bits.bitwiseAnd(UInt64(truncating: 4503599627370495));
             var m = UInt64.zero;
             var e: Int64 = 0;
             if rawExp == 0 {
                 m = rawMant;
                 e = -1074
             } else {
-                m = rawMant.bitwiseOr(UInt64(from: 4503599627370496));
+                m = rawMant.bitwiseOr(UInt64(truncating: 4503599627370496));
                 e = rawExp - 1075
             }
 
             if options.radix == 16 {
                 // `:x` / `:X`: exact hexadecimal floating point (C's `%a`).
+                prefix = if options.uppercase { "0X" } else { "0x" };
                 number = floatHexString(rawExp, rawMant, 52, 1023, options.uppercase)
             } else if precisionProvided == false and suffixPercent == false {
                 // No explicit precision: print the SHORTEST decimal that round-
@@ -1212,23 +1355,13 @@ public struct Float64:
             }
         }
 
-        var result = String();
-        if allowSign {
-            if isNegative {
-                result.append(char: '-')
-            } else if options.sign == .Always {
-                result.append(char: '+')
-            } else if options.sign == .Space {
-                result.append(char: ' ')
-            }
-        }
         if trimTrailingZeros {
             let len = number.bytes.count;
             var dotIndex: Int64 = -1;
             var expIndex: Int64 = -1;
             var i: Int64 = 0;
             while i < len {
-                let b = number.bytes(unchecked: i);
+                let b = unsafe number.bytes(unchecked: i);
                 let v = Int64(from: b);
                 if v == 46 {  // '.'
                     dotIndex = i
@@ -1243,7 +1376,7 @@ public struct Float64:
                 let endIndex: Int64 = if expIndex >= 0 { expIndex } else { len };
                 var trimEnd = endIndex;
                 while trimEnd > dotIndex + 1 {
-                    let b = number.bytes(unchecked: trimEnd - 1);
+                    let b = unsafe number.bytes(unchecked: trimEnd - 1);
                     if Int64(from: b) == 48 {
                         trimEnd = trimEnd - 1
                     } else {
@@ -1266,12 +1399,16 @@ public struct Float64:
             }
         }
 
-        result.append(number);
         if suffixPercent {
-            result.append(char: '%')
+            number.append(char: '%')
         }
 
-        _writePadded(into: writer, result, options)
+        // NaN carries no sign, even under `sign: .Always`.
+        var numberOptions = options;
+        if allowSign == false {
+            numberOptions.sign = .Negative
+        }
+        writer.padIntegral(nonNegative: isNegative == false, prefix: prefix, digits: number, numberOptions)
     }}
 
 

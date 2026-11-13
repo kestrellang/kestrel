@@ -3,8 +3,8 @@ module datetime_regressions
 // Self-checking regression program for the datetime package. Build and run
 // with `lang/datetime/tests/run.sh`; exits non-zero if any check fails.
 
-import datetime.(Date, Time, DateTime, ZonedDateTime, Instant, Duration, Period, TimeZone, Format, FakeClock, Weekday, TimeUnit)
-import std.os.(exit)
+import datetime.(Date, Time, DateTime, ZonedDateTime, Instant, Period, TimeZone, Format, FakeClock, Weekday, TimeUnit)
+import std.system.(exit)
 
 struct Checker {
     var failures: Int64
@@ -144,8 +144,8 @@ func zonedParsing(mutating c: Checker) {
     c.check("zone + offset picks fold side", got: "\(later)", want: "2024-11-03T01:30:00-05:00[America/New_York]");
     c.check("TimeZone(offsetSeconds:)", got: "\(TimeZone(offsetSeconds: -12600)!)", want: "-03:30");
     c.checkTrue("TimeZone(offsetSeconds: 0) is utc", TimeZone(offsetSeconds: 0)! == TimeZone.utc);
-    c.checkTrue("sub-minute offset rejected", TimeZone(offsetSeconds: 90).isNone());
-    c.checkTrue("day-long offset rejected", TimeZone(offsetSeconds: 86400).isNone());
+    c.checkTrue("sub-minute offset rejected", TimeZone(offsetSeconds: 90).isNone);
+    c.checkTrue("day-long offset rejected", TimeZone(offsetSeconds: 86400).isNone);
     c.checkTrue("offset must match zone",
                 ZonedDateTime.parse(from: "2024-07-04T09:00:00-04:00[America/Los_Angeles]").isErr);
 }
@@ -256,7 +256,7 @@ func calendarQueries(mutating c: Checker) {
     c.check("Weekday.number Monday", got: "\(Weekday.Monday.number)", want: "1");
     c.check("Weekday.number Sunday", got: "\(Weekday.Sunday.number)", want: "7");
     c.check("Weekday(number:)", got: "\(Weekday(number: 3)!)", want: "Wednesday");
-    c.checkTrue("Weekday(number: 8) is nil", Weekday(number: 8).isNone());
+    c.checkTrue("Weekday(number: 8) is nil", Weekday(number: 8).isNone);
     c.check("next same weekday", got: "\(d.next(.Thursday))", want: "2024-07-11");
     c.check("next(.Friday)", got: "\(d.next(.Friday))", want: "2024-07-05");
     c.check("previous(.Monday)", got: "\(d.previous(.Monday))", want: "2024-07-01");
@@ -315,11 +315,11 @@ func registryGrowth(mutating c: Checker) {
     var registered: Int64 = 0;
     var minutes: Int64 = 1;
     while minutes <= 400 {
-        if TimeZone(offsetSeconds: minutes * 60).isSome() { registered = registered + 1; }
+        if TimeZone(offsetSeconds: minutes * 60).isSome { registered = registered + 1; }
         minutes = minutes + 1;
     }
     c.check("400 fixed-offset zones", got: "\(registered)", want: "400");
-    c.checkTrue("IANA zone after many fixed ones", TimeZone("America/Chicago").isSome());
+    c.checkTrue("IANA zone after many fixed ones", TimeZone("America/Chicago").isSome);
 }
 
 // TZif footer rules apply after the table's last explicit transition (2037).
@@ -346,10 +346,10 @@ func beforeFirstTransition(mutating c: Checker) {
 
 // Zone names cannot escape the zoneinfo root.
 func zoneNameSafety(mutating c: Checker) {
-    c.checkTrue("dot-dot segment rejected", TimeZone("America/../America/New_York").isNone());
-    c.checkTrue("absolute path rejected", TimeZone("/usr/share/zoneinfo/UTC").isNone());
-    c.checkTrue("traversal rejected", TimeZone("../../../etc/passwd").isNone());
-    c.checkTrue("ordinary name still loads", TimeZone("America/Argentina/Buenos_Aires").isSome());
+    c.checkTrue("dot-dot segment rejected", TimeZone("America/../America/New_York").isNone);
+    c.checkTrue("absolute path rejected", TimeZone("/usr/share/zoneinfo/UTC").isNone);
+    c.checkTrue("traversal rejected", TimeZone("../../../etc/passwd").isNone);
+    c.checkTrue("ordinary name still loads", TimeZone("America/Argentina/Buenos_Aires").isSome);
 }
 
 @main

@@ -18,6 +18,7 @@ pub mod resolve_name;
 pub mod resolve_type;
 pub mod resolve_value;
 pub mod scope;
+pub mod sugar_only;
 pub mod traversal;
 pub mod type_members;
 pub mod visibility;
@@ -25,12 +26,13 @@ pub mod visibility;
 // Re-export primary query types
 pub use annotation::{SelfTypeEntity, annotation_entity, container_type, resolve_annotation};
 pub use conformances::{
-    ConformingProtocolInstantiations, ConformingProtocols, conformance_args_with_defaults,
-    expand_protocol_closure, expand_protocol_closure_in_place, extract_ast_type_args,
-    find_protocol_witness_init, protocol_parents,
+    AssociatedTypeBinding, ConformingProtocolInstantiations, ConformingProtocols, alias_binds,
+    conformance_args_with_defaults, expand_protocol_closure, expand_protocol_closure_in_place,
+    extract_ast_type_args, protocol_parents, writes_conformance,
 };
 pub use extensions::{
-    ExtensionLhsParams, ExtensionTargetEntity, ExtensionsFor, ResolvedExtensionTarget,
+    ExtensionLhsParams, ExtensionOwnTypeParams, ExtensionPatternParams, ExtensionTargetEntity,
+    ExtensionsFor, ResolvedExtensionTarget,
 };
 pub use protocol_members::{
     ProtocolAssociatedTypes, ProtocolMember, ProtocolMemberMap, ProtocolMembers,
@@ -45,8 +47,9 @@ pub use resolve_name::{NameResolution, ResolveName};
 pub use resolve_type::{ResolveTypePath, TypePathChain, TypeResolution, resolve_type_path_chain};
 pub use resolve_value::{ResolveValuePath, ValueResolution};
 pub use scope::{Scope, ScopeFor};
+pub use sugar_only::{SugarOnlyRequirement, sugar_only_hidden};
 pub use traversal::MemberMap;
 pub use type_members::{
     TypeMember, TypeMemberMap, TypeMemberSource, TypeMembers, TypeMembersByName,
 };
-pub use visibility::{IsVisibleFrom, VisibleChildrenByName, internal_boundary};
+pub use visibility::{IsVisibleFrom, VisibleChildrenByName, effective_vis, internal_boundary};

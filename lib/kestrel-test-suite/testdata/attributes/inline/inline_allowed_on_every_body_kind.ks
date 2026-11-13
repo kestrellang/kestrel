@@ -3,6 +3,9 @@
 
 module Test
 
+@builtin(.Copyable)
+protocol Copyable {}
+
 @inline
 func free() {}
 

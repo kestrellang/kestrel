@@ -208,6 +208,12 @@ impl<'s> Parser<'s> {
             .map(|c| c as usize)
     }
 
+    /// Whether a line break precedes the token at an absolute index. End of
+    /// input counts as "on a new line".
+    pub fn nl_before_at(&self, idx: usize) -> bool {
+        self.tokens.get(idx).is_none_or(|t| t.nl_before)
+    }
+
     /// Kind of the token at an absolute index.
     pub fn kind_at(&self, idx: usize) -> Option<SyntaxKind> {
         self.tokens.get(idx).map(|t| t.kind)

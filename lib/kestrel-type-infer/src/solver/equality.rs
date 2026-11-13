@@ -159,8 +159,7 @@ pub(super) fn try_literal_mismatch(
         LiteralKind::Null => Builtin::ExpressibleByNullLiteral,
         LiteralKind::Array => Builtin::InternalExpressibleByArrayLiteral,
         LiteralKind::Dictionary => Builtin::InternalExpressibleByDictionaryLiteral,
-        // Accumulator type variable — not directly coerced against user types
-        LiteralKind::StringInterpolation => return None,
+        LiteralKind::StringInterpolation => Builtin::ExpressibleByStringInterpolation,
     };
     Some(match ctx.resolver.builtin(feature) {
         Some(protocol) => InferError::DoesNotConform {
@@ -225,6 +224,19 @@ pub(super) fn solve_equal_decayed(
     span: Span,
 ) -> SolveResult {
     let vr = ctx.resolve(value);
+    // An Error side poisons an unresolved other side, as in `solve_coerce`:
+    // `unify` absorbs Error without binding, which left a for-loop's
+    // iterator var open under a missing associated type (`_ !: Iterator`).
+    let tr = ctx.resolve(target);
+    if ctx.is_error(vr) || ctx.is_error(tr) {
+        if ctx.is_error(vr) && matches!(ctx.slot(tr), TySlot::Unresolved { .. }) {
+            ctx.poison(target);
+        }
+        if ctx.is_error(tr) && matches!(ctx.slot(vr), TySlot::Unresolved { .. }) {
+            ctx.poison(value);
+        }
+        return SolveResult::Solved;
+    }
     let (pointee, value_is_ref) = match ctx.slot(vr) {
         TySlot::Resolved(TyKind::Ref { pointee, .. }) => (*pointee, true),
         TySlot::Resolved(_) | TySlot::Unresolved { literal: Some(_) } => (vr, false),
@@ -279,10 +291,30 @@ pub(super) fn solve_assign_target(
     expr: kestrel_hir::body::HirExprId,
     span: Span,
 ) -> SolveResult {
+    // A failable place read lends `Optional[&T]` and can't be assigned
+    // (the analyzer's E214). Check the value against the copied-out
+    // `Optional[T]` instead, so `d(k) = 3` / `= null` still type the value
+    // without a cascading `&T` mismatch.
+    if ctx.place_assign_values.contains(&expr)
+        && let Some((optional, pointee)) = lent_optional_payload(ctx, target)
+    {
+        let decayed = ctx.enum_ty(optional, vec![pointee]);
+        return solve_coerce(ctx, value, decayed, expr, span);
+    }
     match ctx.slot(ctx.resolve(target)) {
+        // A `var` holding a shared ref rebinds (`a = s.trimmedStart()`).
+        TySlot::Resolved(TyKind::Ref {
+            mutating: false, ..
+        }) if ctx.rebind_values.contains(&expr) => solve_coerce(ctx, value, target, expr, span),
         TySlot::Resolved(TyKind::Ref { pointee, .. }) => {
             let pointee = *pointee;
             solve_coerce(ctx, value, pointee, expr, span)
+        },
+        // An unsized place (`xs(1..<3) = ys`, a `Slice[T]`) has no value to
+        // overwrite as a whole (Rust's rule): reject it with its own error
+        // rather than a mismatch against the RHS.
+        TySlot::Resolved(_) if !super::conformance::solver_ty_is_sized(ctx, target, 0) => {
+            SolveResult::Error(InferError::UnsizedAssign { target, span })
         },
         TySlot::Resolved(_) | TySlot::Unresolved { literal: Some(_) } => {
             solve_coerce(ctx, value, target, expr, span)
@@ -330,6 +362,20 @@ pub(super) fn solve_coerce(
             ctx.poison(from);
         }
         return SolveResult::Solved;
+    }
+
+    if ctx.decay_wait_gate && awaits_projection_into_decay(ctx, from, to) {
+        return SolveResult::Deferred(Constraint::Coerce {
+            from,
+            to,
+            expr,
+            span,
+            reason: Reason::Unspecified,
+        });
+    }
+
+    if let Some(result) = try_view_arg_peel(ctx, from, to, expr, &span) {
+        return result;
     }
 
     // Stage-1 transparent place: the two ref coercion arms, BEFORE the unify
@@ -397,6 +443,41 @@ pub(super) fn solve_coerce(
             },
         }
     }
+    // 1b. A bound `Optional[&T]` (`let f = b.first`) decays to `Optional[T]`
+    //     like a bound `&T` does: the binding owns a copy. Only binding
+    //     initializers and call arguments decay (MIR copies them out, `optional_ref_decays`); an
+    //     unresolved target waits for an annotation, else the end-of-body
+    //     default decays it (`apply_ref_decay_defaults`).
+    if optional_ref_decay_site(ctx, expr)
+        && let Some((optional, pointee)) = optional_ref_pointee(ctx, fr)
+    {
+        if matches!(ctx.slot(tr), TySlot::Unresolved { literal: None }) {
+            return SolveResult::Deferred(Constraint::Coerce {
+                from,
+                to,
+                expr,
+                span,
+                reason: Reason::Unspecified,
+            });
+        }
+        if optional_ref_pointee(ctx, tr).is_none() {
+            ctx.optional_ref_decays.insert(expr);
+            let decayed = ctx.named(optional, vec![pointee]);
+            return solve_coerce(ctx, decayed, to, expr, span);
+        }
+    }
+
+    // 1c. Anywhere else, an `Optional[&T]` coerced into a known
+    //     `Optional[U]` with a non-ref `U` (`get { self.d(key) }` returning
+    //     `Int64?`) is a copy-out too.
+    if let Some((optional, pointee)) = optional_ref_pointee(ctx, fr)
+        && optional_value_payload(ctx, tr)
+    {
+        ctx.optional_ref_decays.insert(expr);
+        let decayed = ctx.named(optional, vec![pointee]);
+        return solve_coerce(ctx, decayed, to, expr, span);
+    }
+
     // 2. `from` is a ref, `to` is not — copy-out DECAY (binding decay,
     //    consuming args, assignment RHS, return-of-T): the value read is of
     //    the POINTEE type; continue the whole coercion (incl. FromValue
@@ -421,6 +502,24 @@ pub(super) fn solve_coerce(
             });
         }
         let fp = *fp;
+        // A pointee not known yet (`xs(0..<2)` before the range's literals
+        // default) into a `DecaysFrom` target (`let lo: Array[Int64] = …`)
+        // waits: unifying now would pin the view to the owned type.
+        if ctx.decay_wait_gate
+            && matches!(
+                ctx.slot(ctx.resolve(fp)),
+                TySlot::Unresolved { literal: None }
+            )
+            && accepts_decay(ctx, to)
+        {
+            return SolveResult::Deferred(Constraint::Coerce {
+                from,
+                to,
+                expr,
+                span,
+                reason: Reason::Unspecified,
+            });
+        }
         return solve_coerce(ctx, fp, to, expr, span);
     }
 
@@ -544,41 +643,31 @@ pub(super) fn solve_coerce(
         return result;
     }
 
-    if let Some(method) = ctx.resolver.check_promotion(&from_kind, &to_kind) {
-        // Verify the source type matches the `from` method's `value: T` parameter
-        // once T is bound to the target's type args. Without this, any source
-        // type silently promotes to any FromValue-conforming target (e.g.
-        // `let x: String? = 5` would succeed).
-        let target_entity = to_kind.entity();
-        let target_args: Vec<TyVar> = to_kind.args().to_vec();
-        let qctx = ctx.query_ctx;
-        let root = ctx.root;
-        if let Some(target_e) = target_entity {
-            let target_tps: Vec<Entity> = qctx
-                .get::<TypeParams>(target_e)
-                .map(|tp| tp.0.clone())
-                .unwrap_or_default();
-            let subs: Vec<(Entity, TyVar)> = target_tps
-                .iter()
-                .copied()
-                .zip(target_args.iter().copied())
-                .collect();
+    if let Some(result) = try_decays_from(ctx, from, to, &from_kind, &to_kind, expr, &span) {
+        return result;
+    }
 
-            if let Some(param_hir_tys) = qctx.query(LowerCallableTypes {
-                entity: method,
-                root,
-            }) && let Some(Some(value_hir_ty)) = param_hir_tys.first()
-            {
-                let param_tv = lower_hir_ty_sub(ctx, value_hir_ty, None, TyVar(0), &subs);
-                if unify::unify(ctx, from, param_tv).is_err() {
-                    ctx.errored_coerce_exprs.insert(expr);
-                    return SolveResult::Error(InferError::TypeMismatch {
-                        expected: param_tv,
-                        got: from,
-                        span,
-                        reason: Reason::Unspecified,
-                    });
-                }
+    if let Some(method) = ctx.resolver.check_promotion(&from_kind, &to_kind) {
+        // The source must be the target's `FromValue[Output]` arg — the
+        // conformance's protocol arg, pinned at the target (`Optional[Int64]:
+        // FromValue[Int64]`). Without this any source silently promotes to any
+        // FromValue target (`let x: String? = 5`).
+        if let Some(protocol) = ctx.query_ctx.parent_of(method) {
+            let output = ctx.fresh();
+            let pinned = super::conformance::unify_bound_protocol_args(
+                ctx,
+                to_resolved,
+                protocol,
+                &[output],
+            );
+            if pinned.is_err() || unify::unify(ctx, from, output).is_err() {
+                ctx.errored_coerce_exprs.insert(expr);
+                return SolveResult::Error(InferError::TypeMismatch {
+                    expected: output,
+                    got: from,
+                    span,
+                    reason: Reason::Unspecified,
+                });
             }
         }
 
@@ -588,6 +677,7 @@ pub(super) fn solve_coerce(
             crate::ctx::PromotionInfo {
                 method,
                 target_ty: to,
+                view: None,
             },
         );
         return SolveResult::Solved;
@@ -698,6 +788,17 @@ pub(super) fn reconcile_fn_kinds(
     // `gen_expr` propagates outward through `Block`/`Sugar` wrappers — a
     // trailing-closure call site carries the WRAPPER's id in the `Coerce`.
     if ctx.closure_literal_exprs.contains(&expr) {
+        // A closure literal has no C address, whatever it captures.
+        if to_kind == kestrel_ast::FnTypeKind::C {
+            ctx.errored_coerce_exprs.insert(expr);
+            // Report the literal as what it is, a closure, even when its
+            // kind was already taken from the expected type.
+            return Some(SolveResult::Error(InferError::KindMismatch {
+                expected: to_kind,
+                actual: kestrel_ast::FnTypeKind::Normal,
+                span: span.clone(),
+            }));
+        }
         if from_kind != to_kind {
             ctx.set_function_kind(fr, to_kind);
         }
@@ -709,7 +810,11 @@ pub(super) fn reconcile_fn_kinds(
     if from_flex || to_flex {
         if from_flex && !to_flex && from_kind != to_kind {
             ctx.set_function_kind(fr, to_kind);
-            ctx.kind_coercions.insert(expr, (from_kind, to_kind));
+            // A named function adopting C is built as its C address outright
+            // (no widening of a 2-word value), so there is nothing to replay.
+            if to_kind != kestrel_ast::FnTypeKind::C {
+                ctx.kind_coercions.insert(expr, (from_kind, to_kind));
+            }
         } else if to_flex && !from_flex && from_kind != to_kind {
             ctx.set_function_kind(tr, from_kind);
         }
@@ -826,4 +931,320 @@ pub(super) fn reconcile_closure_conventions(
         .zip(&actual)
         .any(|(e, a)| *e != MutBorrow && *a == MutBorrow);
     mismatch.then(|| InferError::ConventionMismatch { span: span.clone() })
+}
+
+/// Shared `Optional[&T]` → the `Optional` entity and `T`. `None` for any other
+/// type (an `Optional[&mutating T]`, or an `Optional` whose payload is not yet
+/// known).
+/// Is `tv` an `Optional` whose payload is resolved and not a reference?
+fn optional_value_payload(ctx: &InferCtx<'_>, tv: TyVar) -> bool {
+    let Some(optional) = ctx.resolver.builtin(Builtin::OptionalEnum) else {
+        return false;
+    };
+    let (TySlot::Resolved(TyKind::Enum { entity, args })
+    | TySlot::Resolved(TyKind::Struct { entity, args })) = ctx.slot(ctx.resolve(tv))
+    else {
+        return false;
+    };
+    *entity == optional
+        && args.len() == 1
+        && matches!(ctx.slot(ctx.resolve(args[0])), TySlot::Resolved(k) if !matches!(k, TyKind::Ref { .. }))
+}
+
+/// A position where a lent `Optional[&T]` decays to `Optional[T]` (unless
+/// the target itself is `Optional[&T]`): a binding initializer, a call
+/// argument (`print("\(xs.first())")`), or a method receiver
+/// (`xs.first().map(f)`: `Optional`'s methods aren't written for a
+/// reference payload).
+/// An argument bound to a borrowed param whose nominal type differs from the
+/// param's reaches it through `Indirection`:
+/// `takes(xs)` with `takes(xs: &Slice[T])` and `xs: Array[T]` passes
+/// `xs.value`. Records one peel level for MIR and re-coerces the pointee, so
+/// nested wrappers peel again. `None` (no peel) for any other argument, a
+/// non-nominal side, the same nominal on both sides, or a wrapper that isn't
+/// `Indirection` — the ordinary coercion then decides.
+fn try_view_arg_peel(
+    ctx: &mut InferCtx<'_>,
+    from: TyVar,
+    to: TyVar,
+    expr: kestrel_hir::body::HirExprId,
+    span: &Span,
+) -> Option<SolveResult> {
+    let &mutating = ctx.view_args.get(&expr)?;
+    let nominal = |kind: &TyKind| match kind {
+        TyKind::Struct { entity, .. } | TyKind::Enum { entity, .. } => Some(*entity),
+        _ => None,
+    };
+    let TySlot::Resolved(to_kind) = ctx.slot(ctx.resolve(to)) else {
+        // An open argument into an open param (`show(sl)`, `sl` a pending
+        // binding) waits for its own type: a ref argument passes its pointee
+        // (`T = Slice[Int64]`), which linking now would turn into `T = &…`.
+        let open = |tv| {
+            matches!(
+                ctx.slot(ctx.resolve(tv)),
+                TySlot::Unresolved { literal: None }
+            )
+        };
+        if ctx.view_link_gate && open(from) && open(to) {
+            return Some(SolveResult::Deferred(Constraint::Coerce {
+                from,
+                to,
+                expr,
+                span: span.clone(),
+                reason: Reason::Unspecified,
+            }));
+        }
+        return None;
+    };
+    let target_entity = nominal(to_kind)?;
+    // A ref-typed argument (`let r = &xs; takes(r)`) peels its pointee.
+    let mut wrapper = ctx.resolve(from);
+    if let TySlot::Resolved(TyKind::Ref { pointee, .. }) = ctx.slot(wrapper) {
+        wrapper = ctx.resolve(*pointee);
+    }
+    // An argument whose type isn't known yet waits for it rather than being
+    // pinned to the param's type, which would rule the peel out:
+    // - one whose own constraint is still pending (`probe(xs.asUnsafeSlice())`)
+    //   while `view_peel_gate` is up;
+    // - a literal the target can't take (`total([1, 2])` with a `&Slice`
+    //   param) while `synth_gate` is up, so it defaults to `Array` and peels.
+    let wait = match ctx.slot(wrapper) {
+        TySlot::Resolved(_) => false,
+        TySlot::Unresolved { literal: None } => {
+            (ctx.view_peel_gate && !ctx.postponed_literal_args.contains(&expr))
+                || awaits_ref_decay(ctx, wrapper)
+                // A call's result typed by a literal default
+                // (`Float64(parsing: pieces(2))`) waits through the
+                // defaults; an operator's (`1 << 26`) is the param's to type.
+                || (ctx.view_link_gate
+                    && ctx.call_return_tvs.contains_key(&expr)
+                    && !ctx.operator_members.contains_key(&expr))
+        },
+        TySlot::Unresolved { literal: Some(lit) } => {
+            ctx.synth_gate && !crate::unify::conforms_to_literal_protocol(ctx, to_kind, *lit)
+        },
+        _ => return None,
+    };
+    if wait {
+        if is_existential_box(ctx, to_kind) {
+            return None;
+        }
+        return Some(SolveResult::Deferred(Constraint::Coerce {
+            from,
+            to,
+            expr,
+            span: span.clone(),
+            reason: Reason::Unspecified,
+        }));
+    }
+    let TySlot::Resolved(wrapper_kind) = ctx.slot(wrapper) else {
+        return None;
+    };
+    let wrapper_kind = wrapper_kind.clone();
+    if nominal(&wrapper_kind)? == target_entity {
+        return None;
+    }
+    // An `Optional` param takes a non-optional argument by wrapping it in
+    // `.Some` (`show(s: String?)` given a `String`), never by peeling it:
+    // the pointee isn't the payload the param asked for.
+    if ctx.resolver.builtin(Builtin::OptionalEnum) == Some(target_entity) {
+        return None;
+    }
+    // Existentials in different boxes stay different types (E147): an
+    // `any[OwnedBox] P` must not peel to its payload and rebox as `any P`.
+    let to_kind = to_kind.clone();
+    if is_existential_box(ctx, &wrapper_kind) || is_existential_box(ctx, &to_kind) {
+        return None;
+    }
+    let peel = super::member::indirection_peel_step(ctx, &wrapper_kind, wrapper, span)?;
+    // A `&mutating` view needs the wrapper's `mutating ref`.
+    if mutating && peel.mut_method.is_none() {
+        return Some(SolveResult::Error(mismatch_error(
+            ctx,
+            to,
+            from,
+            span.clone(),
+        )));
+    }
+    let pointee = peel.target_tv;
+    kestrel_debug::ktrace!(
+        "arg-peel",
+        "expr {expr:?} at {span:?}: {:?} peels toward {:?}",
+        wrapper_kind,
+        to_kind
+    );
+    ctx.arg_indirection_peels
+        .entry(expr)
+        .or_default()
+        .push(peel);
+    ctx.coerce(pointee, to, expr, span.clone());
+    Some(SolveResult::Solved)
+}
+
+/// Is `from` an associated-type projection still pending (`I.SliceOutput`)
+/// that `to`, a `DecaysFrom` target, would pin if linked now? It may yet
+/// resolve to a view's ref, which converts instead.
+pub(super) fn awaits_projection_into_decay(ctx: &InferCtx<'_>, from: TyVar, to: TyVar) -> bool {
+    let from = ctx.resolve(from);
+    matches!(ctx.slot(from), TySlot::Unresolved { literal: None })
+        && accepts_decay(ctx, to)
+        && ctx.constraints.iter().any(
+            |c| matches!(c, Constraint::Associated { result, .. } if ctx.resolve(*result) == from),
+        )
+}
+
+/// Does `to` name an owned type some view converts into (`DecaysFrom`)?
+fn accepts_decay(ctx: &InferCtx<'_>, to: TyVar) -> bool {
+    let Some(protocol) = ctx.resolver.builtin(Builtin::DecaysFromProtocol) else {
+        return false;
+    };
+    match ctx.slot(ctx.resolve(to)) {
+        TySlot::Resolved(kind @ (TyKind::Struct { .. } | TyKind::Enum { .. })) => {
+            ctx.resolver.conforms_to(kind, protocol)
+        },
+        _ => false,
+    }
+}
+
+/// Target-directed view conversion: an unsized view (`StringSlice`,
+/// `Slice[T]`; a `&View` source already peeled to it above) coerced into a
+/// named owned type conforming to `DecaysFrom[View]` builds that type with
+/// the conformance's `decaying(from:)`. Recorded as a promotion, so MIR
+/// applies it at the same value boundary. A `mutating` argument never
+/// converts (its writes would land in a temporary): it stays a mismatch.
+fn try_decays_from(
+    ctx: &mut InferCtx<'_>,
+    from: TyVar,
+    to: TyVar,
+    from_kind: &TyKind,
+    to_kind: &TyKind,
+    expr: kestrel_hir::body::HirExprId,
+    span: &Span,
+) -> Option<SolveResult> {
+    let nominal = |k: &TyKind| matches!(k, TyKind::Struct { .. } | TyKind::Enum { .. });
+    if !nominal(from_kind) || !nominal(to_kind) {
+        return None;
+    }
+    let protocol = ctx.resolver.builtin(Builtin::DecaysFromProtocol)?;
+    let method = ctx.resolver.builtin(Builtin::DecaysFromMethod)?;
+    if super::conformance::solver_ty_is_sized(ctx, from, 0)
+        || !ctx.resolver.conforms_to(to_kind, protocol)
+    {
+        return None;
+    }
+    let view = ctx.view_args.get(&expr).copied();
+    if view == Some(true) {
+        return None;
+    }
+    // The source must be the conformance's protocol arg, pinned at the
+    // target (`String: DecaysFrom[StringSlice]`).
+    let source = ctx.fresh();
+    let to_resolved = ctx.resolve(to);
+    let pinned =
+        super::conformance::unify_bound_protocol_args(ctx, to_resolved, protocol, &[source]);
+    if pinned.is_err() || unify::unify(ctx, from, source).is_err() {
+        ctx.errored_coerce_exprs.insert(expr);
+        return Some(SolveResult::Error(mismatch_error(
+            ctx,
+            to,
+            from,
+            span.clone(),
+        )));
+    }
+    if view == Some(false) {
+        ctx.borrowed_decay_args.insert(expr);
+    }
+    ctx.promotions.insert(
+        expr,
+        crate::ctx::PromotionInfo {
+            method,
+            target_ty: to,
+            view: Some(from),
+        },
+    );
+    Some(SolveResult::Solved)
+}
+
+/// Is `tv` a binding still owed its type by a pending ref decay
+/// (`let p = pieces(2)`, typed by the end-of-body ref-decay defaults)? An
+/// argument reading it waits for that type rather than pinning the binding
+/// to the param's.
+fn awaits_ref_decay(ctx: &InferCtx<'_>, tv: TyVar) -> bool {
+    let tv = ctx.resolve(tv);
+    ctx.constraints.iter().any(|c| match c {
+        Constraint::EqualDecayed { target, .. } => ctx.resolve(*target) == tv,
+        // Only a ref (or still-open) initializer decays: a bound
+        // `Optional[&T]` (`let o2 = o`) is linked by its first use, as before.
+        Constraint::Coerce { from, to, expr, .. } => {
+            ctx.binding_init_exprs.contains(expr)
+                && ctx.resolve(*to) == tv
+                && matches!(
+                    ctx.slot(ctx.resolve(*from)),
+                    TySlot::Resolved(TyKind::Ref { .. }) | TySlot::Unresolved { .. }
+                )
+        },
+        _ => false,
+    })
+}
+
+/// A box holding an existential payload (`any P`, `any[OwnedBox] P`).
+fn is_existential_box(ctx: &InferCtx<'_>, kind: &TyKind) -> bool {
+    let (TyKind::Struct { args, .. } | TyKind::Enum { args, .. }) = kind else {
+        return false;
+    };
+    args.first().is_some_and(|&arg| {
+        matches!(
+            ctx.slot(ctx.resolve(arg)),
+            TySlot::Resolved(TyKind::RawExistential { .. })
+        )
+    })
+}
+
+pub(crate) fn optional_ref_decay_site(
+    ctx: &InferCtx<'_>,
+    expr: kestrel_hir::body::HirExprId,
+) -> bool {
+    ctx.binding_init_exprs.contains(&expr)
+        || ctx.call_arg_exprs.contains(&expr)
+        || ctx.method_receiver_exprs.contains(&expr)
+}
+
+/// `tv` as `Optional[&T]` or `Optional[&mutating T]` (a lent failable
+/// read): the Optional entity and `T`.
+fn lent_optional_payload(ctx: &InferCtx<'_>, tv: TyVar) -> Option<(Entity, TyVar)> {
+    let optional = ctx.resolver.builtin(Builtin::OptionalEnum)?;
+    let TySlot::Resolved(TyKind::Enum { entity, args } | TyKind::Struct { entity, args }) =
+        ctx.slot(ctx.resolve(tv))
+    else {
+        return None;
+    };
+    if *entity != optional || args.len() != 1 {
+        return None;
+    }
+    let TySlot::Resolved(TyKind::Ref { pointee, .. }) = ctx.slot(ctx.resolve(args[0])) else {
+        return None;
+    };
+    Some((optional, *pointee))
+}
+
+pub(crate) fn optional_ref_pointee(ctx: &InferCtx<'_>, tv: TyVar) -> Option<(Entity, TyVar)> {
+    let optional = ctx.resolver.builtin(Builtin::OptionalEnum)?;
+    let (TySlot::Resolved(TyKind::Enum { entity, args })
+    | TySlot::Resolved(TyKind::Struct { entity, args })) = ctx.slot(ctx.resolve(tv))
+    else {
+        return None;
+    };
+    if *entity != optional || args.len() != 1 {
+        return None;
+    }
+    // Only a shared payload decays: an `Optional[&mutating T]` local is how
+    // callers write through a lookup (`let m = c.pick(); if let .Some(w) = m`).
+    let TySlot::Resolved(TyKind::Ref {
+        pointee,
+        mutating: false,
+    }) = ctx.slot(ctx.resolve(args[0]))
+    else {
+        return None;
+    };
+    Some((optional, *pointee))
 }

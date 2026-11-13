@@ -20,7 +20,7 @@ public struct SHA1: Digest {
         self.blocks = BlockBuffer(function: SHA1State(words: initial), blockLength: 64);
     }
 
-    public mutating func update[S](bytes: S) where S: Slice[UInt8], S: not Static {
+    public mutating func update(bytes: &Slice[UInt8]) {
         self.blocks.update(bytes.asUnsafeSlice());
     }
 
@@ -72,7 +72,7 @@ public struct SHA1: Digest {
                 f = b ^ c ^ d;
                 k = 0xca62c1d6;
             }
-            let temp = a.rotateLeft(by: 5) + f + e + k + w(i);
+            let temp = (a.rotateLeft(by: 5)).addWrapping(f).addWrapping(e).addWrapping(k).addWrapping(w(i));
             e = d;
             d = c;
             c = b.rotateLeft(by: 30);
@@ -80,11 +80,11 @@ public struct SHA1: Digest {
             a = temp;
         }
 
-        state(0) = state(0) + a;
-        state(1) = state(1) + b;
-        state(2) = state(2) + c;
-        state(3) = state(3) + d;
-        state(4) = state(4) + e;
+        state(0) = state(0).addWrapping(a);
+        state(1) = state(1).addWrapping(b);
+        state(2) = state(2).addWrapping(c);
+        state(3) = state(3).addWrapping(d);
+        state(4) = state(4).addWrapping(e);
     }
 }
 

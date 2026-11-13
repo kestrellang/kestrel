@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use kestrel_debug::ktrace;
 use kestrel_hecs::Entity;
@@ -79,12 +79,11 @@ pub fn synthesize_clone_shims(module: &mut MirModule, next_entity: &mut u32) {
     // would read back as user clones.
     let clone_key = clone_witness_key(module, cloneable_proto);
     let user_clone_funcs = collect_user_clone_funcs(module, cloneable_proto, &clone_key);
-    let has_user_clone: std::collections::HashSet<Entity> =
-        user_clone_funcs.keys().copied().collect();
+    let has_user_clone: HashSet<Entity> = user_clone_funcs.keys().copied().collect();
 
     // Build worklist: all structs/enums that don't already have a user clone.
     // Skip closure envs and types with unresolvable fields.
-    let closure_env_entities: std::collections::HashSet<Entity> = module
+    let closure_env_entities: HashSet<Entity> = module
         .functions
         .values()
         .filter_map(|f| match &f.kind {
@@ -206,74 +205,39 @@ pub fn synthesize_clone_shims(module: &mut MirModule, next_entity: &mut u32) {
         module.add_witness(witness);
     }
 
-    // Set CopyBehavior::Clone for all shim'd types that have non-trivial fields.
-    // Types with only primitive fields stay Bitwise — the expand pass handles them.
+    // Mark `CopyBehavior::Clone` on every shim'd or user-`clone()` type whose
+    // copy really needs a deep clone (see [`DeepCloneQuery`]); the rest stay
+    // `Bitwise` and a copy is a memcpy.
+    //
+    // User-`clone()` types are skipped by shim synthesis above, so without
+    // this they'd keep their front-end `Bitwise` and the expand pass would
+    // degrade a `CopyValue` on one to a bitwise alias instead of a clone,
+    // corrupting a heap-backed value stored in a generic container (e.g.
+    // quill's `Value` as a `Dictionary[String, Value]` value: its bucket clone
+    // shim bit-copied the `Value`, aliasing the inner String).
+    //
     // A conditionally-Copyable container keeps its generic `None` base: its
     // per-instance behavior is derived later by `refine_mono_copy_behavior`
     // (`Optional[String]` → Clone, `Optional[Int64]` → Bitwise, `Optional[File]`
     // → None). Overwriting the base to Clone here would break that invariant.
-    for &type_entity in shim_map.keys() {
-        if is_conditional_container(module, type_entity) {
-            continue;
-        }
-        // Compute predicate with shared borrow, then mutate separately
-        let needs_struct = module
-            .structs
-            .get(&type_entity)
-            .map(|s| needs_clone_shim_struct(s, &module.ty_arena))
-            .unwrap_or(false);
-        if needs_struct {
-            module.structs.get_mut(&type_entity).unwrap().type_info.copy =
-                CopyBehavior::Clone(cloneable_proto);
-            continue;
-        }
-
-        let needs_enum = module
-            .enums
-            .get(&type_entity)
-            .map(|e| needs_clone_shim_enum(e, &module.ty_arena))
-            .unwrap_or(false);
-        if needs_enum {
-            module.enums.get_mut(&type_entity).unwrap().type_info.copy =
-                CopyBehavior::Clone(cloneable_proto);
-        }
-    }
-
-    // Explicit-clone types (user-written `clone()`) are skipped by shim
-    // synthesis above, so they never had `CopyBehavior::Clone` set — leaving a
-    // non-trivial one as `None`/`Bitwise`. The expand pass then degrades a
-    // `CopyValue` on such a type to a bitwise alias / move instead of a clone,
-    // corrupting a heap-backed value stored in a generic container (e.g. quill's
-    // `Value` as a `Dictionary[String, Value]` value: its bucket clone shim
-    // bit-copied the `Value`, aliasing the inner String). Mark them `Clone` so
-    // the CopyValue expands to their user `clone()`.
     //
-    // Covers types whose `clone()` surfaces only by name and not as a witness —
-    // `user_clone_funcs` already unions both sources. Same trivial-field /
-    // conditional-container guards as the shim loop.
-    let user_clone_types: Vec<Entity> = user_clone_funcs.keys().copied().collect();
-    for &type_entity in &user_clone_types {
-        if is_conditional_container(module, type_entity) {
-            continue;
-        }
-        let needs_struct = module
-            .structs
-            .get(&type_entity)
-            .map(|s| needs_clone_shim_struct(s, &module.ty_arena))
-            .unwrap_or(false);
-        if needs_struct {
-            module.structs.get_mut(&type_entity).unwrap().type_info.copy =
-                CopyBehavior::Clone(cloneable_proto);
-            continue;
-        }
-        let needs_enum = module
-            .enums
-            .get(&type_entity)
-            .map(|e| needs_clone_shim_enum(e, &module.ty_arena))
-            .unwrap_or(false);
-        if needs_enum {
-            module.enums.get_mut(&type_entity).unwrap().type_info.copy =
-                CopyBehavior::Clone(cloneable_proto);
+    // Every decision is made before any is written, so the query reads only
+    // the front end's `type_info.copy`.
+    let needs_clone: Vec<Entity> = {
+        let mut query = DeepCloneQuery::new(module, &has_user_clone, &closure_env_entities);
+        shim_map
+            .keys()
+            .chain(user_clone_funcs.keys())
+            .copied()
+            .filter(|&e| !is_conditional_container(module, e))
+            .filter(|&e| query.nominal_needs_clone(e))
+            .collect()
+    };
+    for type_entity in needs_clone {
+        if let Some(s) = module.structs.get_mut(&type_entity) {
+            s.type_info.copy = CopyBehavior::Clone(cloneable_proto);
+        } else if let Some(e) = module.enums.get_mut(&type_entity) {
+            e.type_info.copy = CopyBehavior::Clone(cloneable_proto);
         }
     }
 }
@@ -536,17 +500,14 @@ fn generate_enum_clone_shim(
         operand: self_val,
     }));
 
-    // Exit block — receives cloned result, returns
-    let exit_block = body.alloc_block();
-    let exit_result = body.alloc_value(ValueDef::owned(self_ty));
-    body.block_mut(exit_block).params.push(BlockParam {
-        value: exit_result,
-        ty: self_ty,
-        ownership: Ownership::Owned,
-    });
-    body.block_mut(exit_block).terminator = Terminator::new(TerminatorKind::Return(exit_result));
-
-    // Per-variant blocks — EnumPayload on @guaranteed, CopyValue to clone
+    // Per-variant blocks — EnumPayload on @guaranteed, CopyValue to clone.
+    //
+    // Each arm returns its result itself rather than jumping to a shared exit
+    // block. A shared exit joins every arm's aggregate through one block
+    // param (a phi of slot addresses in codegen), which keeps every arm's
+    // stack slot alive at once: an 84-case enum got a 5 KB frame. Returning
+    // per arm leaves each slot local to its arm, so the backend builds the
+    // result straight into the return slot.
     let mut switch_arms = Vec::new();
 
     for (case_idx, case_def) in enum_def.cases.iter().enumerate() {
@@ -607,10 +568,8 @@ fn generate_enum_clone_shim(
         }));
 
         body.block_mut(variant_block).insts = variant_insts;
-        body.block_mut(variant_block).terminator = Terminator::new(TerminatorKind::Jump {
-            target: exit_block,
-            args: vec![cloned_enum],
-        });
+        body.block_mut(variant_block).terminator =
+            Terminator::new(TerminatorKind::Return(cloned_enum));
 
         switch_arms.push(SwitchArm {
             pattern: crate::SwitchCase::Variant(variant_idx),
@@ -649,10 +608,8 @@ fn generate_enum_clone_shim(
         operand: wildcard_self,
     }));
     body.block_mut(wildcard_block).insts = wildcard_insts;
-    body.block_mut(wildcard_block).terminator = Terminator::new(TerminatorKind::Jump {
-        target: exit_block,
-        args: vec![wildcard_copy],
-    });
+    body.block_mut(wildcard_block).terminator =
+        Terminator::new(TerminatorKind::Return(wildcard_copy));
     switch_arms.push(SwitchArm {
         pattern: crate::SwitchCase::Wildcard,
         target: wildcard_block,
@@ -709,45 +666,234 @@ fn has_unresolvable_fields_enum(e: &crate::item::enum_def::EnumDef, arena: &TyAr
     })
 }
 
-/// True if a field of type `ty` might need deep cloning: a Named or TypeParam
-/// type, or a tuple that (recursively) contains one. A tuple has no nominal
-/// entity of its own, so a struct/enum whose only non-trivial field is a tuple
-/// of resources (e.g. `(String, String)`) must still get a clone shim — its
-/// `CopyValue` is then deep-cloned element-wise during expand.
-fn ty_needs_clone_shim(arena: &TyArena, ty: TyId) -> bool {
-    match arena.get(ty) {
-        MirTy::Named { .. } | MirTy::TypeParam(_) => true,
-        // The `String`-field route for closures (plan D6, lockstep 8): a
-        // struct holding an `escaping` closure field must get a clone shim and
-        // the `type_info.copy = Clone(cloneable_proto)` overwrite below, so
-        // copying the struct SHARES the environment handle (a retain) instead
-        // of bit-copying it. No frontend classifier change is involved.
-        // `is_shared`, NOT `is_boxed`: a `consuming` closure is NotCopyable,
-        // not Cloneable — it makes its container non-Copyable (`copy_behavior`
-        // answers `None`, which the aggregate fold propagates) instead of
-        // giving it a clone shim that has nothing to clone.
-        MirTy::FuncThick { kind, .. } => kind.is_shared(),
-        MirTy::Tuple(elems) => {
-            let elems = elems.clone();
-            elems.iter().any(|&e| ty_needs_clone_shim(arena, e))
-        },
-        _ => false,
+/// Why a type needs a deep clone: unconditionally, or only when one of its
+/// own type args does. The second form exists for conditionally-Copyable
+/// containers, whose copy class is decided per instance (`Optional[Int64]` is
+/// bitwise, `Optional[String]` clones) — see `refine_mono_copy_behavior`.
+#[derive(Clone, Debug, Default, PartialEq)]
+struct CloneNeed {
+    always: bool,
+    /// Type-param positions whose arg needing a clone makes this type need one.
+    params: Vec<usize>,
+}
+
+impl CloneNeed {
+    const ALWAYS: CloneNeed = CloneNeed {
+        always: true,
+        params: Vec::new(),
+    };
+
+    fn merge(&mut self, other: CloneNeed) {
+        if self.always {
+            return;
+        }
+        if other.always {
+            *self = CloneNeed::ALWAYS;
+            return;
+        }
+        for p in other.params {
+            if !self.params.contains(&p) {
+                self.params.push(p);
+            }
+        }
     }
 }
 
-/// A struct needs a clone shim only if it has at least one field that might
-/// need deep cloning (see [`ty_needs_clone_shim`]). All-primitive structs are
-/// trivially bitwise-copyable and don't need a shim.
-fn needs_clone_shim_struct(s: &crate::item::struct_def::StructDef, arena: &TyArena) -> bool {
-    s.fields.iter().any(|f| ty_needs_clone_shim(arena, f.ty))
+/// Decides whether copying a type takes a deep clone (`CopyBehavior::Clone`)
+/// or is a plain bit copy. This is the one place that decision is made for
+/// structs and enums; it is written into `type_info.copy` by
+/// [`synthesize_clone_shims`] and read by everything after.
+///
+/// A named field is looked through, not assumed to need a clone: a payload of
+/// `Value` (a one-`UInt64` struct) or a payload-free enum is plain bits, so a
+/// type built only from such fields stays `Bitwise` and a copy is a memcpy.
+/// What does need a clone: a shared (`escaping`) closure, a type with a
+/// user-written `clone()` (the refcounted stdlib types: `RcBox`, `CowBox`,
+/// `String`, `Array`, …), a non-conditional generic's type param, and anything
+/// this pass can't see through. Results are memoized per nominal; a type
+/// reached again while its own fields are being scanned is a cycle and counts
+/// as needing a clone (a recursive type holds itself through an indirection).
+struct DeepCloneQuery<'m> {
+    module: &'m MirModule,
+    user_clone: &'m HashSet<Entity>,
+    closure_envs: &'m HashSet<Entity>,
+    memo: HashMap<Entity, CloneNeed>,
 }
 
-fn needs_clone_shim_enum(e: &crate::item::enum_def::EnumDef, arena: &TyArena) -> bool {
-    e.cases.iter().any(|c| {
-        c.payload_fields
-            .iter()
-            .any(|f| ty_needs_clone_shim(arena, f.ty))
-    })
+impl<'m> DeepCloneQuery<'m> {
+    fn new(
+        module: &'m MirModule,
+        user_clone: &'m HashSet<Entity>,
+        closure_envs: &'m HashSet<Entity>,
+    ) -> Self {
+        DeepCloneQuery {
+            module,
+            user_clone,
+            closure_envs,
+            memo: HashMap::new(),
+        }
+    }
+
+    /// Does copying a value of nominal `entity` (generic base) need a clone?
+    fn nominal_needs_clone(&mut self, entity: Entity) -> bool {
+        self.nominal(entity).always
+    }
+
+    fn nominal(&mut self, entity: Entity) -> CloneNeed {
+        if let Some(need) = self.memo.get(&entity) {
+            return need.clone();
+        }
+        // Cycle guard: seen again before its fields are done → needs a clone.
+        self.memo.insert(entity, CloneNeed::ALWAYS);
+        let need = self.compute_nominal(entity);
+        ktrace!(
+            "clone-shim",
+            "deep-clone need of '{}': {:?}",
+            self.module
+                .entity_names
+                .get(&entity)
+                .map(|s| s.as_str())
+                .unwrap_or("?"),
+            need
+        );
+        self.memo.insert(entity, need.clone());
+        need
+    }
+
+    fn compute_nominal(&mut self, entity: Entity) -> CloneNeed {
+        let module = self.module;
+        let (type_params, fields, info, conditional): (_, Vec<TyId>, _, _) =
+            if let Some(s) = module.structs.get(&entity) {
+                let fields = s.fields.iter().map(|f| f.ty).collect();
+                (
+                    &s.type_params,
+                    fields,
+                    &s.type_info,
+                    &s.conditionally_copyable,
+                )
+            } else if let Some(e) = module.enums.get(&entity) {
+                let fields = e
+                    .cases
+                    .iter()
+                    .flat_map(|c| c.payload_fields.iter().map(|f| f.ty))
+                    .collect();
+                (
+                    &e.type_params,
+                    fields,
+                    &e.type_info,
+                    &e.conditionally_copyable,
+                )
+            } else {
+                // Not a struct or enum this pass can see into.
+                return CloneNeed::ALWAYS;
+            };
+
+        let is_conditional = !conditional.is_empty();
+        let opaque = self.closure_envs.contains(&entity)
+            || fields
+                .iter()
+                .any(|&t| ty_contains_unresolvable(t, &module.ty_arena))
+            // Already a clone type (front end), or not copyable at all.
+            || matches!(info.copy, CopyBehavior::Clone(_))
+            // Something to drop means something a bit copy would share.
+            || (info.drop != crate::DropBehavior::None && !is_conditional)
+            || (info.copy == CopyBehavior::None && !is_conditional)
+            // A Cloneable-only grant is never a bit copy.
+            || conditional.clone_only;
+        if opaque {
+            return CloneNeed::ALWAYS;
+        }
+
+        // A user `clone()` is a promise the copy runs it. Kept to the old
+        // shallow rule (any named field) so a hand-written clone on a type
+        // with only primitive fields stays ignored, exactly as before.
+        if self.user_clone.contains(&entity) && !is_conditional {
+            let shallow = fields
+                .iter()
+                .any(|&t| ty_has_named_field(&module.ty_arena, t));
+            return CloneNeed {
+                always: shallow,
+                params: Vec::new(),
+            };
+        }
+
+        let params: Vec<Entity> = type_params.iter().map(|tp| tp.entity).collect();
+        let mut need = CloneNeed::default();
+        for ty in fields {
+            need.merge(self.ty_need(ty, &params));
+            if need.always {
+                return need;
+            }
+        }
+        // A non-conditional generic has one copy class for every instance,
+        // so a type-param field means "may hold something that clones".
+        if !is_conditional && !need.params.is_empty() {
+            return CloneNeed::ALWAYS;
+        }
+        need
+    }
+
+    /// What a field of type `ty` needs, inside a nominal whose type params
+    /// are `params`.
+    fn ty_need(&mut self, ty: TyId, params: &[Entity]) -> CloneNeed {
+        let arena = &self.module.ty_arena;
+        match arena.get(ty).clone() {
+            MirTy::TypeParam(p) => match params.iter().position(|&q| q == p) {
+                Some(i) => CloneNeed {
+                    always: false,
+                    params: vec![i],
+                },
+                None => CloneNeed::ALWAYS,
+            },
+            MirTy::Named { entity, type_args } => {
+                let inner = self.nominal(entity);
+                if inner.always {
+                    return inner;
+                }
+                let mut need = CloneNeed::default();
+                for i in inner.params {
+                    match type_args.get(i) {
+                        Some(&arg) => need.merge(self.ty_need(arg, params)),
+                        None => return CloneNeed::ALWAYS,
+                    }
+                }
+                need
+            },
+            // The `String`-field route for closures (plan D6, lockstep 8): a
+            // struct holding an `escaping` closure field must get a clone shim
+            // and `type_info.copy = Clone(cloneable_proto)`, so copying the
+            // struct SHARES the environment handle (a retain) instead of
+            // bit-copying it. `is_shared`, NOT `is_boxed`: a `consuming`
+            // closure is NotCopyable, not Cloneable — it makes its container
+            // non-Copyable (`copy_behavior` answers `None`, which the aggregate
+            // fold propagates) instead of giving it a clone shim that has
+            // nothing to clone.
+            MirTy::FuncThick { kind, .. } if kind.is_shared() => CloneNeed::ALWAYS,
+            // A tuple has no nominal of its own: a struct whose only
+            // non-trivial field is `(String, String)` still needs a clone, and
+            // its `CopyValue` is deep-cloned element-wise during expand.
+            MirTy::Tuple(elems) => {
+                let mut need = CloneNeed::default();
+                for e in elems {
+                    need.merge(self.ty_need(e, params));
+                }
+                need
+            },
+            MirTy::AssociatedProjection { .. } => CloneNeed::ALWAYS,
+            _ => CloneNeed::default(),
+        }
+    }
+}
+
+/// The old shallow rule, kept for user-`clone()` types: any named or
+/// type-param field (or a tuple or shared closure holding one).
+fn ty_has_named_field(arena: &TyArena, ty: TyId) -> bool {
+    match arena.get(ty) {
+        MirTy::Named { .. } | MirTy::TypeParam(_) => true,
+        MirTy::FuncThick { kind, .. } => kind.is_shared(),
+        MirTy::Tuple(elems) => elems.clone().iter().any(|&e| ty_has_named_field(arena, e)),
+        _ => false,
+    }
 }
 
 #[cfg(test)]
@@ -760,7 +906,7 @@ mod tests {
 
     /// Build a module with a `Cloneable` protocol and `count` shim-eligible
     /// structs named `S0..S{count-1}`, declared in that order. Each has one
-    /// `Named` field so `needs_clone_shim_struct` is true.
+    /// `Named` field so it gets a clone shim.
     fn module_with_cloneable_structs(count: u32) -> MirModule {
         let mut module = MirModule::new("test");
         let unit = module.ty_arena.tuple(vec![]);
@@ -844,5 +990,197 @@ mod tests {
                 .collect::<Vec<_>>()
         };
         assert_eq!(run(), run());
+    }
+
+    // ── Deep-clone decision ────────────────────────────────────────────────
+
+    use crate::item::enum_def::{EnumCaseDef, EnumDef};
+
+    /// A module with only the `Cloneable` protocol registered.
+    fn module_with_cloneable() -> MirModule {
+        let mut module = MirModule::new("test");
+        let unit = module.ty_arena.tuple(vec![]);
+        let cloneable = Entity::from_raw(1);
+        let mut proto = ProtocolDef::new(cloneable, "Cloneable");
+        proto
+            .methods
+            .push(ProtocolMethodDef::new("clone", vec![], unit));
+        module.add_protocol(proto);
+        module.cloneable_protocol = Some(cloneable);
+        module
+    }
+
+    fn add_struct(module: &mut MirModule, raw: u32, name: &str, fields: &[TyId]) -> TyId {
+        let e = Entity::from_raw(raw);
+        module.register_name(e, name);
+        let ty = module.ty_arena.named(e, vec![]);
+        let mut def = StructDef::new(e, name);
+        for (i, &f) in fields.iter().enumerate() {
+            def.add_field(FieldDef::new(format!("f{i}"), f));
+        }
+        def.type_info = TypeInfo::bitwise();
+        module.add_struct(def);
+        ty
+    }
+
+    /// An enum whose case `i` carries `cases[i]` as its payload.
+    fn add_enum(module: &mut MirModule, raw: u32, name: &str, cases: &[&[TyId]]) -> TyId {
+        let e = Entity::from_raw(raw);
+        module.register_name(e, name);
+        let ty = module.ty_arena.named(e, vec![]);
+        let mut def = EnumDef::new(e, name);
+        for (i, payload) in cases.iter().enumerate() {
+            let fields = payload
+                .iter()
+                .enumerate()
+                .map(|(j, &t)| FieldDef::new(format!("p{j}"), t))
+                .collect();
+            def.add_case(EnumCaseDef::with_payload(format!("C{i}"), i as u32, fields));
+        }
+        def.type_info = TypeInfo::bitwise();
+        module.add_enum(def);
+        ty
+    }
+
+    fn copy_of(module: &MirModule, raw: u32) -> CopyBehavior {
+        let e = Entity::from_raw(raw);
+        module
+            .structs
+            .get(&e)
+            .map(|s| s.type_info.copy.clone())
+            .or_else(|| module.enums.get(&e).map(|e| e.type_info.copy.clone()))
+            .expect("nominal exists")
+    }
+
+    /// A field whose type is itself plain bits doesn't make its container a
+    /// clone type: `enum E { case A(Value) case B(Int64) }` stays `Bitwise`,
+    /// so a copy is a memcpy and never calls `__clone$E`.
+    #[test]
+    fn plain_bits_named_fields_stay_bitwise() {
+        let mut module = module_with_cloneable();
+        let i64_ty = module.ty_arena.i64();
+        let value = add_struct(&mut module, 10, "Value", &[i64_ty]);
+        let bin_op = add_enum(&mut module, 11, "BinOp", &[&[], &[]]);
+        let e = add_enum(
+            &mut module,
+            12,
+            "E",
+            &[&[value], &[i64_ty], &[bin_op, i64_ty]],
+        );
+        add_struct(&mut module, 13, "Holder", &[value, e]);
+
+        let mut next_entity = 1000;
+        synthesize_clone_shims(&mut module, &mut next_entity);
+
+        for raw in [10, 11, 12, 13] {
+            assert_eq!(
+                copy_of(&module, raw),
+                CopyBehavior::Bitwise,
+                "nominal {raw}"
+            );
+        }
+    }
+
+    /// A clone type nested any depth down still makes every container a
+    /// clone type.
+    #[test]
+    fn nested_clone_field_makes_containers_clone() {
+        let mut module = module_with_cloneable();
+        let i64_ty = module.ty_arena.i64();
+        // Stands in for `String`: the front end already decided it clones.
+        let string = add_struct(&mut module, 10, "Str", &[i64_ty]);
+        module
+            .structs
+            .get_mut(&Entity::from_raw(10))
+            .unwrap()
+            .type_info
+            .copy = CopyBehavior::Clone(Entity::from_raw(10));
+        let inner = add_struct(&mut module, 11, "Inner", &[i64_ty, string]);
+        let tuple = module.ty_arena.tuple(vec![i64_ty, inner]);
+        add_enum(&mut module, 12, "Outer", &[&[i64_ty], &[tuple]]);
+
+        let mut next_entity = 1000;
+        synthesize_clone_shims(&mut module, &mut next_entity);
+
+        let proto = module.cloneable_protocol.unwrap();
+        assert_eq!(copy_of(&module, 11), CopyBehavior::Clone(proto));
+        assert_eq!(copy_of(&module, 12), CopyBehavior::Clone(proto));
+    }
+
+    /// A type this pass can't see into (no struct or enum def) is assumed to
+    /// need a clone.
+    #[test]
+    fn unknown_nominal_field_needs_clone() {
+        let mut module = module_with_cloneable();
+        let opaque = module.ty_arena.named(Entity::from_raw(99), vec![]);
+        add_struct(&mut module, 10, "HoldsOpaque", &[opaque]);
+
+        let mut next_entity = 1000;
+        synthesize_clone_shims(&mut module, &mut next_entity);
+
+        let proto = module.cloneable_protocol.unwrap();
+        assert_eq!(copy_of(&module, 10), CopyBehavior::Clone(proto));
+    }
+
+    /// Types that reach themselves count as needing a clone.
+    #[test]
+    fn cycle_counts_as_needing_clone() {
+        let mut module = module_with_cloneable();
+        let a = Entity::from_raw(10);
+        let b = Entity::from_raw(11);
+        module.register_name(a, "A");
+        module.register_name(b, "B");
+        let a_ty = module.ty_arena.named(a, vec![]);
+        let b_ty = module.ty_arena.named(b, vec![]);
+        let mut a_def = StructDef::new(a, "A");
+        a_def.add_field(FieldDef::new("b", b_ty));
+        a_def.type_info = TypeInfo::bitwise();
+        module.add_struct(a_def);
+        let mut b_def = StructDef::new(b, "B");
+        b_def.add_field(FieldDef::new("a", a_ty));
+        b_def.type_info = TypeInfo::bitwise();
+        module.add_struct(b_def);
+
+        let mut next_entity = 1000;
+        synthesize_clone_shims(&mut module, &mut next_entity);
+
+        let proto = module.cloneable_protocol.unwrap();
+        assert_eq!(copy_of(&module, 10), CopyBehavior::Clone(proto));
+        assert_eq!(copy_of(&module, 11), CopyBehavior::Clone(proto));
+    }
+
+    /// Every arm of an enum clone shim returns its own result. A shared exit
+    /// block would join all the arms' aggregates through one block param,
+    /// which in codegen keeps one stack slot per arm alive at once.
+    #[test]
+    fn enum_shim_arms_return_directly() {
+        let mut module = module_with_cloneable();
+        let i64_ty = module.ty_arena.i64();
+        let shared = module.ty_arena.intern(MirTy::FuncThick {
+            kind: crate::ty::FnKind::Escaping,
+            params: vec![],
+            ret: i64_ty,
+        });
+        add_enum(&mut module, 10, "E", &[&[i64_ty], &[shared], &[]]);
+
+        let mut next_entity = 1000;
+        synthesize_clone_shims(&mut module, &mut next_entity);
+
+        let shim = module.enums[&Entity::from_raw(10)]
+            .type_info
+            .clone_impl
+            .expect("E gets a clone shim");
+        let body = module.functions[&shim].body.as_ref().unwrap();
+        for block in &body.blocks[1..] {
+            assert!(
+                matches!(block.terminator.kind, TerminatorKind::Return(_)),
+                "every arm returns directly, got {:?}",
+                block.terminator.kind
+            );
+        }
+        assert_eq!(
+            copy_of(&module, 10),
+            CopyBehavior::Clone(module.cloneable_protocol.unwrap())
+        );
     }
 }

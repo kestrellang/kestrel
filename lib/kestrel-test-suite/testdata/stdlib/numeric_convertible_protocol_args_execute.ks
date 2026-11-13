@@ -13,13 +13,13 @@ import std.numeric.(Int8, Int16, Int32, Int64, UInt8, UInt64)
 func main() -> Int64 {
     let a: Int8 = 5;
     let b = Int16(from: a);
-    let c = Int8(from: b);
+    let c = Int8(exactly: b)!;
     let d = Int32(from: c);
     let s: Int16 = 7;
-    let e = Int8(from: s);
+    let e = Int8(exactly: s)!;
     let u: UInt8 = 3;
     let f = Int64(from: u);
     var rng = Lcg64(seed: 1);
     let r = UInt64.random(in: 2..<3, using: rng);
-    Int64(from: d) + Int64(from: e) + f + 4 + Int64(from: r) - 21
+    Int64(from: d) + Int64(from: e) + f + 4 + Int64(exactly: r)! - 21
 }

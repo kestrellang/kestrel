@@ -2,7 +2,7 @@
 // stdlib: true
 
 module Main
-import std.io.stdio.println
+import std.streams.println
 
 func main() -> std.numeric.Int64 {
     let name = "Result";

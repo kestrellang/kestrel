@@ -1,32 +1,34 @@
 // {{TYPE_NAME}} - {{BITS}}-bit {{SIGNEDNESS}} integer
-// Generated from integer.ks.template (docs synced from .ks.interface) - DO NOT EDIT
+// GENERATED FILE — never edit it directly. Edit lang/std/numeric/integer.ks.template
+// (or generate.py) and rerun `python3 generate.py` from lang/std/numeric.
 
 module std.numeric
 
 import std.ffi.(FFISafe)
 import std.core.(
     Equatable, Comparable, Ordering, Bool, Matchable, Hashable, Hasher,
-    Addable, Subtractable, Multipliable, Divisible, Modulo, Negatable,
+    Addable, Subtractable, Multipliable, Divisible, Remainder, Negatable,
     BitwiseAnd, BitwiseOr, BitwiseXor, BitwiseNot, LeftShift, RightShift,
-    AddAssign, SubtractAssign, MultiplyAssign, DivideAssign, ModuloAssign,
+    AddAssign, SubtractAssign, MultiplyAssign, DivideAssign, RemainderAssign,
     BitwiseAndAssign, BitwiseOrAssign, BitwiseXorAssign, LeftShiftAssign, RightShiftAssign,
-    ExpressibleByIntLiteral, Convertible, Defaultable,
+    ExpressibleByIntLiteral, Convertible, NarrowsFrom, Defaultable,
     RangeConstructible, ClosedRangeConstructible, Range, ClosedRange,
     RangeFromConstructible, RangeUpToConstructible, RangeThroughConstructible,
     RangeFrom, RangeUpTo, RangeThrough
 )
-import std.text.(String, StringBuilder, Formatter, Formattable, FormatOptions, _writePadded)
+import std.text.(String, StringSlice, StringBuilder, Formatter, Formattable, FormatOptions)
 import std.memory.(UnsafeSlice, Pointer)
 import std.collections.(Slice)
-import std.numeric.(UInt8, Int64, UInt64)
+import std.numeric.(UInt8, Int64, UInt64, Float32, Float64)
 
 /// A {{BITS}}-bit {{SIGNEDNESS}} integer.
 ///
 /// {{TYPE_NAME}} is the {{BITS}}-bit member of the integer family. The same surface
 /// area is provided across all widths; switch widths to trade range for memory
-/// or to match an FFI ABI. Arithmetic wraps on overflow by default — use the
-/// `*Checked` variants for overflow detection or `*Saturating` to clamp to
-/// `minValue`/`maxValue`. The type is `FFISafe` and lays out as a single
+/// or to match an FFI ABI. Arithmetic traps on overflow in unoptimized builds and wraps in
+/// optimized ones (`--overflow-checks` overrides). Use the `*Wrapping`,
+/// `*Checked`, `*Saturating` or `*Overflowing` variants to pick a behaviour
+/// that holds in every build. The type is `FFISafe` and lays out as a single
 /// `lang.{{LANG_TYPE}}` so it can cross C boundaries unchanged.
 ///
 /// # Examples
@@ -61,7 +63,7 @@ public struct {{TYPE_NAME}}:
     Subtractable,
     Multipliable,
     Divisible,
-    Modulo,
+    Remainder,
     {{NEGATABLE}}
     BitwiseAnd,
     BitwiseOr,
@@ -73,7 +75,7 @@ public struct {{TYPE_NAME}}:
     SubtractAssign,
     MultiplyAssign,
     DivideAssign,
-    ModuloAssign,
+    RemainderAssign,
     BitwiseAndAssign,
     BitwiseOrAssign,
     BitwiseXorAssign,
@@ -148,9 +150,9 @@ public struct {{TYPE_NAME}}:
     }
 
     /// @name From Raw
-    /// Wraps an existing `lang.{{LANG_TYPE}}` without conversion. Internal
-    /// constructor used by intrinsics; not part of the public API.
-    init(raw value: lang.{{LANG_TYPE}}) {
+    /// Wraps an existing `lang.{{LANG_TYPE}}` without conversion. The FFI
+    /// counterpart of `raw`, for values coming back from intrinsics or C.
+    public init(raw value: lang.{{LANG_TYPE}}) {
         self.raw = value
     }
 
@@ -222,8 +224,7 @@ public struct {{TYPE_NAME}}:
         {{TRAILING_ZEROS_IMPL}}
     }}
 
-    /// Value with its byte order reversed. Use to convert between big- and
-    /// little-endian; lowered to a `bswap` intrinsic.
+    {{BYTE_SWAP_DOC}}
     public var byteSwapped: {{TYPE_NAME}} { get {
         {{BYTE_SWAP_IMPL}}
     }}
@@ -269,11 +270,11 @@ public struct {{TYPE_NAME}}:
     // STEPPING
     // ========================================================================
 
-    /// Successor — `self + 1`. Wraps at `maxValue`. Used by `for-in` over
+    /// Successor — `self + 1`. Overflows at `maxValue`, like `add`. Used by `for-in` over
     /// integer ranges.
     public func successor() -> {{TYPE_NAME}} { self.add({{TYPE_NAME}}.one) }
 
-    /// Predecessor — `self - 1`. Wraps at `minValue`.
+    /// Predecessor — `self - 1`. Overflows at `minValue`, like `subtract`.
     public func predecessor() -> {{TYPE_NAME}} { self.subtract({{TYPE_NAME}}.one) }
 
     /// Number of `successor()` steps from `self` to `other` — `other - self`
@@ -312,11 +313,11 @@ public struct {{TYPE_NAME}}:
     // HASHING
     // ========================================================================
 
-    /// Feeds the raw bytes of this value into `hasher`. Endianness-agnostic
-    /// only within a single process — do not persist hashes across builds.
+    /// Feeds this value into `hasher` as one 64-bit word
+    /// (`write(uint64:)`), which `DefaultHasher` mixes in a single round.
+    /// Don't persist hashes across builds.
     public func hash[H](mutating into hasher: H) where H: Hasher {
-        let val = self;
-        hasher.write(UnsafeSlice(pointer: Pointer(to: val).asRaw().cast[UInt8](), count: Layout.of[{{TYPE_NAME}}]().size))
+        hasher.write(uint64: {{HASH_WORD}})
     }
 
     // ========================================================================
@@ -327,7 +328,7 @@ public struct {{TYPE_NAME}}:
     type Subtractable.Output = {{TYPE_NAME}}
     type Multipliable.Output = {{TYPE_NAME}}
     type Divisible.Output = {{TYPE_NAME}}
-    type Modulo.Output = {{TYPE_NAME}}
+    type Remainder.Output = {{TYPE_NAME}}
     {{NEGATABLE_OUTPUT}}
     type BitwiseAnd.Output = {{TYPE_NAME}}
     type BitwiseOr.Output = {{TYPE_NAME}}
@@ -342,27 +343,115 @@ public struct {{TYPE_NAME}}:
     type RangeThroughConstructible.Output = RangeThrough[{{TYPE_NAME}}]
 
     // ========================================================================
-    // ARITHMETIC (Wrapping - Default)
+    // ARITHMETIC (Overflow-checked)
     // ========================================================================
 
-    /// `self + other`, wrapping on overflow. Use `addChecked` to detect or
-    /// `addSaturating` to clamp.
-    public consuming func add(consuming other: {{TYPE_NAME}}) -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_add(self.raw, other.raw)) }
+    /// `self + other`. Traps on overflow when overflow checks are on; use `addWrapping`, `addChecked`,
+    /// `addSaturating` or `addOverflowing` when overflow is expected.
+    ///
+    /// # Errors
+    ///
+    /// Panics when the result doesn't fit in `{{TYPE_NAME}}` and overflow checks are
+    /// on (the default at `-O0`). With checks off it wraps.
+    public consuming func add(consuming other: {{TYPE_NAME}}) -> {{TYPE_NAME}} {
+        if Bool(boolLiteral: lang.i1_and(lang.overflow_checks(), lang.{{LANG_TYPE}}_{{SIGNED_PREFIX}}add_overflows(self.raw, other.raw))) {
+            fatalError("arithmetic overflow: {{TYPE_NAME}} +")
+        }
+        {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_add(self.raw, other.raw))
+    }
 
-    /// `self - other`, wrapping on overflow.
-    public consuming func subtract(consuming other: {{TYPE_NAME}}) -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_sub(self.raw, other.raw)) }
+    /// `self + other`, wrapping around on overflow (two's complement).
+    /// For hashes, checksums and RNGs where wrap-around is the intent.
+    public func addWrapping(other: {{TYPE_NAME}}) -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_add(self.raw, other.raw)) }
 
-    /// `self * other`, wrapping on overflow.
-    public consuming func multiply(consuming other: {{TYPE_NAME}}) -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_mul(self.raw, other.raw)) }
+    /// `self + other` plus whether it overflowed. The value is the
+    /// wrapped result, as from `addWrapping`.
+    public func addOverflowing(other: {{TYPE_NAME}}) -> ({{TYPE_NAME}}, Bool) {
+        ({{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_add(self.raw, other.raw)), Bool(boolLiteral: lang.{{LANG_TYPE}}_{{SIGNED_PREFIX}}add_overflows(self.raw, other.raw)))
+    }
+
+    /// `self - other`. Traps on overflow when overflow checks are on; use `subtractWrapping`, `subtractChecked`,
+    /// `subtractSaturating` or `subtractOverflowing` when overflow is expected.
+    ///
+    /// # Errors
+    ///
+    /// Panics when the result doesn't fit in `{{TYPE_NAME}}` and overflow checks are
+    /// on (the default at `-O0`). With checks off it wraps.
+    public consuming func subtract(consuming other: {{TYPE_NAME}}) -> {{TYPE_NAME}} {
+        if Bool(boolLiteral: lang.i1_and(lang.overflow_checks(), lang.{{LANG_TYPE}}_{{SIGNED_PREFIX}}sub_overflows(self.raw, other.raw))) {
+            fatalError("arithmetic overflow: {{TYPE_NAME}} -")
+        }
+        {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_sub(self.raw, other.raw))
+    }
+
+    /// `self - other`, wrapping around on overflow (two's complement).
+    /// For hashes, checksums and RNGs where wrap-around is the intent.
+    public func subtractWrapping(other: {{TYPE_NAME}}) -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_sub(self.raw, other.raw)) }
+
+    /// `self - other` plus whether it overflowed. The value is the
+    /// wrapped result, as from `subtractWrapping`.
+    public func subtractOverflowing(other: {{TYPE_NAME}}) -> ({{TYPE_NAME}}, Bool) {
+        ({{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_sub(self.raw, other.raw)), Bool(boolLiteral: lang.{{LANG_TYPE}}_{{SIGNED_PREFIX}}sub_overflows(self.raw, other.raw)))
+    }
+
+    /// `self * other`. Traps on overflow when overflow checks are on; use `multiplyWrapping`, `multiplyChecked`,
+    /// `multiplySaturating` or `multiplyOverflowing` when overflow is expected.
+    ///
+    /// # Errors
+    ///
+    /// Panics when the result doesn't fit in `{{TYPE_NAME}}` and overflow checks are
+    /// on (the default at `-O0`). With checks off it wraps.
+    public consuming func multiply(consuming other: {{TYPE_NAME}}) -> {{TYPE_NAME}} {
+        if Bool(boolLiteral: lang.i1_and(lang.overflow_checks(), lang.{{LANG_TYPE}}_{{SIGNED_PREFIX}}mul_overflows(self.raw, other.raw))) {
+            fatalError("arithmetic overflow: {{TYPE_NAME}} *")
+        }
+        {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_mul(self.raw, other.raw))
+    }
+
+    /// `self * other`, wrapping around on overflow (two's complement).
+    /// For hashes, checksums and RNGs where wrap-around is the intent.
+    public func multiplyWrapping(other: {{TYPE_NAME}}) -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_mul(self.raw, other.raw)) }
+
+    /// `self * other` plus whether it overflowed. The value is the
+    /// wrapped result, as from `multiplyWrapping`.
+    public func multiplyOverflowing(other: {{TYPE_NAME}}) -> ({{TYPE_NAME}}, Bool) {
+        ({{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_mul(self.raw, other.raw)), Bool(boolLiteral: lang.{{LANG_TYPE}}_{{SIGNED_PREFIX}}mul_overflows(self.raw, other.raw)))
+    }
+
+    /// The full double-width product `self * other` as `(low, high)`
+    /// halves: `low` is the wrapped product (as from `multiplyWrapping`),
+    /// `high` the bits above it. Compiles to one widening multiply. For
+    /// hashes, RNGs and bignum arithmetic.
+    public func multiplyFull(other: {{TYPE_NAME}}) -> ({{TYPE_NAME}}, {{TYPE_NAME}}) {
+        ({{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_mul(self.raw, other.raw)), {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_{{SIGNED_PREFIX}}mul_high(self.raw, other.raw)))
+    }
 
     /// Truncating integer division (`self / other`). For signed types,
+{{IF_SIGNED}}
+    /// `minValue / -1` traps when overflow checks are on (and wraps
+    /// when off); use `divideWrapping` or `divideChecked`.
+{{ELSE}}
     /// `minValue / -1` wraps; use `divideChecked` to detect.
+{{END_IF}}
     ///
     /// # Errors
     ///
     /// Traps on division by zero (LLVM `udiv`/`sdiv` are UB on zero — the
     /// process aborts before producing a result).
+{{IF_SIGNED}}
+    public consuming func divide(consuming other: {{TYPE_NAME}}) -> {{TYPE_NAME}} {
+        if Bool(boolLiteral: lang.overflow_checks()) and self == {{TYPE_NAME}}.minValue and other == -1 {
+            fatalError("arithmetic overflow: {{TYPE_NAME}}.minValue / -1")
+        }
+        {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_{{SIGNED_PREFIX}}div(self.raw, other.raw))
+    }
+
+    /// `self / other`, with `minValue / -1` wrapping to `minValue`.
+    /// Still traps on division by zero.
+    public func divideWrapping(other: {{TYPE_NAME}}) -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_{{SIGNED_PREFIX}}div(self.raw, other.raw)) }
+{{ELSE}}
     public consuming func divide(consuming other: {{TYPE_NAME}}) -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_{{SIGNED_PREFIX}}div(self.raw, other.raw)) }
+{{END_IF}}
 
     /// `self % other` — truncated remainder; the result has the sign of
     /// `self` for signed types.
@@ -370,7 +459,40 @@ public struct {{TYPE_NAME}}:
     /// # Errors
     ///
     /// Traps on division by zero, like `divide`.
-    public consuming func modulo(consuming other: {{TYPE_NAME}}) -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_{{SIGNED_PREFIX}}rem(self.raw, other.raw)) }
+    public consuming func remainder(consuming other: {{TYPE_NAME}}) -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_{{SIGNED_PREFIX}}rem(self.raw, other.raw)) }
+
+{{IF_SIGNED}}
+    /// Euclidean modulo: the result is always in `0..<|other|`, whatever
+    /// the signs. Differs from `%` (`remainder`) only when `self` is
+    /// negative: `(-7) % 3` is `-1`, `(-7).modulo(by: 3)` is `2`.
+{{ELSE}}
+    /// Euclidean modulo. For unsigned types this is the same as `%`
+    /// (`remainder`); it exists so generic code can use one name.
+{{END_IF}}
+    ///
+    /// # Errors
+    ///
+    /// Traps on division by zero, like `remainder`.
+{{IF_SIGNED}}
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// (-7).modulo(by: 3);   // 2
+    /// (7).modulo(by: -3);   // 1
+    /// (-7).modulo(by: -3);  // 2
+    /// ```
+    public func modulo(by other: {{TYPE_NAME}}) -> {{TYPE_NAME}} {
+        let r = self.remainder(other);
+        if r >= 0 {
+            return r
+        }
+        // |r| < |other|, so neither branch overflows (even for minValue).
+        if other < 0 { r - other } else { r + other }
+    }
+{{ELSE}}
+    public func modulo(by other: {{TYPE_NAME}}) -> {{TYPE_NAME}} { self.remainder(other) }
+{{END_IF}}
 
     /// `self / other` without the divide-by-zero and `minValue / -1` guards —
     /// the bare hardware divide. Faster in hot loops, but **undefined
@@ -390,54 +512,271 @@ public struct {{TYPE_NAME}}:
     /// # Safety
     ///
     /// UB when `other == 0`, or signed `minValue % -1`.
-    public consuming func moduloUnchecked(consuming other: {{TYPE_NAME}}) -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_{{SIGNED_PREFIX}}rem_unchecked(self.raw, other.raw)) }
+    public consuming func remainderUnchecked(consuming other: {{TYPE_NAME}}) -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_{{SIGNED_PREFIX}}rem_unchecked(self.raw, other.raw)) }
 
-    {{NEGATE_METHOD}}
-    {{ABS_METHOD}}
+{{IF_SIGNED}}
+    /// Two's-complement negation. Traps at the minimum value, which has
+    /// no positive counterpart, when overflow checks are on (wraps when off); use `negateWrapping`, `negateChecked` or
+    /// `negateSaturating` there.
+    public consuming func negate() -> {{TYPE_NAME}} {
+        if Bool(boolLiteral: lang.overflow_checks()) and self == {{TYPE_NAME}}.minValue {
+            fatalError("arithmetic overflow: -{{TYPE_NAME}}.minValue")
+        }
+        {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_neg(self.raw))
+    }
+
+    /// `-self`, with `-minValue` wrapping back to `minValue`.
+    public func negateWrapping() -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_neg(self.raw)) }
+    /// Absolute value. Traps at the minimum value when overflow checks are on; use `absWrapping`,
+    /// `absChecked` or `absSaturating` there.
+    public func abs() -> {{TYPE_NAME}} { if Bool(boolLiteral: lang.{{LANG_TYPE}}_{{SIGNED_PREFIX}}lt(self.raw, 0)) { self.negate() } else { self } }
+
+    /// `|self|`, with `minValue.absWrapping()` wrapping to `minValue`.
+    public func absWrapping() -> {{TYPE_NAME}} { if Bool(boolLiteral: lang.{{LANG_TYPE}}_{{SIGNED_PREFIX}}lt(self.raw, 0)) { self.negateWrapping() } else { self } }
+{{ELSE}}
+    
+    
+{{END_IF}}
 
     // ========================================================================
     // ARITHMETIC (Checked - Returns Optional)
     // ========================================================================
 
-{{CHECKED_ARITHMETIC}}
+{{IF_SIGNED}}
+    /// `self + other`, or `None` on overflow.
+{{ELSE}}
+    /// Wrapping addition that returns `None` on overflow.
+{{END_IF}}
+    public func addChecked(other: {{TYPE_NAME}}) -> {{TYPE_NAME}}? {
+        if Bool(boolLiteral: lang.{{LANG_TYPE}}_{{SIGNED_PREFIX}}add_overflows(self.raw, other.raw)) { return .None };
+        .Some(self.addWrapping(other))
+    }
+
+{{IF_SIGNED}}
+    /// `self - other`, or `None` on overflow.
+{{ELSE}}
+    /// Subtraction that returns `None` on underflow (`other > self`).
+{{END_IF}}
+    public func subtractChecked(other: {{TYPE_NAME}}) -> {{TYPE_NAME}}? {
+        if Bool(boolLiteral: lang.{{LANG_TYPE}}_{{SIGNED_PREFIX}}sub_overflows(self.raw, other.raw)) { return .None };
+        .Some(self.subtractWrapping(other))
+    }
+
+{{IF_SIGNED}}
+    /// `self * other`, or `None` on overflow.
+{{ELSE}}
+    /// Wrapping multiplication that returns `None` on overflow.
+{{END_IF}}
+    public func multiplyChecked(other: {{TYPE_NAME}}) -> {{TYPE_NAME}}? {
+        if Bool(boolLiteral: lang.{{LANG_TYPE}}_{{SIGNED_PREFIX}}mul_overflows(self.raw, other.raw)) { return .None };
+        .Some(self.multiplyWrapping(other))
+    }
+
+{{IF_SIGNED}}
+    /// Division that returns `None` for divide-by-zero or for the
+    /// `minValue / -1` overflow case.
+{{ELSE}}
+    /// Division that returns `None` for divide-by-zero.
+{{END_IF}}
+    public func divideChecked(other: {{TYPE_NAME}}) -> {{TYPE_NAME}}? {
+        if other == {{TYPE_NAME}}.zero {
+            return .None
+        };
+{{IF_SIGNED}}
+        // Check for minValue / -1 overflow
+        if self == {{TYPE_NAME}}.minValue and other == {{TYPE_NAME}}(intLiteral: lang.i64_neg(1)) {
+            return .None
+        };
+        .Some(self.divideWrapping(other))
+    }
+
+    /// Negation that returns `None` for `minValue` (whose negation overflows).
+    public func negateChecked() -> {{TYPE_NAME}}? {
+        if self == {{TYPE_NAME}}.minValue {
+            return .None
+        };
+        .Some(self.negateWrapping())
+    }
+
+    /// Absolute value that returns `None` for `minValue` (whose absolute
+    /// value overflows).
+    public func absChecked() -> {{TYPE_NAME}}? {
+        if self == {{TYPE_NAME}}.minValue {
+            return .None
+        };
+        .Some(self.absWrapping())
+{{ELSE}}
+        .Some(self.divide(other))
+{{END_IF}}
+    }
+
     // ========================================================================
     // ARITHMETIC (Saturating - Clamps to Bounds)
     // ========================================================================
 
-{{SATURATING_ARITHMETIC}}
+{{IF_SIGNED}}
+    /// Addition that clamps to `maxValue`/`minValue` instead of wrapping.
+{{ELSE}}
+    /// Addition that clamps to `maxValue` on overflow.
+{{END_IF}}
+    public func addSaturating(other: {{TYPE_NAME}}) -> {{TYPE_NAME}} {
+        let checked = self.addChecked(other);
+        match checked {
+            .Some(result) => result,
+{{IF_SIGNED}}
+            .None => if other.isPositive { {{TYPE_NAME}}.maxValue } else { {{TYPE_NAME}}.minValue }
+{{ELSE}}
+            .None => {{TYPE_NAME}}.maxValue
+{{END_IF}}
+        }
+    }
+
+{{IF_SIGNED}}
+    /// Subtraction that clamps to `maxValue`/`minValue` instead of wrapping.
+{{ELSE}}
+    /// Subtraction that clamps to `0` on underflow (unsigned types cannot
+    /// represent negative results).
+{{END_IF}}
+    public func subtractSaturating(other: {{TYPE_NAME}}) -> {{TYPE_NAME}} {
+        let checked = self.subtractChecked(other);
+        match checked {
+            .Some(result) => result,
+{{IF_SIGNED}}
+            .None => if other.isNegative { {{TYPE_NAME}}.maxValue } else { {{TYPE_NAME}}.minValue }
+{{ELSE}}
+            .None => {{TYPE_NAME}}.zero
+{{END_IF}}
+        }
+    }
+
+{{IF_SIGNED}}
+    /// Multiplication that clamps to `maxValue`/`minValue` instead of wrapping.
+    /// The clamp direction follows the algebraic sign of the would-be result.
+{{ELSE}}
+    /// Multiplication that clamps to `maxValue` on overflow.
+{{END_IF}}
+    public func multiplySaturating(other: {{TYPE_NAME}}) -> {{TYPE_NAME}} {
+        let checked = self.multiplyChecked(other);
+        match checked {
+            .Some(result) => result,
+{{IF_SIGNED}}
+            .None => {
+                // Determine sign of result
+                let sameSign = (self.isNegative == other.isNegative);
+                if sameSign { {{TYPE_NAME}}.maxValue } else { {{TYPE_NAME}}.minValue }
+            }
+        }
+    }
+
+    /// Negation that returns `maxValue` instead of wrapping `minValue`.
+    public func negateSaturating() -> {{TYPE_NAME}} {
+        if self == {{TYPE_NAME}}.minValue {
+            {{TYPE_NAME}}.maxValue
+        } else {
+            self.negate()
+        }
+    }
+
+    /// Absolute value that returns `maxValue` instead of wrapping `minValue`.
+    public func absSaturating() -> {{TYPE_NAME}} {
+        if self == {{TYPE_NAME}}.minValue {
+            {{TYPE_NAME}}.maxValue
+        } else {
+            self.abs()
+{{ELSE}}
+            .None => {{TYPE_NAME}}.maxValue
+{{END_IF}}
+        }
+    }
+
     // ========================================================================
     // ARITHMETIC (Extended)
     // ========================================================================
 
-    /// Raises `self` to `exponent` via binary exponentiation. Wraps on
-    /// overflow. Negative exponents return zero (integer truncation of
-    /// the would-be fraction).
+    /// Raises `self` to `exponent` via binary exponentiation.
+    ///
+    /// # Errors
+    ///
+    /// Panics on a negative exponent, and on overflow when overflow checks
+    /// are on (wraps when off); see `powChecked`,
+    /// `powWrapping` and `powSaturating`.
     ///
     /// # Examples
     ///
     /// ```
     /// (2).pow(10);  // 1024
     /// (3).pow(4);   // 81
-    /// (5).pow(-1);  // 0
     /// ```
     public func pow(exponent: Int64) -> {{TYPE_NAME}} {
+        if Bool(boolLiteral: lang.i1_not(lang.overflow_checks())) {
+            return self.powWrapping(exponent)
+        }
+        match self.powChecked(exponent) {
+            .Some(value) => value,
+            .None => fatalError("arithmetic overflow: {{TYPE_NAME}}.pow")
+        }
+    }
+
+    /// `self` raised to `exponent`, or `None` on overflow or a negative
+    /// exponent.
+    public func powChecked(exponent: Int64) -> {{TYPE_NAME}}? {
         if exponent < 0 {
-            return {{TYPE_NAME}}.zero
-        };
-        if exponent == 0 {
-            return {{TYPE_NAME}}.one
-        };
-        var result = {{TYPE_NAME}}.one;
+            return .None
+        }
+        var result: {{TYPE_NAME}} = 1;
         var base = self;
         var exp = exponent;
         while exp > 0 {
             if exp % 2 == 1 {
-                result = result.multiply(base)
-            };
-            base = base.multiply(base);
+                let next = result.multiplyChecked(base);
+                if next.isNone { return .None }
+                result = next.unwrap()
+            }
+            exp = exp / 2;
+            // Square only when another bit remains, so the last step can't
+            // overflow a result that fits.
+            if exp > 0 {
+                let squared = base.multiplyChecked(base);
+                if squared.isNone { return .None }
+                base = squared.unwrap()
+            }
+        }
+        .Some(result)
+    }
+
+    /// `self` raised to `exponent`, wrapping on overflow. A negative
+    /// exponent traps.
+    public func powWrapping(exponent: Int64) -> {{TYPE_NAME}} {
+        if exponent < 0 {
+            fatalError("pow: negative exponent")
+        }
+        var result: {{TYPE_NAME}} = 1;
+        var base = self;
+        var exp = exponent;
+        while exp > 0 {
+            if exp % 2 == 1 {
+                result = result.multiplyWrapping(base)
+            }
+            base = base.multiplyWrapping(base);
             exp = exp / 2
-        };
+        }
         result
+    }
+
+    /// `self` raised to `exponent`, clamped to `minValue`/`maxValue` on
+    /// overflow. A negative exponent traps.
+    public func powSaturating(exponent: Int64) -> {{TYPE_NAME}} {
+        if exponent < 0 {
+            fatalError("pow: negative exponent")
+        }
+        match self.powChecked(exponent) {
+            .Some(value) => value,
+{{IF_SIGNED}}
+            .None => if self < 0 and exponent % 2 == 1 { {{TYPE_NAME}}.minValue } else { {{TYPE_NAME}}.maxValue }
+{{ELSE}}
+            .None => {{TYPE_NAME}}.maxValue
+{{END_IF}}
+        }
     }
 
     /// Greatest common divisor via Euclidean algorithm. For signed types
@@ -451,14 +790,30 @@ public struct {{TYPE_NAME}}:
     /// (-12).gcd(8);  // 4
     /// ```
     public func gcd(other: {{TYPE_NAME}}) -> {{TYPE_NAME}} {
-        var a = {{GCD_ABS_SELF}};
-        var b = {{GCD_ABS_OTHER}};
+{{IF_SIGNED}}
+        var a = self.absWrapping();
+        var b = other.absWrapping();
+        // `minValue.abs()` wraps to `minValue`, so a remainder can come out
+        // negative: keep each remainder's magnitude so the result is
+        // non-negative (only `gcd(minValue, 0)` = 2^(n-1) is unrepresentable).
+{{ELSE}}
+        var a = self;
+        var b = other;
+{{END_IF}}
         while b != {{TYPE_NAME}}.zero {
             let t = b;
-            b = a.modulo(b);
+{{IF_SIGNED}}
+            b = a.remainder(b).absWrapping();
+{{ELSE}}
+            b = a.remainder(b);
+{{END_IF}}
             a = t
         };
+{{IF_SIGNED}}
+        a.absWrapping()
+{{ELSE}}
         a
+{{END_IF}}
     }
 
     /// Least common multiple, computed as `|self| / gcd(self, other) * |other|`
@@ -476,7 +831,11 @@ public struct {{TYPE_NAME}}:
             return {{TYPE_NAME}}.zero
         };
         let g = self.gcd(other);
-        {{LCM_ABS_SELF}}.divide(g).multiply({{LCM_ABS_OTHER}})
+{{IF_SIGNED}}
+        self.abs().divide(g).multiply(other.abs())
+{{ELSE}}
+        self.divide(g).multiply(other)
+{{END_IF}}
     }
 
     // ========================================================================
@@ -536,7 +895,7 @@ public struct {{TYPE_NAME}}:
     /// MSB re-enter at the LSB.
     public func rotateLeft(by count: Int64) -> {{TYPE_NAME}} {
         let bits: Int64 = {{BITS}};
-        let c = count % bits;
+        let c = count.modulo(by: bits);
         if c == 0 { self }
         else { self.shiftLeft(by: c).bitwiseOr(self.shiftRight(by: bits - c)) }
     }
@@ -545,7 +904,7 @@ public struct {{TYPE_NAME}}:
     /// `rotateLeft`.
     public func rotateRight(by count: Int64) -> {{TYPE_NAME}} {
         let bits: Int64 = {{BITS}};
-        let c = count % bits;
+        let c = count.modulo(by: bits);
         if c == 0 { self }
         else { self.shiftRight(by: c).bitwiseOr(self.shiftLeft(by: bits - c)) }
     }
@@ -563,7 +922,7 @@ public struct {{TYPE_NAME}}:
     /// `self /= other`
     public mutating func divideAssign(other: {{TYPE_NAME}}) { self = self.divide(other) }
     /// `self %= other`
-    public mutating func modAssign(other: {{TYPE_NAME}}) { self = self.modulo(other) }
+    public mutating func remainderAssign(other: {{TYPE_NAME}}) { self = self.remainder(other) }
     /// `self &= other`
     public mutating func bitwiseAndAssign(other: {{TYPE_NAME}}) { self = self.bitwiseAnd(other) }
     /// `self |= other`

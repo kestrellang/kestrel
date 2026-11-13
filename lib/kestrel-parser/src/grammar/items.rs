@@ -23,8 +23,8 @@ use super::blocks::{expect_closer, top_block};
 use super::exprs::expr;
 use super::generics::{opt_conformance_list, opt_type_parameter_list, opt_where_clause};
 use super::patterns::{at_param_pattern_start, param_pattern};
-use super::types::{at_type_start, ty, type_argument_list};
-use super::{delimited, is_label_keyword, name};
+use super::types::{at_type_start, starts_plain_type, ty, type_argument_list};
+use super::{delimited, is_label_keyword, matching_close, name};
 use crate::core::Parser;
 use crate::syntax_error::SyntaxError;
 
@@ -63,7 +63,7 @@ impl Ctx {
 }
 
 const VISIBILITY: &[K] = &[K::Public, K::Private, K::Internal, K::Fileprivate];
-const MODIFIERS: &[K] = &[K::Static, K::Mutating, K::Consuming, K::Indirect];
+const MODIFIERS: &[K] = &[K::Static, K::Unsafe, K::Mutating, K::Consuming, K::Indirect];
 
 /// Tokens that can begin an item (or its header).
 fn at_item_start(p: &Parser<'_>) -> bool {
@@ -88,9 +88,29 @@ fn at_item_start(p: &Parser<'_>) -> bool {
         || at_lazy_modifier(p, 0)
 }
 
-/// Contextual `lazy` at token offset `n`, introducing `lazy let|var`.
+/// Contextual `lazy` at token offset `n`, introducing `lazy let|var`. Other
+/// modifiers may sit between it and the keyword (`lazy static var`), so
+/// `lazy` reads as a modifier in either position.
 fn at_lazy_modifier(p: &Parser<'_>, n: usize) -> bool {
-    p.nth_is_contextual(n, "lazy") && (p.nth_at(n + 1, K::Var) || p.nth_at(n + 1, K::Let))
+    if !p.nth_is_contextual(n, "lazy") {
+        return false;
+    }
+    let mut i = n + 1;
+    while p.nth(i).is_some_and(|k| MODIFIERS.contains(&k)) {
+        i += 1;
+    }
+    p.nth_at(i, K::Var) || p.nth_at(i, K::Let)
+}
+
+/// `LazyModifier` node, if a contextual `lazy` modifier is next.
+fn opt_lazy(p: &mut Parser<'_>) -> bool {
+    if !at_lazy_modifier(p, 0) {
+        return false;
+    }
+    let l = p.start();
+    p.bump(K::Identifier);
+    l.complete(p, K::LazyModifier);
+    true
 }
 
 /// The keyword introducing the item at the cursor, looking past
@@ -114,10 +134,14 @@ fn scan_head(p: &Parser<'_>) -> (Option<K>, bool) {
     if p.kind_at(i).is_some_and(|k| VISIBILITY.contains(&k)) {
         i += 1;
     }
+    let lazy_first = at_lazy_modifier(p, i - start);
+    if lazy_first {
+        i += 1;
+    }
     while p.kind_at(i).is_some_and(|k| MODIFIERS.contains(&k)) {
         i += 1;
     }
-    if at_lazy_modifier(p, i - start) {
+    if !lazy_first && at_lazy_modifier(p, i - start) {
         i += 1;
     }
     (p.kind_at(i), i != start)
@@ -248,6 +272,33 @@ fn opt_static(p: &mut Parser<'_>) {
     }
 }
 
+/// `static` and `unsafe`, each at most once, in either order
+/// (`unsafe static func` and `static unsafe func` are the same declaration;
+/// the AST finds each modifier node by kind, not position).
+fn opt_static_unsafe(p: &mut Parser<'_>) {
+    let (mut seen_static, mut seen_unsafe) = (false, false);
+    loop {
+        if !seen_static && p.at(K::Static) {
+            opt_static(p);
+            seen_static = true;
+        } else if !seen_unsafe && p.at(K::Unsafe) {
+            opt_unsafe(p);
+            seen_unsafe = true;
+        } else {
+            return;
+        }
+    }
+}
+
+/// `UnsafeModifier` node, if `unsafe` is next.
+fn opt_unsafe(p: &mut Parser<'_>) {
+    if p.at(K::Unsafe) {
+        let m = p.start();
+        p.bump(K::Unsafe);
+        m.complete(p, K::UnsafeModifier);
+    }
+}
+
 /// `ParameterList`: `( param, … )`.
 fn parameter_list(p: &mut Parser<'_>) {
     let m = p.start();
@@ -359,16 +410,36 @@ fn import_decl(p: &mut Parser<'_>) {
     m.complete(p, K::ImportDeclaration);
 }
 
-/// `extend Ty (: conformances)? (where …)? { members }`
+/// `extend ([T, …])? Ty (: conformances)? (where …)? { members }`. The
+/// optional list declares params the target doesn't bind, such as `W` in
+/// `extend[W] Int64: Reads[W]`.
 fn extension_decl(p: &mut Parser<'_>) {
     let m = p.start();
     attribute_list(p);
     p.bump(K::Extend);
+    if at_extension_param_list(p) {
+        opt_type_parameter_list(p);
+    }
     ty(p);
     opt_conformance_list(p);
     opt_where_clause(p);
     member_list(p, Ctx::Extension, K::ExtensionBody);
     m.complete(p, K::ExtensionDeclaration);
+}
+
+/// Is the `[` after `extend` a param list rather than array sugar for the
+/// target (`extend [T]: P`, `extend [T]?: P`)? A param list is always
+/// followed by the target type, so the brackets are params exactly when a
+/// type starts after the matching `]`. (The target can't be a kinded
+/// function type, so the plain type starts are enough.)
+fn at_extension_param_list(p: &Parser<'_>) -> bool {
+    if !p.at(K::LBracket) {
+        return false;
+    }
+    let Some(close) = matching_close(p, p.token_pos()) else {
+        return true;
+    };
+    starts_plain_type(p.kind_at(close + 1))
 }
 
 /// `struct`/`enum`/`protocol` declarations.
@@ -380,6 +451,9 @@ fn type_decl(p: &mut Parser<'_>, kw: K) {
         let i = p.start();
         p.bump(K::Indirect);
         i.complete(p, K::IndirectModifier);
+    }
+    if kw == K::Protocol {
+        opt_unsafe(p);
     }
     stray_modifiers(p);
     p.expect(kw);
@@ -435,6 +509,7 @@ fn init_decl(p: &mut Parser<'_>) {
     let m = p.start();
     attribute_list(p);
     visibility(p);
+    opt_unsafe(p);
     stray_modifiers(p);
     p.expect(K::Init);
     opt_type_parameter_list(p);
@@ -466,12 +541,12 @@ fn deinit_decl(p: &mut Parser<'_>) {
     m.complete(p, K::DeinitDeclaration);
 }
 
-/// `static? (mutating|consuming)? func name[T](params) (-> R)? (where …)? body?`
+/// `(static|unsafe)* (mutating|consuming)? func name[T](params) (-> R)? (where …)? body?`
 fn function_decl(p: &mut Parser<'_>) {
     let m = p.start();
     attribute_list(p);
     visibility(p);
-    opt_static(p);
+    opt_static_unsafe(p);
     if p.at_any(&[K::Mutating, K::Consuming]) {
         p.bump_any();
     }
@@ -498,7 +573,7 @@ fn subscript_decl(p: &mut Parser<'_>) {
     let m = p.start();
     attribute_list(p);
     visibility(p);
-    opt_static(p);
+    opt_static_unsafe(p);
     stray_modifiers(p);
     p.expect(K::Subscript);
     opt_type_parameter_list(p);
@@ -521,12 +596,11 @@ fn field_decl(p: &mut Parser<'_>) {
     let m = p.start();
     attribute_list(p);
     visibility(p);
-    opt_static(p);
+    let lazy_first = opt_lazy(p);
+    opt_static_unsafe(p);
     stray_modifiers(p);
-    if at_lazy_modifier(p, 0) {
-        let l = p.start();
-        p.bump(K::Identifier);
-        l.complete(p, K::LazyModifier);
+    if !lazy_first {
+        opt_lazy(p);
     }
     p.bump_any(); // let / var
     name(p);
@@ -568,17 +642,19 @@ fn opt_failable_marker(p: &mut Parser<'_>) {
 
 /// The accessor clause keyword(s) at token offset `n`, if a clause starts
 /// there: `get {`, `set {`, `ref {`, `mutating ref {`, `modifying get {`,
-/// `modifying ref {`, `willSet {`, `didSet {`.
+/// `modifying ref {`, `willSet {`, `didSet {`, or a bodyless `ref` /
+/// `mutating ref` requirement.
 fn at_accessor_clause(p: &Parser<'_>, n: usize) -> bool {
     match p.nth(n) {
         Some(K::Get | K::Set) => p.nth_at(n + 1, K::LBrace),
-        Some(K::Mutating) => p.nth_is_contextual(n + 1, "ref") && p.nth_at(n + 2, K::LBrace),
+        Some(K::Mutating) => p.nth_is_contextual(n + 1, "ref") && at_ref_clause_end(p, n + 2),
+        Some(K::Identifier) if p.nth_is_contextual(n, "ref") => at_ref_clause_end(p, n + 1),
         Some(K::Identifier) if p.nth_is_contextual(n, "modifying") => {
             (p.nth_at(n + 1, K::Get) || p.nth_is_contextual(n + 1, "ref"))
                 && p.nth_at(n + 2, K::LBrace)
         },
         Some(K::Identifier) => {
-            ["ref", "willSet", "didSet"]
+            ["willSet", "didSet"]
                 .iter()
                 .any(|kw| p.nth_is_contextual(n, kw))
                 && p.nth_at(n + 1, K::LBrace)
@@ -626,6 +702,13 @@ fn accessor_body(p: &mut Parser<'_>, field: bool) {
     }
 }
 
+/// What may follow a `ref` / `mutating ref` keyword: its body, or — for a
+/// bodyless protocol requirement (`{ ref mutating ref }`) — the next
+/// requirement clause or the block's closing brace.
+fn at_ref_clause_end(p: &Parser<'_>, n: usize) -> bool {
+    p.nth_at(n, K::LBrace) || p.nth_at(n, K::RBrace) || p.nth_at(n, K::Mutating)
+}
+
 fn accessor_clause(p: &mut Parser<'_>) {
     let m = p.start();
     let kind = match p.current() {
@@ -664,7 +747,11 @@ fn accessor_clause(p: &mut Parser<'_>) {
             kind
         },
     };
-    top_block(p);
+    // Only a ref clause may be bodyless (`at_accessor_clause` admits no
+    // other clause without a `{`).
+    if p.at(K::LBrace) {
+        top_block(p);
+    }
     m.complete(p, kind);
 }
 

@@ -39,8 +39,12 @@ fn build_two_files(source_a: &str, source_b: &str) -> (World, Entity) {
     world.set(root, NodeKind::Module);
     world.set(root, Name(Name::ROOT.to_string()));
 
-    // Build first file
+    // Build first file. Fixtures stand in for the stdlib loader: a file
+    // declaring a `std` module is marked as stdlib source.
     let file_a = world.spawn();
+    if source_a.starts_with("module std") {
+        world.set(file_a, kestrel_ast_builder::StdlibSource);
+    }
     let tokens: Vec<_> = kestrel_lexer::lex(source_a, file_a.index())
         .filter_map(|r| r.ok())
         .collect();
@@ -526,8 +530,7 @@ fn visibility_public_accessible_from_outside() {
 
 #[test]
 fn visibility_private_not_accessible_from_outside() {
-    // No `public` keyword — has no Vis component, so it's visible by default.
-    // This tests the current design: no Vis = always visible.
+    // No visibility keyword means internal: hidden outside `std.core`.
     let (world, root) = build_two_files(
         "module std.core\nstruct Secret {}",
         "module MyApp\nimport std.core",
@@ -540,8 +543,7 @@ fn visibility_private_not_accessible_from_outside() {
         context: myapp,
         root,
     });
-    // Items without Vis component are visible by default
-    assert!(matches!(result, TypeResolution::Found(_)));
+    assert!(matches!(result, TypeResolution::NotFound(_)));
 }
 
 // ================================================================
@@ -766,6 +768,7 @@ fn auto_import_across_std_modules() {
 
     // std.core with Int64
     let f1 = world.spawn();
+    world.set(f1, kestrel_ast_builder::StdlibSource);
     let src1 = "module std.core\npublic struct Int64 {}";
     let tokens1: Vec<_> = kestrel_lexer::lex(src1, f1.index())
         .filter_map(|r| r.ok())
@@ -778,6 +781,7 @@ fn auto_import_across_std_modules() {
 
     // std.text with String
     let f2 = world.spawn();
+    world.set(f2, kestrel_ast_builder::StdlibSource);
     let src2 = "module std.text\npublic struct String {}";
     let tokens2: Vec<_> = kestrel_lexer::lex(src2, f2.index())
         .filter_map(|r| r.ok())

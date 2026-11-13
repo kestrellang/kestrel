@@ -106,7 +106,11 @@ pub fn compile_inst(
                     .get(fc.body.values[result.index()].ty),
                 kestrel_mir::MirTy::Ref { .. }
             );
-            if operand_is_ref && !result_is_ref {
+            // A FAT ref (`&Slice[T]`, `&rawany P`) is already the address of
+            // its two words, which is how the unsized pointee is passed:
+            // nothing to load (as `ref_slot_loads_pointee`).
+            let fat_ref = fc.ctx.module.is_fat(operand_ty);
+            if operand_is_ref && !result_is_ref && !fat_ref {
                 let ptr_ty = fc.ctx.ptr_ty;
                 let v = if is_guaranteed {
                     builder
@@ -625,6 +629,9 @@ fn compile_op1(
         Op::PtrToAddress => arg,
         Op::PtrIsNull => builder.ins().icmp_imm(IntCC::Equal, arg, 0),
         Op::PtrNull(_) => builder.ins().iconst(ptr_ty, 0),
+        Op::OverflowChecks => builder
+            .ins()
+            .iconst(ir::types::I8, i64::from(fc.ctx.options.overflow_checks())),
         Op::PtrTo(ty) => {
             let repr = fc.ctx.tc.repr(ty, &fc.ctx.module.ty_arena, fc.ctx.module);
             let slot = mem::alloc_stack_slot(builder, repr.size(), repr.align(), ptr_ty);
@@ -730,7 +737,7 @@ fn compile_op1(
 /// Return a divisor safe to feed to native `sdiv`/`srem`: `1` when the operation
 /// would be the overflowing `minValue / -1` (so the native op yields `min/1=min`
 /// and `min%1=0`, matching the spec's wrap), otherwise the original divisor. A
-/// zero divisor is left untouched so the native op still traps on div-by-zero.
+/// zero divisor is left untouched; `trap_on_zero_divisor` handles it.
 fn signed_div_overflow_guard(
     builder: &mut FunctionBuilder,
     bits: IntBits,
@@ -746,6 +753,16 @@ fn signed_div_overflow_guard(
     let is_min = builder.ins().icmp(IntCC::Equal, lhs, min_v);
     let is_overflow = builder.ins().band(is_neg_one, is_min);
     builder.ins().select(is_overflow, one, rhs)
+}
+
+/// Trap explicitly on a zero divisor, like every other runtime check. Native
+/// x86 `idiv`/`div` raise SIGFPE on zero (only `sdiv` got a clean trap, as a
+/// side effect of Cranelift's own lowering), so `%` and unsigned `/` died with
+/// a different signal than the rest. Twin of LLVM's `emit_div_by_zero_trap`.
+fn trap_on_zero_divisor(builder: &mut FunctionBuilder, guard: DivGuard, rhs: Value) {
+    if guard == DivGuard::Checked {
+        builder.ins().trapz(rhs, TrapCode::unwrap_user(1));
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -816,12 +833,12 @@ fn compile_op2(
         // Signed div/rem: `minValue / -1` overflows. Cranelift `sdiv`/`srem` TRAP
         // on it, but the spec (int64.ks docs) says it WRAPS (div→minValue, rem→0).
         // Swap the divisor -1→1 exactly in that case so the native op produces
-        // min/1=min and min%1=0 — no trap, correct wrap. Division-by-zero still
-        // traps natively (the swap leaves a 0 divisor untouched). Mirrored in the
-        // LLVM backend (which additionally needs an explicit div-by-zero trap).
+        // min/1=min and min%1=0 — no trap, correct wrap. A zero divisor traps
+        // explicitly first. Mirrored in the LLVM backend.
         Op::Div(bits, Signedness::Signed, guard) => {
-            // Unchecked drops the min/-1 swap (native sdiv then traps on that edge
-            // and on div-by-zero — UB-equivalent). The user guarantees validity.
+            // Unchecked drops both guards (native sdiv then traps on those edges
+            // — UB-equivalent). The user guarantees validity.
+            trap_on_zero_divisor(builder, guard, rhs);
             let safe = if guard == DivGuard::Checked {
                 signed_div_overflow_guard(builder, bits, lhs, rhs)
             } else {
@@ -829,8 +846,12 @@ fn compile_op2(
             };
             builder.ins().sdiv(lhs, safe)
         },
-        Op::Div(_, Signedness::Unsigned, _) => builder.ins().udiv(lhs, rhs),
+        Op::Div(_, Signedness::Unsigned, guard) => {
+            trap_on_zero_divisor(builder, guard, rhs);
+            builder.ins().udiv(lhs, rhs)
+        },
         Op::Rem(bits, Signedness::Signed, guard) => {
+            trap_on_zero_divisor(builder, guard, rhs);
             let safe = if guard == DivGuard::Checked {
                 signed_div_overflow_guard(builder, bits, lhs, rhs)
             } else {
@@ -838,7 +859,10 @@ fn compile_op2(
             };
             builder.ins().srem(lhs, safe)
         },
-        Op::Rem(_, Signedness::Unsigned, _) => builder.ins().urem(lhs, rhs),
+        Op::Rem(_, Signedness::Unsigned, guard) => {
+            trap_on_zero_divisor(builder, guard, rhs);
+            builder.ins().urem(lhs, rhs)
+        },
         Op::AddOverflows(bits, sign) => {
             emit_overflow_check(builder, bits, sign, OverflowKind::Add, lhs, rhs)
         },
@@ -848,6 +872,8 @@ fn compile_op2(
         Op::MulOverflows(bits, sign) => {
             emit_overflow_check(builder, bits, sign, OverflowKind::Mul, lhs, rhs)
         },
+        Op::MulHigh(_, Signedness::Signed) => builder.ins().smulhi(lhs, rhs),
+        Op::MulHigh(_, Signedness::Unsigned) => builder.ins().umulhi(lhs, rhs),
         Op::FAdd(_) => builder.ins().fadd(lhs, rhs),
         Op::FSub(_) => builder.ins().fsub(lhs, rhs),
         Op::FMul(_) => builder.ins().fmul(lhs, rhs),
@@ -1438,15 +1464,11 @@ fn compile_struct_extract(
         // address. A REF-typed result (clone/drop shim projections) keeps
         // the slot's address per the representation contract; loading here
         // would make its consumers deref one level too many.
-        if matches!(fc.ctx.module.ty_arena.get(field_ty), MirTy::Ref { .. })
-            && !matches!(
-                fc.ctx
-                    .module
-                    .ty_arena
-                    .get(fc.body.values[result.index()].ty),
-                MirTy::Ref { .. }
-            )
-        {
+        if kestrel_codegen::ref_slot_loads_pointee(
+            fc.ctx.module,
+            field_ty,
+            fc.body.values[result.index()].ty,
+        ) {
             return Ok(builder
                 .ins()
                 .load(fc.ctx.ptr_ty, MemFlags::new(), addr, Offset32::new(0)));
@@ -1508,15 +1530,11 @@ fn compile_tuple_extract(
             // Stage 2b ref slot with a POINTEE-typed result: load the
             // stored address (see compile_struct_extract; Ref-typed
             // results keep the slot address).
-            if matches!(arena.get(elem_ty), MirTy::Ref { .. })
-                && !matches!(
-                    fc.ctx
-                        .module
-                        .ty_arena
-                        .get(fc.body.values[result.index()].ty),
-                    MirTy::Ref { .. }
-                )
-            {
+            if kestrel_codegen::ref_slot_loads_pointee(
+                fc.ctx.module,
+                elem_ty,
+                fc.body.values[result.index()].ty,
+            ) {
                 return Ok(builder.ins().load(
                     fc.ctx.ptr_ty,
                     MemFlags::new(),
@@ -1565,15 +1583,11 @@ fn compile_enum_payload(
                     // Stage 2b ref slot with a POINTEE-typed result: load
                     // the stored address (see compile_struct_extract;
                     // Ref-typed results keep the slot address).
-                    if matches!(fc.ctx.module.ty_arena.get(field_ty), MirTy::Ref { .. })
-                        && !matches!(
-                            fc.ctx
-                                .module
-                                .ty_arena
-                                .get(fc.body.values[result.index()].ty),
-                            MirTy::Ref { .. }
-                        )
-                    {
+                    if kestrel_codegen::ref_slot_loads_pointee(
+                        fc.ctx.module,
+                        field_ty,
+                        fc.body.values[result.index()].ty,
+                    ) {
                         return Ok(builder.ins().load(
                             fc.ctx.ptr_ty,
                             MemFlags::new(),
@@ -1656,6 +1670,7 @@ fn compile_call(
     match callee {
         Callee::Resolved(mono_id) => compile_resolved_call(fc, builder, *mono_id, args, result),
         Callee::Thin(func_val_id) => compile_thin_call(fc, builder, *func_val_id, args, result),
+        Callee::C(func_val_id) => compile_c_call(fc, builder, *func_val_id, args, result),
         Callee::Thick(closure_val_id) => {
             compile_thick_call(fc, builder, *closure_val_id, args, result)
         },
@@ -1850,7 +1865,6 @@ fn compile_thin_call(
     args: &[CallArg],
     result: Option<ValueId>,
 ) -> Result<bool, CodegenError> {
-    let ptr_ty = fc.ctx.ptr_ty;
     let func_ptr = fc.get_value(builder, func_val_id);
 
     // Infer types from the ValueId's type (FuncThin or Pointer(FuncThin))
@@ -1868,6 +1882,49 @@ fn compile_thin_call(
             "thin call on non-FuncThin".into(),
         ));
     };
+    emit_kestrel_indirect_call(fc, builder, func_ptr, &param_tys, ret_ty, args, result)
+}
+
+/// A call through a C function value: call its type's bridge (Kestrel ABI)
+/// with the address first; the bridge makes the C call.
+fn compile_c_call(
+    fc: &mut FuncCompiler<'_, '_>,
+    builder: &mut FunctionBuilder,
+    func_val_id: ValueId,
+    args: &[CallArg],
+    result: Option<ValueId>,
+) -> Result<bool, CodegenError> {
+    let func_ty = fc.body.values[func_val_id.index()].ty;
+    let Some(decl) = kestrel_codegen::c_abi::CDecl::of_func_c(&fc.ctx.module.ty_arena, func_ty)
+    else {
+        return Err(CodegenError::Unsupported("C call on non-FuncC".into()));
+    };
+    let param_tys = crate::c_bridge::call_bridge_params(func_ty, &decl);
+    let addr_arg = CallArg {
+        value: func_val_id,
+        convention: ParamConvention::Consuming,
+    };
+    let args: Vec<CallArg> = std::iter::once(addr_arg)
+        .chain(args.iter().cloned())
+        .collect();
+    let bridge = crate::c_bridge::call_bridge(fc.ctx, func_ty)?;
+    let fref = fc.ctx.cl_module.declare_func_in_func(bridge, builder.func);
+    let bridge_ptr = builder.ins().func_addr(fc.ctx.ptr_ty, fref);
+    emit_kestrel_indirect_call(fc, builder, bridge_ptr, &param_tys, decl.ret, &args, result)
+}
+
+/// Call `func_ptr`, a Kestrel-ABI function of `param_tys` and `ret_ty`.
+fn emit_kestrel_indirect_call(
+    fc: &mut FuncCompiler<'_, '_>,
+    builder: &mut FunctionBuilder,
+    func_ptr: Value,
+    param_tys: &[(TyId, ParamConvention)],
+    ret_ty: TyId,
+    args: &[CallArg],
+    result: Option<ValueId>,
+) -> Result<bool, CodegenError> {
+    let ptr_ty = fc.ctx.ptr_ty;
+    let arena = &fc.ctx.module.ty_arena;
 
     let ret_repr = fc.ctx.tc.repr(ret_ty, arena, fc.ctx.module);
     let ret_mode = abi::return_mode(ret_repr);
@@ -1878,7 +1935,7 @@ fn compile_thin_call(
     if matches!(ret_mode, ReturnMode::Sret) {
         sig.params.push(AbiParam::new(ptr_ty));
     }
-    for (ty, convention) in &param_tys {
+    for (ty, convention) in param_tys {
         let repr = fc.ctx.tc.repr(*ty, arena, fc.ctx.module);
         match abi::param_pass_mode(*convention, repr) {
             PassMode::ByVal(t) => sig.params.push(AbiParam::new(t)),

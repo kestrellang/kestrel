@@ -2,7 +2,7 @@
 // stdlib: true
 
 module Test
-import std.io.stdio.println
+import std.streams.println
 
 func countExplicit(dict: std.collections.Dictionary[std.numeric.Int64, std.numeric.Int64]) -> std.numeric.Int64 {
     dict.count

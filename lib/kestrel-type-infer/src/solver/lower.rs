@@ -182,11 +182,21 @@ pub(super) fn lower_hir_ty_sub(
             // Abstract args stay conservative: the obligation defers until
             // the arg resolves, and Param/assoc kinds pass through the
             // usual entailment arms.
+            // A signature from another file (std) is reported at the
+            // member or call being solved, so the error lands in the
+            // user's code. One in this file keeps its own span: that
+            // declaration is already readable, and its written-type check
+            // reports the same mistake there (no second copy per use).
+            let site = ctx
+                .formation_site
+                .clone()
+                .filter(|site| site.file_id != span.file_id)
+                .unwrap_or_else(|| span.clone());
             crate::generate::emit_formation_wellformedness(
                 ctx,
                 *entity,
                 &arg_tvs,
-                span,
+                &site,
                 crate::generate::FormationScope::Inferred,
             );
             ctx.named(*entity, arg_tvs)

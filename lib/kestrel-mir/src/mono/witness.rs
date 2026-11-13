@@ -301,7 +301,7 @@ pub fn find_witness_with_method(
         // treating them as wildcards.
         let mut bindings = HashMap::new();
         if match_pattern(arena, witness.implementing_type, self_type, &mut bindings)
-            && witness_proto_args_match(arena, witness, expected_proto_args, &bindings)
+            && witness_proto_args_match(arena, witness, expected_proto_args, &mut bindings)
             && super::entail::witness_constraints_hold(arena, env, witnesses, witness, &bindings)
         {
             candidates.push((i, bindings));
@@ -398,9 +398,15 @@ fn witness_more_specific(arena: &TyArena, a: &WitnessDef, b: &WitnessDef) -> boo
     kestrel_entail::more_specific_rule(
         a_is_instance_of_b,
         b_is_instance_of_a,
-        a.constraints.len(),
-        b.constraints.len(),
+        requirement_count(a),
+        requirement_count(b),
     )
+}
+
+/// The where clauses that restrict a witness: relaxations (`T: not P`)
+/// apply to every type, so they don't make a witness more specific.
+fn requirement_count(w: &WitnessDef) -> usize {
+    w.constraints.iter().filter(|c| c.is_requirement()).count()
 }
 
 /// Check whether a witness's protocol type args match the expected concrete
@@ -412,13 +418,16 @@ fn witness_more_specific(arena: &TyArena, a: &WitnessDef, b: &WitnessDef) -> boo
 /// binds `T → Int64`) is substituted before comparing — treating it as a
 /// match-anything wildcard let a `ClosedRange[Int64]` witness satisfy a
 /// `RandomBounds[Int16]` call site and sample at the wrong layout (silent
-/// miscompile). Only a genuinely free param (`extend T: Proto[FreeParam]`,
-/// never mentioned in the implementing type) still matches anything.
-fn witness_proto_args_match(
+/// miscompile). A genuinely free param (`extend T: Proto[FreeParam]`, never
+/// mentioned in the implementing type) matches anything — and is BOUND to the
+/// call site's arg here, so the witness's `where` clauses are judged on it:
+/// left unbound, `extend Result[T, H]: FromResidual[E] where E: Reportable`
+/// read as "undecidable, permitted" and absorbed a non-Reportable residual.
+pub(crate) fn witness_proto_args_match(
     arena: &TyArena,
     witness: &WitnessDef,
     expected: &[TyId],
-    bindings: &HashMap<Entity, TyId>,
+    bindings: &mut HashMap<Entity, TyId>,
 ) -> bool {
     if expected.is_empty() {
         return true;
@@ -433,10 +442,9 @@ fn witness_proto_args_match(
         .proto_type_args
         .iter()
         .zip(expected.iter())
-        .all(|(&w, &e)| match arena.get(w) {
-            MirTy::TypeParam(p) => bindings.get(p).is_none_or(|&bound| bound == e),
-            _ => w == e,
-        })
+        // A structured arg (`Addable[W[A]]`) matches structurally, binding
+        // or checking the params inside it like a bare one.
+        .all(|(&w, &e)| match_pattern(arena, w, e, bindings))
 }
 
 /// Resolve a `Callee::Witness` to a concrete function entity + type_args + self_type.

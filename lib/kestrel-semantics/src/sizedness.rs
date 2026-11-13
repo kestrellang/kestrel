@@ -14,14 +14,12 @@
 //! (E403 enforces that).
 
 use std::borrow::Cow;
-use std::cell::RefCell;
 
 use kestrel_ast_builder::WhereConstraint;
 use kestrel_ast_builder::{
     FieldClass, Intrinsic, NodeKind, TypeParams, WhereClause as AstWhereClause,
 };
-use kestrel_hecs::guard::OnDrop;
-use kestrel_hecs::{Entity, QueryContext, QueryFn};
+use kestrel_hecs::{CycleMode, Entity, QueryContext, QueryFn};
 use kestrel_hir::{Builtin, HirTy};
 use kestrel_hir_lower::LowerTypeAnnotation;
 use kestrel_name_res::ResolveBuiltin;
@@ -68,10 +66,12 @@ impl QueryFn for TypeParamSizeRequirement {
         // A compiler intrinsic's params (`lang.ptr[T]`, `lang.&`, `lang.*`
         // functions) work at the ABI level and accept an unsized argument —
         // the same reason the implicit-bound injection skips intrinsics.
-        if ctx
-            .parent_of(self.param)
-            .is_some_and(|owner| ctx.get::<Intrinsic>(owner).is_some())
-        {
+        // Tuples (`lang.(,)`) are the exception: they store their elements
+        // by value, so every element is sized.
+        if ctx.parent_of(self.param).is_some_and(|owner| {
+            ctx.get::<Intrinsic>(owner).is_some()
+                && kestrel_name_res::extensions::lang_tuple_arity(ctx, owner).is_none()
+        }) {
             return SizeRequirement::MayBeUnsized;
         }
         let mut relaxed = false;
@@ -167,40 +167,25 @@ pub struct NominalSizedness {
     pub root: Entity,
 }
 
-// Re-entrancy guard for recursive types, same caveat as COMPUTING_STATICNESS:
-// side-channel state the dependency tracker can't see, present only because
-// re-entrant queries panic.
-thread_local! {
-    static COMPUTING_SIZEDNESS: RefCell<Vec<(Entity, Entity)>> = const { RefCell::new(Vec::new()) };
-}
-
 impl QueryFn for NominalSizedness {
     type Output = Sizedness;
 
     fn execute(&self, ctx: &QueryContext<'_>) -> Sizedness {
-        let key = (self.entity, self.root);
-        COMPUTING_SIZEDNESS.with(|stack| stack.borrow_mut().push(key));
-        let _guard = OnDrop::new(|| {
-            COMPUTING_SIZEDNESS.with(|stack| {
-                stack.borrow_mut().pop();
-            });
-        });
         nominal_sizedness_impl(ctx, self.entity, self.root)
+    }
+
+    /// A struct whose unsized tail reaches itself is an infinite type,
+    /// reported elsewhere. Start at Sized and let the gating positions grow
+    /// (bounded by the param count) to the fixpoint.
+    fn cycle_mode(&self) -> CycleMode<Sizedness> {
+        CycleMode::Fixpoint {
+            initial: Sizedness::Sized,
+        }
     }
 
     fn describe(&self) -> String {
         format!("NominalSizedness({:?})", self.entity)
     }
-}
-
-/// Cycle-guarded lookup: a nominal that reaches itself through its tail is
-/// an infinite type, reported elsewhere; treat it as Sized here.
-fn query_nominal_sizedness(ctx: &QueryContext<'_>, entity: Entity, root: Entity) -> Sizedness {
-    let cycle = COMPUTING_SIZEDNESS.with(|stack| stack.borrow().contains(&(entity, root)));
-    if cycle {
-        return Sizedness::Sized;
-    }
-    ctx.query(NominalSizedness { entity, root })
 }
 
 fn nominal_sizedness_impl(ctx: &QueryContext<'_>, entity: Entity, root: Entity) -> Sizedness {
@@ -209,9 +194,15 @@ fn nominal_sizedness_impl(ctx: &QueryContext<'_>, entity: Entity, root: Entity) 
     if ctx.get::<NodeKind>(entity) != Some(&NodeKind::Struct) {
         return Sizedness::Sized;
     }
+    if is_lang_slice(ctx, entity) {
+        return Sizedness::Unsized;
+    }
     let Some(tail) = last_stored_field_type(ctx, entity, root) else {
         return Sizedness::Sized;
     };
+    if tail_always_unsized(ctx, &tail, root) {
+        return Sizedness::Unsized;
+    }
     let own_params: Vec<Entity> = ctx
         .get::<TypeParams>(entity)
         .map(|tp| tp.0.clone())
@@ -252,6 +243,31 @@ pub fn last_stored_field_type(
     })
 }
 
+/// `lang.slice` — the one intrinsic nominal that is never Sized.
+fn is_lang_slice(ctx: &QueryContext<'_>, entity: Entity) -> bool {
+    ctx.get::<kestrel_ast_builder::LangType>(entity) == Some(&kestrel_ast_builder::LangType::Slice)
+}
+
+/// Is a tail type unsized whatever the owner's args are: an always-unsized
+/// nominal, or a conditional one gated on an always-unsized arg
+/// (`Wrapper[lang.slice[T]]`).
+fn tail_always_unsized(ctx: &QueryContext<'_>, tail: &HirTy, root: Entity) -> bool {
+    let HirTy::Struct { entity, args, .. } = tail else {
+        return false;
+    };
+    match ctx.query(NominalSizedness {
+        entity: *entity,
+        root,
+    }) {
+        Sizedness::Sized => false,
+        Sizedness::Unsized => true,
+        Sizedness::ConditionalOn(gating) => gating
+            .iter()
+            .filter_map(|&i| args.get(i))
+            .any(|arg| tail_always_unsized(ctx, arg, root)),
+    }
+}
+
 /// Which of `owner`'s own `not Sized` params a tail type's size depends on.
 fn tail_positions(
     ctx: &QueryContext<'_>,
@@ -272,8 +288,12 @@ fn tail_positions(
                 _ => Vec::new(),
             }
         },
-        HirTy::Struct { entity, args, .. } => match query_nominal_sizedness(ctx, *entity, root) {
-            Sizedness::Sized => Vec::new(),
+        HirTy::Struct { entity, args, .. } => match ctx.query(NominalSizedness {
+            entity: *entity,
+            root,
+        }) {
+            // Always-unsized tails are caught before this walk.
+            Sizedness::Sized | Sizedness::Unsized => Vec::new(),
             Sizedness::ConditionalOn(gating) => gating
                 .iter()
                 .filter_map(|&i| args.get(i))
@@ -300,7 +320,10 @@ impl SizedLayer for HirSizedWalk<'_, '_> {
     }
 
     fn nominal_sizedness(&self, entity: Entity) -> Sizedness {
-        query_nominal_sizedness(self.ctx, entity, self.root)
+        self.ctx.query(NominalSizedness {
+            entity,
+            root: self.root,
+        })
     }
 
     fn shape<'t>(&self, ty: &'t HirTy) -> SizedShape<'t, HirTy> {
@@ -456,7 +479,8 @@ impl ByValueWalk<'_, '_> {
 /// Why a type cannot be the `B` of `any[B] P` (existentials design §3).
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum BoxDefect {
-    /// Not exactly one type parameter.
+    /// Not exactly one type parameter without a default (the payload; a
+    /// defaulted one after it, like an allocator, is fine).
     ParamCount,
     /// The one type parameter is not declared `not Sized`.
     ParamNotRelaxed,
@@ -483,9 +507,13 @@ impl QueryFn for ExistentialBoxDefect {
             .get::<TypeParams>(self.entity)
             .map(|tp| tp.0.clone())
             .unwrap_or_default();
-        let [param] = params.as_slice() else {
+        let defaulted = |p: &Entity| ctx.get::<kestrel_ast_builder::TypeAnnotation>(*p).is_some();
+        let [param, rest @ ..] = params.as_slice() else {
             return Some(BoxDefect::ParamCount);
         };
+        if defaulted(param) || !rest.iter().all(defaulted) {
+            return Some(BoxDefect::ParamCount);
+        }
         let relaxed = ctx.query(TypeParamSizeRequirement {
             param: *param,
             context: self.entity,

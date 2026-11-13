@@ -5,6 +5,8 @@
 
 module flock.cache
 
+import clutch.shell.(runShell)
+
 import flock.error.(FlockError)
 import flock.version.(Version)
 import flock.source.(joinPath, flockHome)
@@ -15,7 +17,7 @@ import flock.source.(joinPath, flockHome)
 
 /// Returns the cache root directory: ~/.kestrel/packages/
 public func cacheRoot() -> String throws FlockError {
-    match getenv("HOME") {
+    match Environment.variable("HOME") {
         .Some(home) => .Ok(joinPath(base: home, rel: ".kestrel/packages")),
         .None => throw FlockError.CacheError("HOME environment variable not set")
     }
@@ -45,7 +47,7 @@ public func isCached(org org: String, pkg pkg: String, version version: Version)
     match cachePath(org: org, pkg: pkg, version: version) {
         .Ok(path) => {
             let manifest = joinPath(base: path, rel: "flock.toml");
-            fileExists(manifest)
+            Path(manifest).exists()
         },
         .Err(_) => false
     }
@@ -58,7 +60,7 @@ public func ensureCacheDir(org org: String, pkg pkg: String, version version: Ve
     match cachePath(org: org, pkg: pkg, version: version) {
         .Err(e) => throw e,
         .Ok(path) => {
-            match mkdirAll(path) {
+            match Directory.createAll(Path(path)) {
                 .Ok(_) => .Ok(path),
                 .Err(_) => {
                     var msg = String(); msg.append("cannot create cache directory: "); msg.append(path);
@@ -76,7 +78,7 @@ public func ensureCacheDir(org org: String, pkg pkg: String, version version: Ve
 /// Downloads a file from a URL to a local path using curl.
 public func downloadFile(url url: String, outputPath outputPath: String) -> () throws FlockError {
     var cmd = String(); cmd.append("curl -sL -o "); cmd.append(outputPath); cmd.append(" "); cmd.append(url);
-    let exitCode = spawn(cmd).unwrap(or: -1);
+    let exitCode = runShell(cmd);
     if exitCode != 0 {
         var msg = String(); msg.append("download failed: "); msg.append(url);
         throw FlockError.RegistryError(msg)
@@ -87,7 +89,7 @@ public func downloadFile(url url: String, outputPath outputPath: String) -> () t
 /// Extracts a .tar.gz archive into the target directory.
 public func extractArchive(archivePath archivePath: String, targetDir targetDir: String) -> () throws FlockError {
     var cmd = String(); cmd.append("tar xzf "); cmd.append(archivePath); cmd.append(" -C "); cmd.append(targetDir);
-    let exitCode = spawn(cmd).unwrap(or: -1);
+    let exitCode = runShell(cmd);
     if exitCode != 0 {
         var msg = String(); msg.append("failed to extract archive: "); msg.append(archivePath);
         throw FlockError.CacheError(msg)

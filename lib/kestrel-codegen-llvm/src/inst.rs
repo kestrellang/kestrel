@@ -121,7 +121,11 @@ pub fn compile_inst<'ctx>(
                     .get(fc.body.values[result.index()].ty),
                 MirTy::Ref { .. }
             );
-            if operand_is_ref && !result_is_ref {
+            // A FAT ref (`&Slice[T]`, `&rawany P`) is already the address of
+            // its two words, which is how the unsized pointee is passed:
+            // nothing to load (as `ref_slot_loads_pointee`).
+            let fat_ref = fc.ctx.module.is_fat(operand_ty);
+            if operand_is_ref && !result_is_ref && !fat_ref {
                 let v = if is_guaranteed {
                     mem::load(
                         builder,
@@ -773,6 +777,10 @@ fn compile_op1<'ctx>(
             cmp_to_bool(cx, builder, cmp)
         },
         Op::PtrNull(_) => mem::null_ptr(cx).into(),
+        Op::OverflowChecks => cx
+            .i8_type()
+            .const_int(u64::from(fc.ctx.options.overflow_checks()), false)
+            .into(),
         Op::PtrTo(ty) => {
             let repr = fc.ctx.tc.repr(ty, &fc.ctx.module.ty_arena, fc.ctx.module);
             let slot = fc.alloca(repr.size(), repr.align());
@@ -1018,6 +1026,33 @@ fn compile_op2<'ctx>(
         Op::AddOverflows(_, sign) => emit_overflow_check(fc, builder, sign, "add", li(), ri())?,
         Op::SubOverflows(_, sign) => emit_overflow_check(fc, builder, sign, "sub", li(), ri())?,
         Op::MulOverflows(_, sign) => emit_overflow_check(fc, builder, sign, "mul", li(), ri())?,
+        // Extend to double width, multiply, keep the top half. LLVM pairs it
+        // with a `mul` of the same operands into one widening multiply.
+        Op::MulHigh(_, sign) => {
+            let narrow = li().get_type();
+            let width = narrow.get_bit_width();
+            let wide = match width {
+                8 => cx.i16_type(),
+                16 => cx.i32_type(),
+                32 => cx.i64_type(),
+                _ => cx.i128_type(),
+            };
+            let ext = |v: IntValue<'ctx>| match sign {
+                Signedness::Signed => builder.build_int_s_extend(v, wide, "mulh.ext"),
+                Signedness::Unsigned => builder.build_int_z_extend(v, wide, "mulh.ext"),
+            };
+            let product = builder
+                .build_int_mul(ext(li()).unwrap(), ext(ri()).unwrap(), "mulh.full")
+                .unwrap();
+            let shift = wide.const_int(width as u64, false);
+            let high = builder
+                .build_right_shift(product, shift, false, "mulh.shr")
+                .unwrap();
+            builder
+                .build_int_truncate(high, narrow, "mulh")
+                .unwrap()
+                .into()
+        },
         Op::FAdd(_) => builder.build_float_add(lf(), rf(), "fadd").unwrap().into(),
         Op::FSub(_) => builder.build_float_sub(lf(), rf(), "fsub").unwrap().into(),
         Op::FMul(_) => builder.build_float_mul(lf(), rf(), "fmul").unwrap().into(),
@@ -1553,15 +1588,11 @@ fn compile_struct_extract<'ctx>(
         // Stage 2b ref slot extracted as a POINTEE-typed result: load the
         // stored address. A REF-typed result (clone/drop shim projections)
         // keeps the slot's address per the representation contract.
-        if matches!(fc.ctx.module.ty_arena.get(field_ty), MirTy::Ref { .. })
-            && !matches!(
-                fc.ctx
-                    .module
-                    .ty_arena
-                    .get(fc.body.values[result.index()].ty),
-                MirTy::Ref { .. }
-            )
-        {
+        if kestrel_codegen::ref_slot_loads_pointee(
+            fc.ctx.module,
+            field_ty,
+            fc.body.values[result.index()].ty,
+        ) {
             return Ok(mem::load(
                 builder,
                 cx.ptr_type(inkwell::AddressSpace::default()),
@@ -1615,15 +1646,11 @@ fn compile_tuple_extract<'ctx>(
     if is_borrowed {
         // Stage 2b ref slot with a POINTEE-typed result: load the stored
         // address (see compile_struct_extract).
-        if matches!(fc.ctx.module.ty_arena.get(elem_ty), MirTy::Ref { .. })
-            && !matches!(
-                fc.ctx
-                    .module
-                    .ty_arena
-                    .get(fc.body.values[result.index()].ty),
-                MirTy::Ref { .. }
-            )
-        {
+        if kestrel_codegen::ref_slot_loads_pointee(
+            fc.ctx.module,
+            elem_ty,
+            fc.body.values[result.index()].ty,
+        ) {
             return Ok(mem::load(
                 builder,
                 cx.ptr_type(inkwell::AddressSpace::default()),
@@ -1690,15 +1717,11 @@ fn compile_enum_payload<'ctx>(
     if is_borrowed {
         // Stage 2b ref slot with a POINTEE-typed result: load the stored
         // address (see compile_struct_extract).
-        if matches!(fc.ctx.module.ty_arena.get(field_ty), MirTy::Ref { .. })
-            && !matches!(
-                fc.ctx
-                    .module
-                    .ty_arena
-                    .get(fc.body.values[result.index()].ty),
-                MirTy::Ref { .. }
-            )
-        {
+        if kestrel_codegen::ref_slot_loads_pointee(
+            fc.ctx.module,
+            field_ty,
+            fc.body.values[result.index()].ty,
+        ) {
             return Ok(mem::load(
                 builder,
                 cx.ptr_type(inkwell::AddressSpace::default()),
@@ -1730,6 +1753,7 @@ fn compile_call<'ctx>(
     match callee {
         Callee::Resolved(mono_id) => compile_resolved_call(fc, builder, *mono_id, args, result),
         Callee::Thin(func_val_id) => compile_thin_call(fc, builder, *func_val_id, args, result),
+        Callee::C(func_val_id) => compile_c_call(fc, builder, *func_val_id, args, result),
         Callee::Thick(closure_val_id) => {
             compile_thick_call(fc, builder, *closure_val_id, args, result)
         },
@@ -1929,8 +1953,6 @@ fn compile_thin_call<'ctx>(
     args: &[CallArg],
     result: Option<ValueId>,
 ) -> Result<bool, CodegenError> {
-    let cx = fc.ctx.cx;
-    let ptr_scalar = fc.ctx.tc.ptr_scalar;
     let module: &'ctx MonoModule = fc.ctx.module;
 
     let func_ptr = fc.get_value(func_val_id).into_pointer_value();
@@ -1948,6 +1970,52 @@ fn compile_thin_call<'ctx>(
             "thin call on non-FuncThin".into(),
         ));
     };
+    emit_kestrel_indirect_call(fc, builder, func_ptr, &param_tys, ret_ty, args, result)
+}
+
+/// A call through a C function value: call its type's bridge (Kestrel ABI)
+/// with the address first; the bridge makes the C call and inlines away.
+fn compile_c_call<'ctx>(
+    fc: &mut FuncCompiler<'_, 'ctx>,
+    builder: &Builder<'ctx>,
+    func_val_id: ValueId,
+    args: &[CallArg],
+    result: Option<ValueId>,
+) -> Result<bool, CodegenError> {
+    let module: &'ctx MonoModule = fc.ctx.module;
+    let func_ty = fc.body.values[func_val_id.index()].ty;
+    let MirTy::FuncC { params, ret, .. } = module.ty_arena.get(func_ty) else {
+        return Err(CodegenError::Unsupported("C call on non-FuncC".into()));
+    };
+    let addr = (func_ty, ParamConvention::Consuming);
+    let param_tys: Vec<_> = std::iter::once(addr)
+        .chain(params.iter().copied())
+        .collect();
+    let addr_arg = CallArg {
+        value: func_val_id,
+        convention: ParamConvention::Consuming,
+    };
+    let args: Vec<CallArg> = std::iter::once(addr_arg)
+        .chain(args.iter().cloned())
+        .collect();
+    let bridge = crate::c_bridge::call_bridge(fc.ctx, func_ty);
+    let bridge_ptr = bridge.as_global_value().as_pointer_value();
+    emit_kestrel_indirect_call(fc, builder, bridge_ptr, &param_tys, *ret, &args, result)
+}
+
+/// Call `func_ptr`, a Kestrel-ABI function of `param_tys` and `ret_ty`.
+fn emit_kestrel_indirect_call<'ctx>(
+    fc: &mut FuncCompiler<'_, 'ctx>,
+    builder: &Builder<'ctx>,
+    func_ptr: PointerValue<'ctx>,
+    param_tys: &[(TyId, ParamConvention)],
+    ret_ty: TyId,
+    args: &[CallArg],
+    result: Option<ValueId>,
+) -> Result<bool, CodegenError> {
+    let cx = fc.ctx.cx;
+    let ptr_scalar = fc.ctx.tc.ptr_scalar;
+    let module: &'ctx MonoModule = fc.ctx.module;
 
     let ret_repr = fc.ctx.tc.repr(ret_ty, &module.ty_arena, module);
     let ret_mode = abi::return_mode(ret_repr);
@@ -1957,7 +2025,7 @@ fn compile_thin_call<'ctx>(
     if matches!(ret_mode, ReturnMode::Sret) {
         params.push(ptr_scalar.llvm(cx).into());
     }
-    for (ty, convention) in &param_tys {
+    for (ty, convention) in param_tys {
         let repr = fc.ctx.tc.repr(*ty, &module.ty_arena, module);
         match abi::param_pass_mode(*convention, repr) {
             PassMode::ByVal(t) => params.push(t.llvm(cx).into()),

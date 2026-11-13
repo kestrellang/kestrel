@@ -20,17 +20,17 @@ public func parseFormValue(body: String, key: String) -> String {
         var matched = true;
         var ki: Int64 = 0;
         while ki < keyLen {
-            if body.bytes(unchecked: pos + ki) != keyEq.bytes(unchecked: ki) {
+            if unsafe body.bytes(unchecked: pos + ki) != unsafe keyEq.bytes(unchecked: ki) {
                 matched = false;
                 break
             };
             ki = ki + 1
         }
-        if matched and (pos == 0 or body.bytes(unchecked: pos - 1) == 38) {
+        if matched and (pos == 0 or unsafe body.bytes(unchecked: pos - 1) == 38) {
             // Found it — extract value until & or end
             let valStart = pos + keyLen;
             var valEnd = valStart;
-            while valEnd < bodyLen and body.bytes(unchecked: valEnd) != 38 {
+            while valEnd < bodyLen and unsafe body.bytes(unchecked: valEnd) != 38 {
                 valEnd = valEnd + 1
             }
             return percentDecode(body.asSlice().subslice(from: valStart, to: valEnd).toOwned())
@@ -49,7 +49,7 @@ public func formatTemp(t: Float64) -> String {
     let negative = t < 0.0;
     let absVal = if negative { 0.0 - t } else { t };
     let scaled = absVal * 10.0 + 0.5; // round
-    let total = match scaled.toInt64() {
+    let total = match Int64(exactly: scaled.trunc()) {
         .Some(n) => n,
         .None => 0
     };
@@ -67,7 +67,7 @@ public func formatTempWhole(t: Float64) -> String {
     let negative = t < 0.0;
     let absVal = if negative { 0.0 - t } else { t };
     let rounded = absVal + 0.5;
-    let whole = match rounded.toInt64() {
+    let whole = match Int64(exactly: rounded.trunc()) {
         .Some(n) => n,
         .None => 0
     };

@@ -77,8 +77,8 @@ public func parseUrl(raw: String) -> ParsedUrl {
     let rawSlice = raw.asSlice();
     match raw.firstIndex(of: "?") {
         .Some(qIdx) => {
-            path = rawSlice.subslice(from: rawSlice.start, to: qIdx.value).toOwned();
-            queryString = rawSlice.subslice(from: qIdx.value + 1, to: rawSlice.end).toOwned()
+            path = rawSlice.subslice(from: 0, to: qIdx.value).toOwned();
+            queryString = rawSlice.subslice(from: qIdx.value + 1, to: rawSlice.bytes.count).toOwned()
         },
         .None => {}
     }
@@ -112,11 +112,11 @@ public func parseQueryString(qs: String) -> Array[(String, String)] {
         return result
     }
 
-    for pair in qs.split("&") {
+    for pair in qs.split(by: "&") {
         match pair.firstIndex(of: "=") {
             .Some(eqIdx) => {
-                let key = percentDecode(pair.subslice(from: pair.start, to: eqIdx.value).toOwned());
-                let val = percentDecode(pair.subslice(from: eqIdx.value + 1, to: pair.end).toOwned());
+                let key = percentDecode(pair.subslice(from: 0, to: eqIdx.value).toOwned());
+                let val = percentDecode(pair.subslice(from: eqIdx.value + 1, to: pair.bytes.count).toOwned());
                 result.append((key, val))
             },
             .None => {
@@ -146,12 +146,12 @@ public func percentDecode(s: String) -> String {
     var out = Array[UInt8](capacity: len);
     var i: Int64 = 0;
     while i < len {
-        let b = bytes(unchecked: i);
+        let b = unsafe bytes(unchecked: i);
         if b == 37 and i + 2 < len { // '%'
-            let hi = hexDigit(bytes(unchecked: i + 1));
-            let lo = hexDigit(bytes(unchecked: i + 2));
+            let hi = hexDigit(unsafe bytes(unchecked: i + 1));
+            let lo = hexDigit(unsafe bytes(unchecked: i + 2));
             if hi >= 0 and lo >= 0 {
-                out.append(UInt8(from: hi * 16 + lo));
+                out.append(UInt8(truncating: hi * 16 + lo));
                 i = i + 3
             } else {
                 out.append(b);
@@ -185,10 +185,10 @@ public func percentDecode(s: String) -> String {
 public func percentEncode(s: String) -> String {
     var out = String();
     for i in 0..<s.bytes.count {
-        let b = Int64(from: s.bytes(unchecked: i));
+        let b = Int64(from: unsafe s.bytes(unchecked: i));
         if (b >= 65 and b <= 90) or (b >= 97 and b <= 122) or (b >= 48 and b <= 57)
             or b == 45 or b == 95 or b == 46 or b == 126 {
-            out.append(char: Char(UInt32(from: b)).unwrap())
+            out.append(char: Char(UInt32(truncating: b)).unwrap())
         } else if b == 32 {
             out.append("+")
         } else {
@@ -237,7 +237,7 @@ public func encodeQueryString(pairs: Array[(String, String)]) -> String {
 /// ```
 func splitSegments(path: String) -> Array[String] {
     var segments = [];
-    for part in path.split("/") {
+    for part in path.split(by: "/") {
         if part.bytes.count > 0 {
             segments.append(part.toOwned())
         }

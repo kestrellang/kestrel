@@ -6,8 +6,10 @@ here="$(cd "$(dirname "$0")" && pwd)"
 pkg="$here/.."
 repo="$pkg/../.."
 kestrel="${1:-$repo/target/release/kestrel}"
-out="${TMPDIR:-/tmp}/kestrel-datetime-tests"
-mkdir -p "$out"
+# Private, unpredictable build dir (a fixed /tmp path could be pre-created or
+# symlinked by another user); removed on exit.
+out="$(mktemp -d "${TMPDIR:-/tmp}/kestrel-datetime-tests.XXXXXX")"
+trap 'rm -rf "$out"' EXIT
 
 cc -c "$pkg/datetime_shims.c" -o "$out/shims.o"
 ar rcs "$out/libdatetime_shims.a" "$out/shims.o"

@@ -29,7 +29,7 @@ public func scoreGuess(guess: String, answer: String) -> Array[LetterState] {
 
     var i: Int64 = 0;
     while i < WORD_LEN {
-        if guess.bytes(unchecked: i) == answer.bytes(unchecked: i) {
+        if unsafe guess.bytes(unchecked: i) == unsafe answer.bytes(unchecked: i) {
             result(i) = LetterState.Correct;
             consumed(i) = true
         };
@@ -38,14 +38,14 @@ public func scoreGuess(guess: String, answer: String) -> Array[LetterState] {
 
     i = 0;
     while i < WORD_LEN {
-        match result(unchecked: i) {
+        match unsafe result(unchecked: i) {
             .Correct => {},
             _ => {
-                let g = guess.bytes(unchecked: i);
+                let g = unsafe guess.bytes(unchecked: i);
                 var j: Int64 = 0;
                 var found = false;
                 while j < WORD_LEN and not found {
-                    if not consumed(unchecked: j) and answer.bytes(unchecked: j) == g {
+                    if not (unsafe consumed(unchecked: j)) and unsafe answer.bytes(unchecked: j) == g {
                         result(i) = LetterState.Present;
                         consumed(j) = true;
                         found = true
@@ -65,14 +65,14 @@ public func keyboardState(guesses: Array[String], answer: String) -> Array[Lette
     var states = Array[LetterState](repeating: LetterState.Untouched, count: 26);
     var gi: Int64 = 0;
     while gi < guesses.count {
-        let g = guesses(unchecked: gi);
+        let g = unsafe guesses(unchecked: gi);
         let scored = scoreGuess(g, answer);
         var i: Int64 = 0;
         while i < WORD_LEN {
-            let letter = g.bytes(unchecked: i);
+            let letter = unsafe g.bytes(unchecked: i);
             let idx = Int64(from: letter) - 65;
             if idx >= 0 and idx < 26 {
-                states(idx) = betterState(states(unchecked: idx), scored(unchecked: i))
+                states(idx) = betterState(unsafe states(unchecked: idx), unsafe scored(unchecked: i))
             };
             i = i + 1
         };
@@ -96,7 +96,7 @@ func rank(s: LetterState) -> Int64 {
 
 public func outcome(guesses: Array[String], answer: String) -> Outcome {
     if guesses.count > 0 {
-        let last = guesses(unchecked: guesses.count - 1);
+        let last = unsafe guesses(unchecked: guesses.count - 1);
         if last == answer { return Outcome.Won }
     };
     if guesses.count >= MAX_GUESSES { return Outcome.Lost };

@@ -33,9 +33,9 @@ struct Tracked {
     subscript(i: Int64) -> Int64 {
         modifying get {
             self.reads += 1;
-            self.items(at: i)
+            self.items(i)
         }
-        set { self.items(at: i) = newValue; }
+        set { self.items(i) = newValue; }
     }
 }
 

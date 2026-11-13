@@ -67,7 +67,7 @@ Initialisms for well-known system domains are allowed in module names: `io`, `fs
 ```
 // Good
 count, capacity, remaining, pointer, address
-std.io, std.os.fs, std.ffi
+std.files, std.network, std.ffi
 
 // Bad
 cnt, cap, rem, ptr, addr
@@ -101,7 +101,7 @@ LeftShift     (not LeftShiftable)
 Negate        (not Negateable)
 FFISafe       (not FFISafeable)
 Equal         (not Equalable)
-Modulo        (not Modulable)
+Remainder     (not Remainderable)
 ```
 
 The test: say it out loud. If the `-able` form sounds natural, use it. If it sounds clunky, drop to a short name.
@@ -200,12 +200,21 @@ stepBy(3)
 ```
 // Good
 min(by: { it.age })
-String(utf8: bytes)
+String(fromUtf8: bytes)
 
 // Bad
 minBy(key: { it.age })
 String.fromUtf8(bytes: bytes)
 ```
+
+**Converting initializers say what they convert from** with a `from…:` label: `from:` for a value of another type, and `from` + the encoding when the bytes need decoding. Acronyms are lowerCamelCase inside a name (§1): `fromUtf8:`, not `fromUTF8:`.
+
+```
+String(fromUtf8: bytes)          // decodes; returns nil on invalid UTF-8
+Int64(from: count32)             // another type's value
+```
+
+`init(from:)` between number types is lossless or traps. A lossy conversion names how it loses information: `truncating:` (keep the low bits), `clamping:` (saturate), `bitPattern:` (reinterpret a same-width value).
 
 **Use `where:` for all predicate closures.** One label, everywhere.
 
@@ -281,7 +290,7 @@ The prefix signals cost at the call site.
 
 ```
 // to* — allocates a new independent value
-toArray()
+toOwned()      // borrowed view or slice -> owned copy (String, Array)
 toAddress()
 
 // as* — borrows or reinterprets existing storage, cheap
@@ -289,6 +298,11 @@ asPointer()
 asSlice()
 asRaw()
 ```
+
+`toOwned()` is the one verb for "copy this borrowed thing into an owned
+value": text views and `StrSlice` give a `String`, slices and collection
+views give an `Array`. `toString()` / `toArray()` stay for conversions
+between different types (`Char.toString()`, `Set.toArray()`).
 
 ## 13. Cross-library consistency
 
@@ -300,18 +314,39 @@ Concrete rules:
 - **Key-extractor closures** always use `byKey:`.
 - **Combining closures** always use `by:`.
 - **Mapping closures** always use `as:` (or are unlabeled for trailing closures like `map`, `flatMap`).
-- **State queries** (`isEmpty`, `count`, `capacity`) are always properties, never methods.
-- **Same concept, same name** — if collections call it `first(where:)`, iterators call it `first(where:)` too, not `find`.
+- **State queries** (`isEmpty`, `count`, `capacity`) and **O(1) element views** (`first`, `last`, `reversed`) are always properties on collections, never methods. Iterators are the exception: their `first()`, `last()`, `count()` and `reversed()` advance or consume the iterator, so they stay methods.
+- **Ends of a sequence** are `append`/`popLast` and `prepend`/`popFirst` on every positional collection (Array, Deque). `Heap` keeps `push`/`pop`/`peek`: it has no front or back, only a top.
+- **Searches** are `find(where:)` / `findLast(where:)`, never `first(where:)`, so they don't collide with the `first` property.
+- **Same concept, same name** — if collections call it `find(where:)`, iterators call it `find(where:)` too.
 
 ```
 // Good — consistent across Array, Set, Iterator, String
 filter(where: { it > 0 })
 all(where: { it.isReady })
-first(where: { it.isExpired })
+find(where: { it.isExpired })
 sort(byKey: { it.name })
 fold(from: 0, by: { a + b })
 
 // Bad — different names/labels for the same thing
 Array.all(satisfying: ...)   // vs Set.all(where: ...)
-Iterator.find(...)           // vs Array.first(where: ...)
+Iterator.first(where: ...)   // vs Array.find(where: ...)
+```
+
+## 14. Slices in public APIs
+
+Public APIs use the safe slice types. `UnsafeSlice` only appears in APIs that are unsafe by name (`asUnsafeSlice()`, `memory.Buffer`).
+
+- **Read-only parameters** take `&Slice[T]`. An `Array` or `UnsafeSlice` argument peels to it through `Indirection`, so callers pass an `Array`, a `Slice`, a sub-slice or an array literal without copying.
+- **Protocol requirements** take `Slice[T]`. A generic requirement can't be called through `any P` (E145), so `any Hasher` and `any Writable` need the concrete type.
+- **Returned views** are `&Slice[T]` (or `&mutating Slice[T]`), borrowed from the receiver: `asSlice()`, `prefix(n)`, `drop(first:)`, `asByteSlice()`.
+
+```
+// Good
+func append(contentsOf other: &Slice[T])
+protocol Writable { mutating func write(from bytes: Slice[UInt8]) -> … }
+func asByteSlice() -> &Slice[UInt8]
+
+// Bad
+func append(contentsOf other: UnsafeSlice[T])
+func asByteSlice() -> UnsafeSlice[UInt8]
 ```

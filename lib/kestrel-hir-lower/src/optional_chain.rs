@@ -82,12 +82,20 @@ impl LowerCtx<'_> {
             return self.alloc_expr(HirExpr::Error { span: span.clone() });
         };
         let take = !base_src.inner().is_some_and(|n| is_place_syntax(&n));
-        let method = if take { "chainTake" } else { "chainBorrow" };
+        let method = if take {
+            Builtin::OptionalChainTakeMethod
+        } else {
+            Builtin::OptionalChainBorrowMethod
+        };
+        let Some(requirement) = self.require_builtin(method, "`?.`", span) else {
+            return self.alloc_expr(HirExpr::Error { span: span.clone() });
+        };
         let scrutinee = self.alloc_expr(HirExpr::ProtocolCall {
+            requirement: Some(requirement),
             from_operator: false,
             receiver: base,
             protocol,
-            method: HirName::name(method),
+            method: self.member_name(requirement),
             type_args: None,
             args: Vec::new(),
             span: span.clone(),
@@ -112,25 +120,17 @@ impl LowerCtx<'_> {
                 by_ref: None,
                 span: span.clone(),
             });
-            let some = self.alloc_pat(HirPat::ImplicitVariant {
-                name: HirName::name("Some"),
-                args: vec![HirPatArg {
+            let some = self.lang_case_pat(
+                Builtin::OptionalSomeCase,
+                vec![HirPatArg {
                     label: None,
                     pattern: binding,
                 }],
-                span: span.clone(),
-            });
-            let none = self.alloc_pat(HirPat::ImplicitVariant {
-                name: HirName::name("None"),
-                args: Vec::new(),
-                span: span.clone(),
-            });
-            let none_value = self.alloc_expr(HirExpr::ImplicitMember {
-                owner: None,
-                name: HirName::name("None"),
-                args: None,
-                span: span.clone(),
-            });
+                "`?.`",
+                span,
+            );
+            let none = self.lang_case_pat(Builtin::OptionalNoneCase, Vec::new(), "`?.`", span);
+            let none_value = self.lang_case_value(Builtin::OptionalNoneCase, None, "`?.`", span);
             body = self.alloc_expr(HirExpr::Match {
                 scrutinee: bind.scrutinee,
                 arms: vec![

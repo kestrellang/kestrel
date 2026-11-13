@@ -7,11 +7,8 @@ use kestrel_hir::body::{HirCallArg, HirExpr, HirExprId};
 use kestrel_hir::ty::HirTy;
 use kestrel_mir::callee::Callee;
 use kestrel_mir::inst::CallArg;
-use kestrel_mir::item::witness::WitnessMethodKey;
 use kestrel_mir::terminator::{SwitchArm, SwitchCase};
-use kestrel_mir::{
-    FieldIdx, Immediate, MirTy, Ownership, ParamConvention, TyId, ValueId, VariantIdx,
-};
+use kestrel_mir::{FieldIdx, Immediate, MirTy, Ownership, ParamConvention, TyId, ValueId};
 
 use super::OssaBodyCtx;
 use crate::ty::{lower_resolved_ty, lower_type};
@@ -64,8 +61,17 @@ impl OssaBodyCtx<'_, '_> {
         // `is_shared`, not `is_boxed`: only a shared environment has a share
         // operation. A `consuming` closure is `not Copyable` and exposes no
         // `clone()` at all.
-        if method_name == "clone"
-            && args.is_empty()
+        let resolved_entity = self
+            .typed
+            .as_ref()
+            .and_then(|t| t.resolutions.get(&expr_id))
+            .copied();
+        let clone_requirement = self.ctx.query.query(kestrel_name_res::ResolveBuiltin {
+            builtin: kestrel_hir::Builtin::CloneMethod,
+            root: self.ctx.root,
+        });
+        if resolved_entity.is_some()
+            && resolved_entity == clone_requirement
             && matches!(
                 self.ctx.module.ty_arena.get(receiver_ty),
                 MirTy::FuncThick { kind, .. } if kind.is_shared()
@@ -74,12 +80,6 @@ impl OssaBodyCtx<'_, '_> {
             let recv = self.lower_expr_for_borrow(receiver_expr);
             return self.emit_copy_value(recv);
         }
-
-        let resolved_entity = self
-            .typed
-            .as_ref()
-            .and_then(|t| t.resolutions.get(&expr_id))
-            .copied();
 
         let is_static = resolved_entity.is_some_and(|e| self.ctx.world.get::<Static>(e).is_some());
 
@@ -95,8 +95,7 @@ impl OssaBodyCtx<'_, '_> {
             self.ctx.world.get::<NodeKind>(resolved),
             Some(NodeKind::Subscript)
         ) {
-            self.ctx
-                .find_ref_accessor_child(resolved, false)
+            self.read_place_provider(resolved, expr_id)
                 .unwrap_or(resolved)
         } else {
             resolved
@@ -120,16 +119,13 @@ impl OssaBodyCtx<'_, '_> {
                 && let Some(field_ty) = self.ctx.resolve_field_ty(se, field_idx)
                 && matches!(
                     self.ctx.module.ty_arena.get(field_ty),
-                    MirTy::FuncThick { .. } | MirTy::FuncThin { .. }
+                    MirTy::FuncThick { .. } | MirTy::FuncThin { .. } | MirTy::FuncC { .. }
                 )
             {
                 let base_val = self.lower_expr_for_borrow(receiver_expr);
                 let field_val = self.emit_struct_extract(base_val, field_idx, field_ty);
-                let call_args = self.lower_call_args_default(args);
-                let callee = match self.ctx.module.ty_arena.get(field_ty) {
-                    MirTy::FuncThin { .. } => Callee::Thin(field_val),
-                    _ => Callee::Thick(field_val),
-                };
+                let call_args = self.lower_value_call_args(field_ty, args);
+                let callee = self.value_callee(field_ty, field_val);
                 return self.emit_call_returning(callee, call_args, result_ty);
             }
         }
@@ -148,14 +144,11 @@ impl OssaBodyCtx<'_, '_> {
         // Function-typed receiver: indirect call (all Borrow by ABI)
         if matches!(
             self.ctx.module.ty_arena.get(receiver_ty),
-            MirTy::FuncThick { .. } | MirTy::FuncThin { .. }
+            MirTy::FuncThick { .. } | MirTy::FuncThin { .. } | MirTy::FuncC { .. }
         ) {
             let receiver_val = self.lower_expr(receiver_expr);
-            let call_args = self.lower_call_args_default(args);
-            let callee = match self.ctx.module.ty_arena.get(receiver_ty) {
-                MirTy::FuncThin { .. } => Callee::Thin(receiver_val),
-                _ => Callee::Thick(receiver_val),
-            };
+            let call_args = self.lower_value_call_args(receiver_ty, args);
+            let callee = self.value_callee(receiver_ty, receiver_val);
             let result = self.emit_call_returning(callee, call_args, result_ty);
             // Lockstep twin of `lower_indirect_call`: calling a `consuming`
             // value CONSUMES it, so this is its last owner — release the unique
@@ -203,7 +196,7 @@ impl OssaBodyCtx<'_, '_> {
             self.prepare_closure_arg_snapshots(Some((receiver_expr, recv_conv)), args, &arg_convs);
             // Indirection method peel: `wrapper.method()` where the wrapper has
             // no `method` → dispatch to the pointee, reached via
-            // `pointeeRef()` / `pointeeMutRef()`. A mutating method (recv_conv
+            // `value`'s `ref` / `mutating ref`. A mutating method (recv_conv
             // == MutBorrow) peels through the mutating accessor. `receiver_ty`
             // is retargeted to the pointee so the callee's type args resolve
             // against the pointee, not the wrapper.
@@ -294,7 +287,7 @@ impl OssaBodyCtx<'_, '_> {
         };
 
         // Defaults are already filled by `lower_call_args_bound` above.
-        let result = self.emit_call_returning(callee, call_args, result_ty);
+        let result = self.emit_call_for_expr(expr_id, callee, call_args, result_ty);
         self.drain_writebacks(wb_mark);
 
         // Failable-init delegation (#144): `self.init(...)` to a failable/throwing
@@ -347,24 +340,14 @@ impl OssaBodyCtx<'_, '_> {
         result_ty: TyId,
         effect: InitEffect,
     ) -> ValueId {
-        let enum_entity = match self.ctx.module.ty_arena.get(result_ty) {
-            MirTy::Named { entity, .. } => *entity,
-            // Not the expected failable enum — leave the result as-is (defensive;
-            // shouldn't occur for a resolved failable delegation).
-            _ => return result,
+        // Not the expected failable enum — leave the result as-is (defensive;
+        // shouldn't occur for a resolved failable delegation).
+        if !matches!(self.ctx.module.ty_arena.get(result_ty), MirTy::Named { .. }) {
+            return result;
+        }
+        let Some((success_idx, failure_idx)) = self.ctx.effect_variant_idxs(&effect) else {
+            return result;
         };
-        let (success_name, failure_name) = match effect {
-            InitEffect::Failable => ("Some", "None"),
-            InitEffect::Throwing => ("Ok", "Err"),
-        };
-        let success_idx = self
-            .ctx
-            .resolve_variant_idx(enum_entity, success_name)
-            .unwrap_or(VariantIdx::new(0));
-        let failure_idx = self
-            .ctx
-            .resolve_variant_idx(enum_entity, failure_name)
-            .unwrap_or(VariantIdx::new(1));
 
         let disc = self.emit_discriminant(result);
 
@@ -430,6 +413,26 @@ impl OssaBodyCtx<'_, '_> {
     ) -> (TyId, Vec<CallArg>) {
         let recv_entity = match self.ctx.module.ty_arena.get(receiver_ty) {
             MirTy::Named { entity, .. } => *entity,
+            // A generic receiver (`h.item(1)`, `H: Holder`) has no stored
+            // fields: a place requirement lends through its accessor, and a
+            // where-clause equality (`H.Item = Array[Int64]`) names the
+            // concrete type the subscript dispatches on.
+            _ if !call_args.is_empty()
+                && self
+                    .ctx
+                    .find_ref_accessor_child(field_entity, false)
+                    .is_some() =>
+            {
+                let old_receiver = call_args.remove(0);
+                let (field_arg, field_ty) = self.computed_prefix_receiver(
+                    old_receiver,
+                    receiver_ty,
+                    field_entity,
+                    receiver_convention,
+                );
+                call_args.insert(0, field_arg);
+                return (field_ty, call_args);
+            },
             _ => return (receiver_ty, call_args),
         };
 
@@ -568,13 +571,13 @@ impl OssaBodyCtx<'_, '_> {
 
         // Computed property: call the getter
         if self.ctx.world.get::<Gettable>(field_entity).is_some() {
-            let field_ty = crate::ty::resolve_type_annotation(self.ctx, field_entity);
-            self.ctx.register_name(field_entity);
-            let type_args = self.prepend_receiver_type_args(receiver_ty, vec![]);
-            let callee = Callee::direct_with_args(field_entity, type_args, None);
             let old_receiver = call_args.remove(0);
-            let getter_result = self.emit_call_returning(callee, vec![old_receiver], field_ty);
-            let field_arg = self.prepare_call_arg(getter_result, receiver_convention);
+            let (field_arg, field_ty) = self.computed_prefix_receiver(
+                old_receiver,
+                receiver_ty,
+                field_entity,
+                receiver_convention,
+            );
             call_args.insert(0, field_arg);
             return (field_ty, call_args);
         }
@@ -587,6 +590,7 @@ impl OssaBodyCtx<'_, '_> {
         expr_id: HirExprId,
         receiver_expr: HirExprId,
         protocol: Entity,
+        requirement: Option<Entity>,
         method_name: &str,
         _hir_type_args: Option<&[HirTy]>,
         args: &[HirCallArg],
@@ -601,13 +605,17 @@ impl OssaBodyCtx<'_, '_> {
         {
             return self.lower_expr(receiver_expr);
         }
-        let receiver_ty = self.resolve_expr_type(receiver_expr);
+        let mut receiver_ty = self.resolve_expr_type(receiver_expr);
         let result_ty = self.resolve_expr_type(expr_id);
+        // `xs.first() ?? 0`: the operator works on the copied-out `Optional[T]`.
+        if self.decays_optional_ref(receiver_expr) {
+            receiver_ty = self.decayed_optional_ty(receiver_ty);
+        }
 
         self.ctx.register_name(protocol);
         let method_type_args = self.resolve_type_args(expr_id);
-        let labels: Vec<Option<String>> = args.iter().map(|a| a.label.clone()).collect();
-        let method_key = WitnessMethodKey::new(method_name, labels);
+        let (method_key, method_entity) =
+            self.protocol_call_target(requirement, protocol, method_name, args);
 
         let conventions = self.collect_witness_conventions(protocol, &method_key);
 
@@ -620,7 +628,6 @@ impl OssaBodyCtx<'_, '_> {
             .copied()
             .unwrap_or(ParamConvention::Borrow);
         // Before the receiver opens its borrow (H12: `x.mutate({ x })`).
-        let method_entity = self.find_protocol_method_entity(protocol, &method_key);
         let arg_convs = self.explicit_arg_conventions(args, method_entity, &conventions, 1);
         self.prepare_closure_arg_snapshots(Some((receiver_expr, recv_conv)), args, &arg_convs);
         let receiver_arg = self.prepare_call_arg_for_expr(receiver_expr, recv_conv);
@@ -646,7 +653,7 @@ impl OssaBodyCtx<'_, '_> {
             method_type_args,
         };
 
-        let result = self.emit_call_returning(callee, call_args, result_ty);
+        let result = self.emit_call_for_expr(expr_id, callee, call_args, result_ty);
         self.drain_writebacks(wb_mark);
         result
     }
@@ -667,10 +674,7 @@ impl OssaBodyCtx<'_, '_> {
         // below must skip it, or the outer call re-dispatches to the inner
         // callee (#175 re-calls the method with the closure as self; #176
         // emits a Slice/user subscript witness on the FuncThick) (#175/#176).
-        let callee_is_call = matches!(
-            &self.hir.exprs[callee_expr],
-            HirExpr::Call { .. } | HirExpr::MethodCall { .. }
-        );
+        let callee_is_call = self.callee_is_call_result(callee_expr);
         let entity = if let Some(&resolved) = self
             .typed
             .as_ref()
@@ -707,9 +711,7 @@ impl OssaBodyCtx<'_, '_> {
             self.ctx.world.get::<NodeKind>(entity),
             Some(NodeKind::Subscript)
         ) {
-            self.ctx
-                .find_ref_accessor_child(entity, false)
-                .unwrap_or(entity)
+            self.read_place_provider(entity, expr_id).unwrap_or(entity)
         } else {
             entity
         };
@@ -787,7 +789,13 @@ impl OssaBodyCtx<'_, '_> {
         } else {
             let convs = self.collect_conventions(entity);
             let callee = if has_receiver {
-                let receiver_ty = self.resolve_expr_type(callee_expr);
+                // A subscript call peeled through `Indirection` (`v(1)` where
+                // only `v`'s target declares the subscript) dispatches on the
+                // pointee, so its type args come from the pointee's type.
+                let receiver_ty = match self.indirection_peels_of(expr_id) {
+                    Some(peels) => lower_resolved_ty(self.ctx, &peels.last().unwrap().target),
+                    None => self.resolve_expr_type(callee_expr),
+                };
                 let mut ta = self.prepend_receiver_type_args(receiver_ty, type_args);
                 if let Some(mir_func) = self.ctx.module.functions.get(&entity) {
                     ta.truncate(mir_func.type_params.len());
@@ -810,12 +818,12 @@ impl OssaBodyCtx<'_, '_> {
                 .first()
                 .copied()
                 .unwrap_or(ParamConvention::Borrow);
-            let receiver_arg = self.prepare_call_arg_for_expr(callee_expr, recv_conv);
+            let (receiver_arg, _) = self.member_receiver_arg(expr_id, callee_expr, recv_conv);
             call_args.insert(0, receiver_arg);
         }
 
         // Defaults are already filled by `lower_call_args_bound` above.
-        let result = self.emit_call_returning(callee, call_args, result_ty);
+        let result = self.emit_call_for_expr(expr_id, callee, call_args, result_ty);
         self.drain_writebacks(wb_mark);
         result
     }
@@ -897,16 +905,20 @@ impl OssaBodyCtx<'_, '_> {
                 (idx, val)
             })
             .collect();
-        // `lazy var` caches are never arguments: they start empty.
+        // `lazy var` caches are never arguments: they start empty. A
+        // defaulted field left out of the call (`S(a: 1)` for `var b = 3`)
+        // gets its default, lowered inline as an explicit init does.
         let mut fields = fields;
         if known_struct {
+            let defaults = self.field_default_values_except(result_ty, &fields);
+            fields.extend(defaults);
             fields.extend(self.empty_lazy_caches(result_ty));
         }
 
         self.emit_struct(result_ty, fields)
     }
 
-    fn emit_init_call(
+    pub(crate) fn emit_init_call(
         &mut self,
         entity: Entity,
         type_args: Vec<TyId>,
@@ -917,6 +929,7 @@ impl OssaBodyCtx<'_, '_> {
         if let Some(init_effect) = init_effect {
             return self.emit_failable_init_call(entity, type_args, args, result_ty, init_effect);
         }
+        let instantiation = type_args.clone();
 
         let ptr_ty = self.ctx.module.ty_arena.pointer(result_ty);
         let one = self.emit_literal(Immediate::i64(1));
@@ -946,7 +959,14 @@ impl OssaBodyCtx<'_, '_> {
         }];
         // Init defaults referencing the init's own type params (rare) aren't
         // substituted here — pass no args (#148 covers the common free-fn case).
-        call_args.extend(self.lower_call_args_bound(args, entity, &conventions, 1, &[]));
+        call_args.extend(self.lower_call_args_instantiated(
+            args,
+            entity,
+            &conventions,
+            1,
+            &[],
+            &instantiation,
+        ));
 
         self.emit_call_void(callee, call_args);
         let ownership = self.ownership_for(result_ty);
@@ -969,26 +989,12 @@ impl OssaBodyCtx<'_, '_> {
         result_ty: TyId,
         effect: InitEffect,
     ) -> ValueId {
+        let instantiation = type_args.clone();
         // result_ty is Optional[T] or Result[T, E]. Extract inner struct type.
-        let (inner_ty, enum_entity, success_name, failure_name) = match &effect {
-            InitEffect::Failable => {
-                let (entity, inner) = match self.ctx.module.ty_arena.get(result_ty) {
-                    MirTy::Named { entity, type_args } if !type_args.is_empty() => {
-                        (*entity, type_args[0])
-                    },
-                    _ => panic!("failable init result_ty must be Optional[T]"),
-                };
-                (inner, entity, "Some", "None")
-            },
-            InitEffect::Throwing => {
-                let (entity, inner) = match self.ctx.module.ty_arena.get(result_ty) {
-                    MirTy::Named { entity, type_args } if !type_args.is_empty() => {
-                        (*entity, type_args[0])
-                    },
-                    _ => panic!("throwing init result_ty must be Result[T, E]"),
-                };
-                (inner, entity, "Ok", "Err")
-            },
+        // result_ty is Optional[T] or Result[T, E]; T is its first arg.
+        let (enum_entity, inner_ty) = match self.ctx.module.ty_arena.get(result_ty) {
+            MirTy::Named { entity, type_args } if !type_args.is_empty() => (*entity, type_args[0]),
+            _ => panic!("effectful init result_ty must be Optional[T] or Result[T, E]"),
         };
 
         // Allocate self as Pointer[T], not Pointer[Optional[T]]
@@ -1035,20 +1041,23 @@ impl OssaBodyCtx<'_, '_> {
             value: self_addr,
             convention: ParamConvention::MutBorrow,
         }];
-        call_args.extend(self.lower_call_args_bound(args, entity, &conventions, 1, &[]));
+        call_args.extend(self.lower_call_args_instantiated(
+            args,
+            entity,
+            &conventions,
+            1,
+            &[],
+            &instantiation,
+        ));
 
         // Call returns Optional[()] or Result[(), E]
         let init_ret = self.emit_call_returning(callee, call_args, init_ret_ty);
 
-        // Resolve variant indices
-        let success_idx = self
+        // Resolve variant indices by the cases' builtin tags.
+        let (success_idx, failure_idx) = self
             .ctx
-            .resolve_variant_idx(enum_entity, success_name)
-            .unwrap_or(VariantIdx::new(0));
-        let failure_idx = self
-            .ctx
-            .resolve_variant_idx(enum_entity, failure_name)
-            .unwrap_or(VariantIdx::new(1));
+            .effect_variant_idxs(&effect)
+            .expect("effectful init needs std's tagged Optional/Result cases");
 
         // Extract discriminant as I32 for switching (same pattern as match lowering)
         let disc = self.emit_discriminant(init_ret);
@@ -1105,7 +1114,7 @@ impl OssaBodyCtx<'_, '_> {
         self.restore_scope(&snapshot);
         self.switch_to(failure_block);
         self.rebind_scope_values(&live_vals, &failure_params);
-        let none_val = if failure_name == "None" {
+        let none_val = if matches!(effect, InitEffect::Failable) {
             self.emit_enum_variant(result_ty, failure_idx, vec![])
         } else {
             // Throwing: extract error payload from init_ret and re-wrap as Result[T, E]
@@ -1134,6 +1143,27 @@ impl OssaBodyCtx<'_, '_> {
         self.tracker = saved_tracker;
         self.tracker.rebind(&live_vals, merge_live);
         result_param
+    }
+
+    /// How to call a function VALUE of type `ty`: a thin code pointer, a
+    /// closure, or a C function address (called with the C ABI).
+    fn value_callee(&self, ty: TyId, val: ValueId) -> Callee {
+        match self.ctx.module.ty_arena.get(ty) {
+            MirTy::FuncThin { .. } => Callee::Thin(val),
+            MirTy::FuncC { .. } => Callee::C(val),
+            _ => Callee::Thick(val),
+        }
+    }
+
+    /// Arguments of a call through a function value of type `ty`. A C
+    /// function takes its params by their own conventions (by value, or a
+    /// pointer for `&T`); Kestrel function values borrow every argument.
+    fn lower_value_call_args(&mut self, ty: TyId, args: &[HirCallArg]) -> Vec<CallArg> {
+        let MirTy::FuncC { params, .. } = self.ctx.module.ty_arena.get(ty) else {
+            return self.lower_call_args_default(args);
+        };
+        let convs: Vec<ParamConvention> = params.iter().map(|(_, c)| *c).collect();
+        self.lower_call_args(args, &convs, 0)
     }
 
     fn lower_indirect_call(
@@ -1166,7 +1196,9 @@ impl OssaBodyCtx<'_, '_> {
             },
             _ => Vec::new(),
         };
-        let call_args = if convs.contains(&ParamConvention::MutBorrow) {
+        let call_args = if matches!(self.ctx.module.ty_arena.get(callee_ty), MirTy::FuncC { .. }) {
+            self.lower_value_call_args(callee_ty, args)
+        } else if convs.contains(&ParamConvention::MutBorrow) {
             let mapped: Vec<ParamConvention> = convs
                 .iter()
                 .map(|c| {
@@ -1182,10 +1214,7 @@ impl OssaBodyCtx<'_, '_> {
             self.lower_call_args_default(args)
         };
 
-        let callee = match self.ctx.module.ty_arena.get(callee_ty) {
-            MirTy::FuncThin { .. } => Callee::Thin(callee_val),
-            _ => Callee::Thick(callee_val),
-        };
+        let callee = self.value_callee(callee_ty, callee_val);
 
         let result = self.emit_call_returning(callee, call_args, result_ty);
 
@@ -1246,17 +1275,31 @@ impl OssaBodyCtx<'_, '_> {
         (self.lower_expr(callee_expr), true)
     }
 
+    /// Whether `callee_expr` is itself a call whose RESULT is the value the
+    /// outer `()` invokes: `s.mk()()`, `fs(0)()`, and desugared operator
+    /// calls such as `f!(2)` (a `forceUnwrap` protocol call, behind its
+    /// `Sugar` wrapper). Its recorded resolution is the inner call's callee,
+    /// never what the outer call dispatches to.
+    fn callee_is_call_result(&self, callee_expr: HirExprId) -> bool {
+        let mut expr = callee_expr;
+        while let HirExpr::Sugar { inner, .. } = &self.hir.exprs[expr] {
+            expr = *inner;
+        }
+        matches!(
+            &self.hir.exprs[expr],
+            HirExpr::Call { .. } | HirExpr::MethodCall { .. } | HirExpr::ProtocolCall { .. }
+        )
+    }
+
     fn resolve_callee_entity_from_expr(&self, callee_expr: HirExprId) -> Option<Entity> {
         // A call/method-call callee_expr produces a closure VALUE — its
         // resolution is the inner call's own callee, not an entity the outer
         // call dispatches to. Don't surface it (mirrors emit_resolved_call).
-        if !matches!(
-            &self.hir.exprs[callee_expr],
-            HirExpr::Call { .. } | HirExpr::MethodCall { .. }
-        ) && let Some(&resolved) = self
-            .typed
-            .as_ref()
-            .and_then(|t| t.resolutions.get(&callee_expr))
+        if !self.callee_is_call_result(callee_expr)
+            && let Some(&resolved) = self
+                .typed
+                .as_ref()
+                .and_then(|t| t.resolutions.get(&callee_expr))
         {
             return Some(resolved);
         }

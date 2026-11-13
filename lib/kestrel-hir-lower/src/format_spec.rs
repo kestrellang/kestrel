@@ -9,8 +9,8 @@
 //! - sign: `+` (always), `-` (negative only), ` ` (space for positive)
 //! - `#`: Alternate form (0x for hex, 0b for binary, etc.)
 //! - `0`: Zero-pad (sets fill to '0' and align to right)
-//! - width: Integer minimum field width
-//! - `.precision`: `.` followed by integer precision
+//! - width: Integer minimum field width, or `{name}` to read it at runtime
+//! - `.precision`: `.` followed by integer precision, or `.{name}`
 //! - type: `s` (string), `d` (decimal), `b` (binary), `o` (octal),
 //!   `x`/`X` (hex), `e`/`E` (scientific), `f`/`F` (fixed),
 //!   `%` (percent), `?` (debug)
@@ -66,6 +66,15 @@ pub enum FormatType {
     Debug,
 }
 
+/// A width or precision: written in the spec, or a nested hole naming a
+/// value read at runtime (`\(n:>{w})`, `\(x:.{p}f)`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Count {
+    Literal(u32),
+    /// A name or dotted path (`w`, `self.width`), lowered like an identifier.
+    Name(String),
+}
+
 /// Parsed format specification.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FormatSpec {
@@ -80,9 +89,9 @@ pub struct FormatSpec {
     /// Zero-pad flag.
     pub zero_pad: bool,
     /// Minimum field width.
-    pub width: Option<u32>,
+    pub width: Option<Count>,
     /// Precision (decimal places for floats, max chars for strings).
-    pub precision: Option<u32>,
+    pub precision: Option<Count>,
     /// Format type specifier.
     pub format_type: FormatType,
 }
@@ -119,6 +128,8 @@ pub enum FormatSpecError {
     UnexpectedChar(char),
     /// Empty precision after dot.
     EmptyPrecision,
+    /// A `{` hole that isn't a name followed by `}`.
+    InvalidHole(String),
 }
 
 impl std::fmt::Display for FormatSpecError {
@@ -131,6 +142,12 @@ impl std::fmt::Display for FormatSpecError {
             FormatSpecError::InvalidPrecision(s) => write!(f, "invalid precision: '{s}'"),
             FormatSpecError::UnexpectedChar(c) => write!(f, "unexpected character: '{c}'"),
             FormatSpecError::EmptyPrecision => write!(f, "empty precision after '.'"),
+            FormatSpecError::InvalidHole(s) => {
+                write!(
+                    f,
+                    "'{{{s}}}' must name a value, like '{{width}}' or '{{self.width}}'"
+                )
+            },
         }
     }
 }
@@ -208,35 +225,17 @@ pub fn parse_format_spec(spec: &str) -> Result<FormatSpec, FormatSpecError> {
     }
 
     // Parse [width]
-    let width_start = pos;
-    while pos < chars.len() && chars[pos].is_ascii_digit() {
-        pos += 1;
-    }
-    if pos > width_start {
-        let width_str: String = chars[width_start..pos].iter().collect();
-        result.width = Some(
-            width_str
-                .parse()
-                .map_err(|_| FormatSpecError::InvalidWidth(width_str))?,
-        );
+    if let Some(width) = parse_count(&chars, &mut pos, FormatSpecError::InvalidWidth)? {
+        result.width = Some(width);
     }
 
     // Parse [.precision]
     if pos < chars.len() && chars[pos] == '.' {
         pos += 1;
-        let precision_start = pos;
-        while pos < chars.len() && chars[pos].is_ascii_digit() {
-            pos += 1;
+        match parse_count(&chars, &mut pos, FormatSpecError::InvalidPrecision)? {
+            Some(precision) => result.precision = Some(precision),
+            None => return Err(FormatSpecError::EmptyPrecision),
         }
-        if pos == precision_start {
-            return Err(FormatSpecError::EmptyPrecision);
-        }
-        let precision_str: String = chars[precision_start..pos].iter().collect();
-        result.precision = Some(
-            precision_str
-                .parse()
-                .map_err(|_| FormatSpecError::InvalidPrecision(precision_str))?,
-        );
     }
 
     // Parse [type]
@@ -251,6 +250,49 @@ pub fn parse_format_spec(spec: &str) -> Result<FormatSpec, FormatSpecError> {
     }
 
     Ok(result)
+}
+
+/// Digits, or a `{name}` hole, at `pos`. `None` when neither is there.
+fn parse_count(
+    chars: &[char],
+    pos: &mut usize,
+    invalid: fn(String) -> FormatSpecError,
+) -> Result<Option<Count>, FormatSpecError> {
+    if chars.get(*pos) == Some(&'{') {
+        let start = *pos + 1;
+        let Some(len) = chars[start..].iter().position(|&c| c == '}') else {
+            return Err(FormatSpecError::InvalidHole(
+                chars[start..].iter().collect(),
+            ));
+        };
+        let name: String = chars[start..start + len].iter().collect();
+        if !is_value_path(&name) {
+            return Err(FormatSpecError::InvalidHole(name));
+        }
+        *pos = start + len + 1;
+        return Ok(Some(Count::Name(name)));
+    }
+    let start = *pos;
+    while *pos < chars.len() && chars[*pos].is_ascii_digit() {
+        *pos += 1;
+    }
+    if *pos == start {
+        return Ok(None);
+    }
+    let digits: String = chars[start..*pos].iter().collect();
+    digits
+        .parse()
+        .map(|n| Some(Count::Literal(n)))
+        .map_err(|_| invalid(digits))
+}
+
+/// `name` or `a.b.c`, each segment an identifier.
+fn is_value_path(text: &str) -> bool {
+    text.split('.').all(|seg| {
+        let mut chars = seg.chars();
+        chars.next().is_some_and(|c| c.is_alphabetic() || c == '_')
+            && chars.all(|c| c.is_alphanumeric() || c == '_')
+    })
 }
 
 fn is_alignment_char(c: char) -> bool {
@@ -340,21 +382,21 @@ mod tests {
     #[test]
     fn test_width() {
         let spec = parse_format_spec("10").unwrap();
-        assert_eq!(spec.width, Some(10));
+        assert_eq!(spec.width, Some(Count::Literal(10)));
 
         let spec = parse_format_spec(">8").unwrap();
         assert_eq!(spec.alignment, Alignment::Right);
-        assert_eq!(spec.width, Some(8));
+        assert_eq!(spec.width, Some(Count::Literal(8)));
     }
 
     #[test]
     fn test_precision() {
         let spec = parse_format_spec(".2").unwrap();
-        assert_eq!(spec.precision, Some(2));
+        assert_eq!(spec.precision, Some(Count::Literal(2)));
 
         let spec = parse_format_spec("10.5").unwrap();
-        assert_eq!(spec.width, Some(10));
-        assert_eq!(spec.precision, Some(5));
+        assert_eq!(spec.width, Some(Count::Literal(10)));
+        assert_eq!(spec.precision, Some(Count::Literal(5)));
     }
 
     #[test]
@@ -381,7 +423,7 @@ mod tests {
         assert!(spec.zero_pad);
         assert_eq!(spec.fill, '0');
         assert_eq!(spec.alignment, Alignment::Right);
-        assert_eq!(spec.width, Some(8));
+        assert_eq!(spec.width, Some(Count::Literal(8)));
     }
 
     #[test]
@@ -390,7 +432,7 @@ mod tests {
         assert!(spec.zero_pad);
         assert_eq!(spec.fill, '0');
         assert_eq!(spec.alignment, Alignment::Right);
-        assert_eq!(spec.width, Some(8));
+        assert_eq!(spec.width, Some(Count::Literal(8)));
         assert_eq!(spec.format_type, FormatType::Hex);
     }
 
@@ -403,7 +445,7 @@ mod tests {
         let spec = parse_format_spec("#08x").unwrap();
         assert!(spec.alternate);
         assert!(spec.zero_pad);
-        assert_eq!(spec.width, Some(8));
+        assert_eq!(spec.width, Some(Count::Literal(8)));
         assert_eq!(spec.format_type, FormatType::Hex);
     }
 
@@ -411,8 +453,8 @@ mod tests {
     fn test_complex_spec() {
         let spec = parse_format_spec(">10.2f").unwrap();
         assert_eq!(spec.alignment, Alignment::Right);
-        assert_eq!(spec.width, Some(10));
-        assert_eq!(spec.precision, Some(2));
+        assert_eq!(spec.width, Some(Count::Literal(10)));
+        assert_eq!(spec.precision, Some(Count::Literal(2)));
         assert_eq!(spec.format_type, FormatType::Fixed);
     }
 
@@ -421,7 +463,7 @@ mod tests {
         let spec = parse_format_spec("*^20s").unwrap();
         assert_eq!(spec.fill, '*');
         assert_eq!(spec.alignment, Alignment::Center);
-        assert_eq!(spec.width, Some(20));
+        assert_eq!(spec.width, Some(Count::Literal(20)));
         assert_eq!(spec.format_type, FormatType::String);
     }
 
@@ -438,7 +480,7 @@ mod tests {
 
         let spec = parse_format_spec("+10d").unwrap();
         assert_eq!(spec.sign, SignMode::Always);
-        assert_eq!(spec.width, Some(10));
+        assert_eq!(spec.width, Some(Count::Literal(10)));
         assert_eq!(spec.format_type, FormatType::Decimal);
     }
 
@@ -447,7 +489,41 @@ mod tests {
         let spec = parse_format_spec("+#010x").unwrap();
         assert_eq!(spec.sign, SignMode::Always);
         assert!(spec.alternate);
-        assert_eq!(spec.width, Some(10));
+        assert_eq!(spec.width, Some(Count::Literal(10)));
         assert_eq!(spec.format_type, FormatType::Hex);
+    }
+
+    #[test]
+    fn test_nested_holes() {
+        let spec = parse_format_spec(">{w}").unwrap();
+        assert_eq!(spec.alignment, Alignment::Right);
+        assert_eq!(spec.width, Some(Count::Name("w".into())));
+
+        let spec = parse_format_spec(".{p}f").unwrap();
+        assert_eq!(spec.precision, Some(Count::Name("p".into())));
+        assert_eq!(spec.format_type, FormatType::Fixed);
+
+        let spec = parse_format_spec("0{self.width}.{digits}").unwrap();
+        assert!(spec.zero_pad);
+        assert_eq!(spec.width, Some(Count::Name("self.width".into())));
+        assert_eq!(spec.precision, Some(Count::Name("digits".into())));
+
+        // `{` as a fill character is still a fill.
+        let spec = parse_format_spec("{<5").unwrap();
+        assert_eq!(spec.fill, '{');
+        assert_eq!(spec.width, Some(Count::Literal(5)));
+
+        assert!(matches!(
+            parse_format_spec(">{w"),
+            Err(FormatSpecError::InvalidHole(_))
+        ));
+        assert!(matches!(
+            parse_format_spec(">{1+2}"),
+            Err(FormatSpecError::InvalidHole(_))
+        ));
+        assert!(matches!(
+            parse_format_spec(">{}"),
+            Err(FormatSpecError::InvalidHole(_))
+        ));
     }
 }

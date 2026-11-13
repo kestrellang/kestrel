@@ -13,7 +13,7 @@
 // "Array[Int64] !: _ExpressibleByArrayLiteral" (fragility audit F33i).
 
 module Main
-import std.io.stdio.println
+import std.streams.println
 
 struct Array[T] {
     let sneaky: Int;

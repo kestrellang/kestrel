@@ -15,19 +15,19 @@ module Test
             // Test map
             let doubled = arr.iter().map(as: { (x) in x * 2 }).collect();
             if doubled.count != 5 { return 1 }
-            if doubled(unchecked: 0) != 2 { return 2 }
-            if doubled(unchecked: 4) != 10 { return 3 }
+            if unsafe doubled(unchecked: 0) != 2 { return 2 }
+            if unsafe doubled(unchecked: 4) != 10 { return 3 }
 
             // Test filter
             let evens = arr.iter().filter(where: { (x) in x % 2 == 0 }).collect();
             if evens.count != 2 { return 4 }
-            if evens(unchecked: 0) != 2 { return 5 }
-            if evens(unchecked: 1) != 4 { return 6 }
+            if unsafe evens(unchecked: 0) != 2 { return 5 }
+            if unsafe evens(unchecked: 1) != 4 { return 6 }
 
             // Test map + filter chain
             let result = arr.iter().filter(where: { (x) in x > 2 }).map(as: { (x) in x * 10 }).collect();
             if result.count != 3 { return 7 }
-            if result(unchecked: 0) != 30 { return 8 }
+            if unsafe result(unchecked: 0) != 30 { return 8 }
 
             0
         }

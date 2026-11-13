@@ -1,0 +1,1346 @@
+//! Well-known builtin types, protocols, and language features.
+//!
+//! This module defines the full `@builtin(.Feature)` system. Each variant of
+//! `Builtin` corresponds to a language feature that can be annotated in stdlib
+//! source files with `@builtin(.FeatureName)`.
+//!
+//! **Resolution**: Forward lookup (entity → Builtin) uses `EntityBuiltin` query
+//! in kestrel-name-res. Reverse lookup (Builtin → entity) uses `ResolveBuiltin`,
+//! which consults the `BuiltinIndex` attribute scan only: a lang item is
+//! identified by its annotation, never by its source name.
+
+/// What kind of symbol a builtin expects, with kind-specific configuration.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum BuiltinKind {
+    /// A builtin protocol.
+    Protocol {
+        /// If true, types implicitly conform unless opted out with `not Protocol`.
+        implicit_conformance: bool,
+        /// If true, must be a marker protocol (no required methods/types).
+        must_be_marker: bool,
+        /// If true, tuples conform if all elements conform.
+        tuple_conformance_propagation: bool,
+        /// If true, conforming types must have all fields also conform.
+        requires_fields_conform: bool,
+        /// If true, enums cannot conform to this protocol.
+        disallow_enum_conformance: bool,
+    },
+    /// A builtin protocol method.
+    ProtocolMethod,
+    /// A builtin struct.
+    Struct,
+    /// A builtin enum.
+    Enum,
+    /// A builtin enum case.
+    EnumCase,
+    /// A builtin function or initializer.
+    Function,
+    /// A builtin type alias.
+    TypeAlias,
+}
+
+impl BuiltinKind {
+    /// Shorthand for a protocol with all flags false.
+    const fn protocol() -> Self {
+        Self::Protocol {
+            implicit_conformance: false,
+            must_be_marker: false,
+            tuple_conformance_propagation: false,
+            requires_fields_conform: false,
+            disallow_enum_conformance: false,
+        }
+    }
+
+    /// Human-readable kind name for error messages.
+    pub fn kind_name(&self) -> &'static str {
+        match self {
+            Self::Protocol { .. } => "protocol",
+            Self::ProtocolMethod => "protocol method",
+            Self::Struct => "struct",
+            Self::Enum => "enum",
+            Self::EnumCase => "enum case",
+            Self::Function => "function",
+            Self::TypeAlias => "type alias",
+        }
+    }
+}
+
+/// A well-known type, protocol, or language feature that the compiler needs
+/// to reference by entity ID.
+///
+/// Each variant maps to a `@builtin(.Name)` attribute in stdlib source files.
+/// The `kind()` method returns metadata about what symbol kind is expected.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Builtin {
+    // ===== Well-known types =====
+    Bool,
+
+    // ===== Copy/Clone semantics =====
+    Copyable,
+    Cloneable,
+    CloneMethod,
+
+    // ===== Reference containment (references stage 2a) =====
+    /// A type is Static iff it transitively contains no reference (`&T`).
+    /// Conformance is structural (never declared); `implicit_conformance`
+    /// turns on `: not Static` declarations and `where T: not Static`
+    /// relaxations, exactly like Copyable.
+    Static,
+
+    // ===== Pattern matching =====
+    Matchable,
+    /// `Matchable.matches(other:)` — the call a value pattern lowers to.
+    MatchableMatches,
+    RangeMatchable,
+    RangeMatchableIsAtLeast,
+    RangeMatchableIsAtMost,
+    RangeMatchableIsBelow,
+    ArrayMatchable,
+    ArrayMatchableMatchLength,
+    ArrayMatchableMatchGet,
+    ArrayMatchableMatchSlice,
+
+    // ===== Literal protocols =====
+    ExpressibleByIntegerLiteral,
+    ExpressibleByFloatLiteral,
+    ExpressibleByStringLiteral,
+    ExpressibleByBoolLiteral,
+    ExpressibleByCharLiteral,
+    ExpressibleByNullLiteral,
+    /// Marker on the unsigned integer types (`UInt8`…`UInt64`): their raw
+    /// bits are unsigned, which integer patterns need for range tests and
+    /// exhaustiveness.
+    UnsignedInteger,
+    InternalExpressibleByArrayLiteral,
+    InternalExpressibleByDictionaryLiteral,
+    /// The requirement init each literal protocol declares. Literal lowering
+    /// calls these through the witness table, so the conformer's witness is
+    /// whatever conformance checking matched — never a shape or label guess.
+    IntegerLiteralInit,
+    FloatLiteralInit,
+    StringLiteralInit,
+    BoolLiteralInit,
+    CharLiteralInit,
+    NullLiteralInit,
+    ArrayLiteralInit,
+    DictionaryLiteralInit,
+
+    // ===== Default literal types =====
+    DefaultIntegerLiteralType,
+    DefaultFloatLiteralType,
+    DefaultStringLiteralType,
+    DefaultBooleanLiteralType,
+    DefaultCharLiteralType,
+    DefaultNullLiteralType,
+    DefaultArrayLiteralType,
+    DefaultDictionaryLiteralType,
+
+    // ===== FFI =====
+    FFISafe,
+
+    // ===== Arithmetic operators =====
+    AddOperatorProtocol,
+    AddOperatorMethod,
+    SubtractOperatorProtocol,
+    SubtractOperatorMethod,
+    MultiplyOperatorProtocol,
+    MultiplyOperatorMethod,
+    DivideOperatorProtocol,
+    DivideOperatorMethod,
+    RemainderOperatorProtocol,
+    RemainderOperatorMethod,
+    NegateOperatorProtocol,
+    NegateOperatorMethod,
+
+    // ===== Comparison operators =====
+    EqualsOperatorProtocol,
+    EqualsOperatorMethod,
+    NotEqualsOperatorProtocol,
+    NotEqualsOperatorMethod,
+    LessThanOperatorProtocol,
+    LessThanOperatorMethod,
+    GreaterThanOperatorProtocol,
+    GreaterThanOperatorMethod,
+    LessOrEqualOperatorProtocol,
+    LessOrEqualOperatorMethod,
+    GreaterOrEqualOperatorProtocol,
+    GreaterOrEqualOperatorMethod,
+
+    // ===== Bitwise operators =====
+    BitwiseAndOperatorProtocol,
+    BitwiseAndOperatorMethod,
+    BitwiseOrOperatorProtocol,
+    BitwiseOrOperatorMethod,
+    BitwiseXorOperatorProtocol,
+    BitwiseXorOperatorMethod,
+    ShiftLeftOperatorProtocol,
+    ShiftLeftOperatorMethod,
+    ShiftRightOperatorProtocol,
+    ShiftRightOperatorMethod,
+    BitwiseNotOperatorProtocol,
+    BitwiseNotOperatorMethod,
+
+    // ===== Logical / short-circuit operators =====
+    LogicalAndOperatorProtocol,
+    LogicalAndOperatorMethod,
+    LogicalOrOperatorProtocol,
+    LogicalOrOperatorMethod,
+    LogicalNotOperatorProtocol,
+    LogicalNotOperatorMethod,
+
+    // ===== Null coalescing =====
+    CoalesceOperatorProtocol,
+    CoalesceOperatorMethod,
+
+    // ===== Force unwrap =====
+    ForceUnwrapOperatorProtocol,
+    ForceUnwrapOperatorMethod,
+
+    // ===== Boolean conditional =====
+    BooleanConditional,
+
+    // ===== Range operators =====
+    ExclusiveRangeOperatorProtocol,
+    ExclusiveRangeOperatorMethod,
+    InclusiveRangeOperatorProtocol,
+    InclusiveRangeOperatorMethod,
+    RangeFromOperatorProtocol,
+    RangeFromOperatorMethod,
+    RangeUpToOperatorProtocol,
+    RangeUpToOperatorMethod,
+    RangeThroughOperatorProtocol,
+    RangeThroughOperatorMethod,
+
+    // ===== Compound assignment =====
+    AddAssignProtocol,
+    AddAssignMethod,
+    SubtractAssignProtocol,
+    SubtractAssignMethod,
+    MultiplyAssignProtocol,
+    MultiplyAssignMethod,
+    DivideAssignProtocol,
+    DivideAssignMethod,
+    RemainderAssignProtocol,
+    RemainderAssignMethod,
+    BitwiseAndAssignProtocol,
+    BitwiseAndAssignMethod,
+    BitwiseOrAssignProtocol,
+    BitwiseOrAssignMethod,
+    BitwiseXorAssignProtocol,
+    BitwiseXorAssignMethod,
+    ShiftLeftAssignProtocol,
+    ShiftLeftAssignMethod,
+    ShiftRightAssignProtocol,
+    ShiftRightAssignMethod,
+
+    // ===== Try / error handling =====
+    ControlFlowEnum,
+    TryableProtocol,
+    TryExtractMethod,
+    FromResidualProtocol,
+    FromResidualMethod,
+
+    // ===== Optional chaining (`a?.b`) =====
+    OptionalChainProtocol,
+    OptionalChainBorrowMethod,
+    OptionalChainMutateMethod,
+    OptionalChainTakeMethod,
+
+    // ===== Value promotion =====
+    FromValueProtocol,
+    FromValueMethod,
+    /// `DecaysFrom[Source]`: a borrowed unsized view converts to its owned
+    /// type where that type is named (`let s: String = t.trimmed()`).
+    DecaysFromProtocol,
+    DecaysFromMethod,
+    /// `Convertible[From]` (lossless `init(from:)`), `NarrowsFrom[From]`
+    /// and `RoundsFrom[From]`: named so a failed lossless conversion can
+    /// point at the spelling that does exist.
+    ConvertibleProtocol,
+    NarrowsFromProtocol,
+    RoundsFromProtocol,
+
+    // ===== Iterator / Iterable =====
+    IteratorProtocol,
+    IteratorNextMethod,
+    IterableProtocol,
+    IterableIterMethod,
+
+    // ===== Optional =====
+    OptionalEnum,
+    OptionalSomeCase,
+    OptionalNoneCase,
+
+    // ===== Result =====
+    ResultOkCase,
+    ResultErrCase,
+    /// `ControlFlow.Continue` — the case a `try` operand's value comes out of.
+    ControlFlowContinueCase,
+    /// `ControlFlow.Break` — the case a `try` operand's residual comes out of.
+    ControlFlowBreakCase,
+
+    // ===== Type operators (type aliases) =====
+    OptionalTypeOperator,
+    ArrayTypeOperator,
+    DictionaryTypeOperator,
+    ResultTypeOperator,
+
+    // ===== Builtin structs =====
+    ArrayStruct,
+    SliceStruct,
+    ManuallyDropStruct,
+    /// `std.ffi.NullableCFunction[F]`: `F` must be a C function type
+    /// (`@extern(.C) (…) -> …`), checked by the analyzer (E647).
+    NullableCFunctionStruct,
+
+    // ===== String interpolation =====
+    /// `ExpressibleByStringInterpolation`: the protocol an interpolated
+    /// literal's type must conform to (its literal protocol).
+    ExpressibleByStringInterpolation,
+    /// `ExpressibleByStringInterpolation.init(interpolation:)` — finishes an
+    /// interpolation, with `Self` = the literal's type.
+    StringInterpolationInit,
+    /// `Interpolatable.init(literalCapacity:interpolationCount:)` — creates
+    /// the accumulator.
+    InterpolatableInit,
+    /// `Interpolatable.appendLiteral` — appends one static segment.
+    InterpolatableAppendLiteral,
+    FormatOptions,
+    /// `_formatSpecOptions` — builds the `FormatOptions` a `{value:spec}` format specifier spells.
+    FormatSpecOptions,
+
+    // ===== References =====
+    /// `@builtin(.DecayOptionalRef) func decayOptionalRef[T](_: Optional[&T])
+    /// -> Optional[T]`: copies the payload out when an `Optional[&T]` is
+    /// bound (`let f = b.first`), so the binding owns a value and stops
+    /// borrowing the place.
+    DecayOptionalRef,
+    FormattableProtocol,
+    FormattableFormatIntoMethod,
+
+    // ===== Derivable protocols (`@derive`) =====
+    // With `FormattableProtocol`, the protocols `@derive` has a built-in
+    // deriver for. A protocol is derivable iff it is the target of one of
+    // these, never by its name.
+    EquatableProtocol,
+    HashableProtocol,
+    ComparableProtocol,
+    DefaultableProtocol,
+
+    // ===== Exitable / @main return =====
+    Exitable,
+    ExitableReport,
+    ExitCode,
+
+    // ===== Indirection / smart-pointer member peel =====
+    /// `Indirection` — opt-in transparent member access: `wrapper.foo` peels
+    /// to `Target.foo` through the required `value` place
+    /// ([`INDIRECTION_PLACE`]). Explicit conformance, non-marker.
+    Indirection,
+    /// `MutableIndirection` — the wrapper also hands out `&mutating Target`.
+    /// A `mutating` requirement called through `any[B] P` needs it.
+    MutableIndirection,
+
+    // ===== Shared-ownership box (implicit boxing) =====
+    /// The generic struct the compiler instantiates for implicit boxing —
+    /// escaping closure environments today; class storage, `any` payloads and
+    /// `indirect enum` payloads later. Bound to `RcBox` in the stdlib via
+    /// `@builtin(.SharedBox)`; the binding is swappable, so every boxing site
+    /// resolves the *entity* through this builtin and then calls only
+    /// `SharedBox` protocol requirements on it (docs/design/shared-box.md).
+    SharedBox,
+
+    // ===== Unique-ownership box (one-shot `consuming` closure envs) =====
+    /// The generic struct the compiler instantiates for a UNIQUELY owned heap
+    /// environment — a `consuming` closure's captures today. Bound to
+    /// `UniqueBox` in the stdlib via `@builtin(.UniqueBox)`.
+    ///
+    /// Deliberately not the shared box: a shared release drops the whole
+    /// payload, which double-frees the capture slots a one-shot body already
+    /// moved out (docs/plans/closure-kinds/closure-kinds-plan.md D5).
+    UniqueBox,
+
+    // ===== Existentials =====
+    /// The box `any P` desugars to: `any P` is `DefaultBox[<raw any P>]`.
+    /// `@builtin(.DefaultBoxType) public type DefaultBox[T] = RcBox[T]`
+    /// denotes the alias *target*, like the default literal types
+    /// (docs/plans/existentials/existentials-design.md).
+    DefaultBoxType,
+    /// A type whose size is known at compile time — every type except a raw
+    /// existential and a struct whose unsized tail is unsized. Structural,
+    /// like `Static`: never declared; every type parameter carries an
+    /// implicit `T: Sized`, relaxed with `where T: not Sized`.
+    Sized,
+    /// The contract a box type must meet to appear in `any[B] P`.
+    ExistentialBox,
+    /// A box that can give up its payload: consuming requirements and
+    /// `consuming x as? T` go through `consumePointee`.
+    ConsumingIndirection,
+    /// The stdlib's single-owner box (`OwnedBox`): the box diagnostics
+    /// suggest when an existential's payload must be consumed.
+    OwnedBox,
+
+    // ===== Requirements / members the compiler calls by tag =====
+    /// `BooleanConditional.boolValue()` — what a non-`Bool` condition calls.
+    BooleanConditionalBoolValue,
+    /// `ConsumingIndirection.consumePointee(body:)` — hands a box's payload out.
+    ConsumingIndirectionConsumePointee,
+    /// `ExistentialBox.init(consuming value:)` — moves a payload into a new box.
+    ExistentialBoxInit,
+    /// `SharedBox.sharedMutRef()` — mutable access through a shared handle.
+    SharedBoxSharedMutRef,
+    /// `UniqueBox.init(consuming value:)`.
+    UniqueBoxInit,
+    /// `UniqueBox.takeValue()` — moves the payload out (once).
+    UniqueBoxTakeValue,
+    /// `OwnedBox.takeValue()` — moves an indirect enum payload out of its box.
+    OwnedBoxTakeValue,
+    /// `Pointer.init(to:)` — a pointer to a value, tracked for dangling-reference checks.
+    PointerToInit,
+    /// `UniqueBox.destroy()` — the box's single reclamation point.
+    UniqueBoxDestroy,
+    /// `Indirection.pointeeRef()` — the member peel's read accessor.
+    IndirectionPointeeRef,
+    /// `MutableIndirection.pointeeMutRef()` — the member peel's write accessor.
+    MutableIndirectionPointeeMutRef,
+
+    // ===== Associated types the compiler projects by tag =====
+    /// `Indirection.Target` — the type a member peel reaches.
+    IndirectionTarget,
+    /// `_ExpressibleByArrayLiteral.Element` — an array literal's element type.
+    ArrayLiteralElement,
+    /// `_ExpressibleByDictionaryLiteral.Key`.
+    DictionaryLiteralKey,
+    /// `_ExpressibleByDictionaryLiteral.Value`.
+    DictionaryLiteralValue,
+    /// `ArrayMatchable.Element` — an array pattern's element type.
+    ArrayMatchableElement,
+    /// `ArrayMatchable.Rest` — an array pattern's rest-binding type.
+    ArrayMatchableRest,
+}
+
+/// The place `Indirection` requires (`var value: Target { ref }`, refined to
+/// `{ ref mutating ref }` by `MutableIndirection`). The member peel and the
+/// existential box views lend the pointee through its accessors.
+pub const INDIRECTION_PLACE: &str = "value";
+
+impl Builtin {
+    /// A display name for the builtin: the type/protocol name as it usually
+    /// appears in Kestrel source code, or the `@builtin` attribute name for
+    /// features that have no source-level type (protocol methods, enum
+    /// cases, etc.). Used in diagnostics only — `ResolveBuiltin` does not
+    /// look builtins up by name.
+    pub fn name(self) -> &'static str {
+        match self {
+            // Well-known types — resolved by source name
+            Self::Bool => "Bool",
+
+            // Copy/Clone
+            Self::Copyable => "Copyable",
+            Self::Cloneable => "Cloneable",
+            Self::CloneMethod => "Clone",
+
+            // Reference containment
+            Self::Static => "Static",
+
+            // Pattern matching
+            Self::Matchable => "Matchable",
+            Self::MatchableMatches => "MatchableMatches",
+            Self::RangeMatchable => "RangeMatchable",
+            Self::RangeMatchableIsAtLeast => "RangeMatchableIsAtLeast",
+            Self::RangeMatchableIsAtMost => "RangeMatchableIsAtMost",
+            Self::RangeMatchableIsBelow => "RangeMatchableIsBelow",
+            Self::ArrayMatchable => "ArrayMatchable",
+            Self::ArrayMatchableMatchLength => "ArrayMatchableMatchLength",
+            Self::ArrayMatchableMatchGet => "ArrayMatchableMatchGet",
+            Self::ArrayMatchableMatchSlice => "ArrayMatchableMatchSlice",
+
+            // Literal protocols — resolved by source name
+            Self::ExpressibleByIntegerLiteral => "ExpressibleByIntegerLiteral",
+            Self::ExpressibleByFloatLiteral => "ExpressibleByFloatLiteral",
+            Self::ExpressibleByStringLiteral => "ExpressibleByStringLiteral",
+            Self::ExpressibleByBoolLiteral => "ExpressibleByBoolLiteral",
+            Self::ExpressibleByCharLiteral => "ExpressibleByCharLiteral",
+            Self::ExpressibleByNullLiteral => "ExpressibleByNullLiteral",
+            Self::UnsignedInteger => "UnsignedInteger",
+            Self::InternalExpressibleByArrayLiteral => "_ExpressibleByArrayLiteral",
+            Self::InternalExpressibleByDictionaryLiteral => "_ExpressibleByDictionaryLiteral",
+            Self::IntegerLiteralInit => "IntegerLiteralInit",
+            Self::FloatLiteralInit => "FloatLiteralInit",
+            Self::StringLiteralInit => "StringLiteralInit",
+            Self::BoolLiteralInit => "BoolLiteralInit",
+            Self::CharLiteralInit => "CharLiteralInit",
+            Self::NullLiteralInit => "NullLiteralInit",
+            Self::ArrayLiteralInit => "ArrayLiteralInit",
+            Self::DictionaryLiteralInit => "DictionaryLiteralInit",
+
+            // Default literal types — resolved by source name
+            Self::DefaultIntegerLiteralType => "Int64",
+            Self::DefaultFloatLiteralType => "Float64",
+            Self::DefaultStringLiteralType => "String",
+            Self::DefaultBooleanLiteralType => "Bool",
+            Self::DefaultCharLiteralType => "Char",
+            Self::DefaultNullLiteralType => "Optional",
+            Self::DefaultArrayLiteralType => "Array",
+            Self::DefaultDictionaryLiteralType => "Dictionary",
+
+            // FFI
+            Self::FFISafe => "FFISafe",
+
+            // Arithmetic operators — protocols resolved by source name
+            Self::AddOperatorProtocol => "Addable",
+            Self::AddOperatorMethod => "AddOperatorMethod",
+            Self::SubtractOperatorProtocol => "Subtractable",
+            Self::SubtractOperatorMethod => "SubtractOperatorMethod",
+            Self::MultiplyOperatorProtocol => "Multipliable",
+            Self::MultiplyOperatorMethod => "MultiplyOperatorMethod",
+            Self::DivideOperatorProtocol => "Divisible",
+            Self::DivideOperatorMethod => "DivideOperatorMethod",
+            Self::RemainderOperatorProtocol => "Remainder",
+            Self::RemainderOperatorMethod => "RemainderOperatorMethod",
+            Self::NegateOperatorProtocol => "Negatable",
+            Self::NegateOperatorMethod => "NegateOperatorMethod",
+
+            // Comparison operators
+            Self::EqualsOperatorProtocol => "Equal",
+            Self::EqualsOperatorMethod => "EqualsOperatorMethod",
+            Self::NotEqualsOperatorProtocol => "NotEqual",
+            Self::NotEqualsOperatorMethod => "NotEqualsOperatorMethod",
+            Self::LessThanOperatorProtocol => "Less",
+            Self::LessThanOperatorMethod => "LessThanOperatorMethod",
+            Self::GreaterThanOperatorProtocol => "Greater",
+            Self::GreaterThanOperatorMethod => "GreaterThanOperatorMethod",
+            Self::LessOrEqualOperatorProtocol => "LessOrEqual",
+            Self::LessOrEqualOperatorMethod => "LessOrEqualOperatorMethod",
+            Self::GreaterOrEqualOperatorProtocol => "GreaterOrEqual",
+            Self::GreaterOrEqualOperatorMethod => "GreaterOrEqualOperatorMethod",
+
+            // Bitwise operators
+            Self::BitwiseAndOperatorProtocol => "BitwiseAnd",
+            Self::BitwiseAndOperatorMethod => "BitwiseAndOperatorMethod",
+            Self::BitwiseOrOperatorProtocol => "BitwiseOr",
+            Self::BitwiseOrOperatorMethod => "BitwiseOrOperatorMethod",
+            Self::BitwiseXorOperatorProtocol => "BitwiseXor",
+            Self::BitwiseXorOperatorMethod => "BitwiseXorOperatorMethod",
+            Self::ShiftLeftOperatorProtocol => "LeftShift",
+            Self::ShiftLeftOperatorMethod => "ShiftLeftOperatorMethod",
+            Self::ShiftRightOperatorProtocol => "RightShift",
+            Self::ShiftRightOperatorMethod => "ShiftRightOperatorMethod",
+            Self::BitwiseNotOperatorProtocol => "BitwiseNot",
+            Self::BitwiseNotOperatorMethod => "BitwiseNotOperatorMethod",
+
+            // Logical / short-circuit operators
+            Self::LogicalAndOperatorProtocol => "And",
+            Self::LogicalAndOperatorMethod => "LogicalAndOperatorMethod",
+            Self::LogicalOrOperatorProtocol => "Or",
+            Self::LogicalOrOperatorMethod => "LogicalOrOperatorMethod",
+            Self::LogicalNotOperatorProtocol => "Not",
+            Self::LogicalNotOperatorMethod => "LogicalNotOperatorMethod",
+
+            // Null coalescing
+            Self::CoalesceOperatorProtocol => "Coalesce",
+            Self::CoalesceOperatorMethod => "CoalesceOperatorMethod",
+
+            // Force unwrap
+            Self::ForceUnwrapOperatorProtocol => "ForceUnwrap",
+            Self::ForceUnwrapOperatorMethod => "ForceUnwrapOperatorMethod",
+
+            // Boolean conditional
+            Self::BooleanConditional => "BooleanConditional",
+
+            // Range operators
+            Self::ExclusiveRangeOperatorProtocol => "RangeConstructible",
+            Self::ExclusiveRangeOperatorMethod => "ExclusiveRangeOperatorMethod",
+            Self::InclusiveRangeOperatorProtocol => "ClosedRangeConstructible",
+            Self::InclusiveRangeOperatorMethod => "InclusiveRangeOperatorMethod",
+            Self::RangeFromOperatorProtocol => "RangeFromConstructible",
+            Self::RangeFromOperatorMethod => "RangeFromOperatorMethod",
+            Self::RangeUpToOperatorProtocol => "RangeUpToConstructible",
+            Self::RangeUpToOperatorMethod => "RangeUpToOperatorMethod",
+            Self::RangeThroughOperatorProtocol => "RangeThroughConstructible",
+            Self::RangeThroughOperatorMethod => "RangeThroughOperatorMethod",
+
+            // Compound assignment
+            Self::AddAssignProtocol => "AddAssign",
+            Self::AddAssignMethod => "AddAssignMethod",
+            Self::SubtractAssignProtocol => "SubtractAssign",
+            Self::SubtractAssignMethod => "SubtractAssignMethod",
+            Self::MultiplyAssignProtocol => "MultiplyAssign",
+            Self::MultiplyAssignMethod => "MultiplyAssignMethod",
+            Self::DivideAssignProtocol => "DivideAssign",
+            Self::DivideAssignMethod => "DivideAssignMethod",
+            Self::RemainderAssignProtocol => "RemainderAssign",
+            Self::RemainderAssignMethod => "RemainderAssignMethod",
+            Self::BitwiseAndAssignProtocol => "BitwiseAndAssign",
+            Self::BitwiseAndAssignMethod => "BitwiseAndAssignMethod",
+            Self::BitwiseOrAssignProtocol => "BitwiseOrAssign",
+            Self::BitwiseOrAssignMethod => "BitwiseOrAssignMethod",
+            Self::BitwiseXorAssignProtocol => "BitwiseXorAssign",
+            Self::BitwiseXorAssignMethod => "BitwiseXorAssignMethod",
+            Self::ShiftLeftAssignProtocol => "LeftShiftAssign",
+            Self::ShiftLeftAssignMethod => "ShiftLeftAssignMethod",
+            Self::ShiftRightAssignProtocol => "RightShiftAssign",
+            Self::ShiftRightAssignMethod => "ShiftRightAssignMethod",
+
+            // Try / error handling
+            Self::ControlFlowEnum => "ControlFlowEnum",
+            Self::TryableProtocol => "TryableProtocol",
+            Self::TryExtractMethod => "TryExtractMethod",
+            Self::FromResidualProtocol => "FromResidualProtocol",
+            Self::FromResidualMethod => "FromResidualMethod",
+
+            // Optional chaining
+            Self::OptionalChainProtocol => "OptionalChain",
+            Self::OptionalChainBorrowMethod => "OptionalChainBorrowMethod",
+            Self::OptionalChainMutateMethod => "OptionalChainMutateMethod",
+            Self::OptionalChainTakeMethod => "OptionalChainTakeMethod",
+
+            // Value promotion
+            Self::FromValueProtocol => "FromValue",
+            Self::FromValueMethod => "FromValueMethod",
+            Self::DecaysFromProtocol => "DecaysFrom",
+            Self::DecaysFromMethod => "DecaysFromMethod",
+            Self::ConvertibleProtocol => "Convertible",
+            Self::NarrowsFromProtocol => "NarrowsFrom",
+            Self::RoundsFromProtocol => "RoundsFrom",
+
+            // Iterator / Iterable
+            Self::IteratorProtocol => "IteratorProtocol",
+            Self::IteratorNextMethod => "IteratorNextMethod",
+            Self::IterableProtocol => "IterableProtocol",
+            Self::IterableIterMethod => "IterableIterMethod",
+
+            // Optional
+            Self::OptionalEnum => "OptionalEnum",
+            Self::OptionalSomeCase => "OptionalSomeCase",
+            Self::OptionalNoneCase => "OptionalNoneCase",
+            Self::ResultOkCase => "ResultOkCase",
+            Self::ResultErrCase => "ResultErrCase",
+            Self::ControlFlowContinueCase => "ControlFlowContinueCase",
+            Self::ControlFlowBreakCase => "ControlFlowBreakCase",
+
+            // Type operators
+            Self::OptionalTypeOperator => "OptionalTypeOperator",
+            Self::ArrayTypeOperator => "ArrayTypeOperator",
+            Self::DictionaryTypeOperator => "DictionaryTypeOperator",
+            Self::ResultTypeOperator => "ResultTypeOperator",
+
+            // Builtin structs
+            Self::ArrayStruct => "ArrayStruct",
+            Self::SliceStruct => "SliceStruct",
+            Self::ManuallyDropStruct => "ManuallyDrop",
+            Self::NullableCFunctionStruct => "NullableCFunction",
+
+            // String interpolation
+            Self::ExpressibleByStringInterpolation => "ExpressibleByStringInterpolation",
+            Self::StringInterpolationInit => "StringInterpolationInit",
+            Self::InterpolatableInit => "InterpolatableInit",
+            Self::InterpolatableAppendLiteral => "InterpolatableAppendLiteral",
+            Self::DecayOptionalRef => "DecayOptionalRef",
+            Self::FormatOptions => "FormatOptions",
+            Self::FormatSpecOptions => "FormatSpecOptions",
+            Self::FormattableProtocol => "FormattableProtocol",
+            Self::FormattableFormatIntoMethod => "FormattableFormatInto",
+
+            // Derivable protocols
+            Self::EquatableProtocol => "EquatableProtocol",
+            Self::HashableProtocol => "HashableProtocol",
+            Self::ComparableProtocol => "ComparableProtocol",
+            Self::DefaultableProtocol => "DefaultableProtocol",
+
+            // Exitable — `Exitable`/`ExitCode` resolve by source name; the method
+            // by its `@builtin` attribute name.
+            Self::Exitable => "Exitable",
+            Self::ExitableReport => "ExitableReport",
+            Self::BooleanConditionalBoolValue => "BooleanConditionalBoolValue",
+            Self::ConsumingIndirectionConsumePointee => "ConsumingIndirectionConsumePointee",
+            Self::ExistentialBoxInit => "ExistentialBoxInit",
+            Self::SharedBoxSharedMutRef => "SharedBoxSharedMutRef",
+            Self::UniqueBoxInit => "UniqueBoxInit",
+            Self::UniqueBoxTakeValue => "UniqueBoxTakeValue",
+            Self::OwnedBoxTakeValue => "OwnedBoxTakeValue",
+            Self::PointerToInit => "PointerToInit",
+            Self::UniqueBoxDestroy => "UniqueBoxDestroy",
+            Self::IndirectionPointeeRef => "IndirectionPointeeRef",
+            Self::MutableIndirectionPointeeMutRef => "MutableIndirectionPointeeMutRef",
+            Self::IndirectionTarget => "IndirectionTarget",
+            Self::ArrayLiteralElement => "ArrayLiteralElement",
+            Self::DictionaryLiteralKey => "DictionaryLiteralKey",
+            Self::DictionaryLiteralValue => "DictionaryLiteralValue",
+            Self::ArrayMatchableElement => "ArrayMatchableElement",
+            Self::ArrayMatchableRest => "ArrayMatchableRest",
+            Self::ExitCode => "ExitCode",
+
+            // Indirection — resolves by source name (auto-imported from std.core).
+            Self::Indirection => "Indirection",
+            Self::MutableIndirection => "MutableIndirection",
+
+            // Shared box — a display name only, deliberately neither the
+            // conformer's name (`RcBox`) nor the protocol's (`SharedBox`):
+            // the binding is whatever type carries `@builtin(.SharedBox)`
+            // (`RcBox` today), found through the attribute index like every
+            // builtin. (This sentinel predates index-only resolution, when a
+            // name-based lookup would have found the wrong entity.)
+            Self::SharedBox => "SharedBoxBinding",
+
+            // Unique box — same rationale as the shared box above: resolution
+            // must go through the attribute index so the binding stays
+            // swappable, and the sentinel must not name any source type.
+            Self::UniqueBox => "UniqueBoxBinding",
+
+            // Default existential box — resolved through the index only, like
+            // the boxes above.
+            Self::DefaultBoxType => "DefaultBoxBinding",
+            Self::Sized => "Sized",
+            Self::ExistentialBox => "ExistentialBox",
+            Self::ConsumingIndirection => "ConsumingIndirection",
+            Self::OwnedBox => "OwnedBox",
+        }
+    }
+
+    /// Parse a builtin from its `@builtin(.Name)` attribute string (without
+    /// the leading dot). Returns None for unknown names.
+    ///
+    /// This must handle the attribute names as they appear in stdlib `.ks` files.
+    /// For operator protocols, the attribute name differs from the source type name
+    /// (e.g., attribute "AddOperatorProtocol" maps to the protocol named "Addable").
+    pub fn from_attribute_name(name: &str) -> Option<Builtin> {
+        match name {
+            // Copy/Clone
+            "Copyable" => Some(Self::Copyable),
+            "Cloneable" => Some(Self::Cloneable),
+            "Clone" => Some(Self::CloneMethod),
+
+            // Reference containment
+            "Static" => Some(Self::Static),
+
+            // Pattern matching
+            "Matchable" => Some(Self::Matchable),
+            "MatchableMatches" => Some(Self::MatchableMatches),
+            "RangeMatchable" => Some(Self::RangeMatchable),
+            "RangeMatchableIsAtLeast" => Some(Self::RangeMatchableIsAtLeast),
+            "RangeMatchableIsAtMost" => Some(Self::RangeMatchableIsAtMost),
+            "RangeMatchableIsBelow" => Some(Self::RangeMatchableIsBelow),
+            "ArrayMatchable" => Some(Self::ArrayMatchable),
+            "ArrayMatchableMatchLength" => Some(Self::ArrayMatchableMatchLength),
+            "ArrayMatchableMatchGet" => Some(Self::ArrayMatchableMatchGet),
+            "ArrayMatchableMatchSlice" => Some(Self::ArrayMatchableMatchSlice),
+
+            // Literal protocols
+            "ExpressibleByIntLiteral" => Some(Self::ExpressibleByIntegerLiteral),
+            "ExpressibleByFloatLiteral" => Some(Self::ExpressibleByFloatLiteral),
+            "ExpressibleByStringLiteral" => Some(Self::ExpressibleByStringLiteral),
+            "ExpressibleByBoolLiteral" => Some(Self::ExpressibleByBoolLiteral),
+            "ExpressibleByCharLiteral" => Some(Self::ExpressibleByCharLiteral),
+            "ExpressibleByNullLiteral" => Some(Self::ExpressibleByNullLiteral),
+            "UnsignedInteger" => Some(Self::UnsignedInteger),
+            "_ExpressibleByArrayLiteral" => Some(Self::InternalExpressibleByArrayLiteral),
+            "_ExpressibleByDictionaryLiteral" => Some(Self::InternalExpressibleByDictionaryLiteral),
+            "IntegerLiteralInit" => Some(Self::IntegerLiteralInit),
+            "FloatLiteralInit" => Some(Self::FloatLiteralInit),
+            "StringLiteralInit" => Some(Self::StringLiteralInit),
+            "BoolLiteralInit" => Some(Self::BoolLiteralInit),
+            "CharLiteralInit" => Some(Self::CharLiteralInit),
+            "NullLiteralInit" => Some(Self::NullLiteralInit),
+            "ArrayLiteralInit" => Some(Self::ArrayLiteralInit),
+            "DictionaryLiteralInit" => Some(Self::DictionaryLiteralInit),
+
+            // FFI
+            "FFISafe" => Some(Self::FFISafe),
+
+            // Default literal types
+            "DefaultIntegerLiteralType" => Some(Self::DefaultIntegerLiteralType),
+            "DefaultFloatLiteralType" => Some(Self::DefaultFloatLiteralType),
+            "DefaultStringLiteralType" => Some(Self::DefaultStringLiteralType),
+            "DefaultBooleanLiteralType" => Some(Self::DefaultBooleanLiteralType),
+            "DefaultCharLiteralType" => Some(Self::DefaultCharLiteralType),
+            "DefaultNullLiteralType" => Some(Self::DefaultNullLiteralType),
+            "DefaultArrayLiteralType" => Some(Self::DefaultArrayLiteralType),
+            "DefaultDictionaryLiteralType" => Some(Self::DefaultDictionaryLiteralType),
+
+            // Arithmetic operators
+            "AddOperatorProtocol" => Some(Self::AddOperatorProtocol),
+            "AddOperatorMethod" => Some(Self::AddOperatorMethod),
+            "SubtractOperatorProtocol" => Some(Self::SubtractOperatorProtocol),
+            "SubtractOperatorMethod" => Some(Self::SubtractOperatorMethod),
+            "MultiplyOperatorProtocol" => Some(Self::MultiplyOperatorProtocol),
+            "MultiplyOperatorMethod" => Some(Self::MultiplyOperatorMethod),
+            "DivideOperatorProtocol" => Some(Self::DivideOperatorProtocol),
+            "DivideOperatorMethod" => Some(Self::DivideOperatorMethod),
+            "RemainderOperatorProtocol" => Some(Self::RemainderOperatorProtocol),
+            "RemainderOperatorMethod" => Some(Self::RemainderOperatorMethod),
+            "NegateOperatorProtocol" => Some(Self::NegateOperatorProtocol),
+            "NegateOperatorMethod" => Some(Self::NegateOperatorMethod),
+
+            // Comparison operators
+            "EqualsOperatorProtocol" => Some(Self::EqualsOperatorProtocol),
+            "EqualsOperatorMethod" => Some(Self::EqualsOperatorMethod),
+            "NotEqualsOperatorProtocol" => Some(Self::NotEqualsOperatorProtocol),
+            "NotEqualsOperatorMethod" => Some(Self::NotEqualsOperatorMethod),
+            "LessThanOperatorProtocol" => Some(Self::LessThanOperatorProtocol),
+            "LessThanOperatorMethod" => Some(Self::LessThanOperatorMethod),
+            "LessOrEqualOperatorProtocol" => Some(Self::LessOrEqualOperatorProtocol),
+            "LessOrEqualOperatorMethod" => Some(Self::LessOrEqualOperatorMethod),
+            "GreaterThanOperatorProtocol" => Some(Self::GreaterThanOperatorProtocol),
+            "GreaterThanOperatorMethod" => Some(Self::GreaterThanOperatorMethod),
+            "GreaterOrEqualOperatorProtocol" => Some(Self::GreaterOrEqualOperatorProtocol),
+            "GreaterOrEqualOperatorMethod" => Some(Self::GreaterOrEqualOperatorMethod),
+
+            // Bitwise operators
+            "BitwiseAndOperatorProtocol" => Some(Self::BitwiseAndOperatorProtocol),
+            "BitwiseAndOperatorMethod" => Some(Self::BitwiseAndOperatorMethod),
+            "BitwiseOrOperatorProtocol" => Some(Self::BitwiseOrOperatorProtocol),
+            "BitwiseOrOperatorMethod" => Some(Self::BitwiseOrOperatorMethod),
+            "BitwiseXorOperatorProtocol" => Some(Self::BitwiseXorOperatorProtocol),
+            "BitwiseXorOperatorMethod" => Some(Self::BitwiseXorOperatorMethod),
+            "ShiftLeftOperatorProtocol" => Some(Self::ShiftLeftOperatorProtocol),
+            "ShiftLeftOperatorMethod" => Some(Self::ShiftLeftOperatorMethod),
+            "ShiftRightOperatorProtocol" => Some(Self::ShiftRightOperatorProtocol),
+            "ShiftRightOperatorMethod" => Some(Self::ShiftRightOperatorMethod),
+            "BitwiseNotOperatorProtocol" => Some(Self::BitwiseNotOperatorProtocol),
+            "BitwiseNotOperatorMethod" => Some(Self::BitwiseNotOperatorMethod),
+
+            // Logical operators
+            "LogicalAndOperatorProtocol" => Some(Self::LogicalAndOperatorProtocol),
+            "LogicalAndOperatorMethod" => Some(Self::LogicalAndOperatorMethod),
+            "LogicalOrOperatorProtocol" => Some(Self::LogicalOrOperatorProtocol),
+            "LogicalOrOperatorMethod" => Some(Self::LogicalOrOperatorMethod),
+            "LogicalNotOperatorProtocol" => Some(Self::LogicalNotOperatorProtocol),
+            "LogicalNotOperatorMethod" => Some(Self::LogicalNotOperatorMethod),
+
+            // Null coalescing
+            "CoalesceOperatorProtocol" => Some(Self::CoalesceOperatorProtocol),
+            "CoalesceOperatorMethod" => Some(Self::CoalesceOperatorMethod),
+
+            // Force unwrap
+            "ForceUnwrapOperatorProtocol" => Some(Self::ForceUnwrapOperatorProtocol),
+            "ForceUnwrapOperatorMethod" => Some(Self::ForceUnwrapOperatorMethod),
+
+            // Boolean conditional
+            "BooleanConditional" => Some(Self::BooleanConditional),
+
+            // Well-known types. Without this arm the `@builtin(.Bool)`
+            // annotation would be silently inert: `EntityBuiltin` returns
+            // `None`, the struct never enters `BuiltinIndex`, and
+            // `ResolveBuiltin` (index only) would not find `Bool` at all. This
+            // arm also makes `every_stdlib_builtin_annotation_is_recognized` a
+            // live guard over the annotation.
+            "Bool" => Some(Self::Bool),
+
+            // Range operators
+            "ExclusiveRangeOperatorProtocol" => Some(Self::ExclusiveRangeOperatorProtocol),
+            "ExclusiveRangeOperatorMethod" => Some(Self::ExclusiveRangeOperatorMethod),
+            "InclusiveRangeOperatorProtocol" => Some(Self::InclusiveRangeOperatorProtocol),
+            "InclusiveRangeOperatorMethod" => Some(Self::InclusiveRangeOperatorMethod),
+            "RangeFromOperatorProtocol" => Some(Self::RangeFromOperatorProtocol),
+            "RangeFromOperatorMethod" => Some(Self::RangeFromOperatorMethod),
+            "RangeUpToOperatorProtocol" => Some(Self::RangeUpToOperatorProtocol),
+            "RangeUpToOperatorMethod" => Some(Self::RangeUpToOperatorMethod),
+            "RangeThroughOperatorProtocol" => Some(Self::RangeThroughOperatorProtocol),
+            "RangeThroughOperatorMethod" => Some(Self::RangeThroughOperatorMethod),
+
+            // Compound assignment
+            "AddAssignProtocol" => Some(Self::AddAssignProtocol),
+            "AddAssignMethod" => Some(Self::AddAssignMethod),
+            "SubtractAssignProtocol" => Some(Self::SubtractAssignProtocol),
+            "SubtractAssignMethod" => Some(Self::SubtractAssignMethod),
+            "MultiplyAssignProtocol" => Some(Self::MultiplyAssignProtocol),
+            "MultiplyAssignMethod" => Some(Self::MultiplyAssignMethod),
+            "DivideAssignProtocol" => Some(Self::DivideAssignProtocol),
+            "DivideAssignMethod" => Some(Self::DivideAssignMethod),
+            "RemainderAssignProtocol" => Some(Self::RemainderAssignProtocol),
+            "RemainderAssignMethod" => Some(Self::RemainderAssignMethod),
+            "BitwiseAndAssignProtocol" => Some(Self::BitwiseAndAssignProtocol),
+            "BitwiseAndAssignMethod" => Some(Self::BitwiseAndAssignMethod),
+            "BitwiseOrAssignProtocol" => Some(Self::BitwiseOrAssignProtocol),
+            "BitwiseOrAssignMethod" => Some(Self::BitwiseOrAssignMethod),
+            "BitwiseXorAssignProtocol" => Some(Self::BitwiseXorAssignProtocol),
+            "BitwiseXorAssignMethod" => Some(Self::BitwiseXorAssignMethod),
+            "ShiftLeftAssignProtocol" => Some(Self::ShiftLeftAssignProtocol),
+            "ShiftLeftAssignMethod" => Some(Self::ShiftLeftAssignMethod),
+            "ShiftRightAssignProtocol" => Some(Self::ShiftRightAssignProtocol),
+            "ShiftRightAssignMethod" => Some(Self::ShiftRightAssignMethod),
+
+            // Try / error handling
+            "ControlFlowEnum" => Some(Self::ControlFlowEnum),
+            "TryableProtocol" => Some(Self::TryableProtocol),
+            "TryExtractMethod" => Some(Self::TryExtractMethod),
+            "FromResidualProtocol" => Some(Self::FromResidualProtocol),
+            "FromResidualMethod" => Some(Self::FromResidualMethod),
+
+            // Optional chaining
+            "OptionalChainProtocol" => Some(Self::OptionalChainProtocol),
+            "OptionalChainBorrowMethod" => Some(Self::OptionalChainBorrowMethod),
+            "OptionalChainMutateMethod" => Some(Self::OptionalChainMutateMethod),
+            "OptionalChainTakeMethod" => Some(Self::OptionalChainTakeMethod),
+
+            // Value promotion
+            "FromValueProtocol" => Some(Self::FromValueProtocol),
+            "FromValueMethod" => Some(Self::FromValueMethod),
+            "DecaysFromProtocol" => Some(Self::DecaysFromProtocol),
+            "DecaysFromMethod" => Some(Self::DecaysFromMethod),
+            "ConvertibleProtocol" => Some(Self::ConvertibleProtocol),
+            "NarrowsFromProtocol" => Some(Self::NarrowsFromProtocol),
+            "RoundsFromProtocol" => Some(Self::RoundsFromProtocol),
+
+            // Iterator / Iterable
+            "IteratorProtocol" => Some(Self::IteratorProtocol),
+            "IteratorNextMethod" => Some(Self::IteratorNextMethod),
+            "IterableProtocol" => Some(Self::IterableProtocol),
+            "IterableIterMethod" => Some(Self::IterableIterMethod),
+
+            // Optional
+            "OptionalEnum" => Some(Self::OptionalEnum),
+            "OptionalSomeCase" => Some(Self::OptionalSomeCase),
+            "OptionalNoneCase" => Some(Self::OptionalNoneCase),
+            "ResultOkCase" => Some(Self::ResultOkCase),
+            "ResultErrCase" => Some(Self::ResultErrCase),
+            "ControlFlowContinueCase" => Some(Self::ControlFlowContinueCase),
+            "ControlFlowBreakCase" => Some(Self::ControlFlowBreakCase),
+
+            // Type operators
+            "OptionalTypeOperator" => Some(Self::OptionalTypeOperator),
+            "ArrayTypeOperator" => Some(Self::ArrayTypeOperator),
+            "DictionaryTypeOperator" => Some(Self::DictionaryTypeOperator),
+            "ResultTypeOperator" => Some(Self::ResultTypeOperator),
+
+            // Builtin structs
+            "ArrayStruct" => Some(Self::ArrayStruct),
+            "SliceStruct" => Some(Self::SliceStruct),
+            "ManuallyDropStruct" => Some(Self::ManuallyDropStruct),
+            "NullableCFunctionStruct" => Some(Self::NullableCFunctionStruct),
+
+            // String interpolation
+            "ExpressibleByStringInterpolation" => Some(Self::ExpressibleByStringInterpolation),
+            "StringInterpolationInit" => Some(Self::StringInterpolationInit),
+            "InterpolatableInit" => Some(Self::InterpolatableInit),
+            "InterpolatableAppendLiteral" => Some(Self::InterpolatableAppendLiteral),
+            "DecayOptionalRef" => Some(Self::DecayOptionalRef),
+            "FormatOptions" => Some(Self::FormatOptions),
+            "FormatSpecOptions" => Some(Self::FormatSpecOptions),
+            "FormattableProtocol" => Some(Self::FormattableProtocol),
+            "FormattableFormatInto" => Some(Self::FormattableFormatIntoMethod),
+
+            // Derivable protocols
+            "EquatableProtocol" => Some(Self::EquatableProtocol),
+            "HashableProtocol" => Some(Self::HashableProtocol),
+            "ComparableProtocol" => Some(Self::ComparableProtocol),
+            "DefaultableProtocol" => Some(Self::DefaultableProtocol),
+
+            // Exitable / @main return
+            "Exitable" => Some(Self::Exitable),
+            "ExitableReport" => Some(Self::ExitableReport),
+            "BooleanConditionalBoolValue" => Some(Self::BooleanConditionalBoolValue),
+            "ConsumingIndirectionConsumePointee" => Some(Self::ConsumingIndirectionConsumePointee),
+            "ExistentialBoxInit" => Some(Self::ExistentialBoxInit),
+            "SharedBoxSharedMutRef" => Some(Self::SharedBoxSharedMutRef),
+            "UniqueBoxInit" => Some(Self::UniqueBoxInit),
+            "UniqueBoxTakeValue" => Some(Self::UniqueBoxTakeValue),
+            "OwnedBoxTakeValue" => Some(Self::OwnedBoxTakeValue),
+            "PointerToInit" => Some(Self::PointerToInit),
+            "UniqueBoxDestroy" => Some(Self::UniqueBoxDestroy),
+            "IndirectionPointeeRef" => Some(Self::IndirectionPointeeRef),
+            "MutableIndirectionPointeeMutRef" => Some(Self::MutableIndirectionPointeeMutRef),
+            "IndirectionTarget" => Some(Self::IndirectionTarget),
+            "ArrayLiteralElement" => Some(Self::ArrayLiteralElement),
+            "DictionaryLiteralKey" => Some(Self::DictionaryLiteralKey),
+            "DictionaryLiteralValue" => Some(Self::DictionaryLiteralValue),
+            "ArrayMatchableElement" => Some(Self::ArrayMatchableElement),
+            "ArrayMatchableRest" => Some(Self::ArrayMatchableRest),
+            "ExitCode" => Some(Self::ExitCode),
+
+            // Indirection / smart-pointer member peel
+            "Indirection" => Some(Self::Indirection),
+            "MutableIndirection" => Some(Self::MutableIndirection),
+
+            // Shared-ownership box (implicit boxing)
+            "SharedBox" => Some(Self::SharedBox),
+
+            // Unique-ownership box (one-shot closure environments)
+            "UniqueBox" => Some(Self::UniqueBox),
+
+            // Existentials
+            "DefaultBoxType" => Some(Self::DefaultBoxType),
+            "Sized" => Some(Self::Sized),
+            "ExistentialBox" => Some(Self::ExistentialBox),
+            "ConsumingIndirection" => Some(Self::ConsumingIndirection),
+            "OwnedBox" => Some(Self::OwnedBox),
+
+            _ => None,
+        }
+    }
+
+    /// Whether this builtin denotes the *target* of the type alias that
+    /// carries its annotation rather than the alias itself.
+    /// `@builtin(.DefaultIntegerLiteralType) type IntegerLiteralType = Int64`
+    /// makes `Int64` the default integer literal type; the type operators
+    /// (`@builtin(.OptionalTypeOperator) type OptionalTypeOperator[T] = …`)
+    /// denote the alias.
+    pub fn denotes_alias_target(self) -> bool {
+        matches!(
+            self,
+            Self::DefaultIntegerLiteralType
+                | Self::DefaultFloatLiteralType
+                | Self::DefaultStringLiteralType
+                | Self::DefaultBooleanLiteralType
+                | Self::DefaultCharLiteralType
+                | Self::DefaultNullLiteralType
+                | Self::DefaultArrayLiteralType
+                | Self::DefaultDictionaryLiteralType
+                | Self::DefaultBoxType
+        )
+    }
+
+    /// Metadata about what symbol kind this builtin expects.
+    pub fn kind(self) -> BuiltinKind {
+        match self {
+            Self::FormatSpecOptions => BuiltinKind::Function,
+            Self::ControlFlowBreakCase => BuiltinKind::EnumCase,
+            Self::ControlFlowContinueCase => BuiltinKind::EnumCase,
+            Self::PointerToInit => BuiltinKind::Function,
+            Self::ArrayMatchableRest => BuiltinKind::TypeAlias,
+            Self::OwnedBoxTakeValue => BuiltinKind::Function,
+            // Copy/Clone
+            Self::Copyable => BuiltinKind::Protocol {
+                implicit_conformance: true,
+                must_be_marker: true,
+                tuple_conformance_propagation: false,
+                requires_fields_conform: false,
+                disallow_enum_conformance: false,
+            },
+            Self::Cloneable => BuiltinKind::protocol(),
+            Self::CloneMethod => BuiltinKind::ProtocolMethod,
+
+            // Reference containment — same marker shape as Copyable:
+            // implicit (structural) conformance + negative declarations.
+            Self::Static => BuiltinKind::Protocol {
+                implicit_conformance: true,
+                must_be_marker: true,
+                tuple_conformance_propagation: false,
+                requires_fields_conform: false,
+                disallow_enum_conformance: false,
+            },
+
+            // Pattern matching
+            Self::Matchable | Self::RangeMatchable | Self::ArrayMatchable => {
+                BuiltinKind::protocol()
+            },
+            Self::MatchableMatches
+            | Self::RangeMatchableIsAtLeast
+            | Self::RangeMatchableIsAtMost
+            | Self::RangeMatchableIsBelow
+            | Self::ArrayMatchableMatchLength
+            | Self::ArrayMatchableMatchGet
+            | Self::ArrayMatchableMatchSlice => BuiltinKind::ProtocolMethod,
+
+            // Literal protocols
+            Self::ExpressibleByIntegerLiteral
+            | Self::ExpressibleByFloatLiteral
+            | Self::ExpressibleByStringLiteral
+            | Self::ExpressibleByBoolLiteral
+            | Self::ExpressibleByCharLiteral
+            | Self::ExpressibleByNullLiteral
+            | Self::UnsignedInteger
+            | Self::InternalExpressibleByArrayLiteral
+            | Self::InternalExpressibleByDictionaryLiteral => BuiltinKind::protocol(),
+            Self::IntegerLiteralInit
+            | Self::FloatLiteralInit
+            | Self::StringLiteralInit
+            | Self::BoolLiteralInit
+            | Self::CharLiteralInit
+            | Self::NullLiteralInit
+            | Self::ArrayLiteralInit
+            | Self::DictionaryLiteralInit => BuiltinKind::ProtocolMethod,
+
+            // Default literal types
+            Self::DefaultIntegerLiteralType
+            | Self::DefaultFloatLiteralType
+            | Self::DefaultStringLiteralType
+            | Self::DefaultBooleanLiteralType
+            | Self::DefaultCharLiteralType
+            | Self::DefaultNullLiteralType
+            | Self::DefaultArrayLiteralType
+            | Self::DefaultDictionaryLiteralType
+            | Self::DefaultBoxType => BuiltinKind::TypeAlias,
+
+            // FFI
+            Self::FFISafe => BuiltinKind::Protocol {
+                implicit_conformance: false,
+                must_be_marker: true,
+                tuple_conformance_propagation: true,
+                requires_fields_conform: true,
+                disallow_enum_conformance: true,
+            },
+
+            // Operator protocols (all follow the same pattern)
+            Self::AddOperatorProtocol
+            | Self::SubtractOperatorProtocol
+            | Self::MultiplyOperatorProtocol
+            | Self::DivideOperatorProtocol
+            | Self::RemainderOperatorProtocol
+            | Self::NegateOperatorProtocol
+            | Self::EqualsOperatorProtocol
+            | Self::NotEqualsOperatorProtocol
+            | Self::LessThanOperatorProtocol
+            | Self::GreaterThanOperatorProtocol
+            | Self::LessOrEqualOperatorProtocol
+            | Self::GreaterOrEqualOperatorProtocol
+            | Self::BitwiseAndOperatorProtocol
+            | Self::BitwiseOrOperatorProtocol
+            | Self::BitwiseXorOperatorProtocol
+            | Self::ShiftLeftOperatorProtocol
+            | Self::ShiftRightOperatorProtocol
+            | Self::BitwiseNotOperatorProtocol
+            | Self::LogicalAndOperatorProtocol
+            | Self::LogicalOrOperatorProtocol
+            | Self::LogicalNotOperatorProtocol
+            | Self::CoalesceOperatorProtocol
+            | Self::ForceUnwrapOperatorProtocol
+            | Self::ExclusiveRangeOperatorProtocol
+            | Self::InclusiveRangeOperatorProtocol
+            | Self::RangeFromOperatorProtocol
+            | Self::RangeUpToOperatorProtocol
+            | Self::RangeThroughOperatorProtocol
+            | Self::AddAssignProtocol
+            | Self::SubtractAssignProtocol
+            | Self::MultiplyAssignProtocol
+            | Self::DivideAssignProtocol
+            | Self::RemainderAssignProtocol
+            | Self::BitwiseAndAssignProtocol
+            | Self::BitwiseOrAssignProtocol
+            | Self::BitwiseXorAssignProtocol
+            | Self::ShiftLeftAssignProtocol
+            | Self::ShiftRightAssignProtocol => BuiltinKind::protocol(),
+
+            // Operator methods
+            Self::AddOperatorMethod
+            | Self::SubtractOperatorMethod
+            | Self::MultiplyOperatorMethod
+            | Self::DivideOperatorMethod
+            | Self::RemainderOperatorMethod
+            | Self::NegateOperatorMethod
+            | Self::EqualsOperatorMethod
+            | Self::NotEqualsOperatorMethod
+            | Self::LessThanOperatorMethod
+            | Self::GreaterThanOperatorMethod
+            | Self::LessOrEqualOperatorMethod
+            | Self::GreaterOrEqualOperatorMethod
+            | Self::BitwiseAndOperatorMethod
+            | Self::BitwiseOrOperatorMethod
+            | Self::BitwiseXorOperatorMethod
+            | Self::ShiftLeftOperatorMethod
+            | Self::ShiftRightOperatorMethod
+            | Self::BitwiseNotOperatorMethod
+            | Self::LogicalAndOperatorMethod
+            | Self::LogicalOrOperatorMethod
+            | Self::LogicalNotOperatorMethod
+            | Self::CoalesceOperatorMethod
+            | Self::ForceUnwrapOperatorMethod
+            | Self::ExclusiveRangeOperatorMethod
+            | Self::InclusiveRangeOperatorMethod
+            | Self::RangeFromOperatorMethod
+            | Self::RangeUpToOperatorMethod
+            | Self::RangeThroughOperatorMethod
+            | Self::AddAssignMethod
+            | Self::SubtractAssignMethod
+            | Self::MultiplyAssignMethod
+            | Self::DivideAssignMethod
+            | Self::RemainderAssignMethod
+            | Self::BitwiseAndAssignMethod
+            | Self::BitwiseOrAssignMethod
+            | Self::BitwiseXorAssignMethod
+            | Self::ShiftLeftAssignMethod
+            | Self::ShiftRightAssignMethod => BuiltinKind::ProtocolMethod,
+
+            // Boolean conditional
+            Self::BooleanConditional => BuiltinKind::protocol(),
+
+            // Try / error handling
+            Self::ControlFlowEnum => BuiltinKind::Enum,
+            Self::TryableProtocol | Self::FromResidualProtocol => BuiltinKind::protocol(),
+            Self::TryExtractMethod | Self::FromResidualMethod => BuiltinKind::ProtocolMethod,
+
+            // Optional chaining
+            Self::OptionalChainProtocol => BuiltinKind::protocol(),
+            Self::OptionalChainBorrowMethod
+            | Self::OptionalChainMutateMethod
+            | Self::OptionalChainTakeMethod => BuiltinKind::ProtocolMethod,
+
+            // Value promotion
+            Self::FromValueProtocol => BuiltinKind::protocol(),
+            Self::FromValueMethod => BuiltinKind::ProtocolMethod,
+            Self::DecaysFromProtocol => BuiltinKind::protocol(),
+            Self::DecaysFromMethod => BuiltinKind::ProtocolMethod,
+            Self::ConvertibleProtocol | Self::NarrowsFromProtocol | Self::RoundsFromProtocol => {
+                BuiltinKind::protocol()
+            },
+
+            // Iterator / Iterable
+            Self::IteratorProtocol | Self::IterableProtocol => BuiltinKind::protocol(),
+            Self::IteratorNextMethod | Self::IterableIterMethod => BuiltinKind::ProtocolMethod,
+
+            // Optional
+            Self::OptionalEnum => BuiltinKind::Enum,
+            Self::OptionalSomeCase | Self::OptionalNoneCase => BuiltinKind::EnumCase,
+            Self::ResultOkCase | Self::ResultErrCase => BuiltinKind::EnumCase,
+
+            // Type operators
+            Self::OptionalTypeOperator
+            | Self::ArrayTypeOperator
+            | Self::DictionaryTypeOperator
+            | Self::ResultTypeOperator => BuiltinKind::TypeAlias,
+
+            // Builtin structs
+            Self::ArrayStruct
+            | Self::SliceStruct
+            | Self::ManuallyDropStruct
+            | Self::NullableCFunctionStruct => BuiltinKind::Struct,
+
+            // String interpolation
+            Self::FormatOptions => BuiltinKind::Struct,
+            Self::ExpressibleByStringInterpolation => BuiltinKind::protocol(),
+            Self::StringInterpolationInit
+            | Self::InterpolatableInit
+            | Self::InterpolatableAppendLiteral => BuiltinKind::ProtocolMethod,
+            Self::DecayOptionalRef => BuiltinKind::Function,
+            Self::FormattableProtocol => BuiltinKind::protocol(),
+            Self::FormattableFormatIntoMethod => BuiltinKind::ProtocolMethod,
+            Self::EquatableProtocol
+            | Self::HashableProtocol
+            | Self::ComparableProtocol
+            | Self::DefaultableProtocol => BuiltinKind::protocol(),
+
+            // Exitable: non-marker protocol with a required `report()` method.
+            Self::Exitable => BuiltinKind::protocol(),
+            Self::ExitableReport => BuiltinKind::ProtocolMethod,
+            Self::BooleanConditionalBoolValue
+            | Self::ConsumingIndirectionConsumePointee
+            | Self::ExistentialBoxInit
+            | Self::SharedBoxSharedMutRef
+            | Self::IndirectionPointeeRef
+            | Self::MutableIndirectionPointeeMutRef => BuiltinKind::ProtocolMethod,
+            Self::IndirectionTarget
+            | Self::ArrayLiteralElement
+            | Self::DictionaryLiteralKey
+            | Self::DictionaryLiteralValue
+            | Self::ArrayMatchableElement => BuiltinKind::TypeAlias,
+            Self::UniqueBoxInit | Self::UniqueBoxTakeValue | Self::UniqueBoxDestroy => {
+                BuiltinKind::Function
+            },
+            Self::ExitCode => BuiltinKind::Struct,
+
+            // Indirection: non-marker protocol with a required `value` place;
+            // explicit conformance (NOT implicit, unlike Copyable).
+            Self::Indirection | Self::MutableIndirection => BuiltinKind::protocol(),
+            // Structural like `Static`: computed, never declared.
+            Self::Sized => BuiltinKind::Protocol {
+                implicit_conformance: true,
+                must_be_marker: true,
+                tuple_conformance_propagation: false,
+                requires_fields_conform: false,
+                disallow_enum_conformance: false,
+            },
+            Self::ExistentialBox | Self::ConsumingIndirection => BuiltinKind::protocol(),
+
+            // Shared box: the annotated symbol is the generic *struct* the
+            // compiler instantiates (`RcBox`), not the `SharedBox` protocol
+            // that states its contract.
+            Self::SharedBox => BuiltinKind::Struct,
+
+            // Unique box: the annotated symbol is the generic *struct* the
+            // compiler instantiates (`UniqueBox`).
+            Self::UniqueBox => BuiltinKind::Struct,
+            Self::OwnedBox => BuiltinKind::Struct,
+
+            // Well-known types — `Bool` resolves by name first, but carries
+            // `@builtin(.Bool)` as the attribute anchor so strategy 2 works too.
+            Self::Bool => BuiltinKind::Struct,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::{Path, PathBuf};
+
+    fn stdlib_root() -> PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../lang/std")
+    }
+
+    fn ks_files(dir: &Path, out: &mut Vec<PathBuf>) {
+        for entry in std::fs::read_dir(dir)
+            .expect("stdlib dir is readable")
+            .flatten()
+        {
+            let path = entry.path();
+            if path.is_dir() {
+                ks_files(&path, out);
+            } else if path.extension().is_some_and(|e| e == "ks") {
+                out.push(path);
+            }
+        }
+    }
+
+    /// Every `@builtin(.Name)` occurrence in `text`, ignoring `//` comments —
+    /// the stdlib mentions builtin names in prose doc comments too.
+    fn annotations(text: &str) -> Vec<String> {
+        let mut found = Vec::new();
+        for line in text.lines() {
+            let code = line.split_once("//").map_or(line, |(before, _)| before);
+            let mut rest = code;
+            while let Some(at) = rest.find("@builtin(.") {
+                rest = &rest[at + "@builtin(.".len()..];
+                let end = rest
+                    .find(|c: char| !c.is_alphanumeric() && c != '_')
+                    .unwrap_or(rest.len());
+                if end > 0 {
+                    found.push(rest[..end].to_string());
+                }
+            }
+        }
+        found
+    }
+
+    /// Every `@builtin(.Name)` written in the stdlib must parse into a `Builtin`.
+    ///
+    /// An unrecognised name is silently inert, not an error: `EntityBuiltin`
+    /// returns `None`, so the entity never enters `BuiltinIndex`, and
+    /// `ResolveBuiltin` (index only) does not find the feature at all.
+    /// `DefaultArrayLiteralType` once sat inert this way, masked by a
+    /// since-removed name-based lookup finding `Array`.
+    #[test]
+    fn every_stdlib_builtin_annotation_is_recognized() {
+        let root = stdlib_root();
+        assert!(root.is_dir(), "stdlib not found at {}", root.display());
+
+        let mut files = Vec::new();
+        ks_files(&root, &mut files);
+        files.sort();
+
+        let mut seen = 0usize;
+        let mut inert: Vec<String> = Vec::new();
+        for path in &files {
+            let text = std::fs::read_to_string(path).expect("stdlib file is readable");
+            for name in annotations(&text) {
+                seen += 1;
+                if Builtin::from_attribute_name(&name).is_none() {
+                    let rel = path.strip_prefix(&root).unwrap_or(path);
+                    inert.push(format!("{}: @builtin(.{name})", rel.display()));
+                }
+            }
+        }
+
+        // Guard the guard: a scan that matches nothing would pass vacuously.
+        assert!(
+            seen > 100,
+            "only found {seen} @builtin annotations — scan is broken"
+        );
+        assert!(
+            inert.is_empty(),
+            "stdlib annotations with no `Builtin::from_attribute_name` arm \
+             (silently inert — add the arm):\n  {}",
+            inert.join("\n  ")
+        );
+    }
+}

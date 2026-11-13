@@ -4,7 +4,7 @@ use kestrel_ast::{AstType, PathSegment};
 use kestrel_hecs::{Entity, World};
 use kestrel_syntax_tree::SyntaxNode;
 use kestrel_syntax_tree::SyntaxNodePtr;
-use kestrel_syntax_tree::ast::{self, AstNode, HasName, HasStatic};
+use kestrel_syntax_tree::ast::{self, AstNode, HasName, HasStatic, HasUnsafe};
 use kestrel_syntax_tree::utils::get_decl_span;
 
 use super::helpers::*;
@@ -80,6 +80,9 @@ pub fn build_function(
 
     set_visibility(world, entity, node);
     set_attributes(world, entity, node, file_id);
+    if node.is_unsafe() {
+        world.set(entity, IsUnsafe);
+    }
     set_documentation(world, entity, syntax);
     set_where_clause(world, entity, node, file_id);
     build_type_parameters(world, entity, node, file_entity, file_id);
@@ -152,9 +155,16 @@ pub fn build_initializer(
 
     set_visibility(world, entity, node);
     set_attributes(world, entity, node, file_id);
+    if node.is_unsafe() {
+        world.set(entity, IsUnsafe);
+    }
     set_documentation(world, entity, syntax);
     set_where_clause(world, entity, node, file_id);
     build_type_parameters(world, entity, node, file_entity, file_id);
+    // `init(text: some Str)` is generic exactly like a function's `some P`
+    // param; without this the param kept the bare `some` type, so the body
+    // couldn't look up members (E106) and no call matched (E113).
+    desugar_opaque_params(world, entity, file_entity, syntax);
 }
 
 /// Build a deinit declaration entity from CST.
@@ -197,6 +207,7 @@ pub fn build_deinit(
 /// `func draw(shape: some Drawable)` becomes:
 /// `func draw[__opaque_0: Drawable](shape: __opaque_0)`
 ///
+/// Runs for functions and initializers.
 /// Each `some` creates an independent synthetic type parameter.
 fn desugar_opaque_params(
     world: &mut World,
@@ -252,10 +263,10 @@ fn desugar_opaque_params(
 
             // `some P and not Copyable` in param position desugars to the
             // existing `where __opaque_N: not Copyable` machinery.
-            if let Some(negative) = negative {
+            for negative in negative {
                 new_where_constraints.push(WhereConstraint::NegativeBound {
                     subject: tp_ast.clone(),
-                    protocol: (**negative).clone(),
+                    protocol: negative.clone(),
                     node: SyntaxNodePtr::new(cst_node),
                 });
             }

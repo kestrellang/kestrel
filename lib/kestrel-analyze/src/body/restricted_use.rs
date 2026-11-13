@@ -332,7 +332,7 @@ fn use_context(ctx: &QueryContext<'_>, entity: Entity, root: Entity) -> UseConte
 
 /// How a restricted declaration is named in the message: `parse`,
 /// `Shape.Circle`, `Point.init`, `Table.subscript`.
-fn display_name(ctx: &QueryContext<'_>, entity: Entity) -> String {
+pub(crate) fn display_name(ctx: &QueryContext<'_>, entity: Entity) -> String {
     let owner = || {
         ctx.parent_of(entity)
             .map(|p| owner_name(ctx, p))

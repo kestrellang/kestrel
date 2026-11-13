@@ -279,7 +279,23 @@ pub fn monomorphize(
 
     // Two-word (data, table) pointers: rewrite the ops that meet one now
     // that every type is concrete.
-    fat::legalize(&mut mono_module, &func_id_map, existential_clone_thunk);
+    let clone_shims: std::collections::HashSet<_> = functions
+        .values()
+        .filter(|f| {
+            matches!(
+                f.kind,
+                crate::item::function::FunctionKind::CloneShim { .. }
+            )
+        })
+        .map(|f| f.entity)
+        .collect();
+    fat::legalize(
+        &mut mono_module,
+        &func_id_map,
+        existential_clone_thunk,
+        cloneable_protocol,
+        &clone_shims,
+    );
 
     Ok(mono_module)
 }
@@ -531,9 +547,16 @@ fn monomorphize_body(
             // would leak or double-drop the argument (a borrowed value stored
             // by a consuming setter was freed twice) — fail loudly instead.
             if was_witness && let Some(idx) = witness_convention_mismatch(&inst.kind, functions) {
+                let witness = match &inst.kind {
+                    InstKind::Call {
+                        callee: Callee::Direct { func, .. },
+                        ..
+                    } => functions.get(func).map(|f| f.name.clone()),
+                    _ => None,
+                };
                 panic!(
                     "ICE: witness call in {:?} passes arg {idx} with a convention its witness \
-                     doesn't take — the requirement and witness disagree",
+                     {witness:?} doesn't take — the requirement and witness disagree",
                     func.name
                 );
             }
@@ -607,7 +630,6 @@ fn closure_clone_as_copy(
         callee:
             Callee::Witness {
                 protocol,
-                method,
                 self_type,
                 ..
             },
@@ -616,7 +638,9 @@ fn closure_clone_as_copy(
     else {
         return None;
     };
-    if Some(*protocol) != cloneable_protocol || method.name != "clone" {
+    // `Cloneable` has exactly one requirement (`clone_shim::clone_witness_key`
+    // relies on the same invariant), so the protocol alone names it.
+    if Some(*protocol) != cloneable_protocol {
         return None;
     }
     let concrete = collect::substitute_and_resolve(arena, witnesses, *self_type, subst);
@@ -761,6 +785,20 @@ fn substitute_immediate(
                 *st = resolve(arena, *st);
             }
         },
+        ImmediateKind::CFunctionRef {
+            type_args,
+            self_type,
+            ty,
+            ..
+        } => {
+            for ta in type_args.iter_mut() {
+                *ta = resolve(arena, *ta);
+            }
+            if let Some(st) = self_type {
+                *st = resolve(arena, *st);
+            }
+            *ty = resolve(arena, *ty);
+        },
         _ => {},
     }
 }
@@ -872,17 +910,32 @@ fn rewrite_callees(
             for (_, callee) in inst.kind.callees_mut() {
                 rewrite_callee(callee, func_id_map, functions);
             }
-            if let InstKind::Literal { value, .. } = &mut inst.kind
-                && let ImmediateKind::FunctionRef {
+            let InstKind::Literal { value, .. } = &mut inst.kind else {
+                continue;
+            };
+            match &value.kind {
+                ImmediateKind::FunctionRef {
                     func,
                     type_args,
                     self_type,
-                } = &value.kind
-            {
-                let key = InstantiationKey::new(*func, type_args.clone(), *self_type);
-                if let Some(&mono_id) = func_id_map.get(&key) {
-                    value.kind = ImmediateKind::MonoFunctionRef(mono_id);
-                }
+                } => {
+                    let key = InstantiationKey::new(*func, type_args.clone(), *self_type);
+                    if let Some(&mono_id) = func_id_map.get(&key) {
+                        value.kind = ImmediateKind::MonoFunctionRef(mono_id);
+                    }
+                },
+                ImmediateKind::CFunctionRef {
+                    func,
+                    type_args,
+                    self_type,
+                    ty,
+                } => {
+                    let key = InstantiationKey::new(*func, type_args.clone(), *self_type);
+                    if let Some(&mono_id) = func_id_map.get(&key) {
+                        value.kind = ImmediateKind::MonoCFunctionRef(mono_id, *ty);
+                    }
+                },
+                _ => {},
             }
         }
     }
@@ -1236,7 +1289,7 @@ impl CopyLayer for MonoCopyLayer<'_> {
         copy
     }
 
-    fn gating_positions(&self, entity: Entity) -> Cow<'_, [usize]> {
+    fn conditional_copy(&self, entity: Entity) -> Cow<'_, kestrel_copy_fold::ConditionalCopy> {
         Cow::Borrowed(crate::ty_query::nominal_copy_in(self.structs, self.enums, entity).1)
     }
 
@@ -1265,7 +1318,7 @@ impl CopyLayer for MonoCopyLayer<'_> {
 /// looked up in the mono maps (their `copy` is correct, or being refined this
 /// round); primitives/pointers/functions are bit-copyable; tuples use the
 /// canonical fold (move-only dominates, else Clone if any element clones).
-fn concrete_copy(
+pub(super) fn concrete_copy(
     arena: &TyArena,
     ty: TyId,
     mono_structs: &IndexMap<MonoTypeKey, MonoStruct>,
@@ -1406,10 +1459,10 @@ fn mono_size_and_align(
 
 /// [`crate::ty::TailLookup`] over the generic struct defs, substituting
 /// (and interning) the last field at the asked instance.
-struct GenericTails<'a> {
-    arena: &'a mut TyArena,
-    structs: &'a IndexMap<Entity, StructDef>,
-    witnesses: &'a [WitnessDef],
+pub(crate) struct GenericTails<'a> {
+    pub(crate) arena: &'a mut TyArena,
+    pub(crate) structs: &'a IndexMap<Entity, StructDef>,
+    pub(crate) witnesses: &'a [WitnessDef],
 }
 
 impl crate::ty::TailLookup for GenericTails<'_> {
@@ -2001,6 +2054,7 @@ mod tests {
             extern_info: Some(crate::item::function::ExternInfo {
                 calling_convention: crate::item::function::CallingConvention::C,
                 symbol_name: "malloc".into(),
+                ..crate::item::function::ExternInfo::c("malloc")
             }),
             is_main: false,
             provides_protocol_default: false,

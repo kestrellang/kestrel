@@ -1,13 +1,14 @@
-// StringSlice - read-only borrowed window into a String's UTF-8 bytes
+// StringSlice - an unsized, in-place view of UTF-8 text
 
 module std.text
 
-import std.core.(Bool, Equal, NotEqual, Equatable, Comparable, Ordering, Cloneable, Hashable, Hasher, fatalError)
+import std.core.(Bool, Equal, NotEqual, Equatable, Comparable, Ordering, Hashable, Hasher, fatalError)
 import std.numeric.(Int64, UInt8)
 import std.result.(Optional)
-import std.memory.(Layout, Pointer, RawPointer, UnsafeSlice)
+import std.memory.(Layout, Pointer, RawPointer)
+import std.collections.(Slice)
 import std.iter.(Iterable)
-import std.text.(Formattable, Formatter, FormatOptions, Char, Grapheme, decodeUtf8, encodeUtf8, String, StringBuilder, StringStorage, CharsIterator, ByteIndex, CharIndex, GraphemeIndex, Str, _bytesEqual, _bytesCompare)
+import std.text.(Formattable, Formatter, FormatOptions, Char, Grapheme, decodeUtf8, encodeUtf8, String, StringBuilder, CharsIterator, ByteIndex, CharIndex, GraphemeIndex, _bytesEqual, _bytesCompare)
 
 // ============================================================================
 // STRING INDEX PROTOCOL
@@ -18,7 +19,8 @@ import std.text.(Formattable, Formatter, FormatOptions, Char, Grapheme, decodeUt
 /// and what the subscript returns.
 public protocol StringIndex: Equatable, Comparable {
     type Yield
-    func read(from slice: StringSlice) -> Yield
+    @sugarOnly
+    func read(from slice: &StringSlice) -> Yield
 }
 
 // ============================================================================
@@ -73,9 +75,8 @@ extend ByteIndex {
 extend CharIndex {
     /// Advances by `n` code points. Requires the source string to
     /// decode UTF-8 boundaries. O(n) in chars advanced.
-    public func advance(by n: Int64, from source: StringSlice) -> CharIndex {
-        let ptr = source._rawPtr();
-        let end = source.end;
+    public func advance(by n: Int64, from source: &StringSlice) -> CharIndex {
+        let end = source._len;
         var offset = self.byteOffset;
         var remaining = n;
         while remaining > 0 and offset < end {
@@ -99,16 +100,21 @@ extend CharIndex {
 // STRING SLICE
 // ============================================================================
 
-/// A read-only window into a `String`'s UTF-8 bytes. It borrows the
-/// string: a slice can't outlive the string it came from, and it can't
-/// be stored in a field or an array that would (E494/E509). Use
-/// `.toOwned()` to keep a piece.
+/// A read-only run of UTF-8 text, viewed in place.
 ///
-/// Making and narrowing a slice is free: no refcount, and the string's
-/// buffer isn't pinned, so changing the string later doesn't copy it.
-/// Every read goes through the string's current buffer. If the string
-/// gets shorter than the slice while the slice is alive, the next read
-/// panics instead of reading freed memory.
+/// `StringSlice` is unsized, like `Slice[T]`: you only ever hold one
+/// behind a reference, `&StringSlice`, which is two words (the first
+/// byte's address and the byte count). A `String` lends its whole text
+/// as one (`s.asSlice()`), and every read-only text method lives here,
+/// so `String` reaches them through its `Indirection` peel. Narrowing
+/// (`trimmed()`, `split(by:)`, `subslice(from:to:)`) lends a smaller
+/// slice of the same bytes; nothing is copied. Use `.toOwned()` to keep
+/// a piece.
+///
+/// A slice doesn't own its bytes and doesn't keep the buffer alive. A
+/// slice of a `String` is only valid until the string next changes
+/// (`append`, `clear`, …) or is dropped; using it after that reads freed
+/// memory. The compiler does not check this yet.
 ///
 /// # Examples
 ///
@@ -121,34 +127,55 @@ extend CharIndex {
 ///
 /// # Representation
 ///
-/// `(base: &String, start: Int64, end: Int64)`. `start` and `end` are
-/// byte offsets into the whole string, not into this slice.
-public struct StringSlice: Str, Equatable, Equal[StringSlice], Equal[String], NotEqual[StringSlice], NotEqual[String], Comparable, Hashable, Cloneable, Formattable, Iterable {
-    type Item = Char
-    type TargetIterator = CharsIterator
-    type Equal[StringSlice].Output = Bool
-    type Equal[String].Output = Bool
-    type NotEqual[StringSlice].Output = Bool
-    type NotEqual[String].Output = Bool
+/// A fat pointer, `(first byte, byte count)`, over bytes that are always
+/// valid UTF-8. Every byte offset std hands out for a slice counts from
+/// its first byte.
+public struct StringSlice: not Copyable {
+    fileprivate var storage: lang.slice[UInt8]
+}
 
-    // Module-internal so `String.asSlice()` can build one (memberwise).
-    let base: &String
-    public let start: Int64
-    public let end: Int64
+extend StringSlice {
+    /// Lends `count` bytes starting at `start` as a slice.
+    ///
+    /// # Safety
+    ///
+    /// The bytes must be valid UTF-8 and stay alive, unmoved and
+    /// unchanged, for as long as the slice is used.
+    static unsafe func lend(consuming start start: Pointer[UInt8], consuming count count: Int64) -> &StringSlice {
+        let fat: lang.ptr[lang.slice[UInt8]] = lang.slice_from_parts(start.raw, count.raw);
+        unsafe Pointer[StringSlice](raw: lang.cast_ptr[_, StringSlice](fat)).value
+    }
+
+    /// This slice's own fat pointer.
+    fileprivate func fat() -> lang.ptr[lang.slice[UInt8]] {
+        lang.cast_ptr[_, lang.slice[UInt8]](lang.ptr_to(self))
+    }
 
     // -- Size ----------------------------------------------------------------
 
+    /// The byte count, for std's byte loops (`bytes.count` publicly).
+    var _len: Int64 { Int64(intLiteral: lang.slice_count(self.fat())) }
+
     /// True when the slice covers zero bytes.
-    public var isEmpty: Bool { self.start >= self.end }
+    public var isEmpty: Bool { self._len == 0 }
 
     // -- Narrowing -----------------------------------------------------------
 
-    /// Returns a sub-slice covering `[newStart, newEnd)` relative to
-    /// the source buffer (absolute byte offsets, not relative to this
-    /// slice's start).
-    public func subslice(from newStart: Int64, to newEnd: Int64) -> StringSlice {
-        StringSlice(base: self.base, start: newStart, end: newEnd)
+    /// Returns the sub-slice covering bytes `[from, to)` of this slice.
+    /// Offsets count from this slice's first byte, like every byte
+    /// position std hands out for a slice (`firstIndex(of:)`, `bytes`).
+    /// An inverted range (`to < from`) is empty; panics when either end
+    /// falls outside the slice.
+    public func subslice(from newStart: Int64, to newEnd: Int64) -> &StringSlice {
+        if newStart < 0 or newStart > self._len or newEnd < 0 or newEnd > self._len {
+            fatalError("StringSlice: subslice range out of bounds");
+        }
+        let count = if newEnd > newStart { newEnd - newStart } else { 0 };
+        unsafe StringSlice.lend(start: self._rawPtr().offset(by: newStart), count: count)
     }
+
+    /// Itself: a slice is already the in-place view.
+    public func asSlice() -> &StringSlice { self }
 
     // -- Conversion ----------------------------------------------------------
 
@@ -157,95 +184,83 @@ public struct StringSlice: Str, Equatable, Equal[StringSlice], Equal[String], No
         if self.isEmpty {
             return String()
         }
-        let ptr = self._rawPtr();
-        String.fromBytesUnchecked(ptr.offset(by: self.start), (self.end - self.start))
+        String.fromBytesUnchecked(self._rawPtr(), self._len)
     }
 
     // -- Internal helpers ----------------------------------------------------
 
-    /// The string's current byte buffer. Panics when the string got
-    /// shorter than this slice since it was made.
-    func _rawPtr() -> Pointer[UInt8] {
-        if self.end > self.base._byteCount() {
-            fatalError("StringSlice: the string is shorter than the slice");
-        }
-        self.base._bytePtr()
-    }
+    /// The address of this slice's first byte.
+    func _rawPtr() -> Pointer[UInt8] { Pointer(raw: lang.cast_ptr[_, UInt8](self.fat())) }
 
-    /// The current address of this slice's first byte, as the raw pointer
-    /// the text views read through. Re-read it on every access.
-    func _bytes() -> lang.ptr[lang.i8] {
-        lang.cast_ptr[_, lang.i8](self._rawPtr().offset(by: self.start).asRaw().raw)
-    }
+    /// The first byte's address, as the raw pointer the text views read
+    /// through.
+    func _bytes() -> lang.ptr[lang.i8] { lang.cast_ptr[_, lang.i8](self.fat()) }
 
     func _readByte(at offset: Int64) -> UInt8 {
-        self._rawPtr().offset(by: offset).read()
+        unsafe self._rawPtr().offset(by: offset).read()
     }
 
     // -- Iteration -----------------------------------------------------------
 
     /// Iterates code points in this slice.
     public func iter() -> CharsIterator {
-        CharsIterator(source: self, length: (self.end - self.start), byteIndex: 0)
+        CharsIterator(source: self, length: self._len, byteIndex: 0)
     }
+}
 
-    // -- Str conformance -----------------------------------------------------
+// -- Protocol conformances ---------------------------------------------------
 
-    /// Returns self — StringSlice is already a slice.
-    public func asSlice() -> StringSlice { self }
+extend StringSlice: Iterable {
+    type Item = Char
+    type TargetIterator = CharsIterator
+}
 
-    // -- Protocol conformances -----------------------------------------------
-
+extend StringSlice: Formattable {
     public func format(mutating into writer: some Formatter, options: FormatOptions = FormatOptions.default()) {
         self.toOwned().format(into: writer, options)
     }
+}
 
+extend StringSlice: Equatable, Equal[StringSlice], Equal[String], NotEqual[StringSlice], NotEqual[String] {
+    type Equal[StringSlice].Output = Bool
+    type Equal[String].Output = Bool
+    type NotEqual[StringSlice].Output = Bool
+    type NotEqual[String].Output = Bool
+
+    /// Byte-wise equality: not normalization-aware (see
+    /// `equalsCaseInsensitive`).
     public func isEqual(to other: StringSlice) -> Bool {
-        let myLen = (self.end - self.start);
-        let otherLen = (other.end - other.start);
-        if myLen != otherLen { return false }
-        if myLen == 0 { return true }
-        _bytesEqual(
-            a: self._rawPtr().offset(by: self.start),
-            b: other._rawPtr().offset(by: other.start),
-            n: myLen
-        )
+        let n = self._len;
+        if n != other._len { return false }
+        if n == 0 { return true }
+        _bytesEqual(a: self._rawPtr(), b: other._rawPtr(), n: n)
     }
 
-    public func equal(to other: StringSlice) -> Bool {
-        self.isEqual(to: other)
-    }
+    public func equal(to other: StringSlice) -> Bool { self.isEqual(to: other) }
 
-    public func notEqual(to other: StringSlice) -> Bool {
-        if self.isEqual(to: other) { false } else { true }
-    }
+    public func notEqual(to other: StringSlice) -> Bool { self.isEqual(to: other) == false }
 
-    public func equal(to other: String) -> Bool {
-        self.isEqual(to: other.asSlice())
-    }
+    public func equal(to other: String) -> Bool { self.isEqual(to: other.asSlice()) }
 
-    public func notEqual(to other: String) -> Bool {
-        if self.isEqual(to: other.asSlice()) { false } else { true }
-    }
+    public func notEqual(to other: String) -> Bool { self.isEqual(to: other.asSlice()) == false }
+}
 
+extend StringSlice: Comparable {
+    /// Lexicographic byte-wise order; a prefix sorts first.
     public func compare(other: StringSlice) -> Ordering {
-        let myLen = (self.end - self.start);
-        let otherLen = (other.end - other.start);
+        let myLen = self._len;
+        let otherLen = other._len;
         let minLen = if myLen < otherLen { myLen } else { otherLen };
-        let cmp = _bytesCompare(
-            a: self._rawPtr().offset(by: self.start),
-            b: other._rawPtr().offset(by: other.start),
-            n: minLen
-        );
+        let cmp = _bytesCompare(a: self._rawPtr(), b: other._rawPtr(), n: minLen);
         if cmp != .Equal { return cmp }
         myLen.compare(otherLen)
     }
+}
 
+extend StringSlice: Hashable {
     public func hash[H](mutating into hasher: H) where H: Hasher {
-        hasher.write(UnsafeSlice(pointer: self._rawPtr().offset(by: self.start), count: (self.end - self.start)))
-    }
-
-    public func clone() -> StringSlice {
-        StringSlice(base: self.base, start: self.start, end: self.end)
+        hasher.write(self.asByteSlice());
+        // Length terminator, as in `String.hash`.
+        hasher.write(uint64: UInt64(truncating: self._len))
     }
 }

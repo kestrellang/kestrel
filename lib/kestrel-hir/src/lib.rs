@@ -7,11 +7,11 @@
 //! - Types are resolved to entities
 
 pub mod body;
-pub mod builtin;
+pub use kestrel_ast::builtin;
 pub mod res;
 pub mod ty;
 
 pub use body::*;
-pub use builtin::Builtin;
+pub use builtin::{Builtin, INDIRECTION_PLACE};
 pub use res::{Local, LocalId, Res};
 pub use ty::HirTy;

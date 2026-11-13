@@ -37,7 +37,7 @@ func use() -> Result[Int64, E2] {
 
 func runErr() -> Bool {
     let b = use();
-    b.isErr()
+    b.isErr
 }   // `b` (the propagated Err) drops here -> exactly one payload deinit
 
 @main

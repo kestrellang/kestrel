@@ -3,6 +3,9 @@
 
 module Test
 
+@builtin(.Copyable)
+protocol Copyable {}
+
 struct Resource: not Copyable {
     var id: lang.i64
 

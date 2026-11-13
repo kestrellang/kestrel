@@ -39,14 +39,16 @@ impl Header {
         }
     }
 
-    fn write(&self, kind: DeriveKind, protocol: &str, shape: &Shape) -> String {
+    /// The header text, and how many leading `where` constraints it wrote
+    /// for a field bound that isn't the derived protocol ([`Generated`]).
+    fn write(&self, kind: DeriveKind, protocol: &str, shape: &Shape) -> (String, usize) {
         match self {
             Header::Extension {
                 target,
                 where_clause,
             } => match where_clause {
-                Some(w) => format!("extend {target}: {protocol} {w}"),
-                None => format!("extend {target}: {protocol}"),
+                Some(w) => (format!("extend {target}: {protocol} {w}"), 0),
+                None => (format!("extend {target}: {protocol}"), 0),
             },
             Header::Type => {
                 let mut out = format!("extend {}", shape.path);
@@ -55,17 +57,28 @@ impl Header {
                 }
                 let _ = write!(out, ": {protocol}");
                 let slots = bound_slots(kind, shape);
+                // A field bound other than the derived protocol (`Copyable`
+                // for `Cloneable`) is written by its lang-item name only so
+                // the text parses; `derive::expand` swaps it for an
+                // `AstType::Builtin`, so no user `Copyable` can shadow it.
+                let lang_bound = kind.field_bound() != kind.builtin();
+                let bound = if lang_bound {
+                    kind.field_bound().name()
+                } else {
+                    protocol
+                };
                 let mut constraints: Vec<String> = shape
                     .params
                     .iter()
                     .filter(|p| slots.iter().any(|s| s.idents.contains(p)))
-                    .map(|p| format!("{p}: {protocol}"))
+                    .map(|p| format!("{p}: {bound}"))
                     .collect();
+                let lang_bounds = if lang_bound { constraints.len() } else { 0 };
                 constraints.extend(shape.where_constraints.iter().cloned());
                 if !constraints.is_empty() {
                     let _ = write!(out, " where {}", constraints.join(", "));
                 }
-                out
+                (out, lang_bounds)
             },
         }
     }
@@ -99,6 +112,15 @@ pub(crate) fn last_path_segment(text: &str) -> Option<String> {
     (!last.is_empty()).then(|| last.to_string())
 }
 
+/// One derived extension's source.
+pub(crate) struct Generated {
+    pub text: String,
+    /// How many of its leading `where` constraints bound a parameter by
+    /// [`DeriveKind::field_bound`] when that is not the derived protocol;
+    /// their placeholder spelling is replaced after the build.
+    pub lang_bounds: usize,
+}
+
 /// `extend ...: P { <witnesses> }` for one derived protocol, or `None` when
 /// this shape can't derive it (an enum `Defaultable` without exactly one
 /// `@default` case; the analyzer reports it).
@@ -107,18 +129,20 @@ pub(crate) fn extension(
     protocol: &str,
     header: &Header,
     shape: &Shape,
-) -> Option<String> {
+) -> Option<Generated> {
     let body = match kind {
         DeriveKind::Equatable => equatable(shape),
         DeriveKind::Hashable => hashable(shape),
         DeriveKind::Comparable => comparable(shape),
         DeriveKind::Formattable => formattable(shape),
         DeriveKind::Defaultable => defaultable(shape)?,
+        DeriveKind::Cloneable => cloneable(shape)?,
     };
-    Some(format!(
-        "{} {{\n{body}}}\n\n",
-        header.write(kind, protocol, shape)
-    ))
+    let (head, lang_bounds) = header.write(kind, protocol, shape);
+    Some(Generated {
+        text: format!("{head} {{\n{body}}}\n\n"),
+        lang_bounds,
+    })
 }
 
 // ===== Patterns =====
@@ -352,13 +376,16 @@ fn formattable(shape: &Shape) -> String {
             }
         },
     };
-    // Width and padding apply to the whole value: render it unpadded, then pad.
+    // Width and padding apply to the whole value: render it unpadded, then
+    // pad. Precision is the fields' business, so `pad` must not truncate.
     format!(
         "    public func format(mutating into writer: some Formatter, options: FormatOptions = FormatOptions.default()) {{
         if let .Some(_) = options.width {{
             var unpadded = options;
             unpadded.width = .None;
-            _writePadded(into: writer, self.formatted(unpadded), options);
+            var outer = options;
+            outer.precision = .None;
+            writer.pad(self.formatted(unpadded), outer);
             return
         }}
         let fieldOptions = FormatOptions.default();
@@ -409,4 +436,72 @@ fn defaultable(shape: &Shape) -> Option<String> {
         },
     };
     Some(format!("    public init() {{\n        {body}\n    }}\n"))
+}
+
+// ===== Cloneable =====
+
+/// A clone copies every field or payload. Each copy is implicit, so a
+/// `Cloneable` field runs its own `clone()` and a `Copyable` one is copied
+/// bitwise.
+///
+/// The copies happen in a private helper, not in `clone()` itself: inside a
+/// type's own `clone()` the compiler doesn't expand copies into clones (that
+/// would recurse), so copying a payload there would alias it. The helper
+/// takes `other` borrowed, so calling it doesn't copy `self` either. Structs
+/// build through an init, so private fields and custom inits don't matter.
+fn cloneable(shape: &Shape) -> Option<String> {
+    let (helper, call) = match &shape.body {
+        ShapeBody::Struct(fields) => {
+            let assigns: String = fields
+                .iter()
+                .map(|f| {
+                    let name = f.label.as_deref().unwrap_or_default();
+                    format!("self.{name} = other.{name}; ")
+                })
+                .collect();
+            (
+                format!(
+                    "    private init(derivedCloneOf other: Self) {{\n        {assigns}\n    }}\n"
+                ),
+                "Self(derivedCloneOf: self)",
+            )
+        },
+        // A case-less enum has no value to clone; DeriveSite reports it.
+        ShapeBody::Enum(cases) if cases.is_empty() => return None,
+        ShapeBody::Enum(cases) => {
+            let mut arms = "match other {\n".to_string();
+            for case in cases {
+                let rebuilt = match case.payload.is_empty() {
+                    true => format!(".{}", case.name),
+                    false => {
+                        let args: Vec<String> = case
+                            .payload
+                            .iter()
+                            .enumerate()
+                            .map(|(i, p)| match &p.label {
+                                Some(l) => format!("{l}: a{i}"),
+                                None => format!("a{i}"),
+                            })
+                            .collect();
+                        format!(".{}({})", case.name, args.join(", "))
+                    },
+                };
+                let _ = writeln!(
+                    arms,
+                    "            {} => {rebuilt},",
+                    case_pattern(case, Some("a"))
+                );
+            }
+            arms.push_str("        }");
+            (
+                format!(
+                    "    private static func derivedClone(of other: Self) -> Self {{\n        {arms}\n    }}\n"
+                ),
+                "Self.derivedClone(of: self)",
+            )
+        },
+    };
+    Some(format!(
+        "    public func clone() -> Self {{\n        {call}\n    }}\n{helper}"
+    ))
 }

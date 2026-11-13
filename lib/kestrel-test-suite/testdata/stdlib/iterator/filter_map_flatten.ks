@@ -13,8 +13,8 @@ module Test
 
             let compacted = arr.iter().compactMap().collect();
             if compacted.count != 2 { return 1 }
-            if compacted(unchecked: 0) != 1 { return 2 }
-            if compacted(unchecked: 1) != 3 { return 3 }
+            if unsafe compacted(unchecked: 0) != 1 { return 2 }
+            if unsafe compacted(unchecked: 1) != 3 { return 3 }
 
             // Test flatMap
             var nested = std.collections.Array[std.collections.Array[std.numeric.Int64]]();
@@ -28,8 +28,8 @@ module Test
 
             let flat = nested.iter().flatMap(as: { (arr) in arr.iter() }).collect();
             if flat.count != 3 { return 4 }
-            if flat(unchecked: 0) != 1 { return 5 }
-            if flat(unchecked: 2) != 3 { return 6 }
+            if unsafe flat(unchecked: 0) != 1 { return 5 }
+            if unsafe flat(unchecked: 2) != 3 { return 6 }
 
             0
         }

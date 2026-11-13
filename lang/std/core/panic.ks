@@ -3,7 +3,7 @@
 module std.core
 
 import std.text.(String)
-import std.io.stdio.(eprintln)
+import std.streams.(eprintln)
 
 /// Aborts the process with `message`.
 ///
@@ -28,6 +28,8 @@ public func fatalError(message: String) -> ! {
     // trap. The Result is intentionally discarded — there is no recovery and
     // the trap is unconditional. `lang.panic()` is an argument-free diverging
     // intrinsic (a bare CPU trap); the message surfaces here, not in codegen.
+    // The trap skips `atexit`, so this write is also what flushes standard
+    // output's buffer (StandardError flushes it before every write).
     eprintln("fatal error: \(message)");
     lang.panic()
 }

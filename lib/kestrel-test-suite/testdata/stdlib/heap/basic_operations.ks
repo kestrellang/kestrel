@@ -39,11 +39,11 @@ module Test
 
             // Pop on empty returns None
             let empty = h.pop();
-            if empty.isSome() { return 14 }
+            if empty.isSome { return 14 }
 
             // Peek on empty returns None
             let emptyPeek = h.peek();
-            if emptyPeek.isSome() { return 15 }
+            if emptyPeek.isSome { return 15 }
 
             // Test clear
             h.push(5);

@@ -8,6 +8,9 @@
 // is legal again. This is the positive counterpart of the E507 tests.
 module Test
 
+@builtin(.Copyable)
+protocol Copyable {}
+
 struct Res: not Copyable {
     var v: lang.i64
 }

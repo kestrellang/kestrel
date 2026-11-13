@@ -1,11 +1,11 @@
-// OwnedBox[T] - single-owner heap box that frees its payload on drop.
+// OwnedBox[T, A] - single-owner heap box that frees its payload on drop.
 
 module std.memory
 
-import std.core.(Bool, Cloneable, ConsumingIndirection, fatalError, Indirection, MutableIndirection, Sized, Static)
+import std.core.(Defaultable, Bool, Cloneable, ConsumingIndirection, Copyable, fatalError, Indirection, MutableIndirection, Sized, Static)
 import std.numeric.(Int64)
 import std.result.(Optional)
-import std.memory.(ExistentialBox, Layout, Pointer, RawPointer, Allocator, SystemAllocator)
+import std.memory.(ExistentialBox, Layout, Pointer, RawPointer, Allocator, GlobalAllocator)
 
 /// Heap allocation with exactly one owner.
 ///
@@ -25,14 +25,17 @@ import std.memory.(ExistentialBox, Layout, Pointer, RawPointer, Allocator, Syste
 ///
 /// # Representation
 ///
-/// A `Pointer[T]` to a heap block holding just the payload, plus a liveness
-/// flag. The block is measured from the payload itself (`Layout.ofValue`),
+/// A `Pointer[T]` to a heap block holding just the payload, plus the
+/// allocator `A` that frees it: one word for a sized payload and a
+/// stateless allocator. The pointer is null once `consumePointee` has given the
+/// payload up. The block is measured from the payload itself (`Layout.ofValue`),
 /// so an unsized payload works.
 ///
 /// # Memory Model
 ///
-/// Single owner, no counting. `OwnedBox` is not `Copyable`; it is
-/// `Cloneable` when its payload is, and a clone allocates a new block.
+/// Single owner, no counting. `OwnedBox` is never bit-copied; it is
+/// `Cloneable` when its payload can be copied at all (bitwise or by its own
+/// `clone()`), and a clone allocates a new block holding that copy.
 ///
 /// # Guarantees
 ///
@@ -44,88 +47,109 @@ import std.memory.(ExistentialBox, Layout, Pointer, RawPointer, Allocator, Syste
 // raw existential, or reference-bearing. Members that move a `T` say
 // `where T: Sized`.
 @builtin(.OwnedBox)
-public struct OwnedBox[T]: not Copyable where T: not Copyable, T: not Sized, T: not Static {
+public struct OwnedBox[T, A = GlobalAllocator]: not Copyable where T: not Copyable, T: not Sized, T: not Static, A: Allocator, A: Copyable {
+    // Null once `consumePointee` has handed the payload out and freed the
+    // block, so `deinit` has nothing left to do (Kestrel has no `forget`).
+    // No separate liveness flag: indirect enum cases store this box, so
+    // every word here is a word in each recursive node.
     fileprivate var ptr: Pointer[T]
-    // False once `consumePointee` has handed the payload out and freed the
-    // block, so `deinit` has nothing left to do. Kestrel has no `forget`.
-    fileprivate var live: Bool
+    // Frees the block. A stateless allocator adds no bytes, so an
+    // indirect enum node still pays one word per box.
+    fileprivate var allocator: A
 
-    /// @name From Value
-    /// Allocates a block holding `value`. Panics if the underlying
-    /// `SystemAllocator` returns `.None`.
+    /// @name Value and Allocator
+    /// Moves `value` into a block allocated from `allocator`.
     ///
     /// # Errors
     ///
     /// Panics with `"OwnedBox allocation failed"` on allocation failure.
-    public init(consuming value: T) where T: Sized {
+    public init(consuming value: T, allocator allocator: A) where T: Sized {
         let layout: Layout = Layout.of[T]();
-        var allocator: SystemAllocator = SystemAllocator();
-        let result: RawPointer? = allocator.allocate(layout);
+        var alloc = allocator;
+        let result: RawPointer? = alloc.allocate(layout);
+        self.allocator = alloc;
         if let .Some(rawPtr) = result {
             self.ptr = rawPtr.cast[T]();
-            self.ptr.write(value);
-            self.live = true;
+            unsafe self.ptr.write(value);
         } else {
             fatalError("OwnedBox allocation failed")
         }
     }
 
     /// Pointer to the payload. Valid while the box is alive.
-    public func valuePtr() -> Pointer[T] {
+    internal func valuePtr() -> Pointer[T] {
         self.ptr
+    }
+
+    /// The payload, in place: `&b.value` borrows it, `b.value.x = 1` writes
+    /// it. The box is its only owner, so a write needs a mutable box.
+    public var value: T {
+        ref { unsafe self.ptr.value }
+        mutating ref { unsafe self.ptr.mutatingValue }
     }
 
     // Frees the block without touching the payload. Measured from the
     // payload so an unsized one works too.
     fileprivate func free() {
-        let layout = Layout.ofValue(at: self.ptr);
-        var allocator = SystemAllocator();
-        allocator.deallocate(self.ptr.asRaw(), layout)
+        let layout = unsafe Layout.ofValue(at: self.ptr);
+        var allocator = self.allocator;
+        unsafe allocator.deallocate(self.ptr.asRaw(), layout)
     }
 
     /// Drops the payload and frees the block, unless `consumePointee`
     /// already took the payload out.
     deinit {
-        if self.live {
-            self.ptr.dropInPlace();
-            self.free()
-        }
+        if self.ptr.isNull { return; }
+        unsafe self.ptr.dropInPlace();
+        self.free()
     }
 }
 
-extend OwnedBox[T]: MutableIndirection {
+extend OwnedBox[T, A]: MutableIndirection {
     type Target = T
-    public func pointeeRef() -> &T { self.ptr.value }
-    public mutating func pointeeMutRef() -> &mutating T { self.ptr.mutatingValue }
 }
 
 // The box owns its payload alone, so it can give it up.
-extend OwnedBox[T]: ConsumingIndirection {
+extend OwnedBox[T, A]: ConsumingIndirection {
     public consuming func consumePointee[R](body: (Pointer[T]) -> R) -> R where R: not Copyable, R: not Static {
-        // Move `self` into a `var` before clearing `live`: assigning a field
+        // Move `self` into a `var` before nulling `ptr`: assigning a field
         // of a `consuming self` directly writes to a copy today.
         var me = self;
         let result = body(me.ptr);
         me.free();
-        me.live = false;
+        // Null address, same metadata: `deinit` then skips the payload.
+        me.ptr = RawPointer.nullPointer().cast[T]().withMetadata(of: me.ptr);
         result
     }
 }
 
-// `any[OwnedBox] P`: the struct's `init(consuming:)` is the witness.
-extend OwnedBox[T]: ExistentialBox {}
-
-// Moves the payload out and frees the block.
-extend OwnedBox[T] where T: Sized {
-    public consuming func takeValue() -> T {
-        self.consumePointee { (p) in p.take() }
+extend OwnedBox[T, A] where A: Defaultable {
+    /// @name From Value
+    /// Allocates a block holding `value` from a default-made `A`.
+    ///
+    /// # Errors
+    ///
+    /// Panics with `"OwnedBox allocation failed"` on allocation failure.
+    public init(consuming value: T) where T: Sized {
+        self.init(value, allocator: A())
     }
 }
 
-// A clone allocates a fresh block holding a clone of the payload. An unsized
-// payload clones through its function table (existentials M4).
-extend OwnedBox[T]: Cloneable where T: Cloneable, T: Sized {
-    public func clone() -> OwnedBox[T] {
-        OwnedBox(self.ptr.value.clone())
+// `any[OwnedBox] P`: the `init(consuming:)` above is the witness.
+extend OwnedBox[T, A]: ExistentialBox where A: Defaultable {}
+
+// Moves the payload out and frees the block.
+extend OwnedBox[T, A] where T: Sized {
+    @builtin(.OwnedBoxTakeValue)
+    public consuming func takeValue() -> T {
+        self.consumePointee { (p) in unsafe p.take() }
+    }
+}
+
+// A clone allocates a fresh block holding a copy of the payload — a bit-copy
+// or the payload's own `clone()`, whichever copying `T` means.
+extend OwnedBox[T, A]: Cloneable where T: Copyable, T: Sized {
+    public func clone() -> OwnedBox[T, A] {
+        OwnedBox(unsafe self.ptr.value, allocator: self.allocator)
     }
 }

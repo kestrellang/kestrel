@@ -15,6 +15,7 @@ kestrel-compiler = { path = "../kestrel-compiler" }
 kestrel-ast = { path = "../kestrel-ast" }
 kestrel-ast-builder = { path = "../kestrel-ast-builder" }
 kestrel-hecs = { path = "../kestrel-hecs" }
+kestrel-name-res = { path = "../kestrel-name-res" }
 kestrel-syntax-tree = { path = "../kestrel-syntax-tree" }
 clap = { workspace = true }
 serde = { version = "1", features = ["derive"] }

@@ -36,7 +36,7 @@ struct BlockBuffer[F] where F: BlockFunction {
     }
 
     mutating func update(bytes: UnsafeSlice[UInt8]) {
-        self.totalLength = self.totalLength + UInt64(from: bytes.count);
+        self.totalLength = self.totalLength.addWrapping(UInt64(truncating: bytes.count));
         var offset: Int64 = 0;
 
         // Top up a partial block first.
@@ -55,7 +55,7 @@ struct BlockBuffer[F] where F: BlockFunction {
 
         // Then whole blocks straight from the input, without copying.
         while offset + self.blockLength <= bytes.count {
-            self.function.compress(bytes.drop(first: offset).prefix(self.blockLength));
+            self.function.compress(bytes.drop(first: offset).prefix(self.blockLength).asUnsafeSlice());
             offset = offset + self.blockLength;
         }
 
@@ -77,7 +77,7 @@ struct BlockBuffer[F] where F: BlockFunction {
             tail.append(0);
         }
 
-        let bitLength = self.totalLength * 8;
+        let bitLength = self.totalLength.multiplyWrapping(8);
         match encoding {
             .BigEndian64 => { tail.append(contentsOf: bitLength.toBytesBigEndian().asUnsafeSlice()); },
             .BigEndian128 => {
@@ -91,7 +91,7 @@ struct BlockBuffer[F] where F: BlockFunction {
 
         var offset: Int64 = 0;
         while offset < tail.count {
-            function.compress(tail.asUnsafeSlice().drop(first: offset).prefix(self.blockLength));
+            function.compress(tail.asUnsafeSlice().drop(first: offset).prefix(self.blockLength).asUnsafeSlice());
             offset = offset + self.blockLength;
         }
         function

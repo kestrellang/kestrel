@@ -66,7 +66,7 @@ fn main() {
         std::process::exit(1);
     }
 
-    // Link the stdlib C shims (libc_shims.c) exactly like the test runner does,
+    // Link the stdlib C shims exactly like the test runner does,
     // otherwise symbols like `_kestrel_open` are undefined at link time.
     let std_dir = kestrel_compiler::stdlib_path::default_std_path().ok();
     let c_sources = kestrel_compiler::stdlib_path::stdlib_c_sources(std_dir.as_deref());

@@ -70,7 +70,7 @@ public struct Headers: Cloneable {
     /// ```
     public func value(forName name: String) -> String? {
         for (key, value) in self.entries {
-            if key.equalsIgnoreAsciiCase(name) {
+            if key.equalsCaseInsensitiveAscii(name) {
                 return .Some(value)
             }
         }
@@ -92,7 +92,7 @@ public struct Headers: Cloneable {
     public func values(forName name: String) -> Array[String] {
         var result = [];
         for (key, value) in self.entries {
-            if key.equalsIgnoreAsciiCase(name) {
+            if key.equalsCaseInsensitiveAscii(name) {
                 result.append(value)
             }
         }
@@ -145,8 +145,8 @@ public struct Headers: Cloneable {
     public mutating func remove(name: String) {
         var i: Int64 = 0;
         while i < self.entries.count {
-            let pair = self.entries(unchecked: i);
-            if pair.0.equalsIgnoreAsciiCase(name) {
+            let pair = unsafe self.entries(unchecked: i);
+            if pair.0.equalsCaseInsensitiveAscii(name) {
                  self.entries.remove(at: i);
             } else {
                 i = i + 1
@@ -166,7 +166,7 @@ public struct Headers: Cloneable {
     /// h.has(name: "missing");  // false
     /// ```
     public func has(name: String) -> Bool {
-        self.value(forName: name).isSome()
+        self.value(forName: name).isSome
     }
 
     /// The total number of header entries (including duplicate names).
@@ -201,14 +201,14 @@ extend Headers {
     /// ```
     public static func parse(from headerBlock: String) -> Headers {
         var headers = Headers();
-        for line in headerBlock.split("\r\n") {
+        for line in headerBlock.split(by: "\r\n") {
             if line.bytes.count == 0 {
                 break
             }
             match line.firstIndex(of: ":") {
                 .Some(colonIdx) => {
-                    let name = line.subslice(from: line.start, to: colonIdx.value).trimmed().toOwned();
-                    let value = line.subslice(from: colonIdx.value + 1, to: line.end).trimmed().toOwned();
+                    let name = line.subslice(from: 0, to: colonIdx.value).trimmed().toOwned();
+                    let value = line.subslice(from: colonIdx.value + 1, to: line.bytes.count).trimmed().toOwned();
                     headers.add(name, value)
                 },
                 .None => {}

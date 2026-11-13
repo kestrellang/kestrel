@@ -124,11 +124,28 @@ impl LowerCtx<'_> {
 
     /// `_` inside an argument: the innermost frame's value. Without a frame
     /// the parser has already reported E811.
-    pub(crate) fn lower_placeholder_use(&mut self, span: &Span) -> HirExprId {
-        match self.placeholder_frames.last().cloned() {
-            Some(fill) => self.lower_fill(&fill, span),
-            None => self.alloc_expr(HirExpr::Error { span: span.clone() }),
+    pub(crate) fn lower_placeholder_use(&mut self, node: &SyntaxNode, span: &Span) -> HirExprId {
+        if let Some(fill) = self.placeholder_frames.last().cloned() {
+            return self.lower_fill(&fill, span);
         }
+        // The parser leaves a bare tuple element `(a, _)` to us: it is fine
+        // as a tuple-assignment target (which never lowers it here) and E811
+        // anywhere else.
+        if is_bare_tuple_element(node) {
+            self.ctx.accumulate(
+                kestrel_reporting::Diagnostic::error()
+                    .with_code("E811")
+                    .with_message(
+                        "`_` here isn't a placeholder: `_` alone in a tuple only discards a \
+                         part of a tuple assignment's target (`(a, _) = pair()`)",
+                    )
+                    .with_labels(vec![kestrel_reporting::Label::primary(
+                        span.file_id,
+                        span.range(),
+                    )]),
+            );
+        }
+        self.alloc_expr(HirExpr::Error { span: span.clone() })
     }
 
     fn lower_fill(&mut self, fill: &PlaceholderFill, span: &Span) -> HirExprId {
@@ -354,4 +371,17 @@ fn call_has_top_level_placeholder(call: &SyntaxNode, file_id: usize) -> bool {
         .filter(|c| c.kind() == SyntaxKind::ArgumentList)
         .flat_map(|list| arguments(&list, file_id))
         .any(|arg| is_hole(&arg.value) || has_placeholder_use(&arg.value))
+}
+
+/// `_` that is a whole element of a tuple expression (see
+/// `at_bare_tuple_element` in the parser, which skips E811 for it).
+fn is_bare_tuple_element(node: &SyntaxNode) -> bool {
+    let Some(wrapper) = node.parent() else {
+        return false;
+    };
+    wrapper.kind() == SyntaxKind::Expression
+        && wrapper.text_range() == node.text_range()
+        && wrapper
+            .parent()
+            .is_some_and(|t| t.kind() == SyntaxKind::ExprTuple)
 }

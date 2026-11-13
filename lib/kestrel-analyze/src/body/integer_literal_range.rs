@@ -1,5 +1,7 @@
 //! # Integer Literal Range Analyzer
 //!
+//! Also checks character literals typed as integers (E120).
+//!
 //! Rejects integer literals whose value does not fit the fixed-width integer
 //! type they resolved to. Without this check an out-of-range literal silently
 //! truncates/wraps at codegen (`let a: Int8 = 200` runs as `-56`,
@@ -23,8 +25,29 @@
 //! **Labels:**
 //! - Primary: the literal expression (or the `-literal` operator expression)
 //!   - Span source: `util::expr_span` on the literal `HirExprId`, or on the
-//!     `negate` `ProtocolCall` `HirExprId` when the literal is negated
+//!     `negate` `ProtocolCall` `HirExprId` when the literal is negated;
+//!     `util::pat_span` on a literal / range `HirPatId` (types from
+//!     `TypedBody::literal_pat_types`)
 //!   - Message: "{value} is not in the range {min}...{max}"
+//!
+//! **Notes:** (none)
+//!
+//! ### E120 — `char_literal_not_ascii` (Error, Correctness)
+//!
+//! A character literal typed as an integer (`let b: UInt8 = '#'`) is a
+//! byte, so it must be ASCII. A wider character is several UTF-8 bytes;
+//! truncating it to one would silently keep the wrong byte.
+//!
+//! **Message:** "character literal '{char}' is not ASCII, so it is not one `{type}` byte"
+//!
+//! **Labels:**
+//! - Primary: the character literal
+//!   - Span source: `util::expr_span` on the literal `HirExprId`, or
+//!     `util::pat_span` on a literal / range `HirPatId`
+//!   - Message: "U+{scalar} is outside '\\0'...'\\x7F'"
+//!
+//! **Notes:**
+//! - "write the bytes as integers, or use `\"...\".bytes` for its UTF-8 encoding"
 
 use crate::context::BodyContext;
 use crate::diagnostic::*;
@@ -32,15 +55,24 @@ use crate::traits::{AnalyzerId, BodyCheck, Describe};
 use crate::util;
 use kestrel_ast_builder::Name;
 use kestrel_hir::body::*;
+use kestrel_span::Span;
 use kestrel_type_infer::result::ResolvedTy;
 use std::collections::HashSet;
 
-static DESCRIPTORS: &[DiagnosticDescriptor] = &[DiagnosticDescriptor {
-    id: "E121",
-    name: "integer_literal_out_of_range",
-    default_severity: Severity::Error,
-    category: Category::Correctness,
-}];
+static DESCRIPTORS: &[DiagnosticDescriptor] = &[
+    DiagnosticDescriptor {
+        id: "E121",
+        name: "integer_literal_out_of_range",
+        default_severity: Severity::Error,
+        category: Category::Correctness,
+    },
+    DiagnosticDescriptor {
+        id: "E120",
+        name: "char_literal_not_ascii",
+        default_severity: Severity::Error,
+        category: Category::Correctness,
+    },
+];
 
 pub struct IntegerLiteralRangeAnalyzer;
 
@@ -61,16 +93,18 @@ impl BodyCheck for IntegerLiteralRangeAnalyzer {
         // as their negated value, so the bare-literal pass must skip them.
         let mut negated: HashSet<HirExprId> = HashSet::new();
 
-        // Pass 1: `negate` over an integer literal → check the negated value.
-        // The `-literal` operator and its receiver share the same resolved type.
+        // Pass 1: `Negatable.negate` over an integer literal → check the
+        // negated value. The `-literal` operator and its receiver share the
+        // same resolved type. Matched by the tagged requirement, not a name.
+        let negate = cx.query.query(kestrel_name_res::ResolveBuiltin {
+            builtin: kestrel_hir::Builtin::NegateOperatorMethod,
+            root: cx.root,
+        });
         for (call_id, expr) in cx.hir.exprs.iter() {
-            let HirExpr::ProtocolCall {
-                receiver, method, ..
-            } = expr
-            else {
+            let HirExpr::ProtocolCall { receiver, .. } = expr else {
                 continue;
             };
-            if method.as_str() != Some("negate") {
+            if negate.is_none() || crate::util::protocol_call_method(cx, call_id) != negate {
                 continue;
             }
             let HirExpr::Literal {
@@ -82,28 +116,70 @@ impl BodyCheck for IntegerLiteralRangeAnalyzer {
             };
             negated.insert(*receiver);
             if let Some(ty) = cx.typed.expr_types.get(receiver) {
-                check_range(cx, v.wrapping_neg(), ty, call_id, &mut diags);
+                check_range(
+                    cx,
+                    v.wrapping_neg(),
+                    ty,
+                    util::expr_span(cx.hir, call_id),
+                    &mut diags,
+                );
             }
         }
 
-        // Pass 2: every other integer literal → check the literal value.
+        // Pass 2: every other integer literal → check the literal value;
+        // a character literal typed as an integer → it must be ASCII.
         for (id, expr) in cx.hir.exprs.iter() {
-            if negated.contains(&id) {
-                continue;
-            }
-            let HirExpr::Literal {
-                value: HirLiteral::Integer(v),
-                ..
-            } = expr
-            else {
+            let HirExpr::Literal { value, .. } = expr else {
                 continue;
             };
-            if let Some(ty) = cx.typed.expr_types.get(&id) {
-                check_range(cx, *v, ty, id, &mut diags);
+            let Some(ty) = cx.typed.expr_types.get(&id) else {
+                continue;
+            };
+            match value {
+                HirLiteral::Integer(v) if !negated.contains(&id) => {
+                    check_range(cx, *v, ty, util::expr_span(cx.hir, id), &mut diags)
+                },
+                HirLiteral::Char { .. } => {
+                    check_literal(cx, value, ty, util::expr_span(cx.hir, id), &mut diags)
+                },
+                _ => {},
             }
         }
 
+        // Pass 3: literal and range patterns, against the type of the value
+        // they match (`match b { 'ü' => .. }` on a `UInt8`). A pattern's
+        // `-1` is already a negative literal, so no negate pass is needed.
+        for (&pat_id, ty) in &cx.typed.literal_pat_types {
+            let span = util::pat_span(cx.hir, pat_id);
+            match &cx.hir.pats[pat_id] {
+                HirPat::Literal { value, .. } => check_literal(cx, value, ty, span, &mut diags),
+                HirPat::Range { start, end, .. } => {
+                    for bound in [start, end].into_iter().flatten() {
+                        check_literal(cx, bound, ty, span.clone(), &mut diags);
+                    }
+                },
+                _ => {},
+            }
+        }
+        // Pattern ids come from a HashMap; report in source order.
+        diags.sort_by_key(|d| d.labels.first().map(|l| (l.span.start, l.span.end)));
+
         diags
+    }
+}
+
+/// Range-check one integer or character literal against `ty`.
+fn check_literal(
+    cx: &BodyContext<'_>,
+    value: &HirLiteral,
+    ty: &ResolvedTy,
+    span: Span,
+    diags: &mut Vec<AnalyzeDiagnostic>,
+) {
+    match value {
+        HirLiteral::Integer(v) => check_range(cx, *v, ty, span, diags),
+        HirLiteral::Char { value: c, .. } => check_byte_char(cx, *c, ty, span, diags),
+        _ => {},
     }
 }
 
@@ -113,7 +189,7 @@ fn check_range(
     cx: &BodyContext<'_>,
     value: i128,
     ty: &ResolvedTy,
-    site: HirExprId,
+    span: Span,
     diags: &mut Vec<AnalyzeDiagnostic>,
 ) {
     let Some((min, max, type_name)) = int_type_bounds(cx, ty) else {
@@ -127,11 +203,45 @@ fn check_range(
         severity: DESCRIPTORS[0].default_severity,
         message: format!("integer literal out of range for `{}`", type_name),
         labels: vec![DiagLabel {
-            span: util::expr_span(cx.hir, site),
+            span,
             message: format!("{} is not in the range {}...{}", value, min, max),
             is_primary: true,
         }],
         notes: vec![],
+    });
+}
+
+/// Emit E120 if a character literal resolved to an integer type is not
+/// ASCII. Non-integer types (`Char`, user conformers) are ignored.
+fn check_byte_char(
+    cx: &BodyContext<'_>,
+    scalar: u32,
+    ty: &ResolvedTy,
+    span: Span,
+    diags: &mut Vec<AnalyzeDiagnostic>,
+) {
+    if scalar <= 0x7F {
+        return;
+    }
+    let Some((_, _, type_name)) = int_type_bounds(cx, ty) else {
+        return;
+    };
+    let shown = char::from_u32(scalar).map_or_else(|| "?".into(), |c| c.escape_debug().to_string());
+    diags.push(AnalyzeDiagnostic {
+        descriptor_id: DESCRIPTORS[1].id,
+        severity: DESCRIPTORS[1].default_severity,
+        message: format!(
+            "character literal '{}' is not ASCII, so it is not one `{}` byte",
+            shown, type_name
+        ),
+        labels: vec![DiagLabel {
+            span,
+            message: format!("U+{:04X} is outside '\\0'...'\\x7F'", scalar),
+            is_primary: true,
+        }],
+        notes: vec![
+            "write the bytes as integers, or use `\"...\".bytes` for its UTF-8 encoding".into(),
+        ],
     });
 }
 

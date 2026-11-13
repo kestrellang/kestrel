@@ -76,6 +76,13 @@ let letter: Char = 'k';
 
 Strings support interpolation with `\(expr)` — see [String Interpolation](string-interpolation.md).
 
+A character literal can also be a `UInt8` byte, so bytes compare against characters directly. The literal must be ASCII: a wider character is several UTF-8 bytes, so `let b: UInt8 = 'é'` is a compile error (E120). An untyped character literal is still a `Char`.
+
+```kestrel
+let comma: UInt8 = ',';          // 44
+"a,b".bytes(1) == ','            // true
+```
+
 ### Unit Type
 
 The unit type `()` represents the absence of a meaningful value:
@@ -144,6 +151,23 @@ let nested: ((Int64, Int64), String) = ((1, 2), "pair");
 
 - **Structural typing:** Two tuple types are equal if they have the same number of elements with the same types in the same order
 - **Positional access:** Elements are accessed by position (`pair.0`, `pair.1`), zero-indexed
+
+### Tuple Assignment
+
+A tuple of places on the left of `=` assigns each part. The whole right side
+is evaluated before any target is written, so a swap or a Fibonacci step
+needs no temporary:
+
+```kestrel
+(a, b) = (b, a);              // swap
+(a, b) = (b, a + b);          // uses the old a and b
+(p.x, xs(0)) = pair();        // fields and subscripts work as targets
+((a, b), c) = ((1, 2), 3);    // nested
+(n, _) = pair();              // `_` discards that part
+```
+
+Each target is checked like a plain assignment: it must be a `var` place
+(E200, E202). A `_` alone in a tuple is only allowed here (E811 elsewhere).
 
 ### Unit as Empty Tuple
 
@@ -239,6 +263,16 @@ let saved: escaping () -> Int64 = { 7 };               // owns captures, may out
 ```
 
 The kind is part of type identity, so `Array[escaping () -> Int64]` and `Array[() -> Int64]` are different types. See [Closures](closures.md) for the full model.
+
+### C Function Types
+
+`@extern(.C) (A, B) -> R` is the address of a function with the C calling convention: one pointer, exactly a C function pointer. Naming an `@export(.C)` or `@extern(.C)` function where one is expected gives its C entry point; a closure has no C address. Calling one needs `unsafe`, and it is `FFISafe` when its params and return are. It is never null; for a callback C allows to be `NULL`, use `std.ffi.NullableCFunction[F]`. See [Callbacks](functions.md#callbacks).
+
+```kestrel
+type Compare = @extern(.C) (Pointer[Int32], Pointer[Int32]) -> Int32
+let cmp: Compare = compareInts;     // an @export(.C) function
+let order = unsafe cmp(a, b);       // a C call
+```
 
 ## Optional Types
 
@@ -498,12 +532,39 @@ let nothing: Int64? = .None;   // Cannot infer wrapped type from bare .None
 
 ## Type Conversion
 
-Kestrel does not perform implicit type conversions between numeric types. Conversions are explicit, via the `init(from:)` initializers each numeric type provides:
+Kestrel does not perform implicit type conversions between numeric types. Every conversion is an explicit initializer, and its label says what happens when the value doesn't fit.
+
+`init(from:)` (the `Convertible[From]` protocol) is lossless. It exists only when every source value converts exactly: widening integers, integers that fit a float's mantissa (up to 24 bits for `Float32`, 53 for `Float64`), `Float32` to `Float64`, and every type from itself.
 
 ```kestrel
-let x: Int64 = 42;
-let y = Float64(from: x);        // Int64 → Float64
-let narrowed = Int32(from: x);   // Int64 → Int32 (narrowing truncates high bits)
+let i: Int32 = -7;
+let w = Int64(from: i);          // widening: always fits
+let f = Float64(from: i);        // 32 bits fit Float64's 53-bit mantissa
+```
+
+A source that doesn't always fit has no `from:`. Integers offer the `NarrowsFrom[From]` spellings instead:
+
+| Label | Out-of-range integer | Float source |
+|---|---|---|
+| `exactly:` | `nil` (failable) | `nil` for a fraction, NaN, infinity or out of range |
+| `truncating:` | keeps the low bits | drops the fraction toward zero, saturates, NaN → 0 |
+| `clamping:` | saturates to `minValue` / `maxValue` | same as `truncating:` |
+| `bitPattern:` | same-width reinterpretation | — |
+
+```kestrel
+let big: Int64 = 300;
+Int8(exactly: big);              // nil
+Int8(exactly: big)!;             // traps
+Int8(truncating: big);           // 44 (low 8 bits)
+Int8(clamping: big);             // 127
+Int64(truncating: -3.7);         // -3
+```
+
+A float converting from a source it can't always hold exactly (`Int64` to `Float64`, `Float64` to `Float32`) uses `rounding:` (`RoundsFrom[From]`), which rounds to the nearest value:
+
+```kestrel
+let n: Int64 = 9_007_199_254_740_993;   // 2^53 + 1
+Float64(rounding: n);                   // 9007199254740992.0
 ```
 
 ### Explicit Casting *(Future)*

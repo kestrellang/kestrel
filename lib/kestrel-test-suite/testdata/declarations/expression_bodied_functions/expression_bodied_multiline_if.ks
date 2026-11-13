@@ -2,7 +2,7 @@
 // expect-stdout: 10\n8\n
 
 module Main
-import std.io.stdio.println
+import std.streams.println
 
 func max(a: std.numeric.Int64, b: std.numeric.Int64) -> std.numeric.Int64 =
     if a > b { a }

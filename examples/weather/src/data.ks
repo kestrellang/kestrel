@@ -13,7 +13,7 @@ public func getFloat(v: Value) -> Float64 {
         .Some(f) => f,
         .None => {
             match v.asInt() {
-                .Some(n) => Float64(from: n),
+                .Some(n) => Float64(rounding: n),
                 .None => 0.0
             }
         }
@@ -33,7 +33,7 @@ public func getInt(v: Value) -> Int64 {
         .None => {
             match v.asFloat() {
                 .Some(f) => {
-                    match f.toInt64() {
+                    match Int64(exactly: f.trunc()) {
                         .Some(n) => n,
                         .None => 0
                     }
@@ -65,7 +65,7 @@ public func getArrayField(obj: Value, key: String) -> Array[Value] {
 
 public func getFloatFromArray(arr: Array[Value], idx: Int64) -> Float64 {
     if idx < arr.count {
-        getFloat(arr(unchecked: idx))
+        getFloat(unsafe arr(unchecked: idx))
     } else {
         0.0
     }
@@ -73,7 +73,7 @@ public func getFloatFromArray(arr: Array[Value], idx: Int64) -> Float64 {
 
 public func getIntFromArray(arr: Array[Value], idx: Int64) -> Int64 {
     if idx < arr.count {
-        getInt(arr(unchecked: idx))
+        getInt(unsafe arr(unchecked: idx))
     } else {
         0
     }
@@ -169,7 +169,7 @@ public func formatDateLabel(dateStr: String, idx: Int64) -> String {
 
 public func getStringFromArray(arr: Array[Value], idx: Int64) -> String {
     if idx < arr.count {
-        getString(arr(unchecked: idx))
+        getString(unsafe arr(unchecked: idx))
     } else {
         ""
     }

@@ -37,8 +37,11 @@ pub enum AnalyzerId {
     IntegerLiteralRange,
     TypeTest,
     RestrictedUse,
+    UnsafeUse,
+    CFunction,
     PackedFieldBorrow,
     OptionalChain,
+    ViewConversion,
 
     // Decl checks
     FunctionBody,
@@ -74,8 +77,8 @@ pub enum AnalyzerId {
     ConformanceTarget,
     ImportTarget,
     RecursiveEnum,
-    IndirectEnum,
-    ParentProtocolConformance,
+    OpaqueCycle,
+    UnsafeField,
     ProtocolFieldConformance,
     Generics,
     TypeArgArity,
@@ -96,6 +99,7 @@ pub enum AnalyzerId {
     TypeAnnotationResolution,
     AttributeValidation,
     EntryPoint,
+    ModuleDeclaration,
 }
 
 impl AnalyzerId {
@@ -123,8 +127,11 @@ impl AnalyzerId {
             AnalyzerId::IntegerLiteralRange => "integer_literal_range",
             AnalyzerId::TypeTest => "type_test",
             AnalyzerId::RestrictedUse => "restricted_use",
+            AnalyzerId::UnsafeUse => "unsafe_use",
+            AnalyzerId::CFunction => "c_function",
             AnalyzerId::PackedFieldBorrow => "packed_field_borrow",
             AnalyzerId::OptionalChain => "optional_chain",
+            AnalyzerId::ViewConversion => "view_conversion",
             AnalyzerId::FunctionBody => "function_body",
             AnalyzerId::ProtocolMethod => "protocol_method",
             AnalyzerId::StaticContext => "static_context",
@@ -158,8 +165,8 @@ impl AnalyzerId {
             AnalyzerId::ConformanceTarget => "conformance_target",
             AnalyzerId::ImportTarget => "import_target",
             AnalyzerId::RecursiveEnum => "recursive_enum",
-            AnalyzerId::IndirectEnum => "indirect_enum",
-            AnalyzerId::ParentProtocolConformance => "parent_protocol_conformance",
+            AnalyzerId::OpaqueCycle => "opaque_cycle",
+            AnalyzerId::UnsafeField => "unsafe_field",
             AnalyzerId::ProtocolFieldConformance => "protocol_field_conformance",
             AnalyzerId::Generics => "generics",
             AnalyzerId::TypeArgArity => "type_arg_arity",
@@ -178,6 +185,7 @@ impl AnalyzerId {
             AnalyzerId::TypeAnnotationResolution => "type_annotation_resolution",
             AnalyzerId::AttributeValidation => "attribute_validation",
             AnalyzerId::EntryPoint => "entry_point",
+            AnalyzerId::ModuleDeclaration => "module_declaration",
         }
     }
 }

@@ -1,16 +1,17 @@
 /// HTTP request model for Perch handlers and middleware.
 
-module perch.request
+module perch
 
 import http.method.(HttpMethod)
 import http.headers.(Headers)
+import http.url.(parseUrl, parseQueryString)
+import http.cookie.(parseCookieHeader)
 
 /// A parsed HTTP request with route parameters and middleware state.
 ///
-/// Combines the raw HTTP data (method, path, headers, body) with
-/// server-resolved state: path parameters extracted during route matching
-/// and a string key-value store that middleware can populate (e.g. an
-/// auth middleware sets `"userId"`).
+/// Combines the raw HTTP data (method, path, headers, body) with the path
+/// parameters extracted during route matching. Per-request state that
+/// middleware produces travels in the typed context, not on the request.
 ///
 /// Query parameters and cookies are parsed eagerly at construction
 /// time and stored for O(1) repeated access.
@@ -18,12 +19,9 @@ import http.headers.(Headers)
 /// # Examples
 ///
 /// ```
-/// func handleUser(request: Request, ctx: Ctx) -> Response {
-///     let id = match request.param("id") {
-///         .Some(id) => id,
-///         .None => return Response.badRequest(Text("Missing id"))
-///     };
-///     Response.ok(Text("User " + id))
+/// // In a middleware:
+/// guard let some header = request.header("Authorization") else {
+///     return .Respond(Response.unauthorized())
 /// }
 /// ```
 public struct Request: Cloneable {
@@ -34,7 +32,8 @@ public struct Request: Cloneable {
     public var headers: Headers
     public var body: String
     public var pathParams: Dictionary[String, String]
-    public var store: Dictionary[String, String]
+    /// Path parameter values in pattern order — what `Path[T]` extracts.
+    public var pathValues: Array[String]
     public var queryParams: Array[(String, String)]
     public var cookies: Array[(String, String)]
 
@@ -46,9 +45,6 @@ public struct Request: Cloneable {
     /// Path parameters are extracted during route matching from `:name`
     /// segments in the route pattern.
     public func param(name: String) -> String? = self.pathParams(name)
-
-    /// Returns a value from the middleware store, or `None`.
-    public func getValue(for key: String) -> String? = self.store(key)
 
     /// Returns a query parameter value by name, or `None`.
     ///
@@ -82,17 +78,35 @@ public struct Request: Cloneable {
     }
 
     public func clone() -> Request {
-        Request(
-            method: self.method,
-            path: self.path.clone(),
-            segments: self.segments.clone(),
-            queryString: self.queryString.clone(),
-            headers: self.headers.clone(),
-            body: self.body.clone(),
-            pathParams: self.pathParams.clone(),
-            store: self.store.clone(),
-            queryParams: self.queryParams.clone(),
-            cookies: self.cookies.clone()
-        )
+        var copy = Request(self.method, url: String(), headers: self.headers.clone(), body: self.body.clone());
+        copy.path = self.path.clone();
+        copy.segments = self.segments.clone();
+        copy.queryString = self.queryString.clone();
+        copy.pathParams = self.pathParams.clone();
+        copy.pathValues = self.pathValues.clone();
+        copy.queryParams = self.queryParams.clone();
+        copy.cookies = self.cookies.clone();
+        copy
+    }
+}
+
+extend Request {
+    /// A request for `url` (path plus optional `?query`), as if parsed off
+    /// the wire. For testing handlers with `App.respond(to:)`.
+    public init(method: HttpMethod, url url: String, headers headers: Headers, body body: String) {
+        let parsed = parseUrl(url);
+        self.cookies = match headers.value(forName: "Cookie") {
+            .Some(cookieHeader) => parseCookieHeader(cookieHeader),
+            .None => Array[(String, String)]()
+        };
+        self.method = method;
+        self.queryParams = parseQueryString(parsed.queryString);
+        self.path = parsed.path;
+        self.segments = parsed.segments;
+        self.queryString = parsed.queryString;
+        self.headers = headers;
+        self.body = body;
+        self.pathParams = [:];
+        self.pathValues = []
     }
 }

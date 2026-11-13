@@ -40,11 +40,11 @@ func main() -> lang.i64 {
     if o.hits != 1 { return 1; }
     o.pos.x += 1;                      // compound assignment
     if o.hits != 2 { return 2; }
-    o.pos.items(at: 0) = 9;            // subscript store on a field
-    if o.pos.items(at: 0) != 9 { return 3; }
+    o.pos.items(0) = 9;            // subscript store on a field
+    if o.pos.items(0) != 9 { return 3; }
     if o.hits != 3 { return 4; }
-    o.pos.items(at: 1) += 1;           // subscript compound assignment
-    if o.pos.items(at: 1) != 3 { return 5; }
+    o.pos.items(1) += 1;           // subscript compound assignment
+    if o.pos.items(1) != 3 { return 5; }
     if o.hits != 4 { return 6; }
     o.pos.c.bump();                    // mutating method on a field
     if o.pos.c.n != 1 { return 7; }

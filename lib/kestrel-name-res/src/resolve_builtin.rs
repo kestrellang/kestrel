@@ -114,17 +114,16 @@ fn scan_builtins(
 }
 
 /// Whether `entity`'s `@builtin` annotation may define a lang item. With a
-/// stdlib loaded (a top-level `std` module exists) only declarations inside
-/// it may — user code cannot claim a lang item (E401, kestrel-analyze
+/// stdlib loaded (the loader marked a `StdRootModule`) only declarations
+/// inside it may — user code cannot claim a lang item (E401, kestrel-analyze
 /// `duplicate_builtin`). Without a stdlib (`--no-std` programs, test
 /// preludes) the program supplies its own lang items, so any module may.
 ///
 /// Single source of truth for both the index and the diagnostic. Stdlib
-/// membership is by module path, so a user file declaring `module std.x`
-/// still passes; telling stdlib files apart by origin needs a file-level
-/// marker the loader does not set today.
+/// membership is by module tree, so a user file declaring `module std.x`
+/// (joining the stdlib's module) still passes.
 pub fn builtin_annotation_allowed(ctx: &QueryContext<'_>, root: Entity, entity: Entity) -> bool {
-    let Some(std_module) = crate::resolve_module::find_child_module(ctx, root, "std") else {
+    let Some(std_module) = crate::helpers::std_root_module(ctx, root) else {
         return true;
     };
     let mut current = entity;
@@ -194,21 +193,15 @@ fn alias_target(ctx: &QueryContext<'_>, alias: Entity, root: Entity) -> Option<E
 /// `[Int]`, and every array literal in that file failed to conform to
 /// `_ExpressibleByArrayLiteral`.
 ///
-/// Falls back to the name for worlds built without the stdlib (unit tests,
-/// `--no-std`), where there is no lang item to find.
+/// No name fallback: a world without the lang item (a `--no-std` program
+/// that never declares it) has no sugar, and the caller reports E141.
 pub fn resolve_sugar_type(
     ctx: &QueryContext<'_>,
-    owner: Entity,
     root: Entity,
     builtin: Builtin,
-    name: &str,
 ) -> Option<Entity> {
-    if let Some(alias) = ctx.query(ResolveBuiltin { builtin, root })
-        && let Some(target) = sugar_alias_target(ctx, root, alias)
-    {
-        return Some(target);
-    }
-    resolve_std_type(ctx, owner, root, name)
+    let alias = ctx.query(ResolveBuiltin { builtin, root })?;
+    sugar_alias_target(ctx, root, alias)
 }
 
 /// Follow `@builtin(.ArrayTypeOperator) type ArrayTypeOperator[T] = Array[T]`
@@ -227,24 +220,6 @@ fn sugar_alias_target(ctx: &QueryContext<'_>, root: Entity, alias: Entity) -> Op
         context: alias,
         root,
     }) {
-        TypeResolution::Found(entity) => Some(entity),
-        _ => None,
-    }
-}
-
-/// Resolve a well-known standard library type name (e.g. "Array", "Optional").
-fn resolve_std_type(
-    ctx: &QueryContext<'_>,
-    owner: Entity,
-    root: Entity,
-    name: &str,
-) -> Option<Entity> {
-    let result = ctx.query(ResolveTypePath {
-        segments: vec![name.to_string()],
-        context: owner,
-        root,
-    });
-    match result {
         TypeResolution::Found(entity) => Some(entity),
         _ => None,
     }

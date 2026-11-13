@@ -98,6 +98,34 @@ struct Person: Greetable {
 }
 ```
 
+### Sugar-Only Requirements
+
+A requirement that exists for a piece of syntax can be marked `@sugarOnly`. Conformers still implement it, but outside the protocol's module the only way to reach it is the syntax:
+
+```kestrel
+public protocol ModuloAssign[Other = Self] {
+    @sugarOnly
+    @builtin(.ModuloAssignMethod)
+    mutating func modAssign(other: Other)
+}
+
+var a = 7;
+a %= 3;          // OK: the syntax
+a.modAssign(3);  // error E115: 'modAssign' can only be used through its syntax
+```
+
+The rule covers the requirement itself (`t.modAssign(3)` on `T: ModuloAssign`) and every type's implementation of it (`Int64.modAssign`). Three places may still call it by name:
+
+- code in the protocol's own module;
+- code in the module that wrote the implementation, so your own types keep calling their own methods and inits;
+- the body of another sugar-only implementation, so a type's `init(stringLiteral:length:)` can build its `String` field with `String(stringLiteral:length:)`.
+
+The standard library marks its operator, compound-assignment, comparison, range, `try`, `?.`/`??`/`!`, literal, pattern, interpolation and indexing hooks this way. Hooks that read well as methods stay public: `add`, `subtract`, `multiply`, `divide`, `modulo`, `negate`, `isEqual`, `compare`, `clone`, `next`, `iter`, and `Indirection.value` (the explicit way past auto-deref).
+
+### Existential-Only Defaults
+
+A default in `extend P` marked `@existentialOnly` is used only by `any P`, for a requirement its function table can't hold (a generic one, say). Conforming types don't inherit it and must still implement the requirement. See [Existential-only defaults](existentials.md#existential-only-defaults).
+
 ## Associated Types
 
 Protocols can define associated types that conforming types must specify:
@@ -130,6 +158,47 @@ protocol Container {
     func contains(element: Element) -> Bool
 }
 ```
+
+### Same-Named Associated Types From Two Protocols
+
+When one type conforms to two protocols that each declare an associated type
+with the same name, name the protocol in the binding: `type Protocol.Name = T`.
+One extension can then conform to both. The operator protocols are the common
+case, since `Addable`, `Subtractable` and the rest each declare `Output`:
+
+```kestrel
+struct Stamp { let v: Int64 }
+struct Span { let v: Int64 }
+
+extend Stamp: Addable[Span], Subtractable[Stamp] {
+    type Addable.Output = Stamp        // Stamp + Span -> Stamp
+    type Subtractable.Output = Span    // Stamp - Stamp -> Span
+    consuming func add(consuming other: Span) -> Stamp { Stamp(v: self.v + other.v) }
+    consuming func subtract(consuming other: Stamp) -> Span { Span(v: self.v - other.v) }
+}
+```
+
+An unqualified `type Output = T` is fine when only one of the type's
+protocols declares `Output`.
+
+The same qualified name works in a `where` clause, on a generic function or
+on a protocol. It picks one of several same-named associated types:
+
+```kestrel
+func addThenSubtract[T](a: T, b: T, c: T) -> T
+    where T: Addable, T: Subtractable, T: Copyable,
+          T.Addable.Output = T, T.Subtractable.Output = T {
+    a + b - c
+}
+
+// Every conformer must bind each `Output` to itself (E410 otherwise), and
+// generic code bound by `Arithmetic` gets `T` back from `+` and `-`.
+protocol Arithmetic: Addable, Subtractable
+    where Self.Addable.Output = Self, Self.Subtractable.Output = Self {}
+```
+
+The standard library's `Numeric`, `Integer` and `FloatingPoint` protocols are
+built this way.
 
 ### Using Self in Associated Types
 
@@ -646,7 +715,7 @@ struct Handle: Disposable {
 
 ### Inherited Protocol Requirements
 
-When conforming to a child protocol, must also explicitly conform to parent protocols:
+Conforming to a child protocol conforms to its parents too; they don't need to be listed again. Their requirements still have to be implemented (E454 otherwise):
 
 ```kestrel
 protocol Drawable {
@@ -657,18 +726,16 @@ protocol Shape: Drawable {
     func area() -> Int
 }
 
-struct Circle: Shape {
+struct Circle: Shape {      // also a Drawable
     func draw() { }
     func area() -> Int { 42 }
 }
-// Error: conforms to 'Shape' but not its parent protocol 'Drawable'
 
-// Correct:
-struct Circle: Drawable, Shape {
-    func draw() { }
-    func area() -> Int { 42 }
-}
+func render[T](x: T) where T: Drawable { x.draw() }
+render(Circle());           // OK
 ```
+
+Listing a parent anyway (`struct Circle: Drawable, Shape`) is allowed and means the same thing.
 
 ### Associated Type Conflicts
 
@@ -685,6 +752,13 @@ protocol B {
 
 protocol C: A, B { }
 // Error: conflicting associated type 'Element'
+```
+
+A `where` clause that pins every one of them settles the conflict, for the
+protocol and for anything that refines it:
+
+```kestrel
+protocol C: A, B where Self.A.Element = Self, Self.B.Element = Self { }  // OK
 ```
 
 However, child protocols can redeclare parent associated types:
@@ -728,8 +802,8 @@ Common protocol-related errors:
 | Wrong parameter count | "does not implement method 'methodName'" |
 | Wrong label | "does not implement method 'methodName'" |
 | Receiver kind mismatch | "receiver kind mismatch" |
-| Missing parent conformance | "conforms to 'Child' but not its parent protocol 'Parent'" |
 | Conflicting associated type | "conflicting associated type 'TypeName'" |
+| Pinned associated type bound to something else (E410) | "'T' binds 'P.Name' to 'X', but protocol 'Q' requires 'Y'" |
 | Duplicate protocol method | "ambiguous method 'methodName'" |
 | Missing associated type | "does not provide associated type 'TypeName'" |
 
@@ -911,3 +985,4 @@ struct RangeIterator: Iterator {
 - [Generics](generics.md) - Generic programming with type parameters and constraints
 - [Enums](enums.md) - Enumerated types that can also conform to protocols
 - [Semantics](semantics.md) - Memory model and type system behavior
+- [Deriving Conformances](derive.md) - `@derive` writes `Equatable`, `Hashable`, `Formattable` and others for you

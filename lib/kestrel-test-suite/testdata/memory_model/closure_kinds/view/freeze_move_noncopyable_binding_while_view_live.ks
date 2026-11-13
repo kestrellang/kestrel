@@ -7,6 +7,9 @@
 // old E500 (the view never moved `r` in the first place).
 module Test
 
+@builtin(.Copyable)
+protocol Copyable {}
+
 struct Res: not Copyable {
     var v: lang.i64
 }

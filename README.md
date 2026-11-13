@@ -163,6 +163,7 @@ Available packages:
 | [kestrel/sdl](https://kestrel-lang.com/flock/kestrel/sdl) | SDL Bindings |
 | [kestrel/crypto](https://kestrel-lang.com/flock/kestrel/crypto) | Crypto primitives |
 | [kestrel/datetime](https://kestrel-lang.com/flock/kestrel/datetime) | Datetime library |
+| [wgpu](lang/wgpu) | WebGPU bindings over wgpu-native (compute; not yet published) |
 
 Also included: **Jessup** (toolchain version manager, like rustup).
 
@@ -181,6 +182,7 @@ Also included: **Jessup** (toolchain version manager, like rustup).
 | [Snake](examples/snake) | Terminal snake with RAII terminal management | Intermediate |
 | [Pong](examples/pong) | Terminal pong with AI opponent | Intermediate |
 | [SDL Pong](examples/sdl_pong) | Graphical pong via SDL2 FFI bindings | Intermediate |
+| [wgpu Compute](examples/wgpu_compute) | Headless GPU compute with a WGSL shader via wgpu | Intermediate |
 
 ## Editor Support
 

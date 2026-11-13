@@ -1,9 +1,8 @@
 // test: execution
 // stdlib: false
 
-// `extend ConcreteType: GenericProto[T]` — `T` has no source on the LHS
-// (Slot is non-generic), so the extension itself introduces `T` as a free
-// type parameter. The conformance is "for all T, Slot conforms to
+// `extend[T] ConcreteType: GenericProto[T]` — `T` has no source on the
+// LHS (Slot is non-generic), so the extension declares `T` itself. The conformance is "for all T, Slot conforms to
 // Indexable[T]". Method bodies use `T`, and at the call site `T` is
 // inferred from arguments.
 
@@ -22,7 +21,7 @@ struct Holder[T] {
 
 struct Slot { public init() {} }
 
-extend Slot: Indexable[T] {
+extend[T] Slot: Indexable[T] {
     type Indexable[T].Output = T
     public func fetch(holder holder: Holder[T]) -> T { holder.read() }
 }

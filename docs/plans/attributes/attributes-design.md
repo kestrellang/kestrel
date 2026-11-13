@@ -644,6 +644,12 @@ The two kinds of protocol differ in what they promise:
 design keeps it automatic. **John decides** (D-Q1), recommendation: explicit
 `@derive` for API protocols, inference for the memory model.
 
+> **Update (D-Q2 decided):** John chose to derive `Cloneable`. The inferred
+> memberwise clone still runs on implicit copies, but it never made the type
+> conform, so `t.clone()` and `T: Cloneable` bounds failed. `@derive(Cloneable)`
+> now writes a `clone()` that copies each field; fields need only `Copyable`.
+> `@derive(Copyable)` is still rejected (E951).
+
 **`@derive(Cloneable)` and `@derive(Copyable)`.** The roadmap lists
 `Cloneable` in the derive list. That was written before the copy fold made it
 automatic. Deriving it now would either do nothing (the type is already

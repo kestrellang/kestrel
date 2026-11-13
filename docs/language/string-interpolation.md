@@ -49,6 +49,20 @@ let opt: Int64? = .Some(3);
 "\(opt:?)"      // Some(3)    debug format
 ```
 
+Width and precision can come from a value at runtime. Write a name, or a
+dotted path, in braces where the number would go:
+
+```kestrel
+let w = 6;
+let p = 2;
+"[\(n:>{w})]"             // [    42]
+"\(third:.{p}f)"          // 0.33
+"[\(name:<{self.width})]" // padded to a field's width
+```
+
+The value must be an `Int64`. Only names go in the braces, not
+expressions: bind `w + 1` to a local first (E708 otherwise).
+
 Precision on floats rounds the stored binary value correctly; the *default* float rendering is the shortest string that round-trips, switching to scientific automatically at extreme magnitudes (`\(1.0e20)` → `1e20`).
 
 ## Escape Sequences
@@ -134,7 +148,11 @@ println("point: \(p)");   // point: (3, 4)
 
 ## Custom Interpolation Targets
 
-Interpolated literals aren't hard-wired to `String`. A literal like `"a\(b)c"` desugars to: create an accumulator, `appendLiteral(...)` / `appendInterpolation(...)` for each segment, then build the result. Any type conforming to `ExpressibleByStringInterpolation` (which refines `ExpressibleByStringLiteral`) can be the result type:
+Interpolated literals aren't hard-wired to `String`. The literal's type `R` is taken from context (an annotation, a parameter type), defaulting to `String`, and must conform to `ExpressibleByStringInterpolation` (which refines `ExpressibleByStringLiteral`). `"a\(b)c"` desugars to:
+
+1. create an `R.Interpolation` accumulator with `init(literalCapacity:interpolationCount:)`,
+2. call `appendLiteral(...)` for each static segment and `appendInterpolation(...)` for each hole,
+3. hand the accumulator to `R.init(interpolation:)`.
 
 ```kestrel
 public protocol Interpolatable {
@@ -144,11 +162,13 @@ public protocol Interpolatable {
 
 public protocol ExpressibleByStringInterpolation: ExpressibleByStringLiteral {
     type Interpolation: Interpolatable
-    init(interpolation: Interpolation)
+    init(consuming interpolation: Interpolation)
 }
 ```
 
-Your accumulator supplies its own `appendInterpolation(...)` overloads, which may constrain hole values to any protocol you like (an SQL builder might require `Bindable` instead of `Formattable`, making `"WHERE id = \(userInput)"` safe by construction):
+`init(interpolation:)` takes the accumulator by value, so it can move the accumulator's buffers out without copying. An accumulator needs no `build()` method and need not be `Cloneable`, or even `Copyable`.
+
+`appendInterpolation` is deliberately **not** a requirement. Your accumulator supplies its own `appendInterpolation(...)` overloads, which may constrain hole values to any protocol you like (an SQL builder might require `Bindable` instead of `Formattable`, making `"WHERE id = \(userInput)"` safe by construction) and may or may not accept a format spec:
 
 ```kestrel
 let tagged: BracketString = "Hello, \(name)!";   // builds via BracketString's accumulator
@@ -166,6 +186,7 @@ let tagged: BracketString = "Hello, \(name)!";   // builds via BracketString's a
 | E705 | Multi-line opener `"""` not followed by a newline |
 | E706 | Multi-line closer `"""` not on its own line |
 | E707 | Unterminated string literal |
+| E708 | Invalid format spec, including a `{…}` width or precision that isn't a name |
 | — | `invalid expression in string interpolation` — the text inside `\(...)` doesn't parse (e.g. `\(t.0.0)`, where `0.0` lexes as a float) |
 | — | `T !: Formattable` — the interpolated value's type has no `Formattable` conformance |
 

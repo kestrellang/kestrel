@@ -46,7 +46,7 @@ module Test
 
             // init(from:) — from Int64
             let i64val: std.numeric.Int64 = 1000;
-            let fromI64 = std.numeric.Int16(from: i64val);
+            let fromI64 = std.numeric.Int16(exactly: i64val)!;
             let expectedFromI64: std.numeric.Int16 = 1000;
             if fromI64 != expectedFromI64 { return 12 }
 
@@ -58,35 +58,35 @@ module Test
 
             // parse — valid Int16 value
             let parsed = std.numeric.Int16(parsing: "1000");
-            if parsed.isNone() { return 14 }
+            if parsed.isNone { return 14 }
             let expectedParsed: std.numeric.Int16 = 1000;
             if parsed.unwrap() != expectedParsed { return 15 }
 
             // parse — negative value
             let parsedNeg = std.numeric.Int16(parsing: "-32768");
-            if parsedNeg.isNone() { return 16 }
+            if parsedNeg.isNone { return 16 }
             if parsedNeg.unwrap() != std.numeric.Int16.minValue { return 17 }
 
             // parse — maxValue
             let parsedMax = std.numeric.Int16(parsing: "32767");
-            if parsedMax.isNone() { return 18 }
+            if parsedMax.isNone { return 18 }
             if parsedMax.unwrap() != std.numeric.Int16.maxValue { return 19 }
 
             // parse — out-of-range (too large)
             let parsedBig = std.numeric.Int16(parsing: "32768");
-            if parsedBig.isSome() { return 20 }
+            if parsedBig.isSome { return 20 }
 
             // parse — out-of-range (too small)
             let parsedSmall = std.numeric.Int16(parsing: "-32769");
-            if parsedSmall.isSome() { return 21 }
+            if parsedSmall.isSome { return 21 }
 
             // parse — invalid string
             let parsedBad = std.numeric.Int16(parsing: "xyz");
-            if parsedBad.isSome() { return 22 }
+            if parsedBad.isSome { return 22 }
 
             // parse — empty string
             let parsedEmpty = std.numeric.Int16(parsing: "");
-            if parsedEmpty.isSome() { return 23 }
+            if parsedEmpty.isSome { return 23 }
 
             0
         }

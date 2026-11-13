@@ -14,24 +14,26 @@ the type checker, and the code is assigned in one place,
 
 ## Contents
 
-- [E001–E011 — Control flow & definite initialization](#e001e011--control-flow--definite-initialization)
+- [E001–E012 — Control flow & definite initialization](#e001e012--control-flow--definite-initialization)
 - [E100–E141 — Type checking, names, parameters & literals](#e100e141--type-checking-names-parameters--literals)
 - [E200–E213 — Mutability, access modes & assignment](#e200e213--mutability-access-modes--assignment)
 - [E300–E321 — Patterns & exhaustiveness](#e300e321--patterns--exhaustiveness)
-- [E400, E411–E479 — Declarations, generics & protocol conformance](#e400-e411e479--declarations-generics--protocol-conformance)
+- [E400–E409, E411–E479 — Declarations, generics & protocol conformance](#e400e409-e411e479--declarations-generics--protocol-conformance)
 - [E480–E499 — References & escape checking](#e480e499--references--escape-checking)
 - [E500–E509 — Moves & ownership](#e500e509--moves--ownership)
 - [E600–E614, E623 — Closures, externs & declaration shape](#e600e614-e623--closures-externs--declaration-shape)
 - [E615–E618 — Entry point](#e615e618--entry-point)
 - [E619–E622 — Place accessors](#e619e622--place-accessors)
 - [E624–E626 — Closure kinds](#e624e626--closure-kinds)
+- [E641–E646 — `unsafe`](#e641e646--unsafe)
+- [E647 — C callbacks](#e647--c-callbacks)
 - [E700–E710 — String & character literals, escapes, format specs](#e700e710--string--character-literals-escapes-format-specs)
 - [E800–E811 — Syntax](#e800e811--syntax)
 - [E900–E999 — Attributes & derives](#e900e999--attributes--derives)
 
 ---
 
-## E001–E011 — Control flow & definite initialization
+## E001–E012 — Control flow & definite initialization
 
 | Code | Message | Explanation |
 |---|---|---|
@@ -46,6 +48,7 @@ the type checker, and the code is assigned in one place,
 | E009 | cannot return before all fields are initialized | An `init` has an early `return` while some fields are still unassigned. |
 | E010 | '{keyword}' outside of loop | `break`/`continue` used where no loop encloses it. |
 | E011 | undeclared label '{label}' | `break`/`continue` names a loop label that no enclosing loop declares. |
+| E012 | `try` can't appear on the right side of `{op}` | The right side of `and`/`or` runs only when the left side doesn't decide the result, so an early return from `try` there is rejected. Bind the value first or move the `try` to the left side. |
 
 ## E100–E141 — Type checking, names, parameters & literals
 
@@ -53,7 +56,7 @@ the type checker, and the code is assigned in one place,
 |---|---|---|
 | E100 | *(retired umbrella)* | Used to cover every inference error. Now carried only by an internal error that is never shown (an expression HIR lowering already reported); each kind below has its own code. |
 | E101 | {kind} condition must be Bool | An `if`/`while`/`guard` condition has a non-`Bool` type. |
-| E102 | no member '{name}' on type '{type}' | The member, associated type or tuple element does not exist on the receiver's type (includes tuple index out of bounds and member access on a primitive). |
+| E102 | no member '{name}' on type '{type}' | The member, associated type or tuple element does not exist on the receiver's type (includes tuple index out of bounds and member access on a primitive). When the receiver is an `Indirection` wrapper that peeled, the message names the receiver as written and adds "or its pointee '{pointee}'". |
 | E103 | ambiguous member / call to '{name}' | More than one candidate fits equally well. |
 | E104 | implicit member '.{name}' not found | `.Case` / `.member` has no match on the expected type. |
 | E105 | could not infer type / cannot infer type parameter | Nothing determines the type; add an annotation. |
@@ -63,14 +66,15 @@ the type checker, and the code is assigned in one place,
 | E109 | type mismatch | The value's type is not the one the context requires (also: a mutating closure where a non-mutating one is expected). |
 | E113 | wrong number of arguments / wrong label / no matching overload / ambiguous trailing closure | The call's shape (arity, argument labels, type-argument count) fits no declaration, or a trailing closure could fill more than one closure-typed parameter. |
 | E114 | literal not accepted | The literal's kind cannot be written as the expected type. |
-| E115 | member '{name}' is not accessible | Visibility forbids the access from this scope. |
+| E115 | member '{name}' is not accessible / '{name}' can only be used through its syntax | Visibility forbids the access from this scope, or the member is (or implements) a `@sugarOnly` requirement named outside its protocol's module. |
 | E116 | wrong kind of member use | A static member used on an instance, an instance method on a type, a type parameter as a value, or a method not called. |
 | E117 | infinite type | Unification would build a recursive type. |
 | E118 | opaque return type error | A circular `some P` return, or a `some P` that hides a non-`Copyable` type. |
 | E110 | duplicate binding '{name}' in parameter pattern | The same name is bound twice in one parameter's destructuring pattern. |
 | E111 | tuple pattern has {n} elements but type has {m} | A tuple-destructuring parameter doesn't match the tuple type's arity. |
 | E112 | tuple pattern used with non-tuple type | A parameter uses tuple destructuring but its type is not a tuple. |
-| E121 | integer literal out of range for \`{type}\` | The literal cannot be represented by the resolved integer type; it would silently wrap. |
+| E120 | character literal '{c}' is not ASCII, so it is not one \`{type}\` byte | A character literal typed as an integer (`let b: UInt8 = 'é'`) must be ASCII; a wider character is several UTF-8 bytes. Patterns are checked too. |
+| E121 | integer literal out of range for \`{type}\` | The literal cannot be represented by the resolved integer type; it would silently wrap. Pattern literals and range bounds are checked against the matched type. |
 | E122 | unsupported unary operator '{op}' | The operator's protocol lang item (`@builtin(.…OperatorProtocol)`) is missing — usually the standard library is not imported. |
 | E124 | unsupported postfix operator '{op}' | Same, for a postfix operator. |
 | E125 | unsupported binary operator '{op}' | Same, for a binary operator. |
@@ -94,7 +98,7 @@ the type checker, and the code is assigned in one place,
 | E143 *(warning)* | implicit parameter 'it' shadows the outer binding 'it' | A closure's implicit `it` hides an outer `let it` or parameter named `it`; the closure uses its own parameter, never the outer binding. |
 | E144 | protocol '{name}' cannot be used as a type; write 'any {name}' for a boxed existential or 'some {name}' for an opaque type | A protocol names a type only through `any` (a boxed existential) or `some` (an opaque type). Bounds (`T: P`, `some P`, `any P`) and `extend P` are unaffected. |
 | E145 | '{member}' cannot be called on '{any P}': {reason} | A protocol requirement that can't go through an existential's function table: `it is a static requirement`, `it is generic`, `it uses 'Self' as a parameter or return type`, or `it mentions associated type '{A}', which '{any P}' leaves unbound`. Emitted by type inference. |
-| E146 | '{any P}' does not conform to '{P}': {why} | An existential passed where `T: P` is needed, but `any P: P` doesn't hold: a requirement can't be called through the table, or the box lacks the access a requirement needs. Emitted by type inference. |
+| E146 | '{any P}' does not conform to '{P}': {why} | An existential passed where `T: P` is needed, but `any P: P` doesn't hold: a requirement can't be called through the table and has no `@existentialOnly` default, or the box lacks the access a requirement needs. Emitted by type inference. |
 | E147 | cannot convert '{from}' to '{to}': existentials in different boxes are different types | `any[A] P` and `any[B] P` are unrelated types; boxes are never converted into each other. Emitted by type inference. |
 | E148 | cannot call {consuming/mutating} method '{m}' on '{any P}': {reason} / cannot consume the payload of '{any P}': {reason} | The existential's box doesn't grant the access the call needs: `consuming` (and `consuming x as? T`) needs `ConsumingIndirection` (shared boxes can't give up their payload), `mutating` needs `MutableIndirection`. Suggests `any[OwnedBox] P`. Calls: type inference; `consuming as?`: the `type_test` analyzer. |
 | E149 *(warning)* | cast from '{any P}' to '{T}' always fails: '{T}' does not conform to '{P}' | `x as? T`, `x is T` or an `is T` pattern whose target can't conform to every bound, so it never matches. |
@@ -103,8 +107,11 @@ the type checker, and the code is assigned in one place,
 | E152 | 'is' needs an existential on the left: '{T}' {is known at compile time / is a generic parameter} | `x is T` (and `as?`, `is` patterns) only test an existential's payload. A concrete type's answer is static; a generic parameter is rejected for now. |
 | E153 | an 'is' pattern binds a borrow of the payload, so it cannot be 'var' | `var c is Circle`: the binding refers to the payload in place. |
 | E154 | '{type}' in an 'any' bound is not a protocol | Every bound of `any` must be a protocol. |
+| E156 | a slice cannot be assigned as a whole | The target of an assignment is unsized (`xs(1..<3) = ys`, a `Slice[T]` place), as in Rust. Copy into it with `xs(1..<3).assign(from: ys)` (lengths must match) or resize with `replaceSubrange`. |
 | E157 | \`?.\` requires a type that conforms to \`OptionalChain\`, found '{T}' | `a?.b` on a value with no payload to chain on (not an `Optional`, a `Result`, or another `OptionalChain` type). Use `.` for a non-optional value. Emitted by type inference. |
 | E158 | can't consume through \`?.\` on a place | A chain on a variable or field lends its payload by reference, so a `consuming` method or argument can't take it. Move the value out first: `a.take()?.…`. Emitted by the `optional_chain` analyzer. |
+| E159 | {construct} requires the \`{Builtin}\` lang item | Compiler-generated code (a `for` loop, `try`, `throw`, an operator, `?.`, `as?`, `lazy`, a format spec, a failable `init`) needs a lang item that no declaration carries the `@builtin(.X)` tag for. Usually the standard library is not imported; a `--no-std` program must declare and tag the item itself. Emitted by HIR lowering. |
+| E160 | a \`let\` condition can't be joined with \`and\` | `if let .Some(e) = end and start < e`: `and` binds tighter than the `let`, so the whole `end and start < e` would be the value matched, with `e` not yet bound. Separate conditions with `,` (`if let .Some(e) = end, start < e`); parenthesize to match against a `Bool` `and`. Applies to `if`, `guard` and `while`. Emitted by HIR lowering. |
 
 ### Example — E109 (type mismatch)
 
@@ -137,7 +144,7 @@ let tiny: Int8 = 200  // error[E121]: integer literal out of range for `Int8`
 | E209 | a ref binding must be a simple \`let\` | A borrow initializer (`let r = &x`) can't be combined with `var` or a destructuring pattern. |
 | E210 | cannot take a \`&mutating\` borrow of immutable variable '{name}' | Mutable borrows need a mutable place (`var`, mutable field, or `Pointer.mutatingValue`). |
 | E211 | *(retired)* | Was "\`&\` pattern bindings are not supported in this position". `&` binders are now allowed in every pattern position; a `let` destructure of a temporary is rejected as E499 instead. |
-| E214 | cannot assign to failable/throwing place '{name}' | A failable (`var first?: T`, `subscript(...)? -> T`) or throwing (`-> T throws E`) property or subscript can't be assigned: the place may not exist. Write through its `mutating ref` with a `&mutating` payload binder. |
+| E214 | cannot assign to failable/throwing place '{name}' | A failable (`var first?: T`, `subscript(...)? -> T`) or throwing (`-> T throws E`) property or subscript can't be assigned: the place may not exist. Write through its `mutating ref` with a `&mutating` payload binder. A failable member that declares `set` accepts plain `=` (its `newValue` is `Optional[T]`, so `dict(k) = null` removes); compound assignment (`dict(k) += 1`) is still E214, since it needs the current value. |
 | E213 | left-hand side of compound assignment is not assignable | `a op= b` needs a place (variable, field, subscript) on the left. |
 | E212 | *(retired)* | Was "closure cannot capture non-Static binding '{name}'". Retired with closure kinds (docs/design/closures.md): a view-kind closure's environment is frame-bound, so it may capture ref bindings and non-`Static` values freely. The owning tier keeps the rejection under E624. |
 
@@ -161,7 +168,7 @@ let tiny: Int8 = 200  // error[E121]: integer literal out of range for `Int8`
 | E313 | variant '{name}' takes {expected} argument(s), got {got} | Payload pattern arity doesn't match the enum case. |
 | E314 | tuple pattern has {pat} elements but type has {ty} | Tuple pattern arity doesn't match the matched tuple type. |
 | E315 | inconsistent bindings across or-pattern alternatives | Every `|` alternative must bind the same names with the same types. |
-| E316 *(warning)* | match on \`String\` with {n} literal arms does byte-equality per arm | Large string matches are O(arms × len); consider a different dispatch strategy. |
+| E316 | *(retired)* | String-literal matches no longer warn; an `if` chain costs the same per arm. |
 | E317 | only one rest pattern (\`..\`) is allowed per tuple pattern | A tuple pattern can elide one run of elements, not two. |
 | E318 | invalid range bounds: start must be less than or equal to end | A range pattern whose bounds are reversed matches nothing. |
 | E319 | nested @ patterns are not allowed | `a @ (b @ p)` — bind one name per pattern. |
@@ -178,25 +185,32 @@ func unwrap(opt: Int64?) -> Int64 {
 }
 ```
 
-## E400, E411–E479 — Declarations, generics & protocol conformance
+## E400–E409, E411–E479 — Declarations, generics & protocol conformance
 
 | Code | Message | Explanation |
 |---|---|---|
 | E400 | duplicate @builtin(.{feature}): already declared by '{name}' | Two declarations carry the same `@builtin` annotation. A lang item is identified by its annotation alone, so only the first (in declaration order) is used. |
 | E401 | @builtin(.{feature}) is reserved for the standard library | With a stdlib loaded, only declarations in `std` may claim a lang item; the annotation is ignored. `--no-std` programs declare their own. |
-| E402 | '{B}' cannot box an existential: {reason} | `any[B] P` names a box that cannot hold a raw existential. `B` needs exactly one type parameter declared `not Sized`, a conformance to `ExistentialBox`, and no stored field holding `T` by value. Reasons: `it must have exactly one type parameter`, `its type parameter is not declared 'not Sized'`, `it does not conform to 'ExistentialBox'`, `field '{f}' stores '{T}' by value`. |
+| E402 | '{B}' cannot box an existential: {reason} | `any[B] P` names a box that cannot hold a raw existential. `B` needs exactly one type parameter without a default (any others must have one), declared `not Sized`, a conformance to `ExistentialBox`, and no stored field holding `T` by value. Reasons: `it must have exactly one type parameter without a default`, `its type parameter is not declared 'not Sized'`, `it does not conform to 'ExistentialBox'`, `field '{f}' stores '{T}' by value`. |
 | E403 | '{T}' may be unsized here ('where {T}: not Sized'), so it can only be used behind a pointer or as the last stored field | A `not Sized` type parameter used by value in a signature or a non-tail field. Move by-value members into an extension `where T: Sized`. |
 | E404 | the box in 'any[...]' is written without type arguments: '{suggestion}' / must name a box type | `any[B] P` takes the box unapplied (`any[RcBox] P`, not `any[RcBox[T]] P`), and it must be a type name. Emitted by HIR lowering. |
+| E405 | property '{name}' must lend a reference (\`ref\` / \`mutating ref\`) to satisfy protocol '{proto}' | The protocol requires `{ ref }` or `{ ref mutating ref }`, and the witness is a computed property without that accessor (a `get` returns a copy, not the place). Declare the ref accessor, or make the property stored. |
+| E406 | indirect enums require the standard library | Boxing a recursive case uses `std.memory.OwnedBox`, which `--no-std` programs lack. |
+| E407 | indirect enum '{name}' contains itself with different type arguments | Polymorphic recursion (`case Nest(Nested[Array[T]])` in `Nested[T]`): every level would need a new instantiation. |
+| E408 | opaque return type of '{name}' contains itself | Functions whose `some P` bodies wrap each other's opaque returns (`g` returns `W(inner: h())`, `h` returns `W(inner: g())`) describe an infinite type. |
+| E409 | `indirect` has no effect: enum '{name}' has no recursive case | *(warning)* An `indirect enum` none of whose cases contains the enum boxes nothing. |
+| E410 | '{type}' binds '{proto}.{name}' to '{actual}', but protocol '{req}' requires '{expected}' | A protocol's `where Self.P.Name = X` pins an associated type for every conformer, including conformers of its refinements; this one binds it to something else. |
 | E411 | duplicate method '{name}': defined on both the type and an extension | An extension redefines a method the type already declares. |
 | E412 | duplicate method '{name}' in extensions of '{type}' | Two extensions of the same type instantiation define the same method. |
 | E413 | computed properties must use 'var' | A computed property (with `get`/`set`) can't be declared `let`. |
+| E414 | this file has no `module` declaration | A file that declares anything must start with a `module` line; without one its names leak into every other module. |
 | E415 | enums cannot have stored fields | Enums carry data in case payloads, not stored fields. |
 | E416 | static stored properties not supported in generic types | A stored static has one storage cell, so it cannot belong to a generic type (`Box[Int64].count` and `Box[String].count` would have to be one cell or many). This also applies in any `extend` of a generic type, `extend Box[Int64]` included, and in protocol extensions, whose `Self` is generic. Use a computed static instead (Swift's rule). |
 | E417 | protocol method '{method}' in '{protocol}' cannot have a body | Protocol requirements are signatures only; put default bodies in a protocol extension. |
 | E418 | '{name}' cannot be static in this context | `static` is not allowed at module level. |
 | E419 | @builtin(.{feature}) must be a marker protocol (no required methods or types) | Builtin language-feature protocols cannot declare requirements. |
 | E420 | fields of '{type_name}' do not conform to '{protocol}' | A field-checked conformance (e.g. `FFISafe`) requires every stored field to conform too. |
-| E421 | '{type_name}' conforms to '{child_protocol}' but not its parent '{parent_protocol}' | Conforming to a child protocol requires conforming to the protocols it inherits from. |
+| E421 | *(retired)* | Conforming to a child protocol now conforms to its parents; a missing parent requirement is E454. |
 | E422 | enum '{enum_name}' cannot conform to protocol '{protocol_name}' | This protocol is restricted to non-enum types. |
 | E423 | cannot conform to \`{protocol_name}\` and opt out of \`Copyable\` | A conformance that requires `Copyable` conflicts with `: not Copyable`. |
 | E424 | '{name}' is not a language feature protocol | `not P` (negative conformance) is only allowed for language-feature protocols like `Copyable`. |
@@ -204,7 +218,7 @@ func unwrap(opt: Int64?) -> Int64 {
 | E426 | duplicate {kind} signature: {signature} | Two functions/inits/subscripts have identical signatures — overloads must differ. |
 | E427 | duplicate enum case '{case_name}' | The same case name is declared twice in one enum. |
 | E428 | duplicate label '{label}' in case '{case_name}' | An enum case payload uses the same label twice. |
-| E429 | enum '{name}' is recursive without 'indirect' | A case payload contains the enum itself; recursion needs `indirect` (heap boxing). |
+| E429 | recursive enum requires `indirect` | A case payload contains the enum itself by value (directly, or through a tuple, struct field or `Optional`); mark the enum `indirect` to box its recursive cases. |
 | E430 | return type of '{name}' is less visible than the function | A `public` function can't expose a non-public type in its return. |
 | E431 | parameter type in '{name}' is less visible than the function | A `public` function can't take a non-public parameter type. |
 | E432 | aliased type in '{name}' is less visible than the type alias | A `public` alias can't point at a non-public type. |
@@ -240,7 +254,7 @@ func unwrap(opt: Int64?) -> Int64 {
 | E462 | conflicting associated type '{name}' inherited by protocol '{proto}' | Two inherited protocols declare incompatible versions of the same associated type. |
 | E463 | method '{name}' is ambiguous: satisfies requirements of multiple protocols ({list}) | One method would witness several unrelated protocols; implement each conformance in its own `extend Type: Protocol` block. |
 | E464 | init has wrong effect for protocol '{proto}' | A witness `init`'s failability/throwing effect doesn't match the protocol requirement. |
-| E465 | indirect enums are not yet supported | `indirect` is recognized but not implemented in this version. |
+| E465 | *(retired in 0.19)* | Was "indirect enums are not yet supported"; `indirect enum` is implemented. The ID stays reserved. |
 | E466 | 'some' (opaque type) is not allowed in a field type | Opaque `some P` types can only appear in return position. |
 | E467 | method '{name}' shadows the stored field '{name}' of '{type}' | A zero-arg extension method with a stored field's name would recurse instead of reading the field. |
 | E469 | parameter '{param}' of method '{name}' has the wrong convention for protocol '{proto}' | A witness parameter's convention (`consuming`/`mutating`/plain) must match the requirement's exactly, like the receiver (E477). |
@@ -265,9 +279,14 @@ extend Box { func show() -> String { "b" } }  // error[E412]: duplicate method '
 ### Example — E429 (recursive enum)
 
 ```kestrel
-enum Tree {
+enum Tree {             // error[E429]: recursive enum requires `indirect`
     case leaf(Int64)
-    case node(Tree, Tree)  // error[E429]: enum 'Tree' is recursive without 'indirect'
+    case node(Tree, Tree)
+}
+
+indirect enum Tree2 {   // OK: `node` is stored behind a box
+    case leaf(Int64)
+    case node(Tree2, Tree2)
 }
 ```
 
@@ -299,7 +318,7 @@ protocol/extension-target arguments, where-clause types).
 
 | Code | Message | Explanation |
 |---|---|---|
-| E480 | parameters are not reference-typed; spell the convention instead | **Permanent.** `x: T` borrows and `mutating x: T` mutably borrows — conventions are the only spelling. Covers function-type and closure parameters too. |
+| E480 | a reference-typed parameter must be written `x: &T` or `x: &mutating T` | `x: &T` borrows like `x: T`, `x: &mutating T` mutably borrows like `mutating x: T` (also in function types and closure params). Rejected when combined with a `mutating`/`consuming` keyword or written through a type alias. |
 | E481 | reference return types are not supported yet | Legal since stage 1; the code is retained for the positions still rejected. |
 | E482 | references cannot be stored in bindings | A `var`/`let` annotation may not be `&T`. An aggregate that *wraps* a reference is legal. |
 | E483 | references cannot be stored in fields | Struct/enum fields, including enum case payloads (payloads classify as Field, not Param). Legal since 2b except from STRICT entries. |
@@ -316,7 +335,7 @@ protocol/extension-target arguments, where-clause types).
 | E494 | cannot return this reference/closure: it borrows local '{name}', which does not outlive the call | A reference (or a closure/value carrying one) rooted in a local would dangle after return. |
 | E495 | returning \`&mutating\` requires a mutable root | A `&mutating` return needs a `mutating` receiver/parameter or `Pointer.mutatingValue` as its root; statics and `.value` don't qualify. |
 | E496 | cannot return a reference rooted at consuming parameter '{name}': it is destroyed when the call returns | Consuming parameters die with the call, so references into them can't escape. |
-| E497 | a reference cannot stay live across a control-flow merge in this version | A reference may not cross an `if`/`match`/loop boundary (current-version limitation). |
+| E497 | a reference cannot stay live across a control-flow merge in this version | A reference may not cross an `if`/`match`/loop boundary (current-version limitation). This includes an arm whose result is a reference to an unsized type (`&StringSlice`), which cannot decay, and rebinding a shared-ref `var` inside a branch or loop ("ref binding '{name}' cannot be rebound inside a branch or loop in this version"). |
 | E498 | cannot consume {value} while a reference into it is live | Destroying or moving a value would leave an outstanding reference dangling. |
 | E499 | cannot borrow a temporary value · \`&\` pattern binding would borrow a temporary | `&` needs a named place; temporaries and get/set members have no stable storage to borrow. A `let` destructure with `&` binders must destructure a named place. |
 
@@ -354,6 +373,7 @@ These apply to non-`Copyable` types, which move instead of copy.
 | E509 | a reference to '{name}' is stored somewhere that outlives '{name}' | A value carrying `&x` (directly or inside a struct or enum value) is stored into a binding declared in an outer scope, which outlives `x`, so the reference would dangle. Returns are covered by E494. |
 | E510 | cannot consume '{name}' while the same call borrows it | One call passes a non-Copyable value both to a borrowing (or `mutating`) parameter or receiver and to a `consuming` parameter, as in `f(x, x)`. |
 | E511 | cannot move a field out of '{type}', which has a deinit | Moving a non-Copyable field out of a value would take it apart without running its type's `deinit`. Borrow or copy the field instead. |
+| E512 | passing a '{view}' to a borrowed '{owned}' parameter copies it | Warning. A borrowed parameter that names an owned type (`x: String`) converts a view argument (`&StringSlice`) through `DecaysFrom`, copying it. The callee only reads, so a `&StringSlice` parameter would borrow the view in place. |
 
 ### Example — E500 / E501 (use after move)
 
@@ -440,7 +460,7 @@ func outlives() -> Int64 {
 | E608 | subscript must have a body | Subscript declarations outside protocols need an implementation. |
 | E609 | @extern functions cannot be generic | Generic functions have no stable ABI to export. |
 | E610 | @extern functions cannot have a body | Extern functions are implemented in external code. |
-| E611 | @extern function parameter '{name}' must use consuming access mode | Extern functions receive values, not references. |
+| E611 | @{extern\|export} function parameter '{name}' must be passed by value (consuming) or by reference (&T) | `mutating x: T` on an `@extern` or `@export` function. C takes `x: T` by value; write `x: &mutating T` for a `T*`. |
 | E612 | '@extern' needs a calling convention: '@extern(.C)' | Reported by attribute validation (the registry's missing-argument check, keeping its pre-registry code). |
 | E613 | required parameter '{name}' cannot follow parameter '{default_name}' which has a default value | Defaulted parameters must come last. |
 | E614 | default value cannot reference parameter '{name}' | Defaults are evaluated at each call site and can't see other parameters. |
@@ -507,13 +527,14 @@ members and `lazy` properties.
 | Code | Message | Explanation |
 |---|---|---|
 | E619 | duplicate read provider: this member declares more than one of \`get\`, \`modifying get\`, \`ref\` and \`modifying ref\` | Reads need exactly one provider. |
-| E620 | duplicate write provider: this member declares both \`set\` and \`mutating ref\` | Writes need exactly one provider. |
-| E621 | \`ref\` and \`modifying\` accessors are not allowed in protocols or protocol extensions | Declare them on concrete types only. |
+| E620 | duplicate write provider: this member declares both \`set\` and \`mutating ref\` | Writes need exactly one provider. A failable member may declare both: `mutating ref` serves `&mutating` binders, `set` serves plain `=`. |
+| E621 | a protocol requires \`ref\` / \`mutating ref\` with bodyless clauses, and only a protocol extension gives their bodies; \`modifying\` accessors are not allowed in either | A protocol requires a place with bodyless clauses (`var value: T { ref mutating ref }`), and a protocol extension may give default bodies (`extend P { var value: T { ref { … } } }`). A body in the protocol itself, a bodyless clause in an extension, and `modifying` accessors are rejected. |
 | E622 | this member has a write provider but no read provider | A `set`/`mutating ref` without a read provider; add one. |
 | E636 | \`modifying\` accessors need an instance receiver | A static member or global has no `self` to modify; use a plain `get` / `ref`. |
-| E637 | a failable/throwing member needs a read accessor · a failable/throwing place cannot have a \`set\` accessor | A failable member (`var x?: T`, `subscript(...)? -> T`) reads as `Optional`, a throwing one (`-> T throws E` with accessors) as `Result`; neither can be assigned. Write through it with a `mutating ref` (`Optional[&mutating T]` / `Result[&mutating T, E]`) and a `&mutating` payload binder. |
+| E637 | a failable/throwing member needs a read accessor · a throwing place cannot have a \`set\` accessor | A failable member (`var x?: T`, `subscript(...)? -> T`) reads as `Optional`, a throwing one (`-> T throws E` with accessors) as `Result`. Write through either with a `mutating ref` (`Optional[&mutating T]` / `Result[&mutating T, E]`) and a `&mutating` payload binder. A failable member may also declare `set`, which receives `Optional[T]`; a throwing one may not. |
 | E638 | (varies) | `willSet` / `didSet` on anything but an instance stored `var` of a struct or enum: a `let`, static or global property, a subscript, a failable member, a protocol member, or mixed with `get`/`set`/`ref`. Also `return` in an observer body, which would skip the store. |
 | E639 | (varies) | `lazy` on anything but an instance `var` of a struct or enum with a type annotation and an `= expr` initializer and no accessors; also a `lazy` property whose type isn't Copyable. |
+| E640 | a \`ref\` accessor needs a body outside a protocol | A bodyless `ref` / `mutating ref` only declares a protocol requirement. Write `ref { … }`, or drop the accessor block for a stored property. |
 
 ## E624–E626 — Closure kinds
 
@@ -556,6 +577,29 @@ func each(action: mutating (Int64) -> ()) { }
 
 func eachOk(mutating action: mutating (Int64) -> ()) { }   // ok
 ```
+
+## E641–E646 — `unsafe`
+
+See [language/unsafe.md](language/unsafe.md). An unsafe context is the operand of `unsafe expr` or the body of `unsafe { … }`; the body of an `unsafe func` is not one.
+
+| Code | Message | Explanation |
+|---|---|---|
+| E641 | [extern function ]'{name}' is unsafe and requires an \`unsafe\` expression or block | A use (call, property read, initializer, subscript, or naming it as a value) of an `unsafe` declaration, a pointer-access `lang` intrinsic, or an `@extern` function, outside an unsafe context. |
+| E641 | calling a C function value is unsafe and requires an \`unsafe\` expression or block | A call through a value of C function type (`@extern(.C) (…) -> …`) outside an unsafe context: nothing checks that its address is a live C function of that type. |
+| E642 | unnecessary \`unsafe\`: it covers no unsafe operation | **Warning.** The region contains no unsafe use. A use marks only the innermost `unsafe` around it, so an `unsafe` wrapping another one is reported too. |
+| E643 | '{name}' is unsafe, but the requirement it satisfies in protocol '{proto}' is not | Generic code calls the requirement without `unsafe`, so its witness can't need it. Mark the requirement `unsafe` or make the witness safe. |
+| E644 | '{proto}' is an unsafe protocol; write the conformance as \`unsafe {proto}\` | Conforming to an `unsafe protocol` vouches for its contract (e.g. `ArrayMatchable`'s in-bounds indices), so it is written `T: unsafe P`. |
+| E645 | '{proto}' is not an unsafe protocol; \`unsafe\` here has no effect | **Warning.** `unsafe P` on a safe protocol. |
+| E646 | only a computed property can be \`unsafe\` | `unsafe` on a stored field. Unsafe fields aren't supported; keep the field private and expose an `unsafe` computed property. |
+
+## E647 — C callbacks
+
+See [language/functions.md](language/functions.md#callbacks).
+
+| Code | Message | Explanation |
+|---|---|---|
+| E647 | '{name}' has no C entry point; a C function type needs a function declared '@export(.C)' or '@extern(.C)' | A C function type `@extern(.C) (…) -> …` holds a C address, so only a function with a C entry point can be named as one. Mark the function `@export(.C)`. (A closure literal has no address at all; that is E624.) |
+| E647 | 'NullableCFunction' needs a C function type '@extern(.C) (…) -> …' | `NullableCFunction[F]` holds a C function pointer, so `F` must be a C function type. |
 
 ## E700–E710 — String & character literals, escapes, format specs
 
@@ -615,15 +659,15 @@ See `docs/plans/attributes/attributes-design.md`.
 | E907 | '@{name}' takes at most one argument | Too many positional arguments. |
 | E908 *(warning)* | '{name}' is deprecated[ since {since}][: {message}][; use '{replacement}' instead] | A use of a `@deprecated` declaration: a call, reference, member access, enum case, or a type named in a body or signature. Not reported inside a declaration that is itself deprecated or unavailable, or nested in one. |
 | E909 | '@align({n})' must be a power of two between 1 and 4096 | `@align` takes a power of two; 4096 is the most `posix_memalign` and the stack provide without a special path. |
-| E910 | '@nonExhaustive' has no effect: '{name}' is not visible outside its module | An attribute that does not fit this type: `@nonExhaustive` on an enum that isn't `public` (only other modules must add a catch-all arm, so it does nothing); `'@layout(.Packed)' cannot be applied to an enum`; `'@layout(.Packed)' cannot be applied to a type with an unsized tail`; `'@layout(.C)' on an enum needs every case to be payload-less; 'Shape.Circle' has a payload`. |
-| E911 | field '{field}' of packed struct '{name}' is not Copyable; packed fields are copied on every read | Every field of a `@layout(.Packed)` struct must be bitwise `Copyable`: it may sit at a misaligned address, so a read copies it out first. |
+| E910 | '@nonExhaustive' has no effect: '{name}' is not visible outside its module | An attribute that does not fit this type: `@nonExhaustive` on an enum that isn't `public` (only other modules must add a catch-all arm, so it does nothing); `'@layout(.Packed)' cannot be applied to an enum`; `'@layout(.Packed)' cannot be applied to a type with an unsized tail`; `'@layout(.C)' on an enum needs every case to be payload-less; 'Shape.Circle' has a payload`; `'@existentialOnly' needs a default for a requirement of the protocol it extends` (the attribute is not on a default, in `extend P`, for one of `P`'s requirements). |
+| E911 | field '{field}' of packed struct '{name}' is not Copyable; packed fields are copied on every read | Every field of a `@layout(.Packed)` struct must be bitwise `Copyable`: it may sit at a misaligned address, so a read copies it out first. An unsized tail reports E910 only. |
 | E912 | cannot borrow '{place}' in place: '{name}' is packed, so the field may be misaligned | `&h.length`, `&mutating h.length`, a `mutating` method on `h.length`, or `h.length` passed to a `mutating` parameter. Copy it first: `var n = h.length`. Reads and whole-field writes are fine. |
 | E913 | '{name}' is unavailable[: {message}][; use '{replacement}' instead] | A use of an `@unavailable` declaration. Reported everywhere, including inside other unavailable code. An unavailable protocol requirement needs no witness. |
 | E914 *(warning)* | '.{old}' is the old spelling; write '.{New}' | `@platform(.linux)` / `.darwin`: accepted for one release, renamed to `.Linux` / `.Darwin` in 0.18. |
 | E950 | cannot find protocol '{P}' | A `@derive` argument doesn't resolve, or resolves to something that isn't a protocol (`'Point' in '@derive' is not a protocol`). |
-| E951 | '{P}' cannot be derived; the derivable protocols are Equatable, Hashable, Comparable, Formattable and Defaultable | The protocol has no built-in deriver. `Copyable` and `Cloneable` say why instead: `'Cloneable' is not derived: whether 'Doc' is Cloneable follows from its fields`. |
-| E952 | cannot derive '{P}' for '{S}': field '{f}' has type '{T}', which is not '{P}' | A field (or enum payload: `payload 'radius' of case 'Circle'`) doesn't conform. For a generic type the derived bound `T: P` is assumed. `Defaultable` skips fields with an initializer and reads only the `@default` case. |
+| E951 | '{P}' cannot be derived; the derivable protocols are Equatable, Hashable, Comparable, Formattable, Defaultable and Cloneable | The protocol has no built-in deriver. `Copyable` says why instead: `'Copyable' is not derived: whether 'Plain' is Copyable follows from its fields`. |
+| E952 | cannot derive '{P}' for '{S}': field '{f}' has type '{T}', which is not '{P}' | A field (or enum payload: `payload 'radius' of case 'Circle'`) doesn't conform. For a generic type the derived bound `T: P` is assumed. `Defaultable` skips fields with an initializer and reads only the `@default` case. `Cloneable` needs only `Copyable` fields (`which is not 'Copyable'`), since its `clone()` copies each one. |
 | E953 | '{S}' already declares '{P}' | The type also declares the protocol itself, or a member written for it implements a requirement (`'Point' derives 'Equatable' but also implements 'isEqual'; remove one`), or `@derive` names the protocol twice. |
-| E954 | '@derive' on an extension needs a type declared in this module | `@derive` on an extension of another module's type, or (0.18) of a type declared in another file; also `cannot derive 'P' for 'S': its last field is unsized`. |
+| E954 | '@derive' on an extension needs a type declared in this module | `@derive` on an extension of another module's type, or (0.18) of a type declared in another file; also `cannot derive 'P' for 'S': its last field is unsized`, and `cannot derive 'Cloneable' for 'S': it opts out of 'Copyable'`. |
 | E957 | cannot derive 'Defaultable' for '{E}': mark exactly one case '@default' | An enum derives `Defaultable` by building its one `@default` case. |
 | E958 | deriving '{P}' requires '{S}' to be '{Q}'; add '{Q}' to '@derive' | A parent protocol doesn't hold. Parents are never derived implicitly: derive them alongside, declare them, or derive them in another `@derive`. |

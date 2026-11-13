@@ -31,8 +31,8 @@ public struct PBKDF2[H] where H: Digest {
     /// (2³² − 1) × digest size (RFC 8018 §5.2) — past that the 32-bit
     /// block index would wrap.
     public static func deriveKey(
-        password: some Slice[UInt8] and not Static,
-        salt salt: some Slice[UInt8] and not Static,
+        password: &Slice[UInt8],
+        salt salt: &Slice[UInt8],
         iterations iterations: Int64,
         length length: Int64
     ) -> SymmetricKey throws CryptoError {
@@ -50,7 +50,7 @@ public struct PBKDF2[H] where H: Digest {
             // U_1 = HMAC(password, salt || INT_32_BE(blockIndex))
             var mac = HMAC[H](key: passwordKey);
             mac.update(salt.asUnsafeSlice());
-            let be = UInt32(from: blockIndex).toBytesBigEndian();
+            let be = UInt32(truncating: blockIndex).toBytesBigEndian();
             mac.update(be);
             var u = mac.finalize().bytes;
             var result = u;

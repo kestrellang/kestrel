@@ -356,6 +356,9 @@ pub enum Token {
     #[token("try")]
     Try,
 
+    #[token("unsafe")]
+    Unsafe,
+
     #[token("throws")]
     Throws,
 
@@ -598,6 +601,7 @@ impl Token {
                 | Token::Throw
                 | Token::Throws
                 | Token::Try
+                | Token::Unsafe
                 | Token::Type
                 | Token::Var
                 | Token::Where

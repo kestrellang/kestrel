@@ -14,39 +14,39 @@ module Test
 
             // firstIndex(where:)
             let fi = arr.firstIndex(where: { (x) in x > 3 });
-            if fi.isNone() { return 1 }
+            if fi.isNone { return 1 }
             if fi.unwrap() != 3 { return 2 }
 
             // firstIndex(where:) - no match
             let fiNone = arr.firstIndex(where: { (x) in x > 10 });
-            if fiNone.isSome() { return 3 }
+            if fiNone.isSome { return 3 }
 
             // lastIndex(where:)
             let li = arr.lastIndex(where: { (x) in x < 4 });
-            if li.isNone() { return 4 }
+            if li.isNone { return 4 }
             if li.unwrap() != 2 { return 5 }
 
             // lastIndex(where:) - no match
             let liNone = arr.lastIndex(where: { (x) in x > 10 });
-            if liNone.isSome() { return 6 }
+            if liNone.isSome { return 6 }
 
             // first(where:)
-            let fm = arr.first(where: { (x) in x > 3 });
-            if fm.isNone() { return 7 }
+            let fm = arr.find(where: { (x) in x > 3 });
+            if fm.isNone { return 7 }
             if fm.unwrap() != 4 { return 8 }
 
             // first(where:) - no match
-            let fmNone = arr.first(where: { (x) in x > 10 });
-            if fmNone.isSome() { return 9 }
+            let fmNone = arr.find(where: { (x) in x > 10 });
+            if fmNone.isSome { return 9 }
 
             // last(where:)
-            let lm = arr.last(where: { (x) in x < 4 });
-            if lm.isNone() { return 10 }
+            let lm = arr.findLast(where: { (x) in x < 4 });
+            if lm.isNone { return 10 }
             if lm.unwrap() != 3 { return 11 }
 
             // last(where:) - no match
-            let lmNone = arr.last(where: { (x) in x > 10 });
-            if lmNone.isSome() { return 12 }
+            let lmNone = arr.findLast(where: { (x) in x > 10 });
+            if lmNone.isSome { return 12 }
 
             // all(satisfy:)
             let allPos = arr.all(where: { (x) in x > 0 });

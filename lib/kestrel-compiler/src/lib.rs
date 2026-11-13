@@ -133,6 +133,15 @@ impl Compiler {
         entity
     }
 
+    /// [`Self::set_source`] for a standard-library file: also marks it
+    /// [`StdlibSource`](kestrel_ast_builder::StdlibSource), which is how the
+    /// stdlib is told apart from user code (never by module name).
+    pub fn set_std_source(&mut self, path: &str, source: String) -> Entity {
+        let entity = self.set_source(path, source);
+        self.world.set(entity, kestrel_ast_builder::StdlibSource);
+        entity
+    }
+
     /// Lex a source file, returning its token stream.
     ///
     /// Results are memoized — repeated calls with unchanged source
@@ -367,9 +376,7 @@ impl Compiler {
         output_path: &Path,
         options: &kestrel_codegen_llvm::CodegenOptions,
     ) -> Result<(), kestrel_codegen_llvm::CodegenError> {
-        let to_llvm = |e: kestrel_codegen_cranelift::CodegenError| {
-            kestrel_codegen_llvm::CodegenError::Unsupported(e.to_string())
-        };
+        let to_llvm = shared_pipeline_error_to_llvm;
         let mir = self.lower_to_mir().map_err(to_llvm)?;
         self.ensure_no_lowering_errors().map_err(to_llvm)?;
         let mono = self.monomorphize_mir(mir).map_err(to_llvm)?;
@@ -575,6 +582,16 @@ impl Compiler {
 
     /// Load all .ks files from a directory, parse and build declarations.
     pub fn load_dir(&mut self, path: &Path) {
+        self.load_dir_as(path, false);
+    }
+
+    /// Load the standard library from `path`: [`Self::load_dir`], with every
+    /// file marked [`StdlibSource`](kestrel_ast_builder::StdlibSource).
+    pub fn load_std_dir(&mut self, path: &Path) {
+        self.load_dir_as(path, true);
+    }
+
+    fn load_dir_as(&mut self, path: &Path, stdlib: bool) {
         let mut files: Vec<_> = Self::collect_ks_files(path);
         files.sort(); // deterministic order
 
@@ -584,7 +601,11 @@ impl Compiler {
                 Err(_) => continue,
             };
             let name = file_path.to_string_lossy().to_string();
-            let entity = self.set_source(&name, source);
+            let entity = if stdlib {
+                self.set_std_source(&name, source)
+            } else {
+                self.set_source(&name, source)
+            };
             self.build(entity);
         }
     }
@@ -1226,5 +1247,23 @@ mod tests {
             2,
             "f2 should have module + struct"
         );
+    }
+}
+
+/// Carry a shared-pipeline error (lowering, mono, verification — typed with
+/// the Cranelift backend's error) into the LLVM backend's error, keeping its
+/// variant. Wrapping its `Display` in `Unsupported` printed
+/// "unsupported: unsupported: …" at -O1.
+fn shared_pipeline_error_to_llvm(
+    e: kestrel_codegen_cranelift::CodegenError,
+) -> kestrel_codegen_llvm::CodegenError {
+    use kestrel_codegen_cranelift::CodegenError as Shared;
+    use kestrel_codegen_llvm::CodegenError as Llvm;
+    match e {
+        Shared::Unsupported(msg) => Llvm::Unsupported(msg),
+        Shared::LinkerError(msg) => Llvm::LinkerError(msg),
+        Shared::IoError(err) => Llvm::IoError(err),
+        Shared::CompilationFailed(failures) => Llvm::CompilationFailed(failures),
+        other => Llvm::Unsupported(other.to_string()),
     }
 }

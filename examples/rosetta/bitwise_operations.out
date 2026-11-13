@@ -1,0 +1,9 @@
+a AND b: 2
+a OR b:  255
+a XOR b: 253
+NOT a:   -256
+a << b:  1020
+a >> b:  63   (arithmetic: -a >> b = -64)
+logical right shift of -a by b: 4611686018427387840
+a rotl b: 1020
+a rotr b: -4611686018427387841

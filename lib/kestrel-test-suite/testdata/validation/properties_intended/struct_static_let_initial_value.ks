@@ -3,7 +3,7 @@
 // expect-stdout: 10\n
 
 module Main
-import std.io.stdio.println
+import std.streams.println
 
 public struct Foo {
     public static let structStaticLet: std.numeric.Int64 = 10;

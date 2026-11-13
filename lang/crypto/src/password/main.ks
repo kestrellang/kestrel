@@ -188,7 +188,7 @@ public struct PasswordHash {
     }
 
     static func parse(encoded: String) -> PasswordHash? {
-        let parts = encoded.split("$").collect();
+        let parts = encoded.split(by: "$").collect();
         if parts.count < 4 or parts(0) != "" { return null; }
         let id = parts(1).toOwned();
         if id == "2a" or id == "2b" or id == "2y" {
@@ -266,8 +266,8 @@ struct PHCParameters {
     static func parse(text: String) -> PHCParameters? {
         var names: [String] = [];
         var values: [Int64] = [];
-        for pair in text.split(",") {
-            let fields = pair.toOwned().split("=").collect();
+        for pair in text.split(by: ",") {
+            let fields = pair.toOwned().split(by: "=").collect();
             if fields.count != 2 { return null; }
             let name = fields(0).toOwned();
             guard let some value = Int64(parsing: fields(1).toOwned()) else { return null; }

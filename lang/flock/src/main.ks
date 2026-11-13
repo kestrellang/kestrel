@@ -8,6 +8,8 @@
 
 module flock.main
 
+import clutch.shell.(runShell, shellOutput)
+
 import clutch.os.(getArgv)
 import clutch.command.(Command)
 import clutch.argument.(Argument)
@@ -67,7 +69,7 @@ func main() -> lang.i32 {
                     var release = false;
                     var binFlag: String? = .None;
                     if matches.submatches.count > 0 {
-                        let sm = matches.submatches(unchecked: 0);
+                        let sm = unsafe matches.submatches(unchecked: 0);
                         release = sm.hasFlag("release");
                         binFlag = sm.value(of: "bin")
                     }
@@ -80,7 +82,7 @@ func main() -> lang.i32 {
                     } else if sub == "init" {
                         var lib = false;
                         if matches.submatches.count > 0 {
-                            lib = matches.submatches(unchecked: 0).hasFlag("lib")
+                            lib = unsafe matches.submatches(unchecked: 0).hasFlag("lib")
                         }
                         handleInit(lib: lib)
                     } else if sub == "publish" {
@@ -93,7 +95,7 @@ func main() -> lang.i32 {
                         var pkg: String? = .None;
                         var instRelease = true;
                         if matches.submatches.count > 0 {
-                            let sm2 = matches.submatches(unchecked: 0);
+                            let sm2 = unsafe matches.submatches(unchecked: 0);
                             force = sm2.hasFlag("force");
                             pkg = sm2.value(of: "package");
                             instRelease = not sm2.hasFlag("debug")
@@ -192,10 +194,10 @@ func handleCheck() -> lang.i32 {
 }
 
 func handleInit(lib lib: Bool) -> lang.i32 {
-    let cwd = getcwd().unwrap(or: String());
+    let cwd = Environment.currentDirectory().map { p in p.string }.unwrap(or: String());
     let manifestPath = joinPath(base: cwd, rel: "flock.toml");
 
-    if fileExists( manifestPath) {
+    if Path(manifestPath).exists() {
          eprintln("flock.toml already exists in this directory");
         return 1
     }
@@ -206,7 +208,7 @@ func handleInit(lib lib: Bool) -> lang.i32 {
     var content = String();
     content.append("[package]\nname = \""); content.append(dirName.clone()); content.append("\"\nversion = \"0.1.0\"\norg = \"\"\ndescription = \"\"\nauthor = \"\"\nlicense = \"\"\nrepository = \"\"\nwebsite = \"\"\ndocumentation = \"\"\n\n[dependencies]\n");
 
-    match writeFileString(manifestPath, content) {
+    match File.writeText(Path(manifestPath), content) {
         .Ok(_) => {  println("Created flock.toml"); },
         .Err(e) => {
              eprintln("Failed to create flock.toml");
@@ -216,9 +218,9 @@ func handleInit(lib lib: Bool) -> lang.i32 {
 
     // Create src/ directory
     let srcDir = joinPath(base: cwd, rel: "src");
-    if not isDirectory( srcDir) {
+    if not Path(srcDir).isDirectory() {
         var mkdirCmd = String(); mkdirCmd.append("mkdir -p "); mkdirCmd.append(srcDir.clone());
-         spawn(mkdirCmd).unwrap(or: -1);
+         runShell(mkdirCmd);
          println("Created src/");
     }
 
@@ -227,20 +229,20 @@ func handleInit(lib lib: Bool) -> lang.i32 {
     let modName = sanitizeModuleName(name: dirName.clone());
     if lib {
         let libPath = joinPath(base: srcDir, rel: "lib.ks");
-        if not fileExists(libPath) {
+        if not Path(libPath).exists() {
             var c = String();
             c.append("module "); c.append(modName); c.append(".lib\n\n/// Returns a friendly greeting.\npublic func greeting() -> String {\n    \"Hello from "); c.append(dirName); c.append("\"\n}\n");
-            match writeFileString(libPath, c) {
+            match File.writeText(Path(libPath), c) {
                 .Ok(_) => {  println("Created src/lib.ks"); },
                 .Err(_) => {}
             }
         }
     } else {
         let mainPath = joinPath(base: srcDir, rel: "main.ks");
-        if not fileExists(mainPath) {
+        if not Path(mainPath).exists() {
             var c = String();
             c.append("module "); c.append(modName); c.append(".main\n\n@main\nfunc main() -> lang.i32 {\n    println(\"Hello from "); c.append(dirName); c.append("!\");\n    0\n}\n");
-            match writeFileString(mainPath, c) {
+            match File.writeText(Path(mainPath), c) {
                 .Ok(_) => {  println("Created src/main.ks"); },
                 .Err(_) => {}
             }
@@ -255,7 +257,7 @@ func sanitizeModuleName(name name: String) -> String {
     var result = String();
     var i: Int64 = 0;
     while i < name.bytes.count {
-        let b = name.bytes(unchecked: i);
+        let b = unsafe name.bytes(unchecked: i);
         let ok = (b >= 97 and b <= 122) or (b >= 65 and b <= 90) or (b >= 48 and b <= 57) or b == 95;
         if ok {
             result.append(name.asSlice().subslice(from: i, to: i + 1).toOwned())
@@ -271,10 +273,10 @@ func sanitizeModuleName(name name: String) -> String {
 }
 
 func handlePublish() -> lang.i32 {
-    let cwd = getcwd().unwrap(or: String());
+    let cwd = Environment.currentDirectory().map { p in p.string }.unwrap(or: String());
     let manifestPath = joinPath(base: cwd, rel: "flock.toml");
 
-    if not fileExists(manifestPath) {
+    if not Path(manifestPath).exists() {
          eprintln("flock.toml not found in current directory");
         return 1
     }
@@ -289,7 +291,7 @@ func handlePublish() -> lang.i32 {
         ),
         dependencies: []
     );
-    match readFileString(manifestPath) {
+    match File.readText(Path(manifestPath)) {
         .Err(_) => {
              eprintln("cannot read flock.toml");
             return 1
@@ -316,7 +318,7 @@ func handlePublish() -> lang.i32 {
         .Some(o) => org = o,
         .None => {}
     }
-    match getenv("FLOCK_ORG") {
+    match Environment.variable("FLOCK_ORG") {
         .Some(o) => org = o,
         .None => {}
     }
@@ -328,14 +330,14 @@ func handlePublish() -> lang.i32 {
     // Read token from ~/.flock/credentials
     var token = "";
     let credPath = joinPath(base: flockHome(), rel: "credentials");
-    match readFileString(credPath) {
+    match File.readText(Path(credPath)) {
         .Ok(contents) => token = trimWhitespace(contents),
         .Err(_) => {}
     }
 
     // Fall back to FLOCK_TOKEN env var
     if token.bytes.count == 0 {
-        match getenv("FLOCK_TOKEN") {
+        match Environment.variable("FLOCK_TOKEN") {
             .Some(t) => token = t,
             .None => {
                  eprintln("No auth token found.");
@@ -351,7 +353,7 @@ func handlePublish() -> lang.i32 {
     // Create archive
     var archivePath = String(); archivePath.append("/tmp/flock-publish-"); archivePath.append(name); archivePath.append("-"); archivePath.append(version); archivePath.append(".tar.gz");
     var tarCmd = String(); tarCmd.append("tar czf "); tarCmd.append(archivePath); tarCmd.append(" -C "); tarCmd.append(quoteArg(cwd)); tarCmd.append(" .");
-    let tarExit = spawn(tarCmd).unwrap(or: -1);
+    let tarExit = runShell(tarCmd);
     if tarExit != 0 {
          eprintln("failed to create archive");
         return 1
@@ -361,11 +363,11 @@ func handlePublish() -> lang.i32 {
     var docsDir = String(); docsDir.append("/tmp/flock-docs-"); docsDir.append(name); docsDir.append("-"); docsDir.append(version);
     let sourceDir = joinPath(base: cwd, rel: manifest.package.source);
     var docCmd = String(); docCmd.append("kestrel-doc --src "); docCmd.append(quoteArg(sourceDir)); docCmd.append(" --out "); docCmd.append(quoteArg(docsDir)); docCmd.append(" --bundle --format json");
-    let docExit = spawn(docCmd).unwrap(or: -1);
+    let docExit = runShell(docCmd);
     var hasDocs = false;
     if docExit == 0 {
         var docsPath = String(); docsPath.append(docsDir); docsPath.append("/docs.json");
-        if fileExists(docsPath) {
+        if Path(docsPath).exists() {
             hasDocs = true
         }
     } else {
@@ -378,7 +380,7 @@ func handlePublish() -> lang.i32 {
     var pubMsg = String(); pubMsg.append("Publishing "); pubMsg.append(org); pubMsg.append("/"); pubMsg.append(name); pubMsg.append("@"); pubMsg.append(version); pubMsg.append(" to "); pubMsg.append(regUrl); pubMsg.append("...");
      println(pubMsg);
 
-    let output = captureOutput(curlCmd).unwrap(or: String());
+    let output = shellOutput(curlCmd);
      println(output);
 
     // Upload docs if generated
@@ -387,26 +389,26 @@ func handlePublish() -> lang.i32 {
         var docsUrl = String(); docsUrl.append(regUrl); docsUrl.append("/api/v1/packages/"); docsUrl.append(org); docsUrl.append("/"); docsUrl.append(name); docsUrl.append("/"); docsUrl.append(version); docsUrl.append("/docs");
         var docsCurlCmd = String(); docsCurlCmd.append("curl -s -X PUT "); docsCurlCmd.append(quoteArg(docsUrl)); docsCurlCmd.append(" -H \"Authorization: Bearer "); docsCurlCmd.append(token); docsCurlCmd.append("\" -H \"Content-Type: application/json\" --data-binary @"); docsCurlCmd.append(docsPath);
          println("Uploading documentation...");
-        let docsOutput = captureOutput(docsCurlCmd).unwrap(or: String());
+        let docsOutput = shellOutput(docsCurlCmd);
          println(docsOutput);
     }
 
     // Clean up
     var rmCmd = String(); rmCmd.append("rm -f "); rmCmd.append(archivePath);
-     spawn(rmCmd).unwrap(or: -1);
+     runShell(rmCmd);
     var rmDocsCmd = String(); rmDocsCmd.append("rm -rf "); rmDocsCmd.append(docsDir);
-     spawn(rmDocsCmd).unwrap(or: -1);
+     runShell(rmDocsCmd);
     0
 }
 
 func handleUpdate() -> lang.i32 {
-    let cwd = getcwd().unwrap(or: String());
+    let cwd = Environment.currentDirectory().map { p in p.string }.unwrap(or: String());
     let lockPath = joinPath(base: cwd, rel: "flock.lock");
 
     // Delete existing lock file to force re-resolution
-    if fileExists(lockPath) {
+    if Path(lockPath).exists() {
         var rmCmd = String(); rmCmd.append("rm "); rmCmd.append(lockPath);
-         spawn(rmCmd).unwrap(or: -1);
+         runShell(rmCmd);
          println("Removed flock.lock");
     }
 
@@ -452,7 +454,7 @@ func handleInstall(target target: String?, binFlag binFlag: String?, force force
 
                     // Ensure ~/.flock/bin exists.
                     let binDir = joinPath(base: flockHome(), rel: "bin");
-                    match mkdirAll(binDir) {
+                    match Directory.createAll(Path(binDir)) {
                         .Ok(_) => {},
                         .Err(_) => {  eprintln("failed to create ~/.flock/bin"); return 1 }
                     }
@@ -460,7 +462,7 @@ func handleInstall(target target: String?, binFlag binFlag: String?, force force
                     // Build + install each target.
                     var i: Int64 = 0;
                     while i < targets.count {
-                        let bin = targets(unchecked: i);
+                        let bin = unsafe targets(unchecked: i);
                         i = i + 1;
                         match installOne(bin: bin, built: built, binDir: binDir, force: force, release: release) {
                             .Ok(_) => {},
@@ -480,7 +482,7 @@ func handleInstall(target target: String?, binFlag binFlag: String?, force force
 /// registry package `<org>/<pkg>[@version]`, or a local directory path.
 func resolveInstallRoot(target target: String?) -> ResolvedPackage throws FlockError {
     match target {
-        .None => loadLocalPackage(rootDir: getcwd().unwrap(or: String())),
+        .None => loadLocalPackage(rootDir: Environment.currentDirectory().map { p in p.string }.unwrap(or: String())),
         .Some(t) => {
             if not isRegistryName(name: t) {
                 // A bare (non-`org/pkg`) target is treated as a local path.
@@ -491,7 +493,7 @@ func resolveInstallRoot(target target: String?) -> ResolvedPackage throws FlockE
             var verOpt: String? = .None;
             var i: Int64 = 0;
             while i < t.bytes.count {
-                if t.bytes(unchecked: i) == 64 { // '@'
+                if unsafe t.bytes(unchecked: i) == 64 { // '@'
                     name = t.asSlice().subslice(from: 0, to: i).toOwned();
                     verOpt = .Some(t.asSlice().subslice(from: i + 1, to: t.bytes.count).toOwned());
                     break
@@ -511,7 +513,7 @@ func resolveInstallRoot(target target: String?) -> ResolvedPackage throws FlockE
             }
             let regUrl = resolveRegistryUrl(projectUrl: .None);
             let regSrc = RegistrySource(config: RegistryConfig(url: regUrl));
-            regSrc.resolve(name: name, spec: DependencySpec.Registry(constraint), baseDir: getcwd().unwrap(or: String()))
+            regSrc.resolve(name: name, spec: DependencySpec.Registry(constraint), baseDir: Environment.currentDirectory().map { p in p.string }.unwrap(or: String()))
         }
     }
 }
@@ -525,7 +527,7 @@ func installOne(bin bin: BinTarget, built built: ResolvedBuild, binDir binDir: S
     }
 
     let dest = joinPath(base: binDir, rel: bin.name);
-    if fileExists(dest) and not force {
+    if Path(dest).exists() and not force {
         throw FlockError.BinaryExists(bin.name.clone())
     }
 
@@ -537,7 +539,7 @@ func installOne(bin bin: BinTarget, built built: ResolvedBuild, binDir binDir: S
         .Ok(_) => {}
     }
 
-    match rename(tmp, dest.clone()) {
+    match File.rename(Path(tmp), to: Path(dest.clone())) {
         .Ok(_) => {},
         .Err(_) => {
             var m = String(); m.append("failed to move binary into "); m.append(binDir.clone());
@@ -590,10 +592,10 @@ struct ResolvedBuild: Cloneable {
 /// Reads and parses `<rootDir>/flock.toml` into a ResolvedPackage.
 func loadLocalPackage(rootDir rootDir: String) -> ResolvedPackage throws FlockError {
     let manifestPath = joinPath(base: rootDir, rel: "flock.toml");
-    if not fileExists(manifestPath) {
+    if not Path(manifestPath).exists() {
         throw FlockError.ManifestNotFound(manifestPath)
     }
-    match readFileString(manifestPath) {
+    match File.readText(Path(manifestPath)) {
         .Err(e) => {
             var msg = String(); msg.append("cannot read "); msg.append(manifestPath);
             .Err(FlockError.IoError(msg))
@@ -675,7 +677,7 @@ func collectBuild(root root: ResolvedPackage) -> ResolvedBuild throws FlockError
         }
         match build.cFlagsCmd {
             .Some(cmd) => {
-                let output = captureOutput( cmd).unwrap(or: String());
+                let output = shellOutput(cmd);
                 let extra = splitWhitespace(output);
                 j = 0;
                 for element in extra {
@@ -699,7 +701,7 @@ func collectBuild(root root: ResolvedPackage) -> ResolvedBuild throws FlockError
             }
             ccCmd.append(" "); ccCmd.append(quoteArg(cPath)); ccCmd.append(" -o "); ccCmd.append(quoteArg(oPath));
 
-            let exitCode = spawn( ccCmd).unwrap(or: -1);
+            let exitCode = runShell(ccCmd);
             if exitCode != 0 {
                 throw FlockError.CompilerFailed(exitCode)
             }
@@ -712,11 +714,11 @@ func collectBuild(root root: ResolvedPackage) -> ResolvedBuild throws FlockError
         // Resolve dynamic link flags if link-cmd is set
         match build.linkCmd {
             .Some(cmd) => {
-                let output = captureOutput( cmd).unwrap(or: String());
+                let output = shellOutput(cmd);
                 let flags = splitWhitespace(output);
                 j = 0;
                 while j < flags.count {
-                    let flag = flags(unchecked: j);
+                    let flag = unsafe flags(unchecked: j);
                     // Parse -l, -L, and -framework flags from command output
                     if flag.starts(with: "-l") {
                         allLinkLibs.append(flag.asSlice().subslice(from: 2, to: flag.bytes.count).toOwned())
@@ -729,7 +731,7 @@ func collectBuild(root root: ResolvedPackage) -> ResolvedBuild throws FlockError
                     j = j + 1;
                     // Handle "-framework Name" as two separate tokens
                     if flag == "-framework" and j < flags.count {
-                        allFrameworks.append(flags(unchecked: j));
+                        allFrameworks.append(unsafe flags(unchecked: j));
                         j = j + 1
                     }
                 }
@@ -788,7 +790,7 @@ func writeLockFile(cwd cwd: String, rootName rootName: String, nodes nodes: Arra
 
     let lockContent = generateLockFile(entries: lockEntries);
     let lockPath = joinPath(base: cwd, rel: "flock.lock");
-    match writeFileString(lockPath, lockContent) {
+    match File.writeText(Path(lockPath), lockContent) {
         .Ok(_) => {},
         .Err(_) => {}
     }
@@ -797,7 +799,7 @@ func writeLockFile(cwd cwd: String, rootName rootName: String, nodes nodes: Arra
 /// Reads the current package, resolves + discovers everything, writes the lock
 /// file, and returns the build set (shared sources + binary targets).
 func resolveAndDiscover() -> ResolvedBuild throws FlockError {
-    let cwd = getcwd().unwrap(or: String());
+    let cwd = Environment.currentDirectory().map { p in p.string }.unwrap(or: String());
     match loadLocalPackage(rootDir: cwd) {
         .Err(e) => throw e,
         .Ok(root) => {
@@ -831,7 +833,7 @@ func selectBin(bins bins: Array[BinTarget], binFlag binFlag: String?, packageNam
         },
         .None => {
             if bins.count == 1 {
-                return .Ok(bins(unchecked: 0).clone())
+                return .Ok(unsafe bins(unchecked: 0).clone())
             }
             // Prefer the package-named default (src/main.ks).
             for element in bins {
@@ -856,7 +858,7 @@ func selectBin(bins bins: Array[BinTarget], binFlag binFlag: String?, packageNam
 
 /// Prints a hint to add `binDir` to PATH when it isn't already there.
 func printPathHintIfNeeded(binDir binDir: String) {
-    let path = match getenv("PATH") {
+    let path = match Environment.variable("PATH") {
         .Some(p) => p,
         .None => return
     };
@@ -875,7 +877,7 @@ func pathContains(path path: String, dir dir: String) -> Bool {
     var i: Int64 = 0;
     let len = path.bytes.count;
     while i <= len {
-        if i == len or path.bytes(unchecked: i) == 58 { // ':'
+        if i == len or unsafe path.bytes(unchecked: i) == 58 { // ':'
             if i > start {
                 let seg = path.asSlice().subslice(from: start, to: i).toOwned();
                 if seg == dir {
@@ -907,7 +909,7 @@ func splitWhitespace(s: String) -> Array[String] {
     let len = s.bytes.count;
 
     while i < len {
-        let b = s.bytes(unchecked: i);
+        let b = unsafe s.bytes(unchecked: i);
         let isSpace = b == 32 or b == 9 or b == 10 or b == 13;
         if isSpace {
             if start >= 0 {
@@ -950,14 +952,14 @@ func lastPathComponent(path: String) -> String {
     let len = path.bytes.count;
     // Skip trailing slash
     var end = len;
-    if end > 0 and path.bytes(unchecked: end - 1) == 47 {
+    if end > 0 and unsafe path.bytes(unchecked: end - 1) == 47 {
         end = end - 1
     }
 
     // Find last slash
     var i = end - 1;
     while i >= 0 {
-        if path.bytes(unchecked: i) == 47 { // '/'
+        if unsafe path.bytes(unchecked: i) == 47 { // '/'
             return path.asSlice().subslice(from: i + 1, to: end).toOwned()
         }
         i = i - 1
@@ -971,7 +973,7 @@ func trimWhitespace(s: String) -> String {
     let len = s.bytes.count;
     var start: Int64 = 0;
     while start < len {
-        let b = s.bytes(unchecked: start);
+        let b = unsafe s.bytes(unchecked: start);
         if b == 32 or b == 9 or b == 10 or b == 13 {
             start = start + 1
         } else {
@@ -980,7 +982,7 @@ func trimWhitespace(s: String) -> String {
     }
     var end = len;
     while end > start {
-        let b = s.bytes(unchecked: end - 1);
+        let b = unsafe s.bytes(unchecked: end - 1);
         if b == 32 or b == 9 or b == 10 or b == 13 {
             end = end - 1
         } else {

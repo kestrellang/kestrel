@@ -57,6 +57,8 @@ pub(crate) struct LowerCtx<'a> {
     pub while_conditions: Vec<HirExprId>,
     /// Every `|>` lowered so far (`HirBody::pipes`).
     pub pipes: Vec<kestrel_hir::body::PipeSite>,
+    /// Every `unsafe` region lowered so far (`HirBody::unsafe_regions`).
+    pub unsafe_regions: Vec<Span>,
 
     /// Stack of active loop labels (innermost last). `None` = unlabeled loop.
     /// Used to validate break/continue labels during lowering.
@@ -112,6 +114,7 @@ impl<'a> LowerCtx<'a> {
             scopes: vec![HashMap::new()], // start with one scope for params
             guard_stmts: Vec::new(),
             pipes: Vec::new(),
+            unsafe_regions: Vec::new(),
             while_conditions: Vec::new(),
             loop_labels: Vec::new(),
             local_depths: HashMap::new(),
@@ -267,19 +270,10 @@ impl<'a> LowerCtx<'a> {
             elements: vec![],
             span: span.clone(),
         });
-        let wrapper_name = match effect {
-            InitEffect::Failable => "Some",
-            InitEffect::Throwing => "Ok",
+        let case = match effect {
+            InitEffect::Failable => kestrel_hir::Builtin::OptionalSomeCase,
+            InitEffect::Throwing => kestrel_hir::Builtin::ResultOkCase,
         };
-        Some(self.alloc_expr(HirExpr::ImplicitMember {
-            owner: None,
-            name: HirName::name(wrapper_name),
-            args: Some(vec![HirCallArg {
-                trailing_closure: false,
-                label: None,
-                value: unit_expr,
-            }]),
-            span,
-        }))
+        Some(self.lang_case_value(case, Some(unit_expr), "this initializer", &span))
     }
 }

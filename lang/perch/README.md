@@ -1,90 +1,83 @@
 # Perch
 
-Web server framework for Kestrel with routing, middleware, and parameterized context.
-
-## Installation
-
-```toml
-[dependencies]
-kestrel/perch = "0.2.1"
-```
-
-## Usage
+Web server framework for Kestrel: handlers are plain functions with typed
+inputs and outputs, middleware upgrades the context type, and errors are
+thrown.
 
 ```kestrel
-var app = App[String]("Hello, World!")
+import perch.(App, Logger, Get, Post, HttpError, Json, Path, Created)
 
-app.route(get: "/", func(req: Request, ctx: String) -> Response {
-    return Response.ok(Text(ctx))
-})
+let app = App(AppCtx(db: db)).using(Logger());
+app.on(Post("/auth/login"), Auth.login);
 
-app.route(get: "/users/:id", func(req: Request, ctx: String) -> Response {
-    let id = req.param("id")
-    return Response.ok(Text("User " + id))
-})
+let notes = app.group("/notes").using(AuthMiddleware());   // AppCtx → AuthCtx
+notes.on(Get("/:id"), Notes.read);
+notes.on(Put(), Notes.create);
 
-app.route(post: "/users", func(req: Request, ctx: String) -> Response {
-    return Response.created(JsonBody(req.body))
-})
-
-let _ = app.listen(port: 8080)
+try app.listen(8080);
 ```
 
-## Key Types
+## Handlers
 
-- **App[T]** - web application with typed context
-- **Request** - incoming HTTP request with method, path segments, headers, body, and route params
-- **Response** - HTTP response builder with Content-based factories
-- **GroupBuilder[T]** - route group with shared prefix and middleware
-- **Content** - protocol for response/request body types (Text, JsonBody, Form, Bytes)
-- **Middleware[T]** - protocol for request processing middleware
+Every handler is `(ctx, input) -> R throws HttpError`:
 
-## Routing
+- **`ctx`** is the group's context — whatever its middleware produced.
+- **`input`** conforms to `FromRequest`: `Json[T]` (`T: Deserialize`),
+  `Path[T]` (`T: PathParameter`), `Query[T]` (`T: Deserialize`), `()`, or a
+  tuple of up to four extractors, or `Request` itself for raw access (form
+  bodies, cookies). A failed extraction is the response
+  (400/404/422) and the handler doesn't run. Destructure extractors right in
+  the parameter: `Json { value: new }: Json[NewNote]`, or for a tuple
+  `(Path { value: id }, Json { value: edit }): (Path[Int64], Json[Edit])`.
+- **`R`** conforms to `IntoResponse`; the status lives in the type:
+  `Json[T]` 200, `Created[R]` 201, `NoContent` 204, `String` 200 text,
+  `Html`/`Text`/`Bytes` (from `http.content`) 200 with their content type,
+  `Response` as-is.
+- A thrown **`HttpError`** (`.notFound()`, `.unauthorized()`,
+  `.conflict(msg)`, …) becomes a JSON `{"error": msg}` response.
+- Other errors convert with `try` once they conform to `IntoHttpError`:
 
-Register handlers with `route(get:)`, `route(post:)`, `route(put:)`, `route(delete:)`, `route(patch:)`:
+  ```kestrel
+  extend SqliteError: IntoHttpError {
+      public consuming func intoHttpError() -> HttpError = HttpError.serverError()
+  }
+  ```
 
 ```kestrel
-app.route(get: "/api/users", handler)
-app.route(get: "/api/users/:id", handler)  // :id is a path parameter
-```
-
-All types that conform to `Routes[T]` get these methods automatically — just implement `addRoute`.
-
-## Route Groups
-
-```kestrel
-var api = GroupBuilder[String]("/api")
-api.route(get: "/users", listUsers)
-api.route(post: "/users", createUser)
-app.addGroup(api)
+static func read(ctx: AuthCtx, Path { value: id }: Path[Int64]) -> Json[Note] throws HttpError {
+    guard let some note = try findNote(ctx.db, id) else {
+        throw HttpError.notFound()
+    }
+    Json(note)
+}
 ```
 
 ## Middleware
 
-Implement the `Middleware[T]` protocol to create reusable middleware:
-
 ```kestrel
-struct AuthCheck[T]: Middleware[T] {
-    func handle(request: Request, ctx: T) -> MiddlewareResult {
-        match request.header("Authorization") {
-            .Some(_) => .Continue(request),
-            .None => .Respond(Response.unauthorized())
-        }
-    }
-
-    func clone() -> AuthCheck[T] { AuthCheck[T]() }
+struct AuthMiddleware: Middleware[AppCtx] {
+    type Output = AuthCtx;
+    func handle(request: Request, ctx: AppCtx) -> MiddlewareResult[AuthCtx] { … }
 }
-
-app.use(AuthCheck[String]())
 ```
 
-## Response Content
+`group.using(m)` returns a `Group[M.Output]`, so a handler that takes
+`AuthCtx` can only be registered behind the middleware that produces one.
+Middleware is stored once and borrowed; it need not be `Cloneable`.
 
-Responses use the `Content` protocol for body data:
+## Sharing
 
-```kestrel
-Response.ok(Text("Hello"))
-Response.ok(JsonBody(payload))
-Response.created(Form([("key", "value")]))
-Response.badRequest(Text("Missing field"))
-```
+`App` and `Group` are handles onto one route table: registering through a
+`let` group adds to the app that `listen`s. `using` and `group` return new
+handles; they never change the one they're called on.
+
+## Testing
+
+`app.respond(to: Request(.Get, url: "/notes/1", headers: h, body: ""))`
+runs a request through routing, middleware, and the handler without a
+socket. `tests/run.sh` builds and runs `tests/checks.ks`.
+
+## Notes
+
+Middleware runs only for matched routes, so `Logger` doesn't log 404s.
+`Path[T]` reads the route's first `:param`; take `Path[(A, B)]` for two.

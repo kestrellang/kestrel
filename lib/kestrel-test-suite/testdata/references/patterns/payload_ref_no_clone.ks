@@ -15,7 +15,7 @@ struct Tracked: Cloneable {
     var payload: String
     var clones: Pointer[Int64]
     func clone() -> Tracked {
-        self.clones.write(self.clones.read() + 1);
+        unsafe self.clones.write(self.clones.read() + 1);
         Tracked(payload: self.payload.clone(), clones: self.clones)
     }
 }
@@ -28,19 +28,19 @@ enum Box2 {
 @main
 func main() -> lang.i64 {
     let clones = SystemAllocator().allocate(Layout.of[Int64]()).unwrap().cast[Int64]();
-    clones.write(0);
+    unsafe clones.write(0);
     let bx = Box2.Pair(
         Tracked(payload: "a", clones: clones),
         Tracked(payload: "b", clones: clones)
     );
 
-    let c0 = clones.read();
+    let c0 = unsafe clones.read();
     let got = match bx {
         .Pair(&a, b) if a.payload == "a" => b.payload,
         .Pair(&a, b) => a.payload,
         .Nothing => "x"
     };
-    let c1 = clones.read();
+    let c1 = unsafe clones.read();
 
     if got != "b" { return 1; }
     if c1 - c0 != 1 { return 2; }

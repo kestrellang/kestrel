@@ -23,6 +23,7 @@ impl OssaBodyCtx<'_, '_> {
         then_body: &HirBlock,
         else_body: Option<&HirBlock>,
     ) -> ValueId {
+        let returns = std::mem::take(&mut self.return_tail);
         let mark = self.ref_watermark();
         let cond_val = self.lower_expr(condition);
         // `HirExpr::If` is the single shape that `if`, `else if`, desugared
@@ -77,6 +78,7 @@ impl OssaBodyCtx<'_, '_> {
         self.switch_to(then_block);
         self.rebind_scope_values(&live_vals, &then_params);
         self.push_scope();
+        self.return_tail = returns;
         let then_val = self.lower_hir_block(then_body);
         // An `if` with no `else` is a unit statement: a then-tail of another
         // type (`if c { println("x") }`, whose tail is a `Result`) is
@@ -107,6 +109,7 @@ impl OssaBodyCtx<'_, '_> {
         self.rebind_scope_values(&live_vals, &else_params);
         self.push_scope();
         let else_exit = if let Some(else_body) = else_body {
+            self.return_tail = returns;
             let else_val = self.lower_hir_block(else_body);
             let prev_span = self.current_span.clone();
             if let Some(tail) = else_body.tail_expr {
@@ -365,7 +368,14 @@ impl OssaBodyCtx<'_, '_> {
                 self.set_field_init(field, pre.join(*post));
             }
         }
-        self.emit_literal(Immediate::unit())
+        let unit = self.emit_literal(Immediate::unit());
+        // No `break` reaches the exit: the loop only leaves by `return`, so
+        // the exit block is dead. Leave no open block (as a match whose arms
+        // all diverge does), or a function tail would return this unit.
+        if break_var_inits.is_empty() {
+            self.current_block = None;
+        }
+        unit
     }
 
     // ================================================================

@@ -50,6 +50,53 @@ fn binary_precedence_is_in_the_tree() {
     assert_eq!(ops("try f() ?? d"), "(try f() ?? d)");
 }
 
+/// The whole body expression, fully parenthesised through binary, prefix
+/// and postfix operators.
+fn grouped(expr: &str) -> String {
+    let tree = parse_ok(&format!("func f() {{ let r = {expr}; }}\n"));
+    let init = first(&tree, SyntaxKind::Expression);
+    group(&init)
+}
+
+fn group(n: &SyntaxNode) -> String {
+    let inner = if n.kind() == SyntaxKind::Expression {
+        n.first_child().unwrap()
+    } else {
+        n.clone()
+    };
+    let kids: Vec<_> = inner.children().collect();
+    let op = || {
+        inner
+            .children_with_tokens()
+            .filter_map(|e| e.into_token())
+            .find(|t| !t.kind().is_trivia())
+            .unwrap()
+            .text()
+            .to_string()
+    };
+    match inner.kind() {
+        SyntaxKind::ExprBinary => format!("({} {} {})", group(&kids[0]), op(), group(&kids[1])),
+        SyntaxKind::ExprUnary => format!("({}{})", op(), group(&kids[0])),
+        SyntaxKind::ExprPostfix => format!("({}{})", group(&kids[0]), op()),
+        _ => inner.text().to_string().trim().to_string(),
+    }
+}
+
+#[test]
+fn one_sided_ranges_group_like_binary_ranges() {
+    // A missing end changes nothing about what the other end takes.
+    assert_eq!(grouped("x + 2.."), "((x + 2)..)");
+    assert_eq!(grouped("-2.."), "((-2)..)");
+    assert_eq!(grouped("-x.."), "((-x)..)");
+    assert_eq!(grouped("..<x - 1"), "(..<(x - 1))");
+    assert_eq!(grouped("..=n * 2"), "(..=(n * 2))");
+    assert_eq!(grouped("a.b(c).."), "(a.b(c)..)");
+    // Comparisons and logic still bind looser than any range.
+    assert_eq!(grouped("i == 0.."), "(i == (0..))");
+    assert_eq!(grouped("..<n == r"), "((..<n) == r)");
+    assert_eq!(grouped("0..<n + 1"), "(0 ..< (n + 1))");
+}
+
 #[test]
 fn binary_spans_cover_their_operands() {
     let tree = parse_ok("func f() { a + b * c }\n");

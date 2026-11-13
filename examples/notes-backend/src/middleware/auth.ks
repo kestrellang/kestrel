@@ -1,31 +1,26 @@
 module notes.middleware
 
-import perch.request.(Request)
-import perch.response.(Response)
-import perch.context.(MiddlewareResult, Middleware)
-import notes.context.(AppCtx)
+import perch.(Request, Response, Middleware, MiddlewareResult)
+import notes.context.(AppCtx, AuthCtx)
 import notes.db.(lookupToken)
 
-public struct AuthMiddleware: Middleware[AppCtx], Cloneable {
-    public func handle(request: Request, ctx: AppCtx) -> MiddlewareResult {
-        guard let .Some(authHeader) = request.header("Authorization") else {
+// Resolves `Authorization: Bearer <token>` to a user and upgrades the
+// group's context from AppCtx to AuthCtx. Stored once by Perch and called
+// by borrow, so it needs no Cloneable.
+public struct AuthMiddleware: Middleware[AppCtx] {
+    type Output = AuthCtx;
+
+    public func handle(request: Request, ctx: AppCtx) -> MiddlewareResult[AuthCtx] {
+        guard let some header = request.header("Authorization") else {
             return .Respond(Response.unauthorized())
         }
-        guard authHeader.starts(with: "Bearer ") else {
+        guard header.starts(with: "Bearer ") else {
             return .Respond(Response.unauthorized())
         }
-
-        let token = authHeader.asSlice().subslice(from: 7, to: authHeader.bytes.count).toOwned();
-
-        let db = ctx.db;
-        guard let .Ok(some userId) = lookupToken(db, token) else {
+        let token = header.asSlice().subslice(from: 7, to: header.bytes.count).toOwned();
+        guard let .Ok(some userId) = lookupToken(ctx.db, token) else {
             return .Respond(Response.unauthorized())
         }
-
-        var req = request;
-        req.store.insert("userId", "\(userId)");
-        .Continue(req)
+        .Continue(AuthCtx(app: ctx, userId: userId))
     }
-
-    public func clone() -> AuthMiddleware { AuthMiddleware() }
 }

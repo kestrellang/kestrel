@@ -69,8 +69,11 @@
 //! **Message:** "cannot assign to failable place '{name}'"
 //!
 //! A failable member (`var first?: T`, `subscript(...)? -> T`) may not
-//! exist, so plain and compound assignment through it are rejected — there
-//! is no place to store into when it is absent.
+//! exist, so assignment through it is rejected — there is no place to store
+//! into when it is absent. The exception is a plain `=` on a failable member
+//! that declares `set`: the setter takes `Optional[T]` and decides what an
+//! absent place means (`dict(k) = v` inserts, `dict(k) = null` removes).
+//! Compound assignment needs the current value, so it is always rejected.
 
 use crate::context::BodyContext;
 use crate::diagnostic::*;
@@ -137,7 +140,7 @@ impl BodyCheck for AssignmentAnalyzer {
             let HirExpr::Assign { target, .. } = expr else {
                 continue;
             };
-            if push_if_failable(cx, *target, &mut diags) {
+            if push_if_failable(cx, *target, AssignShape::Plain, &mut diags) {
                 continue;
             }
             check_target(cx, *target, is_initializer, &mut diags);
@@ -161,7 +164,7 @@ impl BodyCheck for AssignmentAnalyzer {
             let HirExpr::ProtocolCall { receiver, .. } = &cx.hir.exprs[*inner] else {
                 continue;
             };
-            if push_if_failable(cx, *receiver, &mut diags) {
+            if push_if_failable(cx, *receiver, AssignShape::Compound, &mut diags) {
                 continue;
             }
             if !matches!(
@@ -173,7 +176,9 @@ impl BodyCheck for AssignmentAnalyzer {
             // Stage 1.5: a member with a `mutating ref` accessor is a
             // writable place projection — base mutability is enforced by
             // the access-mode analyzer's mutating-receiver check.
-            if util::accessor_place_mut_base(cx, *receiver).is_some() {
+            if util::accessor_place_mut_base(cx, *receiver).is_some()
+                || util::member_has_mutating_ref(cx, *receiver)
+            {
                 continue;
             }
             match util::ref_place(cx, *receiver)
@@ -205,15 +210,30 @@ impl BodyCheck for AssignmentAnalyzer {
     }
 }
 
-/// E214: `target` resolves to a failable member. Returns whether it did.
+/// Plain `=` or compound `op=`: only a plain assignment can use a failable
+/// member's setter, since compound assignment reads the current value first.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum AssignShape {
+    Plain,
+    Compound,
+}
+
+/// E214: `target` resolves to a failable member that can't take this
+/// assignment. Returns whether it reported.
 fn push_if_failable(
     cx: &BodyContext<'_>,
     target: HirExprId,
+    shape: AssignShape,
     diags: &mut Vec<AnalyzeDiagnostic>,
 ) -> bool {
     let Some(member) = util::failable_member(cx, target) else {
         return false;
     };
+    let has_setter = util::has_setter_child(cx, member);
+    // A failable setter takes `Optional[T]`: plain `=` goes through it.
+    if shape == AssignShape::Plain && has_setter {
+        return false;
+    }
     let name = match cx.query.get::<NodeKind>(member) {
         Some(NodeKind::Subscript) => "subscript".to_string(),
         _ => cx
@@ -237,11 +257,17 @@ fn push_if_failable(
             message: "this place may not exist".into(),
             is_primary: true,
         }],
-        notes: vec![
+        notes: vec![if has_setter {
+            // Compound on a settable failable place (`dict(k) += 1`).
+            "compound assignment needs the current value, which may be missing; \
+             update it with a `&mutating` payload binder (`if let .Some(&mutating v) = …`) \
+             or a non-failable form of the place (for a Dictionary, `dict(key, default: v) += …`)"
+                .into()
+        } else {
             "write through its `mutating ref` with a `&mutating` payload binder \
              (`if let .Some(&mutating v) = …`), or through the type's own API"
-                .into(),
-        ],
+                .into()
+        }],
     });
     true
 }
@@ -258,18 +284,20 @@ fn check_target(
         HirExpr::Local(local_id, _) => {
             // Named ref binding (stage 1.5 item 2): writability comes from
             // the REFERENCE type, not the binding's mutability — `r = v` on
-            // a `&mutating` binding is store-through (there is no rebind
-            // spelling); on a shared `&` binding it is the E208 family.
+            // a `&mutating` binding is store-through; on a shared `&` binding
+            // it rebinds a `var` and is the E208 family for a `let`.
             // Mirrors the Field arm's ref_place consult.
+            let local = &cx.hir.locals[*local_id];
             match util::ref_place(cx, target) {
                 Some(true) => return,
+                // A `var` holding a shared ref rebinds to the new ref.
+                Some(false) if local.is_mut => return,
                 Some(false) => {
                     push_assign_through_shared_ref(cx, target, &mut *diags);
                     return;
                 },
                 None => {},
             }
-            let local = &cx.hir.locals[*local_id];
             if !local.is_mut && !util::is_mut_borrow_param(cx, *local_id) {
                 diags.push(AnalyzeDiagnostic {
                     descriptor_id: DESCRIPTORS[0].id,
@@ -289,8 +317,8 @@ fn check_target(
         // In an initializer, self.field assignments are always allowed.
         HirExpr::Field { base, name, .. } => {
             // Indirection write peel through a READ-ONLY wrapper: the field is
-            // reached via `pointeeRef()` (a `&T` place) because the wrapper is
-            // `Indirection` but not `MutableIndirection` — no `pointeeMutRef()`.
+            // reached via `value`'s `ref` (a `&T` place) because the wrapper is
+            // `Indirection` but not `MutableIndirection` — no `mutating ref`.
             // Same class as E208: a `&T` place can't be written. (D2)
             if cx
                 .typed

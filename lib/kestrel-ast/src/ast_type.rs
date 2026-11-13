@@ -52,6 +52,10 @@ pub enum FnTypeKind {
     Consuming,
     /// `escaping (T) -> R` — owned shared snapshot, Cloneable, may outlive the frame.
     Escaping,
+    /// `@extern(.C) (T) -> R` — the address of a C-ABI function: no
+    /// environment, Copyable, FFISafe when its params and result are.
+    /// Only a named `@export(.C)` / `@extern(.C)` function makes one.
+    C,
 }
 
 impl FnTypeKind {
@@ -71,6 +75,7 @@ impl FnTypeKind {
             FnTypeKind::Mutating => Some("mutating"),
             FnTypeKind::Consuming => Some("consuming"),
             FnTypeKind::Escaping => Some("escaping"),
+            FnTypeKind::C => None,
         }
     }
 
@@ -82,6 +87,7 @@ impl FnTypeKind {
             FnTypeKind::Mutating => "mutating ",
             FnTypeKind::Consuming => "consuming ",
             FnTypeKind::Escaping => "escaping ",
+            FnTypeKind::C => "@extern(.C) ",
         }
     }
 }
@@ -155,11 +161,12 @@ pub enum AstType {
     /// Inferred type `_`
     Inferred(Span),
     /// Opaque type, e.g. `some P`, `some P and Q`, `some P and not Copyable`.
-    /// `negative` is the trailing `not <path>` bound; only `Copyable` is
-    /// legal there — validated at HIR lowering, where the path resolves.
+    /// `negative` holds the trailing `not <path>` bounds; only the implicit
+    /// builtins (`Copyable`, `Static`, `Sized`) are legal there — validated
+    /// at HIR lowering, where the paths resolve.
     Some {
         bounds: Vec<AstType>,
-        negative: Option<Box<AstType>>,
+        negative: Vec<AstType>,
         span: Span,
     },
     /// Boxed existential, e.g. `any P`, `any[UniqueBox] P and Q`,
@@ -179,9 +186,46 @@ pub enum AstType {
         mutating: bool,
         span: Span,
     },
+    /// A lang item named by its `@builtin` tag rather than a path. Never
+    /// parsed — only compiler-generated code builds it (`@derive`'s
+    /// `T: Copyable` field bounds), so no user declaration can shadow it.
+    /// Resolves through `ResolveBuiltin`.
+    Builtin(crate::Builtin, Span),
 }
 
 impl AstType {
+    /// The source span of the whole annotation.
+    pub fn span(&self) -> Span {
+        match self {
+            AstType::Named { span, .. }
+            | AstType::Tuple(_, span)
+            | AstType::Function { span, .. }
+            | AstType::Array(_, span)
+            | AstType::Dictionary(_, _, span)
+            | AstType::Optional(_, span)
+            | AstType::Result { span, .. }
+            | AstType::Unit(span)
+            | AstType::Never(span)
+            | AstType::Inferred(span)
+            | AstType::Some { span, .. }
+            | AstType::Any { span, .. }
+            | AstType::Ref { span, .. }
+            | AstType::Builtin(_, span) => span.clone(),
+        }
+    }
+
+    /// A param type that spells its access mode (`&T` / `&mutating T`):
+    /// the pointee and whether it is mutating. A nested ref (`&&T`) is not
+    /// one — it stays, and is rejected as nesting (E487).
+    pub fn param_ref(&self) -> Option<(&AstType, bool)> {
+        match self {
+            AstType::Ref {
+                inner, mutating, ..
+            } if !matches!(**inner, AstType::Ref { .. }) => Some((inner, *mutating)),
+            _ => None,
+        }
+    }
+
     /// The types written inside an `any` type, in source order: the box
     /// (if named), each bound protocol, and each pinned associated type.
     /// Empty for every other variant. Shared by the AST walkers so none of

@@ -25,6 +25,7 @@ pub mod source_map;
 mod stmt;
 pub(crate) mod string_token;
 pub(crate) mod syntax;
+mod tuple_assign;
 pub mod ty;
 
 use std::sync::Arc;
@@ -40,7 +41,7 @@ pub use source_map::{BodySourceMap, LocalSource};
 pub use ty::{
     CallableRefReturn, LowerCallableReturnType, LowerCallableTypes, LowerExtensionTargetTypeArgs,
     LowerTypeAnnotation, PlaceAccessorInfo, PlaceAccessors, RefPolicy, RefPosition, RefReturn,
-    lower_ast_type, reject_ref_types, reject_ref_types_allowing_top_ref,
+    conformance_protocol_args, lower_ast_type, reject_ref_types, reject_ref_types_allowing_top_ref,
 };
 
 use ctx::LowerCtx;
@@ -207,6 +208,7 @@ impl QueryFn for LowerBodyWithSourceMap {
             guard_stmts: lower.guard_stmts,
             while_conditions: lower.while_conditions,
             pipes: lower.pipes,
+            unsafe_regions: lower.unsafe_regions,
         };
         Some(Arc::new(LoweredBody {
             body: Arc::new(body),
@@ -588,7 +590,7 @@ func f() {}",
     fn ordering_ks_bodies_lower() {
         let (world, root, _) = setup(
             include_str!("../../../lang/std/core/ordering.ks"),
-            "reverse",
+            "reversed",
         );
         let ctx = world.query_context();
         let bodies: Vec<_> = world.iter_component::<Valued>().map(|(e, _)| e).collect();

@@ -149,6 +149,23 @@ pub(crate) fn solve_associated(
         return SolveResult::Solved;
     }
 
+    // A projection off a param bounded `where T: P[Args]` names the
+    // conformance those args select: a type conforming to `P[A]` and `P[B]`
+    // must project through the one the bound picked, not the first found.
+    let key = match key {
+        crate::constraint::AssocKey::Entity(assoc) => ctx
+            .query_ctx
+            .parent_of(assoc)
+            .and_then(|proto| witness_args_for(ctx, container, proto))
+            .map_or(
+                crate::constraint::AssocKey::Entity(assoc),
+                |protocol_args| crate::constraint::AssocKey::Conformance {
+                    assoc,
+                    protocol_args,
+                },
+            ),
+        other => other,
+    };
     let found = match &key {
         crate::constraint::AssocKey::Entity(assoc) => ctx
             .resolver
@@ -176,26 +193,21 @@ pub(crate) fn solve_associated(
         Some(assoc) => {
             // Build substitution map from the container's type parameters → its
             // concrete type args, so e.g. `Array[i32].Element = T` resolves to
-            // `i32` rather than a bare `Param{T}`. The map is empty for tuple,
-            // function, never, etc. containers.
-            let container_subs: Vec<(Entity, TyVar)> = match &kind {
-                TyKind::Struct { entity, args }
-                | TyKind::Enum { entity, args }
-                | TyKind::Protocol { entity, args }
-                | TyKind::TypeAlias { entity, args } => {
+            // `i32` rather than a bare `Param{T}`. Entity and args come from ONE
+            // answer (`entity_and_args`), so a tuple binds `lang.(,)`'s params to
+            // its elements — the same view member lookup uses.
+            let container_subs: Vec<(Entity, TyVar)> = ctx
+                .resolver
+                .entity_and_args(&kind)
+                .map(|(entity, args)| {
                     let type_params: Vec<Entity> = ctx
                         .query_ctx
-                        .get::<TypeParams>(*entity)
+                        .get::<TypeParams>(entity)
                         .map(|tp| tp.0.clone())
                         .unwrap_or_default();
-                    type_params
-                        .iter()
-                        .zip(args.iter())
-                        .map(|(&p, &tv)| (p, tv))
-                        .collect()
-                },
-                _ => Vec::new(),
-            };
+                    type_params.into_iter().zip(args).collect()
+                })
+                .unwrap_or_default();
 
             // Extension free-param substitution: when the binding came from
             // `extend ConcreteType: Proto[FreeParams]`, the resolved HirTy may
@@ -220,36 +232,7 @@ pub(crate) fn solve_associated(
                 // concrete type (e.g. multiple `arr(unchecked: i)` calls where
                 // every `I` collapses to `Int64`), and the fallback scan would
                 // pick whichever entry came first in HashMap iteration order.
-                let proto_args = ctx
-                    .witness_protocol_args
-                    .get(&(container, proto))
-                    .cloned()
-                    .or_else(|| {
-                        // The container may have been recorded under a
-                        // different-but-redirected TyVar (the body-level
-                        // emitter in `lib.rs` records against the body-scoped
-                        // param TyVar). Fall back to canonical match, but
-                        // only when it is unambiguous — multiple matches
-                        // mean separate call sites collapsed to the same
-                        // canonical and cannot be disambiguated by canonical
-                        // alone.
-                        let canonical = ctx.resolve(container);
-                        if let Some(args) = ctx.witness_protocol_args.get(&(canonical, proto)) {
-                            return Some(args.clone());
-                        }
-                        let mut iter =
-                            ctx.witness_protocol_args
-                                .iter()
-                                .filter(|((k_tv, k_proto), _)| {
-                                    *k_proto == proto && ctx.resolve(*k_tv) == canonical
-                                });
-                        let first = iter.next()?;
-                        if iter.next().is_some() {
-                            // Ambiguous — bail rather than pick arbitrarily.
-                            return None;
-                        }
-                        Some(first.1.clone())
-                    })?;
+                let proto_args = witness_args_for(ctx, container, proto)?;
                 let ext_params: Vec<Entity> = ctx
                     .query_ctx
                     .get::<TypeParams>(ext)
@@ -261,6 +244,22 @@ pub(crate) fn solve_associated(
 
             let mut all_subs = container_subs;
             all_subs.extend(extension_subs);
+
+            // A pattern extension's binding (`extend Box[(A, B)]: P { type
+            // Element = A }`) names its pattern params: bind them by matching
+            // the container's args against the written target.
+            let container_args: Vec<TyVar> = ctx
+                .resolver
+                .entity_and_args(&kind)
+                .map(|(_, args)| args)
+                .unwrap_or_default();
+            crate::generate::bind_extension_pattern_params(
+                ctx,
+                assoc.source_extension,
+                &container_args,
+                &mut all_subs,
+                &span,
+            );
 
             // Check where_clause_assoc_subs first — if a where clause directly
             // equated this associated type (e.g., `where Item = Optional[T]`),
@@ -366,12 +365,72 @@ pub(crate) fn solve_associated(
 
             solve_equal(ctx, assoc_tv, result, span)
         },
+        // A type that declares the protocol but binds none of its associated
+        // type is E455's to report at the declaration; poison instead of a
+        // second "no associated type" pointing into the protocol's source.
+        None if declares_assoc_protocol(ctx, &kind, &key) => {
+            ctx.poison(result);
+            SolveResult::Solved
+        },
         None => SolveResult::Error(InferError::NoAssociatedType {
             container,
             name: name.to_string(),
             span,
         }),
     }
+}
+
+/// The protocol args a `where container: proto[Args]` clause recorded for
+/// this container: by the exact TyVar first (each call site's fresh param
+/// var), else by canonical type when only one entry collapses there —
+/// independent call sites unified to one type can't be told apart.
+fn witness_args_for(ctx: &InferCtx<'_>, container: TyVar, proto: Entity) -> Option<Vec<TyVar>> {
+    ctx.witness_protocol_args
+        .get(&(container, proto))
+        .cloned()
+        .or_else(|| {
+            // The container may have been recorded under a
+            // different-but-redirected TyVar (the body-level
+            // emitter in `lib.rs` records against the body-scoped
+            // param TyVar). Fall back to canonical match, but
+            // only when it is unambiguous — multiple matches
+            // mean separate call sites collapsed to the same
+            // canonical and cannot be disambiguated by canonical
+            // alone.
+            let canonical = ctx.resolve(container);
+            if let Some(args) = ctx.witness_protocol_args.get(&(canonical, proto)) {
+                return Some(args.clone());
+            }
+            let mut iter = ctx
+                .witness_protocol_args
+                .iter()
+                .filter(|((k_tv, k_proto), _)| {
+                    *k_proto == proto && ctx.resolve(*k_tv) == canonical
+                });
+            let first = iter.next()?;
+            if iter.next().is_some() {
+                // Ambiguous — bail rather than pick arbitrarily.
+                return None;
+            }
+            Some(first.1.clone())
+        })
+}
+
+/// Does `kind` declare conformance to the protocol that owns the associated
+/// type `key` names? Only an entity key knows its protocol.
+fn declares_assoc_protocol(
+    ctx: &InferCtx<'_>,
+    kind: &TyKind,
+    key: &crate::constraint::AssocKey,
+) -> bool {
+    let assoc = match key {
+        crate::constraint::AssocKey::Entity(e)
+        | crate::constraint::AssocKey::Conformance { assoc: e, .. } => *e,
+        crate::constraint::AssocKey::Name(_) => return false,
+    };
+    ctx.query_ctx
+        .parent_of(assoc)
+        .is_some_and(|protocol| ctx.resolver.conforms_to(kind, protocol))
 }
 
 /// Is `kind` the bare alias a `Self.Item` projection collapses to — an
@@ -428,13 +487,19 @@ fn conformance_binding(
         return ConformancePick::Wait;
     }
 
+    // Each conformance's args WITH defaults: `Int64: Multipliable` is
+    // `Multipliable[Int64]`, so `Int64 * Int64` selects it over a sibling
+    // `Multipliable[Meters]` (a written-args-only compare never could).
     let mut selected = conformances.into_iter().filter(|(source, ast_ty)| {
         let args = effective_conformance_args(ctx, *source, protocol, ast_ty);
+        // A defaulted `Self` arg names the conformer itself, not the protocol.
         args.len() == protocol_args.len()
-            && args
-                .iter()
-                .zip(protocol_args)
-                .all(|(hir, &tv)| written_arg_matches(ctx, hir, tv))
+            && args.iter().zip(protocol_args).all(|(arg, &tv)| match arg {
+                kestrel_hir::ty::HirTy::SelfType(..) => {
+                    matches!(ctx.slot(ctx.resolve(tv)), TySlot::Resolved(k) if k.entity() == Some(recv))
+                },
+                _ => written_arg_matches(ctx, arg, tv),
+            })
     });
     let (Some((source, _)), None) = (selected.next(), selected.next()) else {
         return ConformancePick::Unselected;

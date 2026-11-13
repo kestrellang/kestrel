@@ -28,15 +28,15 @@ func main() -> lang.i64 {
         .map(as: { it * 10 })
         .collect();
     if values.count != 2 { return 1 }
-    if values(unchecked: 0) != 10 { return 2 }
-    if values(unchecked: 1) != 30 { return 3 }
+    if unsafe values(unchecked: 0) != 10 { return 2 }
+    if unsafe values(unchecked: 1) != 30 { return 3 }
 
     var single = std.iter.once(Resource(value: 99));
     match single.next() {
         .Some(value) => if value.value != 99 { return 4 },
         .None => return 5
     };
-    if single.next().isSome() { return 6 }
+    if single.next().isSome { return 6 }
 
     0
 }

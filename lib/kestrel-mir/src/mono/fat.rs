@@ -10,8 +10,12 @@
 //! - a cast from a thin pointer pairs it with a null table;
 //! - `PtrWithMeta` pairs one pointer's data word with another's table;
 //! - `SizeOfVal` / `AlignOfVal` fold to the static answer for a sized pointee
-//!   and read the table (plus a struct's sized prefix) for an unsized one;
-//! - `destroy_addr` of an unsized pointee calls the table's drop thunk;
+//!   and read the table (plus a struct's sized prefix) for an unsized one; a
+//!   `lang.slice[T]` tail keeps its element count in word 1 instead of a
+//!   table, so its payload is `count × size(T)` at `align(T)`;
+//! - `destroy_addr` of an unsized pointee calls the table's drop thunk (a
+//!   `lang.slice[T]` pointee is a view and drops nothing);
+//! - `IsBitwise` folds to a constant from the post-mono copy behavior;
 //! - `CloneIntoVal` calls the table's clone word for an unsized pointee and
 //!   the clone thunk at the type for a sized one.
 //!
@@ -23,7 +27,7 @@ use crate::callee::Callee;
 use crate::immediate::{Immediate, ImmediateKind};
 use crate::inst::{CallArg, InstKind, Instruction};
 use crate::item::Layout;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use kestrel_hecs::Entity;
 
@@ -37,6 +41,8 @@ pub fn legalize(
     module: &mut MonoModule,
     func_ids: &HashMap<InstantiationKey, MonoFuncId>,
     clone_thunk: Option<Entity>,
+    cloneable_protocol: Option<Entity>,
+    clone_shims: &HashSet<Entity>,
 ) {
     for i in 0..module.functions.len() {
         let Some(mut body) = module.functions[i].body.take() else {
@@ -47,6 +53,8 @@ pub fn legalize(
             body: &mut body,
             func_ids,
             clone_thunk,
+            cloneable_protocol,
+            clone_shims,
         };
         cx.run();
         module.functions[i].body = Some(body);
@@ -58,6 +66,9 @@ struct Legalize<'a> {
     body: &'a mut crate::body::OssaBody,
     func_ids: &'a HashMap<InstantiationKey, MonoFuncId>,
     clone_thunk: Option<Entity>,
+    cloneable_protocol: Option<Entity>,
+    /// The synthesized memberwise `__clone$T` functions (`FunctionKind::CloneShim`).
+    clone_shims: &'a HashSet<Entity>,
 }
 
 impl Legalize<'_> {
@@ -70,6 +81,53 @@ impl Legalize<'_> {
             }
             self.body.blocks[b].insts = out;
         }
+    }
+
+    /// Is a copy of `ty` exactly a copy of its bytes? A nominal whose copy
+    /// goes through a synthesized memberwise clone (any struct with a nominal
+    /// field gets one) is, when every field is; a user `clone()` never is.
+    fn is_bitwise(&self, ty: TyId) -> bool {
+        let m = &*self.module;
+        match m.ty_arena.get(ty) {
+            MirTy::Tuple(elems) => elems.clone().into_iter().all(|e| self.is_bitwise(e)),
+            MirTy::Named { entity, type_args } => {
+                let key = (*entity, type_args.clone());
+                let (info, fields): (_, Vec<TyId>) = if let Some(s) = m.structs.get(&key) {
+                    (&s.type_info, s.fields.iter().map(|f| f.ty).collect())
+                } else if let Some(e) = m.enums.get(&key) {
+                    let payload = e
+                        .cases
+                        .iter()
+                        .flat_map(|c| c.payload_fields.iter().map(|f| f.ty));
+                    (&e.type_info, payload.collect())
+                } else {
+                    return self.copy_of(ty) == crate::CopyBehavior::Bitwise;
+                };
+                match info.copy {
+                    crate::CopyBehavior::Bitwise => true,
+                    crate::CopyBehavior::Clone(_)
+                        if info
+                            .clone_impl
+                            .is_some_and(|f| self.clone_shims.contains(&f)) =>
+                    {
+                        fields.into_iter().all(|f| self.is_bitwise(f))
+                    },
+                    _ => false,
+                }
+            },
+            _ => self.copy_of(ty) == crate::CopyBehavior::Bitwise,
+        }
+    }
+
+    /// The post-mono copy behavior of `ty` (mono's own classifier).
+    fn copy_of(&self, ty: TyId) -> crate::CopyBehavior {
+        super::concrete_copy(
+            &self.module.ty_arena,
+            ty,
+            &self.module.structs,
+            &self.module.enums,
+            self.cloneable_protocol,
+        )
     }
 
     fn ty_of(&self, v: ValueId) -> TyId {
@@ -200,6 +258,14 @@ impl Legalize<'_> {
                 let size = matches!(op, Op::SizeOfVal(_));
                 self.size_or_align(out, result, ty, arg, size);
             },
+            InstKind::Op1 {
+                result,
+                op: Op::IsBitwise(ty),
+                ..
+            } => {
+                let value = Immediate::bool(self.is_bitwise(ty));
+                out.push(Instruction::new(InstKind::Literal { result, value }));
+            },
             InstKind::Op2 {
                 result,
                 op: Op::PtrWithMeta(to),
@@ -231,6 +297,13 @@ impl Legalize<'_> {
                     result,
                     value: Immediate::unit(),
                 }));
+            },
+            // A slice is a view: its elements belong to the buffer it borrows,
+            // so destroying one destroys nothing.
+            InstKind::DestroyAddr { address, ty, .. }
+                if self.fat(self.ty_of(address)) && self.module.slice_tail_elem(ty).is_some() =>
+            {
+                kestrel_debug::ktrace!("vtable", "slice view destroy elided: {:?}", ty);
             },
             InstKind::DestroyAddr { address, ty, .. } if self.fat(self.ty_of(address)) => {
                 // Drop the payload through its table.
@@ -266,6 +339,13 @@ impl Legalize<'_> {
         let raw = self.raw_ptr();
         let unit = self.module.ty_arena.unit();
         let fat = self.fat(self.ty_of(src));
+        // A slice has no table to clone through, and its element-wise clone
+        // would need a destination buffer; unsized slice structs are
+        // `not Copyable`, so no well-typed program reaches here.
+        if fat && self.module.slice_tail_elem(ty).is_some() {
+            kestrel_debug::ktrace!("vtable", "clone of slice view {:?} has no lowering", ty);
+            return;
+        }
         let (src_data, dst_data) = if fat {
             (
                 self.op1(out, Op::FatWord(0), src, raw),
@@ -335,21 +415,15 @@ impl Legalize<'_> {
             }));
             return;
         }
-        let raw = self.raw_ptr();
-        let table = self.op1(out, Op::FatWord(1), ptr, raw);
-        let word = if size { VTABLE_SIZE } else { VTABLE_ALIGN };
         // A struct with an unsized tail: its sized prefix, then the payload at
         // the payload's alignment. Otherwise the payload itself.
         let Some((psize, palign)) = self.prefix_layout(ty) else {
-            out.push(Instruction::new(InstKind::Op1 {
-                result,
-                op: Op::WordInt(word),
-                arg: table,
-            }));
+            self.payload_word(out, ty, ptr, size, result);
             return;
         };
         let i64_ty = self.module.ty_arena.i64();
-        let talign = self.op1(out, Op::WordInt(VTABLE_ALIGN), table, i64_ty);
+        let talign = self.value(i64_ty);
+        self.payload_word(out, ty, ptr, false, talign);
         // Alignments are powers of two: max(a, b) = ((a-1) | (b-1)) + 1.
         let one = self.int(out, 1);
         let pa_m1 = self.int(out, palign as i128 - 1);
@@ -364,9 +438,10 @@ impl Legalize<'_> {
             }));
             return;
         }
+        let tsize = self.value(i64_ty);
+        self.payload_word(out, ty, ptr, true, tsize);
         // offset = round_up(prefix, payload align); end = offset + payload size;
         // size = round_up(end, max align).
-        let tsize = self.op1(out, Op::WordInt(VTABLE_SIZE), table, i64_ty);
         let p = self.int(out, psize as i128);
         let offset = self.round_up(out, p, ta_m1);
         let end = self.op2(
@@ -382,6 +457,51 @@ impl Legalize<'_> {
             op: Op::And(IntBits::I64),
             lhs: sum,
             rhs: not,
+        }));
+    }
+
+    /// The unsized payload's size (`size`) or align behind fat `ptr` to
+    /// `ty`, into `result`. A raw-existential payload reads it from its table
+    /// (word 1); a `lang.slice[T]` payload is `count × size(T)` at
+    /// `align(T)`, with the count in word 1.
+    fn payload_word(
+        &mut self,
+        out: &mut Vec<Instruction>,
+        ty: TyId,
+        ptr: ValueId,
+        size: bool,
+        result: ValueId,
+    ) {
+        let raw = self.raw_ptr();
+        let meta = self.op1(out, Op::FatWord(1), ptr, raw);
+        let Some(elem) = self.module.slice_tail_elem(ty) else {
+            let word = if size { VTABLE_SIZE } else { VTABLE_ALIGN };
+            out.push(Instruction::new(InstKind::Op1 {
+                result,
+                op: Op::WordInt(word),
+                arg: meta,
+            }));
+            return;
+        };
+        if !size {
+            out.push(Instruction::new(InstKind::Literal {
+                result,
+                value: Immediate::align_of(elem),
+            }));
+            return;
+        }
+        let i64_ty = self.module.ty_arena.i64();
+        let count = self.op1(out, Op::PtrToAddress, meta, i64_ty);
+        let stride = self.value(i64_ty);
+        out.push(Instruction::new(InstKind::Literal {
+            result: stride,
+            value: Immediate::size_of(elem),
+        }));
+        out.push(Instruction::new(InstKind::Op2 {
+            result,
+            op: Op::Mul(IntBits::I64, Signedness::Signed),
+            lhs: count,
+            rhs: stride,
         }));
     }
 

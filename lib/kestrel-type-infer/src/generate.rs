@@ -4,7 +4,9 @@
 //! statement binding, and local variable, then emits constraints
 //! capturing the type relationships between them.
 
-use kestrel_ast_builder::arg_binding::{BindArg, BindError, BindParam, bind_arguments};
+use kestrel_ast_builder::arg_binding::{
+    BindArg, BindError, BindParam, Binding, bind_arguments, names_unlabeled_param,
+};
 use kestrel_ast_builder::{Callable, InitEffect, Name, NodeKind, TypeParams};
 use kestrel_hecs::Entity;
 use kestrel_hir::Builtin;
@@ -18,7 +20,7 @@ use kestrel_span::Span;
 use crate::collections::{HashMap, HashSet};
 use crate::constraint::{CallArg, Constraint, Reason, labels_match};
 use crate::ctx::InferCtx;
-use crate::error::InferError;
+use crate::error::{InferError, sugar_only_error};
 use crate::ty::{LiteralKind, TyKind, TySlot, TyVar};
 use crate::unify;
 
@@ -34,6 +36,12 @@ pub fn generate(ctx: &mut InferCtx<'_>, hir: &HirBody, param_types: &[TyVar], re
 
     // Set return type
     ctx.return_ty = return_ty;
+
+    // A borrowed param's default value (`aad: &Slice[UInt8] = Array()`) is
+    // an argument too, so it may peel through `Indirection` the same way.
+    if let (Some(tail), Some(mutating)) = (hir.tail_expr, default_value_view(ctx)) {
+        ctx.view_args.insert(tail, mutating);
+    }
 
     // Walk statements
     for &stmt_id in &hir.statements {
@@ -73,17 +81,62 @@ pub fn generate(ctx: &mut InferCtx<'_>, hir: &HirBody, param_types: &[TyVar], re
     emit_type_param_value_errors(ctx);
 }
 
+/// When this body is a parameter's default value, the param's view (see
+/// `AstParam::view`): the default entity is the param, its parent the callee.
+fn default_value_view(ctx: &InferCtx<'_>) -> Option<bool> {
+    let callee = ctx.query_ctx.parent_of(ctx.owner)?;
+    let callable = ctx.query_ctx.get::<Callable>(callee)?;
+    callable
+        .params
+        .iter()
+        .find(|p| p.default_entity == Some(ctx.owner))?
+        .view()
+}
+
 /// A returned value (tail or `return e`) is a value position: a
 /// ref-returning call decays to the pointee when the declared return type is
 /// non-ref (#194). When the return type IS `&T` the ref stays — the
 /// return-position borrow / ref-to-ref pass-through in `solve_coerce`
 /// handles it. Call before generating `value`.
 fn mark_return_value(ctx: &mut InferCtx<'_>, hir: &HirBody, value: HirExprId) {
-    if !matches!(
-        ctx.slot(ctx.resolve(ctx.return_ty)),
-        TySlot::Resolved(TyKind::Ref { .. })
-    ) {
-        mark_arm_value(ctx, hir, value);
+    match ctx.slot(ctx.resolve(ctx.return_ty)) {
+        TySlot::Resolved(TyKind::Ref { mutating: true, .. }) => {
+            mark_mutating_place_read(ctx, hir, value)
+        },
+        TySlot::Resolved(TyKind::Ref { .. }) => {},
+        _ => mark_arm_value(ctx, hir, value),
+    }
+}
+
+/// A value returned as `&mutating T` lends a mutable place: a subscript or
+/// computed-property read there (`self.v(0)`, `xs(0)`) goes through its
+/// `mutating ref` (see `mutating_place_reads`). Walks block tails and
+/// `if`/`match` branches, the value's leaves.
+fn mark_mutating_place_read(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) {
+    match &hir.exprs[id] {
+        HirExpr::Block { body, .. } => {
+            if let Some(tail) = body.tail_expr {
+                mark_mutating_place_read(ctx, hir, tail);
+            }
+        },
+        HirExpr::If {
+            then_body,
+            else_body,
+            ..
+        } => {
+            let tails = [Some(then_body), else_body.as_ref()];
+            for tail in tails.into_iter().flatten().filter_map(|b| b.tail_expr) {
+                mark_mutating_place_read(ctx, hir, tail);
+            }
+        },
+        HirExpr::Match { arms, .. } => {
+            for arm in arms {
+                mark_mutating_place_read(ctx, hir, arm.body);
+            }
+        },
+        _ => {
+            ctx.mutating_place_reads.insert(id);
+        },
     }
 }
 
@@ -290,6 +343,16 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
                 instantiate_entity_with_args(ctx, *entity, explicit_type_args, span);
             // Record type arg vars so MIR lowering can retrieve the resolved types
             if !type_arg_vars.is_empty() {
+                // Name the slots by the entity's own params, so an
+                // uninferred one is E105 (`f()` for `func f[T]()`). Slots
+                // that aren't the entity's own (a type param's `A.make()`)
+                // stay unnamed and unreported, as before.
+                if let Some(tp) = ctx.query_ctx.get::<TypeParams>(*entity)
+                    && tp.0.len() == type_arg_vars.len()
+                {
+                    let params = tp.0.iter().map(|&p| Some(p)).collect();
+                    ctx.type_arg_params.insert(id, params);
+                }
                 ctx.record_type_args(id, type_arg_vars, span.clone());
             }
             // Track type parameter references — invalid unless consumed by MethodCall/Call
@@ -344,21 +407,6 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
                 return result_tv;
             }
 
-            // String interpolation accumulator init: replace the concrete
-            // DefaultStringInterpolation struct init with a deferred Implicit
-            // constraint. The literal kind defaults to DefaultStringInterpolation
-            // if nothing else constrains it. solve_implicit handles init
-            // resolution on the concrete type once resolved.
-            if Some(id) == ctx.interpolation_init_expr.take() {
-                let acc_tv = ctx.fresh_literal(LiteralKind::StringInterpolation);
-                ctx.interpolation_acc_tv = Some(acc_tv);
-                let arg_tvs = gen_call_args(ctx, hir, args);
-                let result_tv = ctx.fresh();
-                ctx.implicit(acc_tv, "init", arg_tvs, result_tv, id, span.clone());
-                ctx.expr_types.insert(id, result_tv);
-                return result_tv;
-            }
-
             // Struct construction: Def(struct) used as callee. Free-standing
             // type aliases are already dereferenced by name resolution, so
             // `type C = Counter; C(42)` reaches here with Def(Counter).
@@ -370,8 +418,11 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
                     Some(NodeKind::Struct | NodeKind::Enum)
                 )
             {
-                let arg_tvs = gen_call_args(ctx, hir, args);
-                return gen_struct_init(ctx, *entity, explicit_type_args, &arg_tvs, id, span);
+                let (arg_tvs, postponed) = gen_call_args_phased(ctx, hir, args);
+                let result_tv =
+                    gen_struct_init(ctx, *entity, explicit_type_args, &arg_tvs, id, span);
+                finish_postponed(ctx, hir, postponed);
+                return result_tv;
             }
 
             // Enum case construction: route through OverloadedCall for label checking
@@ -407,6 +458,27 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
                         BindError::AmbiguousTrailingClosure { candidates, .. } => {
                             InferError::AmbiguousTrailingClosure { candidates, span }
                         },
+                        // `greet(name: x)` against `func greet(name: String)`:
+                        // say the label is the param's name, not "no overload".
+                        BindError::LabelMismatch {
+                            arg_label,
+                            expected,
+                            ..
+                        } if names_unlabeled_param(
+                            callable
+                                .params
+                                .iter()
+                                .map(|p| (p.label.as_deref(), p.name.as_str())),
+                            arg_label.as_deref(),
+                        ) =>
+                        {
+                            InferError::LabelMismatch {
+                                expected,
+                                got: arg_label,
+                                got_is_param_name: true,
+                                span,
+                            }
+                        },
                         _ => InferError::NoMatchingOverload {
                             name: ctx
                                 .query_ctx
@@ -431,6 +503,7 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
                 ctx.type_callee_calls.insert(id);
             }
             let (arg_tvs, postponed) = gen_call_args_phased(ctx, hir, args);
+            record_call_arg_slots(ctx, hir, *callee, &arg_tvs, id);
             bind_skipped_default_type_params(ctx, hir, *callee, &arg_tvs, span);
 
             // If the callee is a known function returning Never (e.g., lang.panic),
@@ -462,6 +535,7 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
             args,
             span,
         } => {
+            ctx.method_receiver_exprs.insert(*receiver);
             let recv_tv = gen_expr(ctx, hir, *receiver);
             let (arg_tvs, postponed) = gen_call_args_phased(ctx, hir, args);
             let result_tv = ctx.fresh();
@@ -549,13 +623,32 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
             receiver,
             protocol,
             method,
+            requirement,
             args,
             from_operator,
             span,
             ..
         } => {
-            let recv_tv = gen_expr(ctx, hir, *receiver);
-            let arg_tvs = gen_call_args(ctx, hir, args);
+            if let Some(requirement) = requirement {
+                ctx.protocol_call_requirements.insert(id, *requirement);
+            }
+            // `.Case == x`: a bare implicit-member left operand has no type of
+            // its own, so type the right operand first and check `.Case`
+            // against it, as `x == .Case` already is through the parameter.
+            let (recv_tv, arg_tvs) = if *from_operator
+                && is_bare_implicit_member(hir, *receiver)
+                && is_homogeneous_comparison(ctx, *protocol)
+            {
+                let arg_tvs = gen_call_args(ctx, hir, args);
+                let recv_tv = match arg_tvs.as_slice() {
+                    [arg] => check_expr(ctx, hir, *receiver, arg.ty, Reason::Unspecified).0,
+                    _ => gen_expr(ctx, hir, *receiver),
+                };
+                (recv_tv, arg_tvs)
+            } else {
+                let recv_tv = gen_expr(ctx, hir, *receiver);
+                (recv_tv, gen_call_args(ctx, hir, args))
+            };
             let result_tv = ctx.fresh();
 
             // A `for` loop's `iter()`: whether it is called at all depends on
@@ -573,7 +666,11 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
                 // recv_tv. The downstream Member constraint then sees an Error
                 // receiver and absorbs without emitting "no member" cascades.
                 if ctx.poison_protocol_call_recv_on_failure.contains(&id) {
-                    ctx.conforms_poisoning(recv_tv, *protocol, span.clone());
+                    let origin = match ctx.compound_place_calls.contains(&id) {
+                        true => crate::constraint::ConformsOrigin::CompoundPlace(*receiver),
+                        false => crate::constraint::ConformsOrigin::Expr,
+                    };
+                    ctx.conforms_poisoning(recv_tv, *protocol, span.clone(), origin);
                 } else {
                     ctx.conforms(recv_tv, *protocol, span.clone());
                 }
@@ -588,6 +685,7 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
                 ctx.protocol_dispatch_members.insert(id);
                 if *from_operator {
                     ctx.operator_members.insert(id, *protocol);
+                    ctx.operator_receivers.insert(id, *receiver);
                     unify_literal_operands(ctx, *protocol, recv_tv, &arg_tvs);
                     type_literal_operator(
                         ctx,
@@ -688,6 +786,7 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
             owner,
             name,
             args,
+            requirement,
             span,
         } => {
             // A written owner (`Opt[Int64].Some(1)`, `Opt.None`, `Self.Some`)
@@ -702,29 +801,87 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
                 .as_ref()
                 .map(|a| gen_call_args(ctx, hir, a))
                 .unwrap_or_default();
-            let result_tv = ctx.fresh();
-
-            let Some(name_str) = name.as_str() else {
-                ctx.poison(result_tv);
-                return result_tv;
+            // An interpolation's `init(interpolation:)` is the literal itself:
+            // its type comes from context, else the default (`String`).
+            let result_tv = if ctx.interpolation_results.remove(&id) {
+                ctx.fresh_literal(LiteralKind::StringInterpolation)
+            } else {
+                ctx.fresh()
             };
-            // Check mode (bidi §2.1): look `.Case` up on the expected type,
-            // or on its promotion target (`.Red` against `Color?` is a
-            // `Color`, then promoted by the caller's coercion).
-            // With a written owner, that type is the home — the context only
-            // checks the result afterwards.
-            let home = owner_tv.or_else(|| {
-                expect
-                    .as_ref()
-                    .and_then(|(e, _)| implicit_case_home(ctx, *e, name_str))
-            });
-            if let Some(home) = home {
+
+            // A desugaring's requirement call (`try`'s `fromResidual`): `Self`
+            // is the expected type, i.e. the value's own type. (No early
+            // `return`: the value must reach the `expr_types` record at the
+            // end of `gen_expr`, which MIR lowering reads as the call's Self.)
+            // A desugaring's lang-item case (`.Some(x)` from `lazy`, `?.`,
+            // `throw`): the case entity is pinned, so its home is the case's
+            // own enum — never a lookup of its spelling on the expected type.
+            let pinned_case = requirement
+                .filter(|&r| ctx.query_ctx.get::<NodeKind>(r) == Some(&NodeKind::EnumCase));
+            if let Some(case) = pinned_case {
+                let Some((home_enum, name_str)) = ctx.query_ctx.parent_of(case).zip(name.as_str())
+                else {
+                    ctx.poison(result_tv);
+                    return result_tv;
+                };
+                // Check mode: an expected type that IS the case's enum is the
+                // home (so the payload is checked against it in place);
+                // otherwise the enum with fresh args.
+                let expected_home = expect.as_ref().map(|(e, _)| *e).filter(|&e| {
+                    matches!(
+                        ctx.slot(ctx.resolve(e)),
+                        TySlot::Resolved(TyKind::Enum { entity, .. }) if *entity == home_enum
+                    )
+                });
+                let home = match expected_home {
+                    Some(home) => home,
+                    None => {
+                        let params: Vec<Entity> = ctx
+                            .query_ctx
+                            .get::<TypeParams>(home_enum)
+                            .map(|tp| tp.0.clone())
+                            .unwrap_or_default();
+                        let args: Vec<TyVar> = params.iter().map(|_| ctx.fresh()).collect();
+                        ctx.named(home_enum, args)
+                    },
+                };
                 ctx.equal(result_tv, home, span.clone());
+                ctx.implicit(result_tv, name_str, arg_tvs, result_tv, id, span.clone());
+                result_tv
+            } else if let Some(requirement) = requirement {
+                crate::solver::requirement_call(
+                    ctx,
+                    *requirement,
+                    result_tv,
+                    &arg_tvs,
+                    result_tv,
+                    id,
+                    span.clone(),
+                );
+                result_tv
+            } else {
+                let Some(name_str) = name.as_str() else {
+                    ctx.poison(result_tv);
+                    return result_tv;
+                };
+                // Check mode (bidi §2.1): look `.Case` up on the expected type,
+                // or on its promotion target (`.Red` against `Color?` is a
+                // `Color`, then promoted by the caller's coercion).
+                // With a written owner, that type is the home — the context only
+                // checks the result afterwards.
+                let home = owner_tv.or_else(|| {
+                    expect
+                        .as_ref()
+                        .and_then(|(e, _)| implicit_case_home(ctx, *e, name_str))
+                });
+                if let Some(home) = home {
+                    ctx.equal(result_tv, home, span.clone());
+                }
+                // Implicit constraint: decided here against the home just
+                // equated (or queued while the expected type is still open).
+                ctx.implicit(result_tv, name_str, arg_tvs, result_tv, id, span.clone());
+                result_tv
             }
-            // Implicit constraint: decided here against the home just
-            // equated (or queued while the expected type is still open).
-            ctx.implicit(result_tv, name_str, arg_tvs, result_tv, id, span.clone());
-            result_tv
         },
 
         // === Control flow ===
@@ -738,6 +895,9 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
             // Like lib1, validation of BooleanConditional conformance
             // happens in a later pass. This avoids i1/Bool mismatches
             // when stdlib code uses lang intrinsics directly in conditions.
+            // A condition is read by value, so a ref-returning call
+            // (`flags(i)` on an `Array[Bool]`) decays to its pointee.
+            mark_arm_value(ctx, hir, *condition);
             let _cond_tv = gen_expr(ctx, hir, *condition);
 
             // Check mode: every arm is checked against the expectation, so a
@@ -824,7 +984,7 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
         } => {
             ctx.scrutinee_exprs.insert(*scrutinee);
             if hir.arms_borrow_mode(arms) == Some(true) {
-                ctx.mutating_scrutinee_exprs.insert(*scrutinee);
+                ctx.mutating_place_reads.insert(*scrutinee);
             }
             let scrut_tv = gen_expr(ctx, hir, *scrutinee);
             // Stage-1 transparent place: a scrutinee is a VALUE context, so a
@@ -841,7 +1001,7 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
             // Patterns are checked against a synthesized scrutinee (bidi
             // §6.1 / P3f): settle it first, so binders get their types here
             // rather than from a deferred ImplicitPat.
-            settle_scrutinee(ctx, scrut_tv);
+            settle_open_value(ctx, scrut_tv);
             let result_tv = ctx.fresh();
             // An optional-chain bind is always checked against `Optional[α]`
             // (wrap-or-flatten at the tail leaf); an outer expectation pins α.
@@ -868,6 +1028,7 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
                 // Guard must be bool
                 if let Some(guard) = arm.guard {
                     // Guard type validated later (same as if-condition)
+                    mark_arm_value(ctx, hir, guard);
                     let _guard_tv = gen_expr(ctx, hir, guard);
                 }
 
@@ -950,11 +1111,20 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
         HirExpr::Return { value, span } => {
             if let Some(val) = value {
                 // A `return e;` statement is a value position, identical to
-                // the return-tail.
+                // the return-tail. Checked against the return type like the
+                // tail (bidi §2.1), so introduction forms see it — a tuple
+                // literal needs it to keep refs its `(&T, U)` slots pin.
                 mark_return_value(ctx, hir, *val);
-                let val_tv = gen_expr(ctx, hir, *val);
                 let reason = return_reason(ctx);
-                ctx.coerce_because(val_tv, ctx.return_ty, *val, span.clone(), reason);
+                let (val_tv, pushed) = if expectation_known(ctx, ctx.return_ty) {
+                    check_expr(ctx, hir, *val, ctx.return_ty, reason.clone())
+                } else {
+                    (gen_expr(ctx, hir, *val), false)
+                };
+                if !pushed {
+                    mark_synth_pending(ctx, hir, *val, val_tv);
+                    ctx.coerce_because(val_tv, ctx.return_ty, *val, span.clone(), reason);
+                }
             } else {
                 // Bare return — coerce unit against return type so
                 // `return` in a non-void function is a type mismatch
@@ -983,7 +1153,38 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
             // inert to the decay set, so rebind-style stores are unaffected.
             mark_arm_value(ctx, hir, *value);
             let target_tv = gen_expr(ctx, hir, *target);
-            let value_tv = gen_expr(ctx, hir, *value);
+            // A collection literal is checked against a target whose type is
+            // already known (`shapes = [Sq(), Rc()]` into `[any Shape]`), as
+            // in a `let` with an annotation; the store below still coerces.
+            // A closure literal is checked against the target too, so its
+            // parameters are typed (`handlers(k) = { it.count }`). A
+            // subscript target's place type is bound by its member
+            // resolution, so solve that first, as for a postponed argument.
+            let value_tv = if is_closure_literal(hir, *value) {
+                // Solve the target first: a subscript place is typed by its
+                // member resolution, as for a postponed closure argument,
+                // which a literal index (`list(0) = { … }`) must not hold up.
+                settle_open_value(ctx, target_tv);
+                check_expr(
+                    ctx,
+                    hir,
+                    *value,
+                    target_tv,
+                    Reason::Assign(expr_span(hir, *target)),
+                )
+                .0
+            } else if is_collection_literal(hir, *value) {
+                check_expr(
+                    ctx,
+                    hir,
+                    *value,
+                    target_tv,
+                    Reason::Assign(expr_span(hir, *target)),
+                )
+                .0
+            } else {
+                gen_expr(ctx, hir, *value)
+            };
             // Route through AssignTarget, which picks store-through vs plain
             // coerce once the target resolves — and crucially DEFERS while the
             // target is still unresolved. A LOCAL target may resolve late
@@ -1000,6 +1201,15 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
                 HirExpr::Local(..) | HirExpr::Call { .. } | HirExpr::MethodCall { .. }
             );
             if route_via_assign_target {
+                match hir.exprs[*target] {
+                    HirExpr::Local(local, _) if hir.locals[local].is_mut => {
+                        ctx.rebind_values.insert(*value);
+                    },
+                    HirExpr::Local(..) => {},
+                    _ => {
+                        ctx.place_assign_values.insert(*value);
+                    },
+                }
                 ctx.assign_target(value_tv, target_tv, *value, span.clone());
             } else {
                 let reason = Reason::Assign(expr_span(hir, *target));
@@ -1026,19 +1236,25 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
             // to each literal element. Falls back to fresh on the default path.
             let arr_tv = ctx.fresh_literal(LiteralKind::Array);
             ctx.literal_spans.insert(arr_tv, span.clone());
+            let conformer =
+                adopt_conformer_expectation(ctx, arr_tv, &expect, LiteralKind::Array, span);
             let elem_tv = ctx.fresh();
-            ctx.associated(arr_tv, "Element", elem_tv, span.clone());
+            associated_builtin(ctx, arr_tv, Builtin::ArrayLiteralElement, elem_tv, span);
             // Bidirectional hint: if the enclosing `let` annotated this array
             // with `Array[E]`, pre-seed `elem_tv` with `E` before element
-            // constraints run. This way each element is compared against the
-            // target element type, not against whatever literal kind the first
-            // element happens to have.
+            // constraints run — or, for a conformer target (`let v: J = [...]`),
+            // `elem_tv` is already `J.Element`. This way each element is
+            // compared against the target element type, not against whatever
+            // literal kind the first element happens to have.
             let hint = expect
                 .as_ref()
-                .and_then(|(expected, _)| extract_array_elem_hint(ctx, *expected));
+                .and_then(|(expected, _)| extract_array_elem_hint(ctx, *expected))
+                .or_else(|| (conformer && expectation_known(ctx, elem_tv)).then_some(elem_tv));
             let hinted = match hint {
                 Some(hint_elem) => {
-                    ctx.equal(elem_tv, hint_elem, span.clone());
+                    if hint_elem != elem_tv {
+                        ctx.equal(elem_tv, hint_elem, span.clone());
+                    }
                     true
                 },
                 None => false,
@@ -1049,6 +1265,7 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
             for (i, &e) in elements.iter().enumerate() {
                 // Literal elements always decay refs to owned (stage 1.5).
                 mark_arm_value(ctx, hir, e);
+                ctx.collection_elements.insert(e);
                 // Check mode: an element is a leaf checked against the
                 // expected element type, so it may promote (D7).
                 if let Some(h) = hint
@@ -1059,6 +1276,9 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
                 }
                 let e_tv = gen_expr(ctx, hir, e);
                 let e_span = expr_span(hir, e);
+                // A slice element stays the pointee: a collection's element
+                // must be Static, which a ref never is, and the unsized
+                // pointee fails with the clearer "it is unsized" detail.
                 let e_tv = peel_ref_tv(ctx, e_tv);
                 let reason = match &first_span {
                     Some(first) if i > 0 && !hinted => Reason::Element(first.clone()),
@@ -1074,10 +1294,12 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
         HirExpr::Dict { entries, span } => {
             let dict_tv = ctx.fresh_literal(LiteralKind::Dictionary);
             ctx.literal_spans.insert(dict_tv, span.clone());
+            let conformer =
+                adopt_conformer_expectation(ctx, dict_tv, &expect, LiteralKind::Dictionary, span);
             let key_tv = ctx.fresh();
             let val_tv = ctx.fresh();
-            ctx.associated(dict_tv, "Key", key_tv, span.clone());
-            ctx.associated(dict_tv, "Value", val_tv, span.clone());
+            associated_builtin(ctx, dict_tv, Builtin::DictionaryLiteralKey, key_tv, span);
+            associated_builtin(ctx, dict_tv, Builtin::DictionaryLiteralValue, val_tv, span);
             let expected_entry = expect
                 .as_ref()
                 .and_then(|(expected, _)| extract_dict_entry_hint(ctx, *expected));
@@ -1085,14 +1307,36 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
                 ctx.equal(key_tv, hint_key, span.clone());
                 ctx.equal(val_tv, hint_val, span.clone());
             }
+            // A conformer target (`let v: J = ["k": 1, "n": null]`) already
+            // knows its `Key`/`Value`: each entry is checked against them, so
+            // mixed values each build the target's `Value` and nested literals
+            // / implicit members (`.Str(s)`) see it as their expected type.
+            let checked_entry =
+                (conformer && expectation_known(ctx, key_tv) && expectation_known(ctx, val_tv))
+                    .then_some((key_tv, val_tv));
             for entry in entries {
                 // Literal entries always decay refs to owned (stage 1.5).
                 mark_arm_value(ctx, hir, entry.key);
                 mark_arm_value(ctx, hir, entry.value);
+                ctx.collection_elements.insert(entry.key);
+                ctx.collection_elements.insert(entry.value);
+                if let Some((key, value)) = checked_entry {
+                    check_leaf(ctx, hir, entry.key, key, Reason::Unspecified);
+                    check_leaf(ctx, hir, entry.value, value, Reason::Unspecified);
+                    continue;
+                }
+                // A known value type checks each non-literal value, so
+                // `[String: any Shape]` boxes `Sq()` as an array literal does.
+                // Literal values keep the acceptance check below.
+                let checked_value =
+                    expected_entry
+                        .map(|(_, hint_val)| hint_val)
+                        .filter(|&hint_val| {
+                            expectation_known(ctx, hint_val)
+                                && literal_kind_for_expr(hir, entry.value).is_none()
+                        });
                 let k = gen_expr(ctx, hir, entry.key);
-                let v = gen_expr(ctx, hir, entry.value);
                 let k = peel_ref_tv(ctx, k);
-                let v = peel_ref_tv(ctx, v);
                 let key_span = expr_span(hir, entry.key);
                 let value_span = expr_span(hir, entry.value);
                 let expected_key = expected_entry
@@ -1110,6 +1354,12 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
                 ) {
                     ctx.equal(key_tv, k, key_span);
                 }
+                if let Some(hint_val) = checked_value {
+                    check_leaf(ctx, hir, entry.value, hint_val, Reason::Unspecified);
+                    continue;
+                }
+                let v = gen_expr(ctx, hir, entry.value);
+                let v = peel_ref_tv(ctx, v);
                 if !emit_dict_literal_acceptance_error(
                     ctx,
                     hir,
@@ -1128,10 +1378,17 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
             // FRESH slot var: an annotation pinning the slot to `&T`
             // (stage 2b ref tuples) keeps the ref; unpinned ref elements
             // decay to owned (the stage-1.5 behavior). Non-local elements
-            // keep the eager peel.
+            // keep the eager peel — unless the expected type already pins
+            // that slot to a ref (`-> (&Slice[T], &Slice[T])`): then the
+            // element keeps its ref and the outer Coerce checks it.
+            let ref_slots = expected_tuple_ref_slots(ctx, expect.as_ref(), elements.len());
             let elem_tvs: Vec<TyVar> = elements
                 .iter()
-                .map(|&e| {
+                .zip(ref_slots)
+                .map(|(&e, ref_slot)| {
+                    if ref_slot {
+                        return gen_expr(ctx, hir, e);
+                    }
                     mark_arm_value(ctx, hir, e);
                     let tv = gen_expr(ctx, hir, e);
                     if value_expr_is_local(hir, e) {
@@ -1139,7 +1396,7 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
                         ctx.equal_decayed(tv, slot, expr_span(hir, e));
                         slot
                     } else {
-                        peel_ref_tv(ctx, tv)
+                        peel_value_ref_tv(ctx, tv)
                     }
                 })
                 .collect();
@@ -1175,7 +1432,7 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
         // `poison_protocol_call_recv_on_failure` BEFORE recursing, so when
         // `gen_expr` reaches that ProtocolCall it emits a poisoning Conforms.
         // Type-of(Sugar) == type-of(inner) (structurally transparent).
-        HirExpr::Sugar { kind, inner, span } => {
+        HirExpr::Sugar { kind, inner, .. } => {
             mark_sugar_primary(ctx, hir, *kind, *inner);
             // An interpolation is one literal checked in place (bidi §6.1):
             // its desugared accumulator calls are not user receivers.
@@ -1188,15 +1445,6 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
             }
             let result_tv = gen_expr(ctx, hir, *inner);
             ctx.interpolation_depth -= interp as u32;
-
-            // Link the interpolation's result type to its accumulator so that
-            // an expected type (from a let annotation or function parameter)
-            // can drive which accumulator is used.
-            if matches!(kind, kestrel_hir::body::SugarKind::StringInterpolation)
-                && let Some(acc_tv) = ctx.interpolation_acc_tv.take()
-            {
-                ctx.interpolation_link(result_tv, acc_tv, span.clone());
-            }
 
             propagate_closure_literal(ctx, *inner, id);
             result_tv
@@ -1297,26 +1545,37 @@ fn mark_sugar_primary(
             // inner is the addAssign ProtocolCall (or HirExpr::Error if the
             // AST place check rejected the LHS at desugar time).
             ctx.poison_protocol_call_recv_on_failure.insert(inner);
+            // A member place may be a failable read (`d(k) += 1`):
+            // the analyzer's E214 owns that error, not a Conforms E107.
+            if let HirExpr::ProtocolCall { receiver, .. } = &hir.exprs[inner]
+                && matches!(
+                    hir.exprs[*receiver],
+                    HirExpr::Field { .. } | HirExpr::Call { .. } | HirExpr::MethodCall { .. }
+                )
+            {
+                ctx.compound_place_calls.insert(inner);
+            }
         },
         SugarKind::StringInterpolation => {
-            // inner is Block { stmts: [Let($dsi, init_call), ...], tail_expr: build_call }.
-            // If the DSI init fails (stdlib missing), poison so append/build errors absorb.
-            let HirExpr::Block { body, .. } = &hir.exprs[inner] else {
-                return;
-            };
-            if let Some(first_stmt) = body.stmts.first()
-                && let HirStmt::Let {
-                    value: Some(init_call),
-                    ..
-                } = &hir.stmts[*first_stmt]
+            // inner is Block { stmts: [Let($dsi, .init(...)), appends...],
+            // tail_expr: .init(interpolation: $dsi) }. The tail is the literal.
+            if let HirExpr::Block { body, .. } = &hir.exprs[inner]
+                && let Some(tail) = body.tail_expr
             {
-                ctx.poison_protocol_call_recv_on_failure.insert(*init_call);
-                // Tag the init call so gen_expr replaces the concrete DSI struct
-                // init with a deferred type variable (like a type parameter call).
-                ctx.interpolation_init_expr = Some(*init_call);
+                ctx.interpolation_results.insert(tail);
             }
         },
     }
+}
+
+/// Is a binding initializer an unsized NON-reference value — a borrowed
+/// `&Slice[T]` / `&StringSlice` parameter, whose local is typed as the
+/// pointee? (A ref-returning call's unsized result is already a `Ref`.)
+fn init_is_unsized_view(ctx: &InferCtx<'_>, val_tv: TyVar) -> bool {
+    matches!(
+        ctx.slot(ctx.resolve(val_tv)),
+        TySlot::Resolved(TyKind::Struct { .. })
+    ) && !crate::solver::solver_ty_is_sized(ctx, val_tv, 0)
 }
 
 // ===== Statement generation =====
@@ -1347,6 +1606,9 @@ fn gen_stmt(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirStmtId) {
                 // may solve while its initializer is being generated.
                 if !named_ref {
                     ctx.binding_init_exprs.insert(*val);
+                    if ty.is_some() {
+                        ctx.annotated_init_exprs.insert(*val);
+                    }
                 }
                 // An annotated binding is a check: the annotation is pushed
                 // into introduction forms (arms, elements, block tails).
@@ -1360,6 +1622,13 @@ fn gen_stmt(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirStmtId) {
                 };
                 if pushed {
                     // The leaves already coerced into the annotation.
+                } else if ty.is_none() && init_is_unsized_view(ctx, val_tv) {
+                    // A slice parameter re-bound (`let t = s` for
+                    // `s: &Slice[T]`, whose local is typed as its pointee):
+                    // an unsized value only lives behind a reference, so the
+                    // binding re-lends it, like a named ref binding.
+                    let lent = ctx.ref_ty(val_tv, false);
+                    ctx.local_types.insert(*local, lent);
                 } else if named_ref {
                     // Named ref binding (`let r = &expr;`): the one binding
                     // form that is NOT a value context — no decay-set entry,
@@ -1375,13 +1644,20 @@ fn gen_stmt(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirStmtId) {
                     // An unannotated binding is a value context (bidi §9: "an
                     // unannotated `let` decays"): a ref initializer whose type
                     // is already known gives the binding its pointee here,
-                    // instead of the end-of-body ref-decay default.
+                    // instead of the end-of-body ref-decay default. An
+                    // unsized pointee (`let s = xs.asSlice()`, a `Slice[T]`)
+                    // has no value to copy out: the binding keeps the ref.
                     if ty.is_none()
                         && let TySlot::Resolved(TyKind::Ref { pointee, .. }) =
                             ctx.slot(ctx.resolve(val_tv))
                     {
                         let pointee = *pointee;
-                        let _ = unify::unify(ctx, local_tv, pointee);
+                        let target = if crate::solver::pointee_is_unsized(ctx, pointee) {
+                            val_tv
+                        } else {
+                            pointee
+                        };
+                        let _ = unify::unify(ctx, local_tv, target);
                     }
                     // Value flows to the binding (allows promotion)
                     ctx.coerce_because(val_tv, local_tv, *val, span.clone(), reason);
@@ -1459,6 +1735,7 @@ fn gen_pat(
         HirPat::Literal { value, span, .. } => {
             let lit_tv = literal_to_tyvar(ctx, value);
             ctx.equal(lit_tv, scrutinee_tv, span.clone());
+            ctx.literal_pats.insert(pat_id, scrutinee_tv);
         },
 
         HirPat::Tuple {
@@ -1560,8 +1837,10 @@ fn gen_pat(
 
         HirPat::Range { span, .. } => {
             // Range patterns constrain the scrutinee to be the literal type
-            // For now, just accept — range pattern types are validated later
+            // For now, just accept — range pattern types are validated later.
+            // Its bounds are range-checked against the scrutinee's type.
             let _ = span;
+            ctx.literal_pats.insert(pat_id, scrutinee_tv);
         },
 
         HirPat::At {
@@ -1610,7 +1889,14 @@ fn gen_pat(
             let rest_tv = ctx.fresh();
             if let Some(proto) = ctx.resolver.builtin(kestrel_hir::Builtin::ArrayMatchable) {
                 ctx.conforms(scrutinee_tv, proto, span.clone());
-                ctx.associated(scrutinee_tv, "Element", elem_tv, span.clone());
+                associated_builtin(
+                    ctx,
+                    scrutinee_tv,
+                    Builtin::ArrayMatchableElement,
+                    elem_tv,
+                    span,
+                );
+                // `Rest` has no @builtin tag yet, so it is still bound by name.
                 ctx.associated(scrutinee_tv, "Rest", rest_tv, span.clone());
             }
 
@@ -1631,6 +1917,46 @@ fn gen_pat(
 
         HirPat::Error { .. } => { /* swallow */ },
     }
+}
+
+/// Record which parameter each argument of a direct named-function call
+/// fills (`InferCtx::call_arg_slots`), from the label-aware binding plan.
+fn record_call_arg_slots(
+    ctx: &mut InferCtx<'_>,
+    hir: &HirBody,
+    callee: HirExprId,
+    args: &[CallArg],
+    call: HirExprId,
+) {
+    let HirExpr::Def(entity, _, _) = &hir.exprs[callee] else {
+        return;
+    };
+    let Some(plan) = crate::solver::call::binding_plan_for(ctx.query_ctx, *entity, args) else {
+        return;
+    };
+    let slots = arg_slots(&plan, args.len());
+    // Arguments filling a borrowed param may peel through `Indirection`.
+    if let Some(callable) = ctx.query_ctx.get::<kestrel_ast_builder::Callable>(*entity) {
+        for (arg, &slot) in args.iter().zip(&slots) {
+            if let Some(mutating) = callable.params.get(slot).and_then(|p| p.view()) {
+                ctx.view_args.insert(arg.value, mutating);
+            }
+        }
+    }
+    ctx.call_arg_slots.insert(call, slots);
+}
+
+/// The parameter slot of each argument under `plan`, in argument order.
+pub(crate) fn arg_slots(plan: &[Binding], arg_count: usize) -> Vec<usize> {
+    let mut slots: Vec<usize> = (0..arg_count).collect();
+    for (slot, binding) in plan.iter().enumerate() {
+        if let Binding::Arg(ai) = binding
+            && let Some(s) = slots.get_mut(*ai)
+        {
+            *s = slot;
+        }
+    }
+    slots
 }
 
 /// A free-function call that omits a defaulted argument whose type is one
@@ -1724,12 +2050,8 @@ fn gen_struct_init(
         if let Some(hir_ty) = explicit_type_args.get(i) {
             let explicit_tv = lower_hir_ty(ctx, hir_ty);
             ctx.equal(fresh_tv, explicit_tv, span.clone());
-        } else if let Some(default_ty) = qctx.query(LowerTypeAnnotation {
-            entity: param_entity,
-            root,
-        }) {
-            // Defer: apply only if this TyVar is still unconstrained after solving
-            ctx.type_param_defaults.push((fresh_tv, default_ty));
+        } else {
+            ctx.defer_type_param_default(fresh_tv, param_entity);
         }
     }
 
@@ -1833,8 +2155,22 @@ fn gen_struct_init(
         // Only emit arg constraints when exactly one init matches.
         // Multiple matches (e.g. Int64.init(from: Int8/UInt8/...)) need
         // type-directed disambiguation which happens during solving.
-        if let [init] = matched.as_slice() {
+        // A lone witness of a parameterized protocol's init (`Int8`'s only
+        // `init(from: Int8)`) goes through the protocol like the overloaded
+        // case below, so its argument is checked as a conformance.
+        let lone_witness = matches!(matched.as_slice(), [init]
+            if crate::resolve::witnesses_parameterized_requirement(qctx, root, struct_entity, *init));
+        if let [init] = matched.as_slice()
+            && !lone_witness
+        {
             let init = *init;
+            // `@sugarOnly` init requirements (`init(intLiteral:)`) are built by
+            // literal lowering, never by a written call outside their module.
+            if let Some(requirement) =
+                kestrel_name_res::sugar_only_hidden(qctx, init, ctx.owner, root)
+            {
+                ctx.report_error(sugar_only_error(qctx, requirement, "init", result_tv, span));
+            }
             matched_init = Some(init);
             // Record which init was selected so MIR lowering can use the init entity
             ctx.resolutions.insert(expr_id, init);
@@ -1863,10 +2199,23 @@ fn gen_struct_init(
 
             emit_where_clause_constraints_with_subs(ctx, init, &init_subs, span);
 
-            // Constrain args against the matched init's param types
+            // Constrain args against the matched init's param types, each
+            // against the parameter its label binds it to (skipped defaults
+            // shift later arguments past them).
             if let Some(param_tys) = qctx.query(LowerCallableTypes { entity: init, root }) {
-                for (index, (arg, param_ty)) in args.iter().zip(param_tys.iter()).enumerate() {
-                    if let Some(hir_ty) = param_ty {
+                let slots = crate::solver::call::binding_plan_for(qctx, init, args)
+                    .map(|plan| arg_slots(&plan, args.len()))
+                    .unwrap_or_else(|| (0..args.len()).collect());
+                let callable = qctx.get::<Callable>(init);
+                for (arg, &index) in args.iter().zip(slots.iter()) {
+                    // A borrowed init param may peel its argument too.
+                    let view = callable
+                        .and_then(|c| c.params.get(index))
+                        .and_then(|p| p.view());
+                    if let Some(mutating) = view {
+                        ctx.view_args.insert(arg.value, mutating);
+                    }
+                    if let Some(Some(hir_ty)) = param_tys.get(index) {
                         let param_tv = lower_hir_ty_with_subs(ctx, hir_ty, &init_subs);
                         let reason = Reason::Param {
                             index,
@@ -1894,18 +2243,24 @@ fn gen_struct_init(
             // resolve_member will detect the ambiguity and try protocol-based
             // resolution, letting the solver disambiguate via type inference.
             let recv_tv = ctx.named(struct_entity, fresh_args.clone());
-            let init_result = ctx.fresh(); // init return type (discarded — result is struct type)
-            ctx.member(
+            // The member's result is the struct, wrapped by the winning
+            // init's effect (`UInt32(exactly: x)` is `UInt32?`). When no
+            // candidate has an effect the result is known now: the struct
+            // itself, typed at once so later reads (`a.n`) needn't wait.
+            let any_effect = matched.iter().any(|&m| qctx.get::<InitEffect>(m).is_some());
+            let init_result = if any_effect { ctx.fresh() } else { result_tv };
+            ctx.member_static(
                 recv_tv,
                 "init",
                 args.to_vec(),
                 init_result,
                 expr_id,
                 true,
+                Vec::new(),
                 span.clone(),
             );
-            ctx.expr_types.insert(expr_id, result_tv);
-            return result_tv;
+            ctx.expr_types.insert(expr_id, init_result);
+            return init_result;
         }
     } else if qctx.get::<NodeKind>(struct_entity) == Some(&NodeKind::Enum) {
         // An enum has no memberwise init: it is built through its cases.
@@ -1938,42 +2293,48 @@ fn gen_struct_init(
             .copied()
             .collect();
 
-        // Auto-generated memberwise inits require one labeled argument per
-        // field, in declaration order, with the label matching the field name.
-        // Mismatches here silently truncate via zip() below, so validate upfront.
-        if args.len() != fields.len() {
-            let struct_name = qctx
-                .get::<Name>(struct_entity)
+        // Auto-generated memberwise inits take one labeled argument per field,
+        // in declaration order, labeled with the field name. A field with a
+        // default (`var b = 3`) may be left out; its default fills it in MIR
+        // (`emit_struct_construct`).
+        let struct_name = || {
+            qctx.get::<Name>(struct_entity)
                 .map(|n| n.0.clone())
-                .unwrap_or_else(|| "<struct>".into());
-            ctx.report_error(InferError::MemberwiseInitArity {
-                struct_name,
-                expected: fields.len(),
-                got: args.len(),
-                span: span.clone(),
-            });
-        } else {
-            for (arg, &field) in args.iter().zip(fields.iter()) {
-                let expected_label = qctx
-                    .get::<Name>(field)
-                    .map(|n| n.0.clone())
-                    .unwrap_or_default();
-                if arg.label.as_deref() != Some(expected_label.as_str()) {
-                    let struct_name = qctx
-                        .get::<Name>(struct_entity)
-                        .map(|n| n.0.clone())
-                        .unwrap_or_else(|| "<struct>".into());
+                .unwrap_or_else(|| "<struct>".into())
+        };
+        // With no defaults the count alone decides: say so, as one error.
+        let has_defaults = fields
+            .iter()
+            .any(|&f| qctx.get::<kestrel_ast_builder::Valued>(f).is_some());
+        let arity_only = !has_defaults && args.len() != fields.len();
+        let mut next = 0;
+        for (index, &field) in fields.iter().enumerate().take_while(|_| !arity_only) {
+            let expected_label = qctx
+                .get::<Name>(field)
+                .map(|n| n.0.clone())
+                .unwrap_or_default();
+            let arg = match args.get(next) {
+                Some(arg) if arg.label.as_deref() == Some(expected_label.as_str()) => arg,
+                _ if qctx.get::<kestrel_ast_builder::Valued>(field).is_some() => continue,
+                Some(arg) => {
                     ctx.report_error(InferError::MemberwiseInitLabel {
-                        struct_name,
+                        struct_name: struct_name(),
                         expected: expected_label,
                         got: arg.label.clone(),
                         span: span.clone(),
                     });
-                }
-            }
-        }
-
-        for (index, (arg, &field)) in args.iter().zip(fields.iter()).enumerate() {
+                    arg
+                },
+                None => {
+                    ctx.report_error(InferError::MemberwiseInitMissing {
+                        struct_name: struct_name(),
+                        field: expected_label,
+                        span: span.clone(),
+                    });
+                    break;
+                },
+            };
+            next += 1;
             if let Some(hir_ty) = qctx.query(LowerTypeAnnotation {
                 entity: field,
                 root,
@@ -1985,6 +2346,20 @@ fn gen_struct_init(
                 };
                 ctx.coerce_because(arg.ty, field_tv, arg.value, span.clone(), reason);
             }
+        }
+        if arity_only || args.len() > fields.len() {
+            ctx.report_error(InferError::MemberwiseInitArity {
+                struct_name: struct_name(),
+                expected: fields.len(),
+                got: args.len(),
+                span: span.clone(),
+            });
+        } else if let Some(extra) = args.get(next) {
+            ctx.report_error(InferError::MemberwiseInitUnexpected {
+                struct_name: struct_name(),
+                label: extra.label.clone(),
+                span: span.clone(),
+            });
         }
     }
 
@@ -2050,6 +2425,7 @@ fn wrap_init_result(
 fn gen_call_args(ctx: &mut InferCtx<'_>, hir: &HirBody, args: &[HirCallArg]) -> Vec<CallArg> {
     args.iter()
         .map(|arg| {
+            ctx.call_arg_exprs.insert(arg.value);
             let ty = gen_expr(ctx, hir, arg.value);
             CallArg {
                 label: arg.label.clone(),
@@ -2246,6 +2622,11 @@ fn require_known_receiver(ctx: &mut InferCtx<'_>, recv: TyVar, member: &str, spa
     if receiver_open(ctx, recv) && crate::solver::apply_ref_decay_defaults_into(ctx, Some(recv)) {
         settle_left(ctx);
     }
+    // The receiver may be reached THROUGH such a binding (`pair.0` of
+    // `let pair = pairs(i)`): settle every pending decay to the left.
+    if receiver_open(ctx, recv) && crate::solver::apply_ref_decay_defaults_into(ctx, None) {
+        settle_left(ctx);
+    }
     if !receiver_open(ctx, recv) {
         return;
     }
@@ -2266,10 +2647,12 @@ fn require_known_receiver(ctx: &mut InferCtx<'_>, recv: TyVar, member: &str, spa
     ctx.poison(open);
 }
 
-/// Settle a match scrutinee before its patterns are generated: solve the
-/// left side and default the open literals it is built from (unless it is
-/// itself a literal, which literal patterns may still type).
-fn settle_scrutinee(ctx: &mut InferCtx<'_>, scrut: TyVar) {
+/// Settle a value before the code typed from it is generated (a match
+/// scrutinee before its patterns, an assignment target before its closure
+/// value): solve the left side and default the open literals it is built
+/// from (unless it is itself a literal, which literal patterns may still
+/// type).
+fn settle_open_value(ctx: &mut InferCtx<'_>, scrut: TyVar) {
     if !receiver_open(ctx, scrut) {
         return;
     }
@@ -2292,7 +2675,7 @@ fn unify_literal_operands(ctx: &mut InferCtx<'_>, protocol: Entity, recv: TyVar,
         Builtin::SubtractOperatorProtocol,
         Builtin::MultiplyOperatorProtocol,
         Builtin::DivideOperatorProtocol,
-        Builtin::ModuloOperatorProtocol,
+        Builtin::RemainderOperatorProtocol,
         Builtin::EqualsOperatorProtocol,
         Builtin::NotEqualsOperatorProtocol,
         Builtin::LessThanOperatorProtocol,
@@ -2321,6 +2704,35 @@ fn unify_literal_operands(ctx: &mut InferCtx<'_>, protocol: Entity, recv: TyVar,
     {
         let _ = unify::unify(ctx, recv, arg.ty);
     }
+}
+
+/// A `.Case` / `.case(args)` with no written owner: its type comes only from
+/// context.
+fn is_bare_implicit_member(hir: &HirBody, id: HirExprId) -> bool {
+    matches!(
+        hir.exprs[id],
+        HirExpr::ImplicitMember {
+            owner: None,
+            requirement: None,
+            ..
+        }
+    )
+}
+
+/// `==` `!=` `<` `>` `<=` `>=`: both operands are the same type in the
+/// ordinary case, so either one can type an implicit-member operand.
+fn is_homogeneous_comparison(ctx: &InferCtx<'_>, protocol: Entity) -> bool {
+    use kestrel_hir::builtin::Builtin;
+    [
+        Builtin::EqualsOperatorProtocol,
+        Builtin::NotEqualsOperatorProtocol,
+        Builtin::LessThanOperatorProtocol,
+        Builtin::GreaterThanOperatorProtocol,
+        Builtin::LessOrEqualOperatorProtocol,
+        Builtin::GreaterOrEqualOperatorProtocol,
+    ]
+    .iter()
+    .any(|&b| ctx.resolver.builtin(b) == Some(protocol))
 }
 
 /// The type `.name` resolves on when checked against `expected`: `expected`
@@ -2409,7 +2821,7 @@ fn peel_ref_var(ctx: &InferCtx<'_>, tv: TyVar) -> TyVar {
 /// the pending constraints that produce it. Returns true on progress.
 fn default_literal_roots(ctx: &mut InferCtx<'_>, recv: TyVar) -> bool {
     let mut roots = Vec::new();
-    collect_literal_roots(ctx, recv, 4, &mut roots);
+    collect_literal_roots(ctx, recv, &mut Vec::new(), &mut roots);
     let mut progress = false;
     for tv in roots {
         if let Some(lit) = open_literal(ctx, tv) {
@@ -2422,8 +2834,17 @@ fn default_literal_roots(ctx: &mut InferCtx<'_>, recv: TyVar) -> bool {
 /// The open literal vars `tv` is produced from: itself, or the inputs of
 /// the pending constraint whose result it is (a call's or member's receiver
 /// and arguments, an associated type's container, an interpolation's
-/// accumulator), up to `depth` steps back.
-fn collect_literal_roots(ctx: &InferCtx<'_>, tv: TyVar, depth: u32, out: &mut Vec<TyVar>) {
+/// accumulator), however many steps back. The walk is bounded by `seen`
+/// (each var is expanded once), not by a depth: the receiver needs its
+/// type now whatever the chain's length — `let a = xs(0); (a + b + c +
+/// d).f()` reaches the index literal five steps back, and a fixed cap
+/// turned that into a false E106.
+fn collect_literal_roots(
+    ctx: &InferCtx<'_>,
+    tv: TyVar,
+    seen: &mut Vec<TyVar>,
+    out: &mut Vec<TyVar>,
+) {
     let target = peel_ref_var(ctx, tv);
     if open_literal(ctx, target).is_some() {
         if !out.contains(&target) {
@@ -2431,9 +2852,10 @@ fn collect_literal_roots(ctx: &InferCtx<'_>, tv: TyVar, depth: u32, out: &mut Ve
         }
         return;
     }
-    if depth == 0 || !matches!(ctx.slot(target), TySlot::Unresolved { .. }) {
+    if seen.contains(&target) || !matches!(ctx.slot(target), TySlot::Unresolved { .. }) {
         return;
     }
+    seen.push(target);
     let produced_by = |r: &TyVar| peel_ref_var(ctx, *r) == target;
     let mut inputs: Vec<TyVar> = Vec::new();
     for c in &ctx.constraints {
@@ -2459,9 +2881,6 @@ fn collect_literal_roots(ctx: &InferCtx<'_>, tv: TyVar, depth: u32, out: &mut Ve
             Constraint::Associated {
                 container, result, ..
             } if produced_by(result) => inputs.push(*container),
-            Constraint::InterpolationLink {
-                result_tv, acc_tv, ..
-            } if produced_by(result_tv) => inputs.push(*acc_tv),
             Constraint::TupleIndex { tuple, result, .. } if produced_by(result) => {
                 inputs.push(*tuple)
             },
@@ -2477,13 +2896,18 @@ fn collect_literal_roots(ctx: &InferCtx<'_>, tv: TyVar, depth: u32, out: &mut Ve
             // A deferred value flow into it (an argument into a protocol
             // argument, a binding's initializer).
             Constraint::Coerce { from, to, .. } if produced_by(to) => inputs.push(*from),
+            // A deferred ref decay (`let got = xs(0)` while the index's
+            // literal still decides the element type).
+            Constraint::EqualDecayed { value, target, .. } if produced_by(target) => {
+                inputs.push(*value)
+            },
             Constraint::Equal { a, b, .. } if produced_by(a) => inputs.push(*b),
             Constraint::Equal { a, b, .. } if produced_by(b) => inputs.push(*a),
             _ => {},
         }
     }
     for input in inputs {
-        collect_literal_roots(ctx, input, depth - 1, out);
+        collect_literal_roots(ctx, input, seen, out);
     }
 }
 
@@ -2517,6 +2941,12 @@ fn expected_closure_shape(
     params: &[HirClosureParam],
     expected: TyVar,
 ) -> Option<ClosureShape> {
+    // Only the shape is read here; the caller's coercion still decides the
+    // conversion. So look through an Optional (`let f: (F)? = { … }`, or a
+    // `dict(k)` place, typed by the getter's `(&V)?` until the setter is
+    // picked) and a ref to the function type inside.
+    let expected = optional_payload(ctx, expected).unwrap_or(expected);
+    let expected = peel_ref_var(ctx, expected);
     let TySlot::Resolved(TyKind::Function {
         kind,
         params: eparams,
@@ -2536,6 +2966,19 @@ fn expected_closure_shape(
         conventions: conventions.clone(),
         ret: *ret,
     })
+}
+
+/// `T` when `tv` is `Optional[T]`.
+fn optional_payload(ctx: &InferCtx<'_>, tv: TyVar) -> Option<TyVar> {
+    let optional = ctx.resolver.builtin(kestrel_hir::Builtin::OptionalEnum)?;
+    match ctx.slot(ctx.resolve(tv)) {
+        TySlot::Resolved(TyKind::Enum { entity, args } | TyKind::Struct { entity, args })
+            if *entity == optional =>
+        {
+            args.first().copied()
+        },
+        _ => None,
+    }
 }
 
 /// `check(closure, E)` (bidi §8): parameters, conventions, kind and return
@@ -2600,9 +3043,12 @@ fn gen_closure_body(ctx: &mut InferCtx<'_>, hir: &HirBody, body: &HirBlock, ret_
 }
 
 /// Phase 1 of a call's arguments (bidi §8, Rust's two-pass
-/// `check_argument_types`): closure literals get a placeholder var and are
-/// generated by [`finish_postponed`] once the call is emitted, so they are
-/// checked against the parameter type the other arguments determined.
+/// `check_argument_types`): closure and collection literals get a placeholder
+/// var and are generated by [`finish_postponed`] once the call is emitted, so
+/// they are checked against the parameter type the other arguments
+/// determined. A collection literal checked against `Array[any P]` boxes each
+/// element; synthesized first, it would fix its element type to the first
+/// element's.
 fn gen_call_args_phased(
     ctx: &mut InferCtx<'_>,
     hir: &HirBody,
@@ -2612,11 +3058,17 @@ fn gen_call_args_phased(
     let args = args
         .iter()
         .map(|arg| {
+            ctx.call_arg_exprs.insert(arg.value);
             let ty = if is_closure_literal(hir, arg.value) {
                 let placeholder = ctx.fresh();
                 // The call's own coercion treats it as the closure literal it
                 // stands for.
                 ctx.closure_literal_exprs.insert(arg.value);
+                postponed.push((placeholder, arg.value));
+                placeholder
+            } else if is_collection_literal(hir, arg.value) {
+                let placeholder = ctx.fresh();
+                ctx.postponed_literal_args.insert(arg.value);
                 postponed.push((placeholder, arg.value));
                 placeholder
             } else {
@@ -2672,14 +3124,27 @@ fn is_closure_literal(hir: &HirBody, id: HirExprId) -> bool {
     }
 }
 
+/// A non-empty array or dictionary literal as written.
+fn is_collection_literal(hir: &HirBody, id: HirExprId) -> bool {
+    match &hir.exprs[id] {
+        HirExpr::Array { elements, .. } => !elements.is_empty(),
+        HirExpr::Dict { entries, .. } => !entries.is_empty(),
+        _ => false,
+    }
+}
+
 /// Phase 2: solve what the call and its other arguments determined, then
-/// check each postponed closure against its parameter type, in source order.
+/// check each postponed literal against its parameter type, in source order.
 fn finish_postponed(ctx: &mut InferCtx<'_>, hir: &HirBody, postponed: Vec<(TyVar, HirExprId)>) {
     if postponed.is_empty() {
         return;
     }
     crate::solver::fixpoint(ctx);
     for (placeholder, closure) in postponed {
+        if is_collection_literal(hir, closure) {
+            check_leaf(ctx, hir, closure, placeholder, Reason::Unspecified);
+            continue;
+        }
         ctx.expectation = Some((placeholder, Reason::Unspecified));
         let closure_tv = gen_expr(ctx, hir, closure);
         ctx.expectation = None;
@@ -2714,6 +3179,25 @@ fn instantiate_entity_with_args(
     instantiate_entity_inner(ctx, entity, explicit_type_args, site_span)
 }
 
+/// `written` followed by an `Infer` slot for each later param that has a
+/// declared default, stopping at the first without one (defaults are
+/// trailing). `instantiate_entity_inner` registers the defaults.
+fn pad_defaulted_type_args(ctx: &InferCtx<'_>, params: &[Entity], written: &[HirTy]) -> Vec<HirTy> {
+    let span = hir_ty_span(&written[0]);
+    let mut args = written.to_vec();
+    for &param in params.iter().skip(written.len()) {
+        if ctx
+            .query_ctx
+            .get::<kestrel_ast_builder::TypeAnnotation>(param)
+            .is_none()
+        {
+            break;
+        }
+        args.push(HirTy::Infer(span.clone()));
+    }
+    args
+}
+
 fn instantiate_entity_inner(
     ctx: &mut InferCtx<'_>,
     entity: Entity,
@@ -2729,6 +3213,23 @@ fn instantiate_entity_inner(
         .get::<TypeParams>(entity)
         .map(|tp| tp.0.clone())
         .unwrap_or_default();
+
+    // A nominal type named with some args (`Array[Int64].make()`) leaves its
+    // trailing defaulted params to inference, falling back to the declared
+    // default when nothing pins them, as a constructor call does.
+    let written_len = explicit_type_args.len();
+    let padded;
+    let explicit_type_args = if written_len > 0
+        && written_len < type_param_entities.len()
+        && matches!(
+            qctx.get::<NodeKind>(entity),
+            Some(NodeKind::Struct | NodeKind::Enum)
+        ) {
+        padded = pad_defaulted_type_args(ctx, &type_param_entities, explicit_type_args);
+        padded.as_slice()
+    } else {
+        explicit_type_args
+    };
 
     // Validate explicit type arg arity
     if !explicit_type_args.is_empty() && explicit_type_args.len() != type_param_entities.len() {
@@ -2767,8 +3268,28 @@ fn instantiate_entity_inner(
             .map(|t| lower_hir_ty(ctx, t))
             .collect()
     } else {
-        type_param_entities.iter().map(|_| ctx.fresh()).collect()
+        let fresh: Vec<TyVar> = type_param_entities.iter().map(|_| ctx.fresh()).collect();
+        for (&tv, &param) in fresh.iter().zip(&type_param_entities) {
+            ctx.note_type_param_var(tv, param);
+        }
+        fresh
     };
+    // The padded slots fall back to their declared defaults, and so does
+    // every param of a nominal named bare (`String.make()`).
+    let bare_nominal = written_len == 0
+        && matches!(
+            qctx.get::<NodeKind>(entity),
+            Some(NodeKind::Struct | NodeKind::Enum)
+        );
+    if written_len < explicit_type_args.len() || bare_nominal {
+        for (&tv, &param) in fresh_type_args
+            .iter()
+            .zip(&type_param_entities)
+            .skip(written_len)
+        {
+            ctx.defer_type_param_default(tv, param);
+        }
+    }
 
     // Build substitution map: type param entity → fresh TyVar.
     // Used to instantiate generic param/return types with fresh vars.
@@ -2840,7 +3361,10 @@ fn instantiate_entity_inner(
                 .unwrap_or_default();
             for &param in &target_type_params {
                 if !subs.iter().any(|(e, _)| *e == param) {
+                    // Unpinned, a defaulted param (`String`'s `A`) takes its
+                    // default, as it does for `String()`.
                     let fresh = ctx.fresh();
+                    ctx.defer_type_param_default(fresh, param);
                     subs.push((param, fresh));
                 }
             }
@@ -2864,10 +3388,34 @@ fn instantiate_entity_inner(
         subs.push((declaring, self_tv));
     }
 
+    // A static member of a pattern extension (`extend Box[(A, B)] { static
+    // func … }` called as `Box[(Int64, Bool)].zero(…)`): bind its pattern
+    // params from the owner's args. They lead the recorded args, after which
+    // MIR's signature expects the member's own (`ExtensionOwnTypeParams`).
+    let mut type_arg_vars = Vec::new();
+    if let Some(ext) = qctx
+        .parent_of(entity)
+        .filter(|&p| qctx.get::<NodeKind>(p) == Some(&NodeKind::Extension))
+        && let Some(target) = qctx.query(kestrel_name_res::ExtensionTargetEntity {
+            extension: ext,
+            root,
+        })
+    {
+        let owner_args: Vec<TyVar> = qctx
+            .get::<TypeParams>(target)
+            .map(|tp| tp.0.clone())
+            .unwrap_or_default()
+            .iter()
+            .filter_map(|p| subs.iter().find(|(e, _)| e == p).map(|&(_, tv)| tv))
+            .collect();
+        type_arg_vars =
+            bind_extension_pattern_params(ctx, Some(ext), &owner_args, &mut subs, site_span);
+    }
+    type_arg_vars.extend(fresh_type_args.iter().copied());
+
     emit_where_clause_constraints_with_subs(ctx, entity, &subs, site_span);
 
     // Determine entity kind and build appropriate type
-    let type_arg_vars = fresh_type_args.clone();
     let kind = qctx.get::<NodeKind>(entity);
     let entity_tv = match kind {
         // Functions and initializers: build Function type from Callable + return type
@@ -2975,6 +3523,58 @@ fn instantiate_entity_inner(
     (entity_tv, type_arg_vars)
 }
 
+/// Bind `ext`'s pattern params (`ExtensionPatternParams`) for one use: a
+/// fresh var each, pushed into `subs`, solved by equating every owner arg
+/// with the target arg written in its position (`W[X]` against `W[Int64]`).
+/// Returns the vars in `ExtensionOwnTypeParams` order, for the use's
+/// recorded type args. Empty when `ext` has no pattern params.
+pub(crate) fn bind_extension_pattern_params(
+    ctx: &mut InferCtx<'_>,
+    ext: Option<Entity>,
+    owner_args: &[TyVar],
+    subs: &mut Vec<(Entity, TyVar)>,
+    span: &Span,
+) -> Vec<TyVar> {
+    let Some(ext) = ext else {
+        return Vec::new();
+    };
+    let root = ctx.root;
+    let pattern = ctx
+        .query_ctx
+        .query(kestrel_name_res::ExtensionPatternParams {
+            extension: ext,
+            root,
+        });
+    if pattern.is_empty() {
+        return Vec::new();
+    }
+    kestrel_debug::ktrace!(
+        "infer",
+        "pattern params of {ext:?}: {} (owner args {owner_args:?})",
+        pattern.len()
+    );
+    let tvs: Vec<TyVar> = pattern
+        .iter()
+        .map(|&(_, param)| {
+            let tv = ctx.fresh();
+            subs.push((param, tv));
+            tv
+        })
+        .collect();
+    let written = ctx
+        .query_ctx
+        .query(kestrel_hir_lower::LowerExtensionTargetTypeArgs {
+            extension: ext,
+            root,
+        })
+        .unwrap_or_default();
+    for (hir_arg, &owner_arg) in written.iter().zip(owner_args) {
+        let pattern_tv = lower_hir_ty_with_subs(ctx, hir_arg, subs);
+        ctx.equal(owner_arg, pattern_tv, span.clone());
+    }
+    tvs
+}
+
 fn emit_where_clause_constraints_with_subs(
     ctx: &mut InferCtx<'_>,
     entity: Entity,
@@ -3051,10 +3651,10 @@ fn emit_where_clause_constraints_with_subs(
 /// value) at its source site with a clean `DoesNotConform`, instead of letting
 /// it reach the post-mono containment backstop (Inv-3b) as an ICE.
 ///
-/// Scoped deliberately to the Copyable/Cloneable bounds: other where-clause
-/// bounds (`Hashable`, `Comparable`, …) are already enforced at
-/// value-construction sites, so surfacing them here would be an orthogonal,
-/// larger change. The helper only pushes `conforms` constraints (it never
+/// A written type is also checked against its params' other bounds
+/// (`Hashable`, `Comparable`, …): nothing else checks a type that is only
+/// annotated or built (`var d: [P: Int64] = [:]`), so a bad argument used to
+/// surface only after monomorphization, inside std. The helper only pushes `conforms` constraints (it never
 /// re-enters `lower_hir_ty`), so it can't recurse — nested args get their own
 /// well-formedness from the recursive lowering of `arg_tvs` above.
 /// Which builtin bounds a type-formation site checks (the single place the
@@ -3062,8 +3662,8 @@ fn emit_where_clause_constraints_with_subs(
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum FormationScope {
     /// A type the program forms explicitly — an annotation, parameter,
-    /// return, field, literal default or constructor: Copyable, Cloneable
-    /// and Static bounds.
+    /// return, field, literal default or constructor: every declared bound
+    /// (Copyable, Cloneable and Static included).
     Written,
     /// A type inference forms by instantiating a member's signature
     /// (`collect() -> Array[Item]`): the Static bound only — the
@@ -3097,7 +3697,7 @@ pub(crate) fn emit_formation_wellformedness(
         checked.extend(builtin(Builtin::Copyable));
         checked.extend(builtin(Builtin::Cloneable));
     }
-    if checked.is_empty() {
+    if checked.is_empty() && scope == FormationScope::Inferred {
         return;
     }
     // Positional map from the type's declared params to the formed args.
@@ -3124,7 +3724,10 @@ pub(crate) fn emit_formation_wellformedness(
         let Some(param) = subject.as_param() else {
             continue;
         };
-        if !checked.contains(&protocol) {
+        // A written type is checked against every bound its params
+        // declare (`Dictionary[K, V] where K: Hashable`); an inferred one
+        // only against the builtin ones (see `FormationScope`).
+        if scope == FormationScope::Inferred && !checked.contains(&protocol) {
             continue;
         }
         let Some(pos) = params.iter().position(|p| *p == param) else {
@@ -3141,7 +3744,7 @@ pub(crate) fn emit_formation_wellformedness(
 /// Copyable/Static wellformedness bounds against `rawany P` would only be
 /// cascades of it.
 fn is_invalid_existential_box(ctx: &InferCtx<'_>, entity: Entity, args: &[HirTy]) -> bool {
-    matches!(args, [HirTy::RawExistential { .. }])
+    matches!(args, [HirTy::RawExistential { .. }, ..])
         && ctx
             .query_ctx
             .query(kestrel_semantics::ExistentialBoxDefect {
@@ -3247,6 +3850,26 @@ pub(crate) fn lower_subject_with_base(
 /// Used by `HirStmt::Let` to feed the annotation's element type into an
 /// array-literal RHS so element mismatches compare against the target
 /// element type rather than each other.
+/// Per element of a tuple literal of `arity`: is the expected tuple's slot
+/// already a ref (`(&T, U)` from a return type or `let` annotation)? Such an
+/// element is a ref position, not an always-decay aggregate element, so a
+/// ref-returning call there keeps its reference. All `false` when nothing
+/// pins the tuple's shape at generation time (the stage-1.5 decay applies).
+fn expected_tuple_ref_slots(
+    ctx: &InferCtx<'_>,
+    expect: Option<&(TyVar, Reason)>,
+    arity: usize,
+) -> Vec<bool> {
+    let slots = expect.and_then(|(expected, _)| match ctx.slot(ctx.resolve(*expected)) {
+        TySlot::Resolved(TyKind::Tuple(elems)) if elems.len() == arity => Some(elems.clone()),
+        _ => None,
+    });
+    match slots {
+        Some(elems) => elems.iter().map(|&t| expected_is_ref(ctx, t)).collect(),
+        None => vec![false; arity],
+    }
+}
+
 fn extract_array_elem_hint(ctx: &InferCtx<'_>, tv: TyVar) -> Option<TyVar> {
     let resolved = ctx.resolve(tv);
     let TySlot::Resolved(crate::ty::TyKind::Struct { entity, args }) = ctx.slot(resolved) else {
@@ -3260,6 +3883,60 @@ fn extract_array_elem_hint(ctx: &InferCtx<'_>, tv: TyVar) -> Option<TyVar> {
         return None;
     }
     args.first().copied()
+}
+
+/// A collection literal whose expected type is a concrete conformer of its
+/// literal protocol other than the default (`let v: J = [...]` with
+/// `J: _ExpressibleByArrayLiteral`) IS that type: equate it now, before the
+/// `Element`/`Key`/`Value` constraints are emitted, so they resolve on the spot
+/// and the elements are checked against them instead of unifying with each
+/// other (`[1, "two", true]`). Returns whether it adopted the expectation.
+/// `container.<tag>` keyed by the TAGGED associated type's entity, never its
+/// spelling: a conformer that also binds another protocol's same-named
+/// `Element` must not hand that one to a literal or pattern. Without the
+/// stdlib tag there is no such protocol, so nothing is constrained.
+fn associated_builtin(
+    ctx: &mut InferCtx<'_>,
+    container: TyVar,
+    tag: Builtin,
+    result: TyVar,
+    span: &Span,
+) {
+    if let Some(assoc) = ctx.resolver.builtin(tag) {
+        ctx.associated_entity(container, assoc, result, span.clone());
+    }
+}
+
+fn adopt_conformer_expectation(
+    ctx: &mut InferCtx<'_>,
+    literal_tv: TyVar,
+    expect: &Option<(TyVar, Reason)>,
+    literal: LiteralKind,
+    span: &Span,
+) -> bool {
+    let Some((expected, _)) = expect else {
+        return false;
+    };
+    let default = match literal {
+        LiteralKind::Array => kestrel_hir::Builtin::DefaultArrayLiteralType,
+        LiteralKind::Dictionary => kestrel_hir::Builtin::DefaultDictionaryLiteralType,
+        _ => return false,
+    };
+    let TySlot::Resolved(kind) = ctx.slot(ctx.resolve(*expected)) else {
+        return false;
+    };
+    let kind = kind.clone();
+    let entity = match &kind {
+        TyKind::Struct { entity, .. } | TyKind::Enum { entity, .. } => *entity,
+        _ => return false,
+    };
+    if ctx.resolver.builtin(default) == Some(entity)
+        || !crate::unify::conforms_to_literal_protocol(ctx, &kind, literal)
+    {
+        return false;
+    }
+    ctx.equal(literal_tv, *expected, span.clone());
+    true
 }
 
 /// If `tv` resolves to `Dictionary[K, V, ...]`, return TyVars for `(K, V)`.
@@ -3333,8 +4010,7 @@ fn literal_protocol(ctx: &InferCtx<'_>, literal: LiteralKind) -> Option<Entity> 
         LiteralKind::Null => Builtin::ExpressibleByNullLiteral,
         LiteralKind::Array => Builtin::InternalExpressibleByArrayLiteral,
         LiteralKind::Dictionary => Builtin::InternalExpressibleByDictionaryLiteral,
-        // Accumulator type — resolved by InterpolationLink, no literal protocol
-        LiteralKind::StringInterpolation => return None,
+        LiteralKind::StringInterpolation => Builtin::ExpressibleByStringInterpolation,
     };
     ctx.resolver.builtin(builtin)
 }
@@ -3692,7 +4368,7 @@ fn equate_decaying_value(
     if value_expr_is_local(hir, value_expr) {
         ctx.equal_decayed_because(value_tv, target_tv, span, reason);
     } else {
-        let peeled = peel_ref_tv(ctx, value_tv);
+        let peeled = peel_value_ref_tv(ctx, value_tv);
         // Target first, like `EqualDecayed` and array elements: a mismatch
         // reads "expected <result type> got <this arm>", which is what the
         // `FirstArm` reason explains.
@@ -3717,6 +4393,21 @@ fn return_reason(ctx: &InferCtx<'_>) -> Reason {
 /// unresolved here and decay via `bind_call_result` instead. A missed
 /// site surfaces as a `validate_ref_placement` diagnostic, never a
 /// miscompile.
+/// [`peel_ref_tv`] for a VALUE position (a tuple element, an arm value): a
+/// ref to an unsized pointee has no value to copy out, so it stays the ref
+/// (`(s.trimmed(), 1)` is a `(&StringSlice, Int64)`).
+fn peel_value_ref_tv(ctx: &mut InferCtx<'_>, tv: TyVar) -> TyVar {
+    let r = ctx.resolve(tv);
+    match ctx.slot(r) {
+        TySlot::Resolved(TyKind::Ref { pointee, .. })
+            if crate::solver::pointee_sizedness(ctx, *pointee) != Some(false) =>
+        {
+            *pointee
+        },
+        _ => tv,
+    }
+}
+
 fn peel_ref_tv(ctx: &mut InferCtx<'_>, tv: TyVar) -> TyVar {
     let r = ctx.resolve(tv);
     match ctx.slot(r) {
@@ -3806,54 +4497,41 @@ fn gen_variant_pat(
     span: &Span,
     source: MatchSource,
 ) {
-    let qctx = ctx.query_ctx;
-    let root = ctx.root;
-    let labels: Vec<Option<String>> = args.iter().map(|a| a.label.clone()).collect();
-    check_variant_pattern_labels(ctx, entity, &labels, span);
-
-    // Build substitution map: enum type params → fresh TyVars linked to scrutinee.
-    // This ensures payload types like HirTy::Param(T) resolve to the scrutinee's
-    // actual type arg, not the canonical Param TyVar.
-    let mut subs: Vec<(Entity, TyVar)> = Vec::new();
-    if let Some(parent_enum) = qctx.parent_of(entity) {
-        let parent_tps: Vec<Entity> = qctx
+    // The scrutinee must be the case's enum (with fresh args, so the
+    // pattern can drive the scrutinee's inference).
+    if let Some(parent_enum) = ctx.query_ctx.parent_of(entity) {
+        let parent_args: Vec<TyVar> = ctx
+            .query_ctx
             .get::<TypeParams>(parent_enum)
-            .map(|tp| tp.0.clone())
+            .map(|tp| tp.0.iter().map(|_| ctx.fresh()).collect())
             .unwrap_or_default();
-        let parent_args: Vec<TyVar> = parent_tps.iter().map(|_| ctx.fresh()).collect();
-        let enum_tv = ctx.named(parent_enum, parent_args.clone());
-
-        // Scrutinee must be this enum type
+        let enum_tv = ctx.named(parent_enum, parent_args);
         ctx.equal(scrutinee_tv, enum_tv, span.clone());
-
-        // Map enum type params to the fresh args linked to scrutinee
-        for (&param, &arg) in parent_tps.iter().zip(parent_args.iter()) {
-            subs.push((param, arg));
-        }
     }
-
-    // Get case's payload types, substituting enum type params with scrutinee args
-    let payload_types: Vec<TyVar> = match qctx.query(LowerCallableTypes { entity, root }) {
-        Some(types) => types
-            .iter()
-            .map(|t| match t {
-                Some(hir_ty) => lower_hir_ty_with_subs(ctx, hir_ty, &subs),
-                None => ctx.fresh(),
-            })
-            .collect(),
-        // No Callable → unit case, args should be empty
-        None => vec![],
+    // Bind the payload against the settled scrutinee, like an implicit
+    // `.Case` (bidi P3f) — so an error scrutinee poisons the bindings
+    // instead of leaving them uninferred — but with the case pinned.
+    let arg_tys: Vec<TyVar> = args.iter().map(|_| ctx.fresh()).collect();
+    let name = ctx
+        .query_ctx
+        .get::<Name>(entity)
+        .map(|n| n.0.clone())
+        .unwrap_or_default();
+    let pat = crate::constraint::Constraint::ImplicitPat {
+        scrutinee: scrutinee_tv,
+        name,
+        case: Some(entity),
+        arg_tys: arg_tys.clone(),
+        labels: args.iter().map(|a| a.label.clone()).collect(),
+        span: span.clone(),
     };
-
-    // Constrain each arg pattern against the corresponding payload type
-    let payload_len = payload_types.len();
-    for (arg, payload_tv) in args.iter().zip(payload_types) {
-        gen_pat(ctx, hir, arg.pattern, payload_tv, source);
+    if receiver_open(ctx, scrutinee_tv) {
+        ctx.constraints.push(pat);
+    } else {
+        crate::solver::solve_now(ctx, pat);
     }
-    // Extra args with no corresponding type get fresh TyVars
-    for arg in args.iter().skip(payload_len) {
-        let arg_tv = ctx.fresh();
-        gen_pat(ctx, hir, arg.pattern, arg_tv, source);
+    for (arg, &tv) in args.iter().zip(&arg_tys) {
+        gen_pat(ctx, hir, arg.pattern, tv, source);
     }
 }
 
@@ -3878,6 +4556,7 @@ pub(crate) fn check_variant_pattern_labels(
             ctx.report_error(InferError::LabelMismatch {
                 expected,
                 got: Some(got.clone()),
+                got_is_param_name: false,
                 span: span.clone(),
             });
         }
@@ -3904,6 +4583,7 @@ fn gen_implicit_variant_pat(
     let pat = crate::constraint::Constraint::ImplicitPat {
         scrutinee: scrutinee_tv,
         name: name.to_string(),
+        case: None,
         arg_tys: arg_tys.clone(),
         labels: args.iter().map(|a| a.label.clone()).collect(),
         span: span.clone(),
@@ -3939,6 +4619,14 @@ fn gen_struct_pat(
         .map(|tp| tp.0.clone())
         .unwrap_or_default();
     let fresh_args: Vec<TyVar> = type_params.iter().map(|_| ctx.fresh()).collect();
+    // Field types name the struct's params; bind them to the scrutinee's
+    // args (as `gen_variant_pat` does for enum payloads), so `Wrap[Page] {
+    // value: p }` types `p` as `Page`, not `T`.
+    let subs: Vec<(Entity, TyVar)> = type_params
+        .iter()
+        .copied()
+        .zip(fresh_args.iter().copied())
+        .collect();
     let struct_tv = ctx.named(entity, fresh_args);
 
     // Scrutinee must be this struct type
@@ -3964,7 +4652,7 @@ fn gen_struct_pat(
                     entity: child,
                     root,
                 })
-                .map(|hir_ty| lower_hir_ty(ctx, &hir_ty))
+                .map(|hir_ty| lower_hir_ty_with_subs(ctx, &hir_ty, &subs))
             })
             .unwrap_or_else(|| {
                 let tv = ctx.fresh();

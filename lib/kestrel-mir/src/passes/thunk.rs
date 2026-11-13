@@ -69,11 +69,7 @@ pub fn run_thunk_pass(module: &mut MirModule, next_entity: &mut u32) {
         // `cargo build` without `--release`. These are O(params) once per
         // thunk — cheap enough to always be live.
         assert!(
-            !needs_env
-                || target_func
-                    .params
-                    .first()
-                    .is_some_and(|p| p.name == "env" || p.name == "_env"),
+            !needs_env || target_func.params.first().is_some_and(|p| p.is_env),
             "{}: kind {:?} promises a leading env param but params[0] is {:?} — \
              the env param must stay at index 0 in mir-lower `closure.rs` / this pass",
             target_func.name,
@@ -119,12 +115,9 @@ pub fn run_thunk_pass(module: &mut MirModule, next_entity: &mut u32) {
             ty: env_ty,
             ownership: Ownership::Owned,
         });
-        thunk_def.params.push(ParamDef::new(
-            "_env",
-            env_val,
-            env_ty,
-            ParamConvention::Consuming,
-        ));
+        thunk_def
+            .params
+            .push(ParamDef::env("_env", env_val, env_ty));
         body.param_count += 1;
 
         // Build forward args

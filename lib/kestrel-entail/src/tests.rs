@@ -184,22 +184,6 @@ fn self_and_projection_subjects() {
 }
 
 #[test]
-fn not_conforms() {
-    let g = |ty| {
-        entails(
-            &World,
-            &Goal::NotConforms {
-                ty,
-                protocol: e(SHOW),
-            },
-        )
-    };
-    assert_eq!(g(nom(STR, vec![])), Tri::Holds);
-    assert_eq!(g(nom(INT, vec![])), Tri::Fails);
-    assert_eq!(g(ETy::Var), Tri::Unknown);
-}
-
-#[test]
 fn specificity() {
     let generic = vec![ETy::Param(e(T))];
     let special = vec![nom(INT, vec![])];

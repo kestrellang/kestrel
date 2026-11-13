@@ -317,7 +317,7 @@ fn first_less_visible(cx: &DeclContext<'_>, ty: &AstType) -> Option<Vis> {
             .into_iter()
             .find_map(|t| first_less_visible(cx, t)),
         AstType::Ref { inner, .. } => first_less_visible(cx, inner),
-        AstType::Unit(_) | AstType::Never(_) | AstType::Inferred(_) => None,
+        AstType::Unit(_) | AstType::Never(_) | AstType::Inferred(_) | AstType::Builtin(..) => None,
     }
 }
 

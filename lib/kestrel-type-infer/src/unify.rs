@@ -8,7 +8,7 @@
 
 use crate::ctx::InferCtx;
 use crate::ty::{LiteralKind, TyKind, TySlot, TyVar};
-use kestrel_ast_builder::{Intrinsic, Name, NodeKind};
+use kestrel_ast_builder::{Intrinsic, Name, NodeKind, TypeParams};
 use kestrel_hecs::Entity;
 use kestrel_hir::Builtin;
 use kestrel_name_res::expand_protocol_closure;
@@ -116,6 +116,15 @@ pub fn unify(ctx: &mut InferCtx<'_>, a: TyVar, b: TyVar) -> Result<(), UnifyErro
                             | (LiteralKind::Float, LiteralKind::Integer)
                     ) {
                         Some(LiteralKind::Float)
+                    } else if matches!(
+                        (x, y),
+                        (LiteralKind::String, LiteralKind::StringInterpolation)
+                            | (LiteralKind::StringInterpolation, LiteralKind::String)
+                    ) {
+                        // `match n { 0 => "Fizz", _ => "\(n)" }`: the
+                        // interpolation is the narrower requirement, and
+                        // both default to `String`.
+                        Some(LiteralKind::StringInterpolation)
                     } else {
                         return Err(UnifyError::Mismatch);
                     }
@@ -154,7 +163,9 @@ pub fn unify(ctx: &mut InferCtx<'_>, a: TyVar, b: TyVar) -> Result<(), UnifyErro
         (TySlot::Unresolved { literal: Some(lit) }, TySlot::Resolved(kind)) => {
             if conforms_to_literal_protocol(ctx, kind, *lit) {
                 occurs_check(ctx, a, b)?;
+                let kind = kind.clone();
                 ctx.types[a.0 as usize] = TySlot::Redirect(b);
+                defer_open_arg_defaults(ctx, &kind);
                 Ok(())
             } else {
                 Err(UnifyError::LiteralGuard)
@@ -163,7 +174,9 @@ pub fn unify(ctx: &mut InferCtx<'_>, a: TyVar, b: TyVar) -> Result<(), UnifyErro
         (TySlot::Resolved(kind), TySlot::Unresolved { literal: Some(lit) }) => {
             if conforms_to_literal_protocol(ctx, kind, *lit) {
                 occurs_check(ctx, b, a)?;
+                let kind = kind.clone();
                 ctx.types[b.0 as usize] = TySlot::Redirect(a);
+                defer_open_arg_defaults(ctx, &kind);
                 Ok(())
             } else {
                 Err(UnifyError::LiteralGuard)
@@ -177,6 +190,31 @@ pub fn unify(ctx: &mut InferCtx<'_>, a: TyVar, b: TyVar) -> Result<(), UnifyErro
 
         // Redirect should be resolved by resolve()
         _ => unreachable!("resolve() should have followed redirects"),
+    }
+}
+
+/// A literal adopting a nominal type whose defaulted params are still open
+/// (`[8, 9]` passed as `Array[Int64, B]` for a generic `B`) is the value
+/// that forms that type, so those params take their declared defaults if
+/// nothing else pins them, as at a constructor call.
+fn defer_open_arg_defaults(ctx: &mut InferCtx<'_>, kind: &TyKind) {
+    let (TyKind::Struct { entity, args } | TyKind::Enum { entity, args }) = kind else {
+        return;
+    };
+    let Some(params) = ctx
+        .query_ctx
+        .get::<TypeParams>(*entity)
+        .map(|tp| tp.0.clone())
+    else {
+        return;
+    };
+    for (&arg, param) in args.iter().zip(params) {
+        if matches!(
+            ctx.slot(ctx.resolve(arg)),
+            TySlot::Unresolved { literal: None }
+        ) {
+            ctx.defer_type_param_default(arg, param);
+        }
     }
 }
 
@@ -562,9 +600,7 @@ pub fn conforms_to_literal_protocol(ctx: &InferCtx<'_>, ty: &TyKind, lit: Litera
         LiteralKind::Null => Builtin::ExpressibleByNullLiteral,
         LiteralKind::Array => Builtin::InternalExpressibleByArrayLiteral,
         LiteralKind::Dictionary => Builtin::InternalExpressibleByDictionaryLiteral,
-        // Accumulator type — InterpolationLink validates the type through
-        // associated type resolution, so accept any concrete type here.
-        LiteralKind::StringInterpolation => return true,
+        LiteralKind::StringInterpolation => Builtin::ExpressibleByStringInterpolation,
     };
     let Some(protocol) = ctx.resolver.builtin(feature) else {
         return false;

@@ -46,6 +46,11 @@ pub struct HirBody {
     /// Every `|>` in the body, with what its right side was. Type inference
     /// rewords a failed pipe's errors into a fix-it from this.
     pub pipes: Vec<PipeSite>,
+    /// Source extent of every `unsafe expr` / `unsafe { … }` in the body,
+    /// in source order. The wrapper itself lowers to its operand, so HIR is
+    /// unchanged for every other pass; the unsafe-use analyzer reads these
+    /// to decide which uses are inside an unsafe context (a lexical rule).
+    pub unsafe_regions: Vec<Span>,
 }
 
 /// One `lhs |> rhs` (`SugarKind::Pipe`), as HIR lowering saw its right side.
@@ -95,6 +100,7 @@ impl HirBody {
             guard_stmts: Vec::new(),
             while_conditions: Vec::new(),
             pipes: Vec::new(),
+            unsafe_regions: Vec::new(),
         }
     }
 
@@ -112,8 +118,8 @@ impl HirBody {
             else {
                 continue;
             };
-            // Arm 0 is `.Some($o)` by construction.
-            let Some(HirPat::ImplicitVariant { args, .. }) =
+            // Arm 0 is the `Some($o)` lang-case pattern by construction.
+            let Some(HirPat::Variant { args, .. }) =
                 arms.first().map(|a| &self.pats[a.pattern])
             else {
                 continue;
@@ -153,6 +159,12 @@ pub struct OptionalChainBind {
     pub binder: LocalId,
 }
 
+/// Name of the synthetic local a destructuring `let` binds a non-place
+/// initializer to (`let (a, b) = f()` is `{ let $let_tmp = f(); match
+/// $let_tmp { (a, b) => () } }`). Nothing else reads it, so the destructure
+/// may move out of it.
+pub const LET_DESTRUCTURE_TEMP: &str = "$let_tmp";
+
 /// Where a `HirExpr::Match` came from. Drives diagnostic phrasing and lets
 /// analyzers skip desugared matches (for-loop bodies, if-let wildcards) that
 /// would otherwise produce false-positive unreachable / irrefutable warnings.
@@ -171,7 +183,8 @@ pub enum MatchSource {
     GuardLet,
     /// Desugared from `for p in iter { ... }` (the Option match on iterator.next()).
     ForLoop,
-    /// Desugared from `let <pattern> = expr;`.
+    /// Desugared from `let <pattern> = expr;`. A non-place initializer is
+    /// first bound to a [`LET_DESTRUCTURE_TEMP`] local, the scrutinee.
     LetDestructure,
     /// Desugared from a destructured fn / method / closure parameter
     /// (`func f((a, b): (I, I))` or `{ ((a, b): (I, I)) in ... }`).
@@ -216,7 +229,7 @@ pub enum SugarKind {
     /// if the AST-level place check rejected the LHS at desugar time.
     CompoundAssign,
     /// `"hello \(name)!"` — `inner` is the Block containing the
-    /// DefaultStringInterpolation init/append/build sequence.
+    /// accumulator init / append / `init(interpolation:)` sequence.
     StringInterpolation,
     /// `x is T` / `x is not T` — `inner` is `match x { is T => true, _ =>
     /// false }` (arms swapped for `is not`).
@@ -383,6 +396,14 @@ pub enum HirExpr {
         owner: Option<HirExprId>,
         name: HirName,
         args: Option<Vec<HirCallArg>>,
+        /// Set by desugarings that call one protocol requirement on the
+        /// expected type (`try`'s `FromResidual.fromResidual`): the member IS
+        /// this requirement (the `@builtin`-tagged entity), so inference types
+        /// it from the requirement's signature with `Self` = the expected type
+        /// instead of looking `name` up among the type's members — which would
+        /// see every same-named static of every extension. `None` for
+        /// user-written `.name` and enum-case sugar.
+        requirement: Option<Entity>,
         span: Span,
     },
 
@@ -409,6 +430,13 @@ pub enum HirExpr {
         receiver: HirExprId,
         protocol: Entity,
         method: HirName,
+        /// The `@builtin`-tagged requirement of `protocol` this call IS
+        /// (operators' `AddOperatorMethod`, …). When set, inference types the
+        /// call from this requirement — never by looking `method` up among the
+        /// receiver's members — and MIR keys the witness from it. `None` falls
+        /// back to the by-name lookup (a prelude without the method tag, and
+        /// desugarings not converted yet).
+        requirement: Option<Entity>,
         type_args: Option<Vec<HirTy>>,
         args: Vec<HirCallArg>,
         /// True when this call was desugared from an operator (binary, unary,
@@ -820,297 +848,265 @@ pub struct HirStructPatField {
 
 // ===== Operator desugaring tables =====
 //
-// Each entry maps an operator to its protocol name + method name.
+// Each entry maps an operator to its `@builtin` protocol and method tags.
 // The protocol entity is resolved from the DefMap during HIR lowering.
 // Adding a new operator = one table entry, no new HIR variants needed.
 
-/// (operator, protocol_name, method_name, arg_label)
-///
-/// Label is `None` for single-name params (no external label in Kestrel),
-/// `Some("by")` for shift ops, `Some("to")` for range ops.
-pub const BINARY_OP_PROTOCOLS: &[(BinaryOp, Builtin, &str, Option<&str>)] = &[
-    (BinaryOp::Add, Builtin::AddOperatorProtocol, "add", None),
+/// (operator, protocol, method). The method's spelling and its argument
+/// label are read off the tagged requirement itself, never written here.
+pub const BINARY_OP_PROTOCOLS: &[(BinaryOp, Builtin, Builtin)] = &[
+    (
+        BinaryOp::Add,
+        Builtin::AddOperatorProtocol,
+        Builtin::AddOperatorMethod,
+    ),
     (
         BinaryOp::Sub,
         Builtin::SubtractOperatorProtocol,
-        "subtract",
-        None,
+        Builtin::SubtractOperatorMethod,
     ),
     (
         BinaryOp::Mul,
         Builtin::MultiplyOperatorProtocol,
-        "multiply",
-        None,
+        Builtin::MultiplyOperatorMethod,
     ),
     (
         BinaryOp::Div,
         Builtin::DivideOperatorProtocol,
-        "divide",
-        None,
+        Builtin::DivideOperatorMethod,
     ),
     (
         BinaryOp::Rem,
-        Builtin::ModuloOperatorProtocol,
-        "modulo",
-        None,
+        Builtin::RemainderOperatorProtocol,
+        Builtin::RemainderOperatorMethod,
     ),
     (
         BinaryOp::Eq,
         Builtin::EqualsOperatorProtocol,
-        "equal",
-        Some("to"),
+        Builtin::EqualsOperatorMethod,
     ),
     (
         BinaryOp::Ne,
         Builtin::NotEqualsOperatorProtocol,
-        "notEqual",
-        Some("to"),
+        Builtin::NotEqualsOperatorMethod,
     ),
     (
         BinaryOp::Lt,
         Builtin::LessThanOperatorProtocol,
-        "lessThan",
-        None,
+        Builtin::LessThanOperatorMethod,
     ),
     (
         BinaryOp::Gt,
         Builtin::GreaterThanOperatorProtocol,
-        "greaterThan",
-        None,
+        Builtin::GreaterThanOperatorMethod,
     ),
     (
         BinaryOp::Le,
         Builtin::LessOrEqualOperatorProtocol,
-        "lessThanOrEqual",
-        None,
+        Builtin::LessOrEqualOperatorMethod,
     ),
     (
         BinaryOp::Ge,
         Builtin::GreaterOrEqualOperatorProtocol,
-        "greaterThanOrEqual",
-        None,
+        Builtin::GreaterOrEqualOperatorMethod,
     ),
     (
         BinaryOp::BitAnd,
         Builtin::BitwiseAndOperatorProtocol,
-        "bitwiseAnd",
-        None,
+        Builtin::BitwiseAndOperatorMethod,
     ),
     (
         BinaryOp::BitOr,
         Builtin::BitwiseOrOperatorProtocol,
-        "bitwiseOr",
-        None,
+        Builtin::BitwiseOrOperatorMethod,
     ),
     (
         BinaryOp::BitXor,
         Builtin::BitwiseXorOperatorProtocol,
-        "bitwiseXor",
-        None,
+        Builtin::BitwiseXorOperatorMethod,
     ),
     (
         BinaryOp::Shl,
         Builtin::ShiftLeftOperatorProtocol,
-        "shiftLeft",
-        Some("by"),
+        Builtin::ShiftLeftOperatorMethod,
     ),
     (
         BinaryOp::Shr,
         Builtin::ShiftRightOperatorProtocol,
-        "shiftRight",
-        Some("by"),
+        Builtin::ShiftRightOperatorMethod,
     ),
     (
         BinaryOp::RangeInclusive,
         Builtin::InclusiveRangeOperatorProtocol,
-        "inclusiveRange",
-        Some("to"),
+        Builtin::InclusiveRangeOperatorMethod,
     ),
     (
         BinaryOp::RangeExclusive,
         Builtin::ExclusiveRangeOperatorProtocol,
-        "exclusiveRange",
-        Some("to"),
+        Builtin::ExclusiveRangeOperatorMethod,
     ),
 ];
 
 /// Short-circuit operators: right operand is wrapped in a closure.
 /// `logicalAnd(other:)` and `logicalOr(other:)` are single-name params (no label).
 /// `coalesce(default:)` is also single-name (no label).
-pub const SHORT_CIRCUIT_OP_PROTOCOLS: &[(BinaryOp, Builtin, &str, Option<&str>)] = &[
+pub const SHORT_CIRCUIT_OP_PROTOCOLS: &[(BinaryOp, Builtin, Builtin)] = &[
     (
         BinaryOp::And,
         Builtin::LogicalAndOperatorProtocol,
-        "logicalAnd",
-        None,
+        Builtin::LogicalAndOperatorMethod,
     ),
     (
         BinaryOp::Or,
         Builtin::LogicalOrOperatorProtocol,
-        "logicalOr",
-        None,
+        Builtin::LogicalOrOperatorMethod,
     ),
     (
         BinaryOp::Coalesce,
         Builtin::CoalesceOperatorProtocol,
-        "coalesce",
-        None,
+        Builtin::CoalesceOperatorMethod,
     ),
 ];
 
-/// (operator, protocol_builtin, method_name)
-pub const UNARY_OP_PROTOCOLS: &[(UnaryOp, Builtin, &str)] = &[
-    (UnaryOp::Neg, Builtin::NegateOperatorProtocol, "negate"),
+/// (operator, protocol_builtin, method_builtin, method_name)
+pub const UNARY_OP_PROTOCOLS: &[(UnaryOp, Builtin, Builtin)] = &[
+    (
+        UnaryOp::Neg,
+        Builtin::NegateOperatorProtocol,
+        Builtin::NegateOperatorMethod,
+    ),
     (
         UnaryOp::BitNot,
         Builtin::BitwiseNotOperatorProtocol,
-        "bitwiseNot",
+        Builtin::BitwiseNotOperatorMethod,
     ),
     (
         UnaryOp::LogicalNot,
         Builtin::LogicalNotOperatorProtocol,
-        "logicalNot",
+        Builtin::LogicalNotOperatorMethod,
     ),
     (
         UnaryOp::RangeUpTo,
         Builtin::RangeUpToOperatorProtocol,
-        "rangeUpTo",
+        Builtin::RangeUpToOperatorMethod,
     ),
     (
         UnaryOp::RangeThrough,
         Builtin::RangeThroughOperatorProtocol,
-        "rangeThrough",
+        Builtin::RangeThroughOperatorMethod,
     ),
 ];
 
-/// (operator, protocol_builtin, method_name)
-pub const POSTFIX_OP_PROTOCOLS: &[(PostfixOp, Builtin, &str)] = &[
+/// (operator, protocol_builtin, method_builtin, method_name)
+pub const POSTFIX_OP_PROTOCOLS: &[(PostfixOp, Builtin, Builtin)] = &[
     (
         PostfixOp::RangeFrom,
         Builtin::RangeFromOperatorProtocol,
-        "rangeFrom",
+        Builtin::RangeFromOperatorMethod,
     ),
     (
         PostfixOp::Unwrap,
         Builtin::ForceUnwrapOperatorProtocol,
-        "forceUnwrap",
+        Builtin::ForceUnwrapOperatorMethod,
     ),
 ];
 
-/// (operator, protocol_builtin, method_name, arg_label)
+/// (operator, protocol_builtin, method_builtin, method_name, arg_label)
 ///
 /// Most compound assign methods use single-name params (no label).
 /// Only shift-assign ops have a `"by"` label.
-pub const COMPOUND_ASSIGN_PROTOCOLS: &[(CompoundAssignOp, Builtin, &str, Option<&str>)] = &[
+pub const COMPOUND_ASSIGN_PROTOCOLS: &[(CompoundAssignOp, Builtin, Builtin)] = &[
     (
         CompoundAssignOp::AddAssign,
         Builtin::AddAssignProtocol,
-        "addAssign",
-        None,
+        Builtin::AddAssignMethod,
     ),
     (
         CompoundAssignOp::SubAssign,
         Builtin::SubtractAssignProtocol,
-        "subtractAssign",
-        None,
+        Builtin::SubtractAssignMethod,
     ),
     (
         CompoundAssignOp::MulAssign,
         Builtin::MultiplyAssignProtocol,
-        "multiplyAssign",
-        None,
+        Builtin::MultiplyAssignMethod,
     ),
     (
         CompoundAssignOp::DivAssign,
         Builtin::DivideAssignProtocol,
-        "divideAssign",
-        None,
+        Builtin::DivideAssignMethod,
     ),
     (
         CompoundAssignOp::RemAssign,
-        Builtin::ModuloAssignProtocol,
-        "modAssign",
-        None,
+        Builtin::RemainderAssignProtocol,
+        Builtin::RemainderAssignMethod,
     ),
     (
         CompoundAssignOp::BitAndAssign,
         Builtin::BitwiseAndAssignProtocol,
-        "bitwiseAndAssign",
-        None,
+        Builtin::BitwiseAndAssignMethod,
     ),
     (
         CompoundAssignOp::BitOrAssign,
         Builtin::BitwiseOrAssignProtocol,
-        "bitwiseOrAssign",
-        None,
+        Builtin::BitwiseOrAssignMethod,
     ),
     (
         CompoundAssignOp::BitXorAssign,
         Builtin::BitwiseXorAssignProtocol,
-        "bitwiseXorAssign",
-        None,
+        Builtin::BitwiseXorAssignMethod,
     ),
     (
         CompoundAssignOp::ShlAssign,
         Builtin::ShiftLeftAssignProtocol,
-        "shiftLeftAssign",
-        Some("by"),
+        Builtin::ShiftLeftAssignMethod,
     ),
     (
         CompoundAssignOp::ShrAssign,
         Builtin::ShiftRightAssignProtocol,
-        "shiftRightAssign",
-        Some("by"),
+        Builtin::ShiftRightAssignMethod,
     ),
 ];
 
-/// Look up the protocol for a binary operator.
-/// Returns `(protocol_builtin, method_name, arg_label)` or `None` if not found.
-pub fn lookup_binary_op(op: &BinaryOp) -> Option<(Builtin, &'static str, Option<&'static str>)> {
-    BINARY_OP_PROTOCOLS
+/// What an operator desugars to: a call to `method` (an `@builtin`-tagged
+/// requirement of `protocol`). Its name and argument label are the
+/// requirement's own.
+#[derive(Copy, Clone, Debug)]
+pub struct OperatorRequirement {
+    pub protocol: Builtin,
+    pub method: Builtin,
+}
+
+fn find_op<O: PartialEq>(table: &[(O, Builtin, Builtin)], op: &O) -> Option<OperatorRequirement> {
+    table
         .iter()
         .find(|(o, ..)| o == op)
-        .map(|(_, proto, method, label)| (*proto, *method, *label))
+        .map(|&(_, protocol, method)| OperatorRequirement { protocol, method })
+}
+
+/// Look up the protocol for a binary operator.
+pub fn lookup_binary_op(op: &BinaryOp) -> Option<OperatorRequirement> {
+    find_op(BINARY_OP_PROTOCOLS, op)
 }
 
 /// Look up the protocol for a short-circuit binary operator.
-/// Returns `(protocol_builtin, method_name, arg_label)` or `None` if not found.
-pub fn lookup_short_circuit_op(
-    op: &BinaryOp,
-) -> Option<(Builtin, &'static str, Option<&'static str>)> {
-    SHORT_CIRCUIT_OP_PROTOCOLS
-        .iter()
-        .find(|(o, ..)| o == op)
-        .map(|(_, proto, method, label)| (*proto, *method, *label))
+pub fn lookup_short_circuit_op(op: &BinaryOp) -> Option<OperatorRequirement> {
+    find_op(SHORT_CIRCUIT_OP_PROTOCOLS, op)
 }
 
 /// Look up the protocol for a unary operator.
-/// Returns `(protocol_builtin, method_name)` or `None` if not found.
-pub fn lookup_unary_op(op: &UnaryOp) -> Option<(Builtin, &'static str)> {
-    UNARY_OP_PROTOCOLS
-        .iter()
-        .find(|(o, ..)| o == op)
-        .map(|(_, proto, method)| (*proto, *method))
+pub fn lookup_unary_op(op: &UnaryOp) -> Option<OperatorRequirement> {
+    find_op(UNARY_OP_PROTOCOLS, op)
 }
 
 /// Look up the protocol for a postfix operator.
-/// Returns `(protocol_builtin, method_name)` or `None` if not found.
-pub fn lookup_postfix_op(op: &PostfixOp) -> Option<(Builtin, &'static str)> {
-    POSTFIX_OP_PROTOCOLS
-        .iter()
-        .find(|(o, ..)| o == op)
-        .map(|(_, proto, method)| (*proto, *method))
+pub fn lookup_postfix_op(op: &PostfixOp) -> Option<OperatorRequirement> {
+    find_op(POSTFIX_OP_PROTOCOLS, op)
 }
 
 /// Look up the protocol for a compound assignment operator.
-/// Returns `(protocol_builtin, method_name, arg_label)` or `None` if not found.
-pub fn lookup_compound_assign_op(
-    op: &CompoundAssignOp,
-) -> Option<(Builtin, &'static str, Option<&'static str>)> {
-    COMPOUND_ASSIGN_PROTOCOLS
-        .iter()
-        .find(|(o, ..)| o == op)
-        .map(|(_, proto, method, label)| (*proto, *method, *label))
+pub fn lookup_compound_assign_op(op: &CompoundAssignOp) -> Option<OperatorRequirement> {
+    find_op(COMPOUND_ASSIGN_PROTOCOLS, op)
 }
 
 // ===== Loop-label resolution =====

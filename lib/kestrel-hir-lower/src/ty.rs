@@ -214,7 +214,7 @@ fn lower_structural_type(
 
         // Sugar types → resolve standard library entity + Struct.
         // The `Builtin` is the `@builtin(.XTypeOperator)` lang item that binds
-        // the syntax; the string is only a fallback for worlds without it.
+        // the syntax; the string only names it in the E141 message.
         AstType::Array(elem, span) => lower_sugar_type(
             ctx,
             owner,
@@ -254,6 +254,7 @@ fn lower_structural_type(
         AstType::Unit(span) => HirTy::Tuple(Vec::new(), span.clone()),
         AstType::Never(span) => HirTy::Never(span.clone()),
         AstType::Inferred(span) => HirTy::Infer(span.clone()),
+        AstType::Builtin(builtin, span) => lower_builtin_type(ctx, root, *builtin, span),
         AstType::Some {
             bounds,
             negative,
@@ -263,35 +264,43 @@ fn lower_structural_type(
                 .iter()
                 .map(|b| lower_bound_type(ctx, owner, root, b))
                 .collect();
-            // The legal negative bounds are the implicit builtins: `Copyable`
-            // and `Static` (`some Slice[T] and not Static` takes a borrowing
-            // slice; the param desugar turns it into a where-clause bound).
-            // Recovery keeps the flag set so a bad negative doesn't cascade
-            // into "underlier must be Copyable".
-            let not_copyable = match negative {
-                None => false,
-                Some(neg) if negative_bound_is(ctx, owner, root, neg, Builtin::Static) => false,
-                Some(neg) => {
-                    if !negative_bound_is(ctx, owner, root, neg, Builtin::Copyable) {
-                        let neg_span = ast_type_span(neg);
-                        ctx.accumulate(
-                            Diagnostic::error()
-                                .with_code("E140")
-                                .with_message("negative bound on an opaque type must be 'Copyable' or 'Static'")
-                                .with_labels(vec![
-                                    Label::primary(neg_span.file_id, neg_span.range())
-                                        .with_message("only 'not Copyable' and 'not Static' are supported here"),
-                                ])
-                                .with_notes(vec![
-                                    "`not` is only legal on builtin protocols with implicit \
-                                     conformance (e.g. `Copyable`)"
-                                        .into(),
-                                ]),
-                        );
-                    }
-                    true
-                },
-            };
+            // The legal negative bounds are the implicit builtins: `Copyable`,
+            // `Static` and `Sized` (`some Iterable and not Static and not
+            // Sized` takes a borrowed slice view; the param desugar turns each
+            // into a where-clause bound). Only `not Copyable` changes the
+            // opaque itself. Recovery sets the flag so a bad negative doesn't
+            // cascade into "underlier must be Copyable".
+            let mut not_copyable = false;
+            for neg in negative {
+                if [Builtin::Static, Builtin::Sized]
+                    .into_iter()
+                    .any(|b| negative_bound_is(ctx, owner, root, neg, b))
+                {
+                    continue;
+                }
+                not_copyable = true;
+                if negative_bound_is(ctx, owner, root, neg, Builtin::Copyable) {
+                    continue;
+                }
+                let neg_span = ast_type_span(neg);
+                ctx.accumulate(
+                    Diagnostic::error()
+                        .with_code("E140")
+                        .with_message(
+                            "negative bound on an opaque type must be 'Copyable', 'Static' or 'Sized'",
+                        )
+                        .with_labels(vec![
+                            Label::primary(neg_span.file_id, neg_span.range()).with_message(
+                                "only 'not Copyable', 'not Static' and 'not Sized' are supported here",
+                            ),
+                        ])
+                        .with_notes(vec![
+                            "`not` is only legal on builtin protocols with implicit \
+                             conformance (e.g. `Copyable`)"
+                                .into(),
+                        ]),
+                );
+            }
             HirTy::Opaque {
                 bounds: hir_bounds,
                 not_copyable,
@@ -360,9 +369,10 @@ fn lower_any_type(
         bindings,
         span: span.clone(),
     };
+    // The box's other params (its allocator) take their defaults.
     HirTy::Struct {
         entity: box_entity,
-        args: vec![raw],
+        args: fill_type_arg_defaults(ctx, root, box_entity, vec![raw]),
         span: span.clone(),
     }
 }
@@ -879,8 +889,10 @@ fn override_span(ty: &mut HirTy, span: &Span) {
 /// generic arg, function-type param/return) structurally as it descends.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RefPosition {
-    /// Parameter position — the one PERMANENT rejection (references-gaps.md
-    /// §10.6): conventions are the only parameter spelling, forever.
+    /// Parameter position. A param may spell its access mode with a ref
+    /// type (`x: &T`) instead of a keyword — the AST builder strips that ref
+    /// from the written type — so a ref still here was combined with
+    /// `mutating` / `consuming`, or came through a type alias.
     Param,
     /// Return position — carved out (made legal) in stage 1.
     Return,
@@ -901,10 +913,9 @@ pub enum RefPosition {
 impl RefPosition {
     fn code_and_message(self) -> (&'static str, &'static str) {
         match self {
-            // Permanent rule — worded as "are not", never "not yet".
             RefPosition::Param => (
                 "E480",
-                "parameters are not reference-typed; spell the convention instead — `x: T` borrows, `mutating x: T` mutably borrows",
+                "a reference-typed parameter must be written `x: &T` or `x: &mutating T`: without a `mutating` / `consuming` keyword, and not through a type alias",
             ),
             RefPosition::Return => ("E481", "reference return types are not supported yet"),
             RefPosition::Binding => ("E482", "references cannot be stored in bindings"),
@@ -1178,36 +1189,53 @@ fn lower_sugar_type(
         .map(|t| lower_ast_type(ctx, owner, root, t))
         .collect();
 
-    if let Some(entity) = kestrel_name_res::resolve_sugar_type(ctx, owner, root, builtin, name) {
-        let args = fill_type_arg_defaults(ctx, root, entity, lowered_args);
-        // Dispatch by NodeKind — Optional is an enum, Array/Dictionary are structs.
-        match ctx.get::<NodeKind>(entity).cloned() {
-            Some(NodeKind::Enum) => HirTy::Enum {
-                entity,
-                args,
-                span: span.clone(),
-            },
-            Some(NodeKind::Protocol) => HirTy::Protocol {
-                entity,
-                args,
-                span: span.clone(),
-            },
-            _ => HirTy::Struct {
-                entity,
-                args,
-                span: span.clone(),
-            },
-        }
-    } else {
-        ctx.accumulate(
-            Diagnostic::error()
-                .with_code("E141")
-                .with_message(format!("{name} is not defined"))
-                .with_labels(vec![Label::primary(span.file_id, span.range())])
-                .with_notes(vec!["is the standard library imported?".to_string()]),
-        );
-        HirTy::Error(span.clone())
+    match kestrel_name_res::resolve_sugar_type(ctx, root, builtin) {
+        Some(entity) => {
+            let args = fill_type_arg_defaults(ctx, root, entity, lowered_args);
+            nominal_hir_ty(ctx, entity, args, span)
+        },
+        None => undefined_lang_type(ctx, name, span),
     }
+}
+
+/// A compiler-generated reference to a lang item by its `@builtin` tag
+/// (`AstType::Builtin`). No path is looked up, so nothing can shadow it.
+fn lower_builtin_type(
+    ctx: &QueryContext<'_>,
+    root: Entity,
+    builtin: Builtin,
+    span: &Span,
+) -> HirTy {
+    match ctx.query(kestrel_name_res::ResolveBuiltin { builtin, root }) {
+        Some(entity) => {
+            let args = fill_type_arg_defaults(ctx, root, entity, Vec::new());
+            nominal_hir_ty(ctx, entity, args, span)
+        },
+        None => undefined_lang_type(ctx, builtin.name(), span),
+    }
+}
+
+/// The HIR type naming nominal `entity`, by its kind: Optional is an enum,
+/// Array/Dictionary are structs, `Copyable` is a protocol.
+fn nominal_hir_ty(ctx: &QueryContext<'_>, entity: Entity, args: Vec<HirTy>, span: &Span) -> HirTy {
+    let span = span.clone();
+    match ctx.get::<NodeKind>(entity).cloned() {
+        Some(NodeKind::Enum) => HirTy::Enum { entity, args, span },
+        Some(NodeKind::Protocol) => HirTy::Protocol { entity, args, span },
+        _ => HirTy::Struct { entity, args, span },
+    }
+}
+
+/// E141: a type the language names (sugar or a lang item) has no declaration.
+fn undefined_lang_type(ctx: &QueryContext<'_>, name: &str, span: &Span) -> HirTy {
+    ctx.accumulate(
+        Diagnostic::error()
+            .with_code("E141")
+            .with_message(format!("{name} is not defined"))
+            .with_labels(vec![Label::primary(span.file_id, span.range())])
+            .with_notes(vec!["is the standard library imported?".to_string()]),
+    );
+    HirTy::Error(span.clone())
 }
 
 /// Fill in default type arguments for type parameters beyond user-provided args.
@@ -1258,6 +1286,39 @@ impl LowerCtx<'_> {
         let lowered = lower_ast_type(self.ctx, self.owner, self.root, ty);
         reject_ref_types(self.ctx, lowered, pos, RefPolicy::AllowAggregate)
     }
+}
+
+/// A conformance's protocol arguments — the `written` ones lowered in the
+/// declaring `source`'s scope, then each remaining protocol type param's
+/// declared default (`: Addable` is `: Addable[Self]`, `: LeftShift` is
+/// `: LeftShift[Int64]`). A default's `Self` stays `HirTy::SelfType(protocol)`
+/// for the caller to read as the conformer. Stops at the first param with
+/// neither. THE one place conformance args are completed with defaults.
+pub fn conformance_protocol_args(
+    ctx: &QueryContext<'_>,
+    root: Entity,
+    protocol: Entity,
+    source: Entity,
+    written: &[AstType],
+) -> Vec<HirTy> {
+    let mut args: Vec<HirTy> = written
+        .iter()
+        .map(|ast| lower_ast_type(ctx, source, root, ast))
+        .collect();
+    let params = ctx
+        .get::<kestrel_ast_builder::TypeParams>(protocol)
+        .map(|tp| tp.0.clone())
+        .unwrap_or_default();
+    for &param in params.iter().skip(args.len()) {
+        let Some(default) = ctx.query(LowerTypeAnnotation {
+            entity: param,
+            root,
+        }) else {
+            break;
+        };
+        args.push(default);
+    }
+    args
 }
 
 // ===== Queries =====
@@ -1585,6 +1646,8 @@ impl QueryFn for LowerCallableTypes {
 ///
 /// For `extend Box[lang.i64]`, returns `Some(vec![HirTy for i64])`.
 /// For `extend Box` (no type args), returns `Some(vec![])`.
+/// Written args are padded with the target's declared defaults
+/// (`extend Array[T]` lowers to `[T, GlobalAllocator]`).
 /// Returns None if the entity has no ExtensionTarget component.
 #[derive(Clone, PartialEq, Eq, Hash)]
 pub struct LowerExtensionTargetTypeArgs {
@@ -1612,18 +1675,20 @@ impl QueryFn for LowerExtensionTargetTypeArgs {
             return Some(vec![lowered]);
         }
         // Sugar targets (`extend [T]`, `extend T?`, `extend [K: V]`) carry
-        // their type arguments inline.
+        // their type arguments inline, and so does a tuple target
+        // (`extend (X, Y)`: the elements are `lang.(,)`'s args).
         let sugar_args: Option<Vec<&AstType>> = match &target.0 {
+            AstType::Tuple(elems, _) => Some(elems.iter().collect()),
             AstType::Array(elem, _) | AstType::Optional(elem, _) => Some(vec![elem.as_ref()]),
             AstType::Dictionary(key, val, _) => Some(vec![key.as_ref(), val.as_ref()]),
             _ => None,
         };
         if let Some(args) = sugar_args {
-            return Some(
-                args.into_iter()
-                    .map(|a| lower_ast_type(ctx, self.extension, self.root, a))
-                    .collect(),
-            );
+            let lowered = args
+                .into_iter()
+                .map(|a| lower_ast_type(ctx, self.extension, self.root, a))
+                .collect();
+            return Some(self.fill_defaults(ctx, lowered));
         }
         let AstType::Named { segments, .. } = &target.0 else {
             return Some(vec![]);
@@ -1635,7 +1700,7 @@ impl QueryFn for LowerExtensionTargetTypeArgs {
         };
 
         if last_seg.type_args.is_empty() {
-            return Some(vec![]);
+            return Some(self.bare_target_args(ctx));
         }
 
         // If the target's arity is known and the extension provides too many
@@ -1668,7 +1733,60 @@ impl QueryFn for LowerExtensionTargetTypeArgs {
                 }
             })
             .collect();
-        Some(args)
+        Some(self.fill_defaults(ctx, args))
+    }
+}
+
+impl LowerExtensionTargetTypeArgs {
+    /// Args for a bare target (`extend String`, `extend Dictionary`): its
+    /// defaulted params take their defaults, as when some args are written,
+    /// so `extend String` is `extend String[GlobalAllocator]` (Rust's rule).
+    /// The params before them stay open, as the target's own params.
+    /// Empty when nothing is defaulted: the extension covers every
+    /// instantiation (`extend Range`).
+    fn bare_target_args(&self, ctx: &QueryContext<'_>) -> Vec<HirTy> {
+        let Some(target) = ctx.query(ExtensionTargetEntity {
+            extension: self.extension,
+            root: self.root,
+        }) else {
+            return vec![];
+        };
+        let params = ctx
+            .get::<TypeParams>(target)
+            .map(|tp| tp.0.clone())
+            .unwrap_or_default();
+        let has_default = |&p: &Entity| {
+            ctx.query(LowerTypeAnnotation {
+                entity: p,
+                root: self.root,
+            })
+            .is_some()
+        };
+        let Some(first_default) = params.iter().position(has_default) else {
+            return vec![];
+        };
+        let Some(written) = ctx.get::<ExtensionTarget>(self.extension) else {
+            return vec![];
+        };
+        let span = ast_type_span(&written.0);
+        let open = params[..first_default]
+            .iter()
+            .map(|&p| HirTy::Param(p, span.clone()))
+            .collect();
+        fill_type_arg_defaults(ctx, self.root, target, open)
+    }
+
+    /// Pads written args with the target's trailing type-param defaults, so
+    /// `extend Array[T]` extends `Array[T, GlobalAllocator]` (Rust's rule):
+    /// an extension that names some args means the defaults for the rest.
+    fn fill_defaults(&self, ctx: &QueryContext<'_>, args: Vec<HirTy>) -> Vec<HirTy> {
+        let Some(target) = ctx.query(ExtensionTargetEntity {
+            extension: self.extension,
+            root: self.root,
+        }) else {
+            return args;
+        };
+        fill_type_arg_defaults(ctx, self.root, target, args)
     }
 }
 
@@ -1714,6 +1832,7 @@ fn ast_type_span(ty: &AstType) -> Span {
         | AstType::Inferred(span)
         | AstType::Some { span, .. }
         | AstType::Any { span, .. }
+        | AstType::Builtin(_, span)
         | AstType::Ref { span, .. } => span.clone(),
     }
 }
@@ -1743,7 +1862,7 @@ fn nested_type_capturing_param(
             // own parameter, so the extension stands in for the binder.
             Some(NodeKind::Extension) => {
                 let lhs = ctx.query(kestrel_name_res::ExtensionLhsParams { extension: e, root });
-                if lhs.contains(&param) {
+                if lhs.iter().any(|&(_, p)| p == param) {
                     return nested;
                 }
             },

@@ -46,7 +46,10 @@ pub mod string_escape;
 pub mod integer_literal_range;
 
 // Uses of `@deprecated` / `@unavailable` declarations (E908, E913)
+pub mod c_function;
 pub mod restricted_use;
+pub mod unsafe_use;
+pub mod view_conversion;
 
 // Borrows of `@layout(.Packed)` fields (E912)
 pub mod packed_field_borrow;

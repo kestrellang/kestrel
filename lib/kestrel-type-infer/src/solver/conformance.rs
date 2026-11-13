@@ -27,6 +27,7 @@ pub(super) fn solve_applicable(
                 name,
                 is_call,
                 span,
+                searched_pointee: None,
             })
         },
         kestrel_entail::Tri::Fails | kestrel_entail::Tri::Unknown => {
@@ -72,7 +73,7 @@ pub(super) fn direct_param_bound_protocols(ctx: &InferCtx<'_>, param: Entity) ->
     };
     let mut protocols = Vec::new();
     for item in &confs.0 {
-        let ConformanceItem::Positive(ast_ty, _) = item else {
+        let ConformanceItem::Positive(ast_ty, ..) = item else {
             continue;
         };
         let kestrel_ast_builder::AstType::Named { segments, .. } = ast_ty else {
@@ -127,6 +128,18 @@ pub(super) fn solve_conforms(
     protocol_args: Vec<TyVar>,
 ) -> SolveResult {
     let resolved = ctx.resolve(ty);
+    // A compound assignment through a failable or throwing place
+    // (`d(k) += 1`): the analyzer always reports E214 for it, so stop the
+    // cascade without an E107.
+    if let ConformsOrigin::CompoundPlace(place) = origin
+        && ctx
+            .resolutions
+            .get(&place)
+            .is_some_and(|&member| kestrel_ast_builder::is_effectful_place(ctx.query_ctx, member))
+    {
+        ctx.poison(ty);
+        return SolveResult::Solved;
+    }
     match ctx.slot(resolved) {
         TySlot::Unresolved { .. } => SolveResult::Deferred(Constraint::Conforms {
             ty,
@@ -160,9 +173,11 @@ pub(super) fn solve_conforms(
                 return SolveResult::Solved;
             }
             if is_static_builtin(ctx, protocol) {
-                if poison_ty_on_failure {
-                    ctx.poison(ty);
-                }
+                let ty = if poison_ty_on_failure {
+                    ctx.poison_keeping_shown(ty)
+                } else {
+                    ty
+                };
                 return SolveResult::Error(InferError::DoesNotConform {
                     ty,
                     protocol,
@@ -204,9 +219,11 @@ pub(super) fn solve_conforms(
                 if typearg_failure_is_duplicate(ctx, resolved, protocol, origin) {
                     return SolveResult::Solved;
                 }
-                if poison_ty_on_failure {
-                    ctx.poison(ty);
-                }
+                let ty = if poison_ty_on_failure {
+                    ctx.poison_keeping_shown(ty)
+                } else {
+                    ty
+                };
                 return SolveResult::Error(InferError::DoesNotConform {
                     ty,
                     protocol,
@@ -271,9 +288,11 @@ pub(super) fn solve_conforms(
                             if unify_bound_protocol_args(ctx, resolved, protocol, &protocol_args)
                                 .is_err()
                             {
-                                if poison_ty_on_failure {
-                                    ctx.poison(ty);
-                                }
+                                let ty = if poison_ty_on_failure {
+                                    ctx.poison_keeping_shown(ty)
+                                } else {
+                                    ty
+                                };
                                 return SolveResult::Error(InferError::DoesNotConform {
                                     ty,
                                     protocol,
@@ -313,9 +332,11 @@ pub(super) fn solve_conforms(
                         protocol_args,
                     }),
                     Err(()) => {
-                        if poison_ty_on_failure {
-                            ctx.poison(ty);
-                        }
+                        let ty = if poison_ty_on_failure {
+                            ctx.poison_keeping_shown(ty)
+                        } else {
+                            ty
+                        };
                         SolveResult::Error(InferError::DoesNotConform {
                             ty,
                             protocol,
@@ -330,28 +351,35 @@ pub(super) fn solve_conforms(
                 // E157: `?.` on a type with no payload names that type, so
                 // keep a copy of it before poisoning overwrites the slot.
                 if ctx.resolver.builtin(Builtin::OptionalChainProtocol) == Some(protocol) {
-                    let shown = ctx.fresh();
-                    ctx.types[shown.0 as usize] = ctx.slot(resolved).clone();
-                    if poison_ty_on_failure {
-                        ctx.poison(ty);
-                    }
+                    let shown = if poison_ty_on_failure {
+                        ctx.poison_keeping_shown(ty)
+                    } else {
+                        ty
+                    };
                     return SolveResult::Error(InferError::OptionalChainNotConforming {
                         ty: shown,
                         span,
                     });
                 }
-                if poison_ty_on_failure {
-                    ctx.poison(ty);
-                }
+                let ty = if poison_ty_on_failure {
+                    ctx.poison_keeping_shown(ty)
+                } else {
+                    ty
+                };
                 // E146 names what blocks `any P: P`.
                 SolveResult::Error(
-                    crate::existential::self_conformance_error(ctx, resolved, protocol, &span)
-                        .unwrap_or_else(|| InferError::DoesNotConform {
-                            ty,
-                            protocol,
-                            protocol_args: protocol_args.clone(),
-                            span,
-                        }),
+                    crate::existential::self_conformance_error(
+                        ctx,
+                        ctx.resolve(ty),
+                        protocol,
+                        &span,
+                    )
+                    .unwrap_or_else(|| InferError::DoesNotConform {
+                        ty,
+                        protocol,
+                        protocol_args: protocol_args.clone(),
+                        span,
+                    }),
                 )
             }
         },
@@ -468,18 +496,22 @@ pub(super) fn unify_bound_protocol_args(
             root: ctx.root,
         });
     let mut applicable: Vec<ApplicableConformance> = Vec::new();
-    for (proto, source, written) in &insts {
+    for (proto, source, ast_args) in &insts {
         if *proto != protocol {
             continue;
         }
-        // `: Mul` declares `Mul[Self]`: a defaulted conformance is an
-        // instantiation too, or a sibling `Mul[Meters]` would win alone.
-        let ast_args = &kestrel_name_res::conformance_args_with_defaults(
+        // Declared args completed with defaults (`Int64: Multipliable` is
+        // `Multipliable[Self]`): skipping a defaulted conformance left a
+        // sibling `Multipliable[Meters]` as the ONLY applicable one, which
+        // then pinned every `Int64 * Int64`'s `Other` to `Meters`.
+        let decl_args = kestrel_hir_lower::conformance_protocol_args(
             ctx.query_ctx,
+            ctx.root,
             protocol,
-            written.clone(),
+            *source,
+            ast_args,
         );
-        if ast_args.is_empty() {
+        if decl_args.is_empty() {
             continue;
         }
         // Map the source's free type params to the receiver's concrete args:
@@ -542,11 +574,6 @@ pub(super) fn unify_bound_protocol_args(
                 }
                 (subs, target_args)
             };
-        // Lower the declared protocol args (in the source's scope) to HirTy.
-        let decl_args: Vec<kestrel_hir::ty::HirTy> = ast_args
-            .iter()
-            .map(|a| kestrel_hir_lower::lower_ast_type(ctx.query_ctx, *source, ctx.root, a))
-            .collect();
         applicable.push(ApplicableConformance {
             decl_args,
             subs,
@@ -569,7 +596,14 @@ pub(super) fn unify_bound_protocol_args(
             !want_args
                 .iter()
                 .zip(c.decl_args.iter())
-                .any(|(&w, d)| tv_definitely_incompatible(ctx, w, d))
+                .any(|(&w, d)| match d {
+                    // A default's `Self` is the receiver itself.
+                    kestrel_hir::ty::HirTy::SelfType(..) => matches!(
+                        ctx.slot(ctx.resolve(w)),
+                        TySlot::Resolved(k) if k.entity().is_some_and(|e| e != entity)
+                    ),
+                    _ => tv_definitely_incompatible(ctx, w, d),
+                })
         });
         if applicable.is_empty() {
             return Err(());
@@ -610,12 +644,38 @@ pub(super) fn unify_bound_protocol_args(
     }
 
     for (want, decl) in want_args.iter().zip(decl_args.iter()) {
-        let decl_tv = lower_hir_ty_sub(ctx, decl, None, resolved, &subs);
+        // `Some(protocol)` reads a default's `Self` as the receiver.
+        let decl_tv = lower_hir_ty_sub(ctx, decl, Some(protocol), resolved, &subs);
         if unify::unify(ctx, *want, decl_tv).is_err() {
             return Err(());
         }
     }
     Ok(BoundArgs::Decided)
+}
+
+/// Whether `entity` declares `protocol` instantiated at itself
+/// (`extend UInt64: Convertible[UInt64]`, or a defaulted `[Other = Self]`).
+pub(super) fn declares_identity_instantiation(
+    ctx: &InferCtx<'_>,
+    entity: Entity,
+    protocol: Entity,
+) -> bool {
+    use kestrel_hir::ty::HirTy;
+    let insts = ctx
+        .query_ctx
+        .query(kestrel_name_res::ConformingProtocolInstantiations {
+            entity,
+            root: ctx.root,
+        });
+    insts.iter().filter(|(p, ..)| *p == protocol).any(|(_, source, ast_args)| {
+        let args =
+            kestrel_hir_lower::conformance_protocol_args(ctx.query_ctx, ctx.root, protocol, *source, ast_args);
+        match args.as_slice() {
+            [HirTy::SelfType(..)] => true,
+            [HirTy::Struct { entity: e, .. } | HirTy::Enum { entity: e, .. }] => *e == entity,
+            _ => false,
+        }
+    })
 }
 
 /// Outcome of [`unify_bound_protocol_args`] when no contradiction was found.
@@ -797,7 +857,7 @@ impl CopyLayer for SolverCopyLayer<'_, '_> {
         sem
     }
 
-    fn gating_positions(&self, entity: Entity) -> Cow<'_, [usize]> {
+    fn conditional_copy(&self, entity: Entity) -> Cow<'_, kestrel_copy_fold::ConditionalCopy> {
         Cow::Owned(self.ctx.query_ctx.query(ConditionalCopyableParams {
             entity,
             root: self.ctx.root,
@@ -823,9 +883,11 @@ impl kestrel_semantics::CopyShapeLayer for SolverCopyLayer<'_, '_> {
         self.ctx.root
     }
 
-    // HOOK: structural parent context scopes the bound lookup.
-    fn param_context(&self, param: Entity) -> Entity {
-        self.ctx.query_ctx.parent_of(param).unwrap_or(param)
+    // HOOK: the body being solved scopes the bound lookup, so a method's or
+    // extension's `where T: Copyable` counts (the param's own declaring
+    // entity is always consulted too — see `param_bound_contexts`).
+    fn param_context(&self, _param: Entity) -> Entity {
+        self.ctx.owner
     }
 
     fn self_context(&self) -> Entity {

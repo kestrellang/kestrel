@@ -6,3 +6,4 @@ description = "HTMX counter example using Perch"
 [dependencies]
 perch = { path = "../../lang/perch" }
 plume = { path = "../../lang/plume" }
+quill = { path = "../../lang/quill" }

@@ -460,7 +460,7 @@ impl<'a> CollectionContext<'a> {
                 }
             },
 
-            Callee::Thin(_) | Callee::Thick(_) | Callee::Resolved(_) => {},
+            Callee::Thin(_) | Callee::Thick(_) | Callee::C(_) | Callee::Resolved(_) => {},
         }
     }
 
@@ -476,6 +476,12 @@ impl<'a> CollectionContext<'a> {
             func,
             type_args,
             self_type,
+        }
+        | ImmediateKind::CFunctionRef {
+            func,
+            type_args,
+            self_type,
+            ..
         } = imm
         {
             if !self.functions.contains_key(func) {
@@ -718,32 +724,43 @@ pub fn build_subst(
 
                 subst.type_params.entry(*protocol).or_insert(concrete_ty);
 
-                for wit in witnesses.iter() {
+                // The bound's args, concrete at this instantiation, pick the
+                // conformance it names (`Int64: P[A]` vs `Int64: P[B]`) and
+                // bind the free params of `extend X: P[W]` to them.
+                let bound_args: Vec<TyId> = protocol_type_args
+                    .iter()
+                    .map(|&arg| substitute(arena, arg, &subst))
+                    .collect();
+                let selected = witnesses.iter().enumerate().find_map(|(i, wit)| {
                     if wit.protocol != *protocol {
-                        continue;
+                        return None;
                     }
                     let mut bindings = HashMap::new();
-                    if !witness::match_pattern(
+                    (witness::match_pattern(
                         arena,
                         wit.implementing_type,
                         concrete_ty,
                         &mut bindings,
-                    ) {
-                        continue;
-                    }
-                    for (pi, &wc_arg_entity) in protocol_type_args.iter().enumerate() {
-                        if let Some(&proto_expr) = wit.proto_type_args.get(pi)
-                            && let MirTy::TypeParam(ext_entity) = arena.get(proto_expr)
-                            && !subst.type_params.contains_key(ext_entity)
-                            && let Some(&cv) = subst.type_params.get(&wc_arg_entity)
-                        {
-                            subst.type_params.insert(*ext_entity, cv);
-                        }
-                    }
-                    for (entity, ty) in &bindings {
+                    ) && witness::witness_proto_args_match(arena, wit, &bound_args, &mut bindings))
+                    .then_some((i, bindings))
+                });
+                if let Some((_, bindings)) = &selected {
+                    for (entity, ty) in bindings {
                         subst.type_params.entry(*entity).or_insert(*ty);
                     }
-                    break;
+                }
+                if let Some((wit_idx, _)) = selected
+                    && !bound_args.is_empty()
+                {
+                    // Project through the selected conformance only.
+                    populate_assoc_types_from(
+                        arena,
+                        witnesses,
+                        &witnesses[wit_idx],
+                        concrete_ty,
+                        &mut subst,
+                    );
+                    continue;
                 }
 
                 populate_assoc_types(
@@ -830,6 +847,24 @@ pub fn populate_assoc_types(
     }
 }
 
+/// [`populate_assoc_types`] through one chosen conformance: its bindings,
+/// with its pattern and protocol-arg params already in `subst`.
+fn populate_assoc_types_from(
+    arena: &mut TyArena,
+    witnesses: &[WitnessDef],
+    witness: &WitnessDef,
+    concrete_ty: TyId,
+    subst: &mut SubstMap,
+) {
+    for &(assoc, bound_ty) in &witness.type_bindings {
+        let resolved = substitute(arena, bound_ty, subst);
+        let final_ty = deep_resolve(arena, witnesses, resolved, 0);
+        subst
+            .assoc_types
+            .insert((concrete_ty, witness.protocol, assoc), final_ty);
+    }
+}
+
 /// Substitute a type through a SubstMap, then recursively resolve any
 /// AssociatedProjection nodes that emerge. Use for callee type_args in
 /// scan_callee where the parent's SubstMap resolves TypeParams but the
@@ -908,6 +943,26 @@ fn deep_resolve(arena: &mut TyArena, witnesses: &[WitnessDef], ty: TyId, depth: 
                 .collect();
             if new != elems { arena.tuple(new) } else { ty }
         },
+        MirTy::FuncC {
+            params,
+            ret,
+            unsigned,
+        } => {
+            let new_params: Vec<(TyId, crate::ty::ParamConvention)> = params
+                .iter()
+                .map(|&(p, c)| (deep_resolve(arena, witnesses, p, depth + 1), c))
+                .collect();
+            let new_ret = deep_resolve(arena, witnesses, ret, depth + 1);
+            if new_params != params || new_ret != ret {
+                arena.intern(MirTy::FuncC {
+                    params: new_params,
+                    ret: new_ret,
+                    unsigned,
+                })
+            } else {
+                ty
+            }
+        },
         MirTy::FuncThin { params, ret }
         | MirTy::FuncThick {
             params,
@@ -963,6 +1018,7 @@ fn references_type_param(arena: &TyArena, ty: TyId, entity: Entity) -> bool {
             .iter()
             .any(|&a| references_type_param(arena, a, entity)),
         MirTy::FuncThin { params, ret }
+        | MirTy::FuncC { params, ret, .. }
         | MirTy::FuncThick {
             params,
             ret,
@@ -987,6 +1043,7 @@ pub fn has_type_param(arena: &TyArena, ty: TyId) -> bool {
         MirTy::Tuple(elems) => elems.iter().any(|&e| has_type_param(arena, e)),
         MirTy::Named { type_args, .. } => type_args.iter().any(|&a| has_type_param(arena, a)),
         MirTy::FuncThin { params, ret }
+        | MirTy::FuncC { params, ret, .. }
         | MirTy::FuncThick {
             params,
             ret,
@@ -1033,7 +1090,9 @@ fn ty_depth(arena: &TyArena, ty: TyId, cap: usize) -> usize {
         MirTy::Named { type_args, .. } => type_args.clone(),
         MirTy::Tuple(elems) => elems.clone(),
         MirTy::Pointer(inner) => vec![*inner],
-        MirTy::FuncThin { params, ret } | MirTy::FuncThick { params, ret, .. } => params
+        MirTy::FuncThin { params, ret }
+        | MirTy::FuncC { params, ret, .. }
+        | MirTy::FuncThick { params, ret, .. } => params
             .iter()
             .map(|(t, _)| *t)
             .chain(std::iter::once(*ret))

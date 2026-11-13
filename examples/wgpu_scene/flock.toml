@@ -1,0 +1,9 @@
+[package]
+name = "wgpu_scene"
+version = "0.1.0"
+description = "A lit 3D scene in an SDL window: a textured floor, instanced cubes and a fly camera, drawn with wgpu"
+
+[dependencies]
+wgpu = { path = "../../lang/wgpu" }
+sdl = { path = "../../lang/sdl" }
+linalg = { path = "../../lang/linalg" }

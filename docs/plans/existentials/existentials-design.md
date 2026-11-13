@@ -163,7 +163,7 @@ A type `B` can appear in `any[B] P` iff:
    sharing requirements. `SharedBox` becomes a refinement:
    `SharedBox: ExistentialBox, Cloneable, MutableIndirection`. `init` is only
    ever called at a sized `Target` (§4).
-2. **It has exactly one type parameter, declared `not Sized`.**
+2. **It has exactly one type parameter without a default, declared `not Sized`.** Any further parameters (the box's allocator) must have defaults.
 3. **It is unsizable.** Every stored field that mentions `T` is a
    `Pointer[X]`, where `X` is `T` or an unsized-tail struct ending in `T`, or
    is itself an unsizable box of `T`. This structural rule lets the compiler
@@ -361,7 +361,10 @@ symbol. Compilation is whole-program, so that address is unique per type.
 
 **When it holds.** The conformance holds **iff** both:
 
-- every requirement of `P` is dispatchable (§5), and
+- every requirement of `P` is dispatchable (§5), or has an
+  `@existentialOnly` default in `extend P` that the box binds as its
+  witness (`Formattable.format(into:)` forwards to the dispatchable
+  `formatted(options:)`), and
 - `B` grants the access level each requirement needs.
 
 For example:

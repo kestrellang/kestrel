@@ -13,10 +13,10 @@ struct Bag {
     var more: Array[Int64]
 
     mutating func touch() {
-        let r = &mutating self.items(at: 0); // ERROR(E210): cannot take a `&mutating` borrow of immutable field 'items'
+        let r = &mutating self.items(0); // ERROR(E210): cannot take a `&mutating` borrow of immutable field 'items'
     }
 
     func look() {
-        let r = &mutating self.more(at: 0); // ERROR(E210): cannot take a `&mutating` borrow of immutable variable 'self'
+        let r = &mutating self.more(0); // ERROR(E210): cannot take a `&mutating` borrow of immutable variable 'self'
     }
 }

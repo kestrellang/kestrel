@@ -198,6 +198,7 @@ impl LowerCtx<'_> {
                         owner: None,
                         name: hir_name(name.clone()),
                         args,
+                        requirement: None,
                         span: span.clone(),
                     })
                 };
@@ -240,13 +241,23 @@ impl LowerCtx<'_> {
                 if op == kestrel_ast::BinaryOp::Pipe {
                     return self.lower_pipe(node, &span);
                 }
-                let (lhs, rhs) = self.operands(node, &span);
+                let (lhs, mut rhs) = self.operands(node, &span);
+                // A rejected right side lowers as recovery poison, so the
+                // misplaced `try` reports once and nothing cascades from it.
+                if matches!(op, kestrel_ast::BinaryOp::And | kestrel_ast::BinaryOp::Or)
+                    && self.reject_try_in_short_circuit_rhs(&rhs, &op)
+                {
+                    rhs = ExprSrc::Error(rhs.node().map_or(span.clone(), |n| self.span(n)));
+                }
                 let lhs = self.lower_expr_src(&lhs);
                 let rhs = self.lower_expr_src(&rhs);
                 self.desugar_binary_hir(op, lhs, rhs, &span)
             },
             SyntaxKind::ExprAssignment => {
                 let (lhs, rhs) = self.operands(node, &span);
+                if let Some(target) = crate::tuple_assign::tuple_target(&lhs) {
+                    return self.lower_tuple_assign(&target, &rhs, &span);
+                }
                 // `a?.b = v`: the assignment is the chain's tail, so `v` is
                 // evaluated only when the chain reaches its target.
                 if let Some(chain) = optional_chain_node(&lhs) {
@@ -358,11 +369,24 @@ impl LowerCtx<'_> {
                 let operand = ExprSrc::or_error(first_expr(node), &span);
                 self.desugar_try(&operand, &span)
             },
+            // `unsafe` adds no HIR node: the operand lowers in place and the
+            // region is recorded for the unsafe-use analyzer.
+            SyntaxKind::ExprUnsafe => {
+                self.unsafe_regions.push(span.clone());
+                let operand = ExprSrc::or_error(first_expr(node), &span);
+                self.lower_expr_src(&operand)
+            },
+            SyntaxKind::ExprUnsafeBlock => {
+                self.unsafe_regions.push(span.clone());
+                let body = BlockSyntax::of(code_block(node), self.file_id);
+                let body = self.lower_block(&body);
+                self.alloc_expr(HirExpr::Block { body, span })
+            },
             SyntaxKind::ExprClosure => self.lower_closure(node, &span),
             SyntaxKind::ExprMatch => self.lower_match(node, &span),
             SyntaxKind::ExprCast => self.desugar_cast(node, &span),
             SyntaxKind::ExprTypeTest => self.desugar_type_test(node, &span),
-            SyntaxKind::ExprPlaceholderUse => self.lower_placeholder_use(&span),
+            SyntaxKind::ExprPlaceholderUse => self.lower_placeholder_use(node, &span),
             SyntaxKind::ExprOptionalChain => {
                 self.lower_optional_chain(node, &span, |this, inner| this.lower_expr_src(inner))
             },
@@ -379,6 +403,48 @@ impl LowerCtx<'_> {
 
     /// The two operands of a binary-shaped node, each an error at `span`
     /// when absent.
+    /// E012: `try` in the right operand of `and` / `or`. That operand runs
+    /// inside the short-circuit closure, so its early return would leave the
+    /// closure, not the function. A closure written inside the operand is
+    /// its own scope and may use `try` freely. True when it reported.
+    fn reject_try_in_short_circuit_rhs(
+        &mut self,
+        rhs: &ExprSrc,
+        op: &kestrel_ast::BinaryOp,
+    ) -> bool {
+        let Some(rhs) = rhs.node() else {
+            return false;
+        };
+        let mut rejected = false;
+        let mut stack = vec![rhs.clone()];
+        while let Some(node) = stack.pop() {
+            match node.kind() {
+                SyntaxKind::ExprClosure => continue,
+                SyntaxKind::ExprTry => {
+                    rejected = true;
+                    let span = self.span(&node);
+                    self.ctx.accumulate(
+                        Diagnostic::error()
+                            .with_code("E012")
+                            .with_message(format!(
+                                "`try` can't appear on the right side of `{}`",
+                                op.symbol()
+                            ))
+                            .with_labels(vec![Label::primary(span.file_id, span.range())
+                                .with_message("this runs only if the left side doesn't decide the result")])
+                            .with_notes(vec![
+                                "bind the value first (`let x = try f();`) or move the `try` to the left side"
+                                    .to_string(),
+                            ]),
+                    );
+                },
+                _ => {},
+            }
+            stack.extend(node.children());
+        }
+        rejected
+    }
+
     pub(crate) fn operands(&self, node: &SyntaxNode, span: &Span) -> (ExprSrc, ExprSrc) {
         let mut exprs = expr_children(node);
         let lhs = ExprSrc::or_error(exprs.next(), span);
@@ -449,7 +515,7 @@ impl LowerCtx<'_> {
         current
     }
 
-    fn lower_path(&mut self, segments: &[PathSeg], span: &Span) -> HirExprId {
+    pub(crate) fn lower_path(&mut self, segments: &[PathSeg], span: &Span) -> HirExprId {
         // Consume the callee-position marker up front so the nested
         // `lower_path` calls this function makes (and any path lowered inside
         // a callee expression) are checked as ordinary values.
@@ -1434,6 +1500,7 @@ impl LowerCtx<'_> {
             owner: Some(owner),
             name: HirName::Name(case.name.clone()),
             args,
+            requirement: None,
             span: span.clone(),
         });
         self.record_segments(std::slice::from_ref(case), id);
@@ -1640,6 +1707,34 @@ impl LowerCtx<'_> {
     /// Let-conditions create bindings in the current scope.
     /// `source` tags any desugared let-condition matches so the right
     /// diagnostic fires (IfLet → E302, WhileLet → E308, Guard → E309).
+    /// Lower a `let` condition's value. A bare `and` there (`if let .Some(e)
+    /// = end and start < e`) is E160: `and` binds tighter than the `let`, so
+    /// it would scrutinize `end and start < e` with `e` not yet bound. The
+    /// fix is a condition list, `if let .Some(e) = end, start < e`.
+    /// Parenthesized (`= (a and b)`) it is an ordinary `Bool` scrutinee.
+    pub(crate) fn lower_let_value(&mut self, value: &ExprSrc) -> HirExprId {
+        let Some(node) = value.node().map(unwrap_expr).filter(|n| {
+            n.kind() == SyntaxKind::ExprBinary && binary_op(n) == Some(kestrel_ast::BinaryOp::And)
+        }) else {
+            return self.lower_expr_src(value);
+        };
+        let span = self.span(&node);
+        self.ctx.accumulate(
+            Diagnostic::error()
+                .with_code("E160")
+                .with_message("a `let` condition can't be joined with `and`")
+                .with_labels(vec![
+                    Label::primary(span.file_id, span.range())
+                        .with_message("`and` makes this whole expression the value being matched"),
+                ])
+                .with_notes(vec![
+                    "separate conditions with `,`: `if let .Some(x) = value, x > 0 { … }`"
+                        .to_string(),
+                ]),
+        );
+        self.alloc_expr(HirExpr::Error { span })
+    }
+
     pub(crate) fn lower_if_conditions(
         &mut self,
         conditions: &[Cond],
@@ -1658,7 +1753,7 @@ impl LowerCtx<'_> {
                 Cond::Expr(expr) => self.lower_expr_src(expr),
                 Cond::Let { pat, value } => {
                     // if let pattern = value → desugar to match with bool result
-                    let lowered_value = self.lower_expr_src(value);
+                    let lowered_value = self.lower_let_value(value);
                     let lowered_pat = self.lower_pat(pat);
 
                     // match value { pattern => true, _ => false }
@@ -2104,7 +2199,7 @@ impl LowerCtx<'_> {
 
         match first {
             Cond::Let { pat, value } => {
-                let scrutinee = self.lower_expr_src(value);
+                let scrutinee = self.lower_let_value(value);
 
                 // Bindings are visible in the success continuation (deeper
                 // conditions + the body), not in the fail branch. Scope the

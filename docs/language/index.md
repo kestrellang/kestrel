@@ -15,10 +15,12 @@ Welcome to the Kestrel programming language documentation.
 - **[Functions](functions.md)** - Function declarations, parameters, and methods
 - **[Closures](closures.md)** - First-class functions, captures, and the four closure kinds
 - **[Protocols](protocols.md)** - Traits and interfaces
+- **[Deriving Conformances](derive.md)** - `@derive(Equatable, Hashable, ...)`
 - **[Generics](generics.md)** - Parametric polymorphism
 - **[Opaque Types](opaque-types.md)** - `some Protocol` return types
 - **[Pattern Matching](pattern-matching.md)** - Destructuring and matching
 - **[References](references.md)** - Borrowed references (`&T`)
+- **[Unsafe](unsafe.md)** - `unsafe func`, `unsafe` expressions and blocks, unsafe protocols
 - **[Error Handling](error-handling.md)** - `Result`, `throws`, and `try`
 - **[Optional Chaining](optional-chaining.md)** - `a?.b`, mutation through `?.`, and the `OptionalChain` protocol
 - **[Modules](modules.md)** - Module system and imports

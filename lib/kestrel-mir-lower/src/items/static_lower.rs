@@ -14,7 +14,7 @@ use kestrel_mir::body::OssaBody;
 use kestrel_mir::item::function::{FunctionDef, FunctionKind};
 use kestrel_mir::item::static_def::{FileConstantData, StaticDef};
 use kestrel_mir::op::IntBits;
-use kestrel_mir::{FieldIdx, Immediate, MirTy, TyId, WitnessMethodKey};
+use kestrel_mir::{FieldIdx, Immediate, MirTy, TyId};
 use kestrel_syntax_tree::SyntaxKind;
 use kestrel_syntax_tree::ast::{self, AstNode};
 
@@ -217,8 +217,9 @@ fn synthesize_main_wrapper(ctx: &mut LowerCtx, master_init: Option<Entity>) {
             vec![],
         );
 
-        let ret_val = match (exitable, exitcode_ent) {
-            (Some(exitable), Some(exitcode_ent)) => {
+        let report = ctx.builtin_witness_key(Builtin::ExitableReport);
+        let ret_val = match (exitable, exitcode_ent, report) {
+            (Some(exitable), Some(exitcode_ent), Some(report)) => {
                 let exitcode_ty = ctx.module.ty_arena.named(exitcode_ent, vec![]);
                 let i8_ty = ctx.module.ty_arena.i8();
                 let field = ctx
@@ -233,7 +234,7 @@ fn synthesize_main_wrapper(ctx: &mut LowerCtx, master_init: Option<Entity>) {
                     Some(code),
                     Callee::Witness {
                         protocol: exitable,
-                        method: WitnessMethodKey::simple("report"),
+                        method: report,
                         self_type: run_ret,
                         method_type_args: vec![],
                     },

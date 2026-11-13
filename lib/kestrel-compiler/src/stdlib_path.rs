@@ -129,14 +129,24 @@ pub fn repo_std_path() -> PathBuf {
 /// The stdlib's C shim sources that must be compiled and linked into any
 /// binary using the stdlib. Empty if the shim is absent.
 ///
-/// The `io/libc_shims.c` path was written out at three call sites; it lives
-/// here so moving the shim is one edit.
+/// Every shim is listed here, the one place call sites read from, so adding
+/// or moving a shim is one edit.
+const STDLIB_C_SHIMS: &[&str] = &[
+    "files/files_shims.c",
+    "network/network_shims.c",
+    "streams/streams_shims.c",
+    "system/system_shims.c",
+];
+
 pub fn stdlib_c_sources(std_dir: Option<&Path>) -> Vec<PathBuf> {
     let Some(std_dir) = std_dir else {
         return vec![];
     };
-    let shim = std_dir.join("io/libc_shims.c");
-    if shim.exists() { vec![shim] } else { vec![] }
+    STDLIB_C_SHIMS
+        .iter()
+        .map(|shim| std_dir.join(shim))
+        .filter(|path| path.exists())
+        .collect()
 }
 
 #[cfg(test)]

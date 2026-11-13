@@ -6,5 +6,5 @@
 
 module Test
 
-@platform(.Windows) // ERROR: '.Windows' is not a platform; expected '.Darwin', '.Linux', '.darwin' or '.linux'
+@platform(.Windows) // ERROR: '.Windows' is not a platform; expected '.Darwin', '.Linux', '.Emscripten', '.darwin' or '.linux'
 func f() {}

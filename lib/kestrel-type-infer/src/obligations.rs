@@ -36,21 +36,21 @@ const DEFAULT_RULES: &[(&str, DefaultRule)] = &[
     // operator.
     ("rule L", solver::apply_operator_literal_adoption),
     // Rule C, then literal defaults, holding back arguments of calls still
-    // waiting on their receiver and interpolation accumulators.
-    ("literal defaults (strict)", |ctx| {
-        solver::apply_literal_defaults(ctx, 0)
-    }),
+    // waiting on their receiver.
+    ("literal defaults", solver::apply_literal_defaults),
     // A ref-initialized binding nothing else pinned takes its copy-out
-    // decay; it can gate the literals the next rule would default.
+    // decay; it can gate the literals the literal-defaults rule (re-run
+    // after any progress) would default.
     ("ref decay", solver::apply_ref_decay_defaults),
-    // Interpolation accumulators default too (so `"\(n)".bytes` resolves).
-    ("literal defaults (relaxed)", |ctx| {
-        solver::apply_literal_defaults(ctx, 1)
-    }),
 ];
 
 /// Finish inference for a body: flush, default, report.
 pub fn finish_body(ctx: &mut InferCtx<'_>, hir: &HirBody) {
+    kestrel_debug::ktrace!(
+        "finish-body",
+        "{}",
+        kestrel_ast_builder::qualified_name(ctx.query_ctx, ctx.owner)
+    );
     // P5 audit: which constraint kinds the walker left for the flush.
     for c in ctx
         .constraints
@@ -71,6 +71,10 @@ pub fn finish_body(ctx: &mut InferCtx<'_>, hir: &HirBody) {
         let kind = kind.split([' ', '{', '(']).next().unwrap_or("");
         kestrel_debug::ktrace!("p5", "after-flush {kind}");
     }
+    // Borrowed arguments still waiting on their own type coerce now, before
+    // any literal default can pin what only the param would have.
+    ctx.view_peel_gate = false;
+    fixpoint(ctx);
     apply_defaults(ctx);
 
     // Every call/member that could type a check-mode leaf has fired, so a
@@ -78,10 +82,29 @@ pub fn finish_body(ctx: &mut InferCtx<'_>, hir: &HirBody) {
     ctx.synth_gate = false;
     fixpoint(ctx);
 
+    // Borrowed arguments still open link to their open params now.
+    ctx.view_link_gate = false;
+    fixpoint(ctx);
+    apply_defaults(ctx);
+
     // Type-parameter defaults (`H = DefaultHasher`) for vars nothing pinned.
     if solver::apply_type_param_defaults(ctx) {
         fixpoint(ctx);
     }
+
+    // Last resort, after every other default had its chance: literals still
+    // held back for a receiver nothing resolved take their defaults, and
+    // whatever they unblock gets the full default pass again.
+    if solver::apply_held_literal_defaults(ctx) {
+        fixpoint(ctx);
+        apply_defaults(ctx);
+    }
+
+    // A ref whose pointee no default resolved coerces into its
+    // `DecaysFrom` target now, which may pin the pointee itself.
+    ctx.decay_wait_gate = false;
+    fixpoint(ctx);
+    apply_defaults(ctx);
 
     // Reports. Unresolved generic type params first, so their vars are
     // poisoned before cascades; the never-fallback (Rust's

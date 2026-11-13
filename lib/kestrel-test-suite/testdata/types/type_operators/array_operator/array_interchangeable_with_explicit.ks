@@ -3,7 +3,7 @@
 // skip: blocked on type alias normalization
 
 module Test
-import std.io.stdio.println
+import std.streams.println
 
 func countExplicit(arr: std.collections.Array[std.numeric.Int64]) -> std.numeric.Int64 {
     arr.count

@@ -19,9 +19,9 @@ struct Container: not Copyable {
 func main() -> lang.i64 {
     let c = Container(box: std.memory.RcBox[std.numeric.Int64](42));
 
-    let getter = { c.box.getValue() };
+    let getter = { c.box.value };
     if getter() != 42 { return 1 }           // closure captured the field's value
-    if c.box.getValue() != 42 { return 2 }   // `c` still usable — not consumed
+    if c.box.value != 42 { return 2 }   // `c` still usable — not consumed
 
     0
 }

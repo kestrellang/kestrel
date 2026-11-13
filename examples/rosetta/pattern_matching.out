@@ -1,0 +1,2 @@
+(B (B (B E 1 E) 2 (B E 3 E)) 4 (B (B E 5 E) 6 (R (B E 7 E) 8 (B E 9 (R E 10 E)))))
+depth after inserting 1..1000 in order: 15

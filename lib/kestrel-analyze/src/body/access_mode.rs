@@ -132,19 +132,8 @@ impl BodyCheck for AccessModeAnalyzer {
                         check_call_args(cx, entity, args, Some(*receiver), &mut diags);
                     }
                 },
-                HirExpr::ProtocolCall {
-                    receiver,
-                    protocol,
-                    method,
-                    args,
-                    ..
-                } => {
-                    // Find the protocol method entity (a `?.` bind's is the
-                    // one inference settled on).
-                    let method = cx
-                        .typed
-                        .protocol_method_name(expr_id, method.as_str_or_empty());
-                    if let Some(method_entity) = find_protocol_method(cx, *protocol, method) {
+                HirExpr::ProtocolCall { receiver, args, .. } => {
+                    if let Some(method_entity) = crate::util::protocol_call_method(cx, expr_id) {
                         check_call_args(cx, method_entity, args, Some(*receiver), &mut diags);
                     }
                 },
@@ -364,6 +353,11 @@ fn arg_is_closure_value(cx: &BodyContext<'_>, arg_id: HirExprId) -> bool {
     )
 }
 
+/// Is `expr` a direct reference to one of the function's own parameters?
+fn is_function_param(cx: &BodyContext<'_>, expr: HirExprId) -> bool {
+    matches!(&cx.hir.exprs[expr], HirExpr::Local(local, _) if cx.hir.params.contains(local))
+}
+
 /// Calling a `mutating`-KIND closure is an EXCLUSIVE use of whatever holds it.
 ///
 /// docs/design/closures.md, "`mutating`: write-back": "Calling one is an
@@ -405,6 +399,10 @@ fn check_mutating_kind_call(
                 "cannot call a `mutating` closure through a shared reference",
             ));
         },
+        // A plain (borrowing) parameter of `mutating` closure type already
+        // gets E625 at the signature, which names the fix; an E203 per call
+        // would repeat it and wrongly say the closure is bound with `let`.
+        MutClass::ImmutableLocal(_) if is_function_param(cx, callee) => {},
         MutClass::ImmutableLocal(name) => {
             diags.push(AnalyzeDiagnostic {
                 descriptor_id: descriptor("E203").id,
@@ -625,7 +623,14 @@ fn classify_mutability(cx: &BodyContext<'_>, expr_id: HirExprId) -> MutClass {
     // a ref-provider member's READ types `&T`, which would wrongly
     // classify the projection as SharedRef.
     if let Some(base) = util::accessor_place_mut_base(cx, expr_id) {
-        return classify_mutability(cx, base);
+        let class = classify_mutability(cx, base);
+        // A pointer-derived `ref` (`tmp.offset(by: i).value` on a
+        // `Pointer`) lends storage the receiver only points at, so a
+        // temporary receiver doesn't make the place a temporary.
+        if matches!(class, MutClass::Temporary) && pointer_derived_read(cx, expr_id) {
+            return MutClass::SharedRef;
+        }
+        return class;
     }
     // A field-subscript (`self.items(at: i)`: a subscript on a stored field,
     // method-call shaped) with a write provider is a projection of the
@@ -695,6 +700,23 @@ fn classify_mutability(cx: &BodyContext<'_>, expr_id: HirExprId) -> MutClass {
     }
 }
 
+/// Does member expression `expr_id` read through a `ref` accessor whose
+/// result is pointer-derived (`kestrel_type_infer::RetRefPointerDerived`)?
+fn pointer_derived_read(cx: &BodyContext<'_>, expr_id: HirExprId) -> bool {
+    let Some(&member) = cx.typed.resolutions.get(&expr_id) else {
+        return false;
+    };
+    cx.query
+        .query(kestrel_hir_lower::PlaceAccessors { entity: member })
+        .and_then(|info| info.ref_accessor)
+        .is_some_and(|entity| {
+            cx.query.query(kestrel_type_infer::RetRefPointerDerived {
+                entity,
+                root: cx.root,
+            })
+        })
+}
+
 /// A `&mutating` place is mutable, unless it is reached through a stored
 /// ref field (`v.p`, `self.base(i)`): no interior mutability, so the field's
 /// base must be mutable (see `util::stored_ref_field_base`). A temporary
@@ -707,15 +729,4 @@ fn mutating_ref_class(cx: &BodyContext<'_>, expr_id: HirExprId) -> MutClass {
         MutClass::Temporary => MutClass::Mutable,
         class => class,
     }
-}
-
-/// Find a method entity on a protocol by name.
-fn find_protocol_method(
-    cx: &BodyContext<'_>,
-    protocol: kestrel_hecs::Entity,
-    method_name: &str,
-) -> Option<kestrel_hecs::Entity> {
-    util::children_named_of_kind(cx.query, protocol, method_name, NodeKind::Function)
-        .first()
-        .copied()
 }

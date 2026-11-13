@@ -4,10 +4,11 @@
 //! expr      = binary (('=' | op'=') expr)?            // ExprAssignment / ExprCompoundAssignment
 //! binary    = operand (binop operand | 'is' 'not'? Ty | 'as?' Ty)*  // ExprBinary / ExprTypeTest / ExprCast
 //! operand   = 'try' postfix                           // ExprTry
+//!           | 'unsafe' (unop+ postfix | postfix)      // ExprUnsafe
 //!           | 'consuming' postfix 'as?' Ty            // ExprCast (consuming downcast)
 //!           | unop+ postfix                           // ExprUnary
 //!           | postfix
-//! postfix   = stmt_like tight*                        // if/while/loop/for/match/return/throw
+//! postfix   = stmt_like tight*                        // if/while/loop/for/match/return/throw/unsafe {
 //!           | primary tight* trailing* ('.' member tight*)*
 //! tight     = '(' args ')'                            // no line break before `(`
 //!           | '.' member                              // `.` touching the operand
@@ -67,6 +68,7 @@ pub(super) fn at_expr_start(p: &Parser<'_>) -> bool {
         K::Return,
         K::Throw,
         K::Try,
+        K::Unsafe,
         K::Consuming,
         K::Minus,
         K::Plus,
@@ -133,7 +135,7 @@ fn is_compound_assign(kind: Option<K>) -> bool {
 /// | 15 | `??` (right-assoc) |
 /// | 20 | `and` |
 /// | 30 | `==` `!=` `<` `>` `<=` `>=` `is` (left-assoc: `a < b < c` is `(a < b) < c`) |
-/// | 40 | `..=` `..<` |
+/// | 40 | `..=` `..<`, and the one-sided `a..` `..<b` `..=b` ([`RANGE_BP`]) |
 /// | 50 | `+` `-` `\|` `^` |
 /// | 60 | `*` `/` `%` `&` |
 /// | 70 | `<<` `>>` |
@@ -153,7 +155,7 @@ pub(crate) fn binary_binding_power(kind: K) -> Option<(u8, u8)> {
         | K::Greater
         | K::LessEquals
         | K::GreaterEquals => 30,
-        K::DotDotEquals | K::DotDotLess => 40,
+        K::DotDotEquals | K::DotDotLess => RANGE_BP,
         K::Plus | K::Minus | K::Pipe | K::Caret => 50,
         K::Star | K::Slash | K::Percent | K::Ampersand => 60,
         K::LessLess | K::GreaterGreater => 70,
@@ -208,6 +210,11 @@ fn binary(p: &mut Parser<'_>, cond: bool) -> Option<ExprInfo> {
     binary_bp(p, cond, 0)
 }
 
+/// Binding power of every range operator: binary `a..<b` / `a..=b`, and the
+/// one-sided forms, which group like a binary range missing an end —
+/// `x + 2..` is `(x + 2)..`, `..<n - 1` is `..<(n - 1)`, `-2..` is `(-2)..`.
+const RANGE_BP: u8 = 40;
+
 /// Binding power of `is` / `as?`, which take a type on the right.
 const IS_BP: u8 = 30;
 const AS_BP: u8 = 80;
@@ -234,6 +241,11 @@ fn binary_bp(p: &mut Parser<'_>, cond: bool, min_bp: u8) -> Option<ExprInfo> {
     loop {
         if let Some(folded) = type_operator(p, lhs, min_bp) {
             lhs = folded;
+            continue;
+        }
+        // Postfix `start..` closes everything to its left at range level.
+        if p.at(K::DotDot) && RANGE_BP >= min_bp {
+            lhs = wrap(p, lhs.cm, K::ExprPostfix, |p| p.bump(K::DotDot));
             continue;
         }
         let Some((left, right)) = p.current().and_then(binary_binding_power) else {
@@ -270,6 +282,19 @@ fn operand(p: &mut Parser<'_>, cond: bool) -> Option<ExprInfo> {
         postfix(p, cond);
         return Some(finish2(p, m, K::ExprTry));
     }
+    // `unsafe {` is the block form (a stmt-like primary, see `postfix`);
+    // anything else after `unsafe` is its operand.
+    if p.at(K::Unsafe) && !p.nth_at(1, K::LBrace) {
+        let m = start2(p);
+        p.bump(K::Unsafe);
+        // The operand may itself start with a prefix operator (`unsafe &x`).
+        if is_unary_op(p.current()) {
+            unary(p, cond);
+        } else {
+            postfix(p, cond);
+        }
+        return Some(finish2(p, m, K::ExprUnsafe));
+    }
     if is_unary_op(p.current()) {
         return Some(unary(p, cond));
     }
@@ -281,11 +306,15 @@ fn operand(p: &mut Parser<'_>, cond: bool) -> Option<ExprInfo> {
 fn unary(p: &mut Parser<'_>, cond: bool) -> ExprInfo {
     let m = start2(p);
     let is_amp = p.at(K::Ampersand);
+    let is_range = p.at_any(&[K::DotDotLess, K::DotDotEquals]);
     p.bump_any();
     if is_amp {
         p.eat(K::Mutating);
     }
-    if !cond && is_unary_op(p.current()) {
+    if is_range {
+        // `..<end` takes its end like a binary range's right operand.
+        binary_bp(p, cond, RANGE_BP + 1);
+    } else if !cond && is_unary_op(p.current()) {
         unary(p, cond);
     } else {
         postfix(p, cond);
@@ -340,7 +369,17 @@ fn postfix(p: &mut Parser<'_>, cond: bool) -> Option<ExprInfo> {
     let mut binds = false;
     let info = if cond {
         let chain = cond_primary(p)?;
-        let chain = tight_ops(p, chain, true, &mut binds);
+        let mut chain = tight_ops(p, chain, true, &mut binds);
+        // A condition's `{` is normally its body; it is a trailing closure
+        // only when the body brace still follows: `match xs.find { … } {`.
+        while at_cond_trailing_closure(p) {
+            let before = p.token_pos();
+            chain = trailing_closures(p, chain, at_cond_trailing_closure);
+            if p.token_pos() == before {
+                break; // this operand takes no closure (`5 { … } {`)
+            }
+            chain = tight_ops(p, chain, true, &mut binds);
+        }
         close(p, chain)
     } else if at_stmt_like(p) {
         let info = stmt_like(p);
@@ -349,9 +388,15 @@ fn postfix(p: &mut Parser<'_>, cond: bool) -> Option<ExprInfo> {
     } else {
         let chain = primary(p)?;
         let mut chain = tight_ops(p, chain, false, &mut binds);
-        chain = trailing_closures(p, chain);
-        // Continuation: `.member` on a later line, followed by tight operators.
-        while p.at(K::Dot) {
+        // Each link of a `.member` chain, on this line or a later one, may
+        // take trailing closures: `xs.filter { … }.map { … }`.
+        loop {
+            chain = trailing_closures(p, chain, at_trailing_closure);
+            // A `.` on a later line never continues a bare `{ … }`: in a
+            // match it starts the next arm's pattern (`=> { … }` then `.Nil =>`).
+            if !p.at(K::Dot) || matches!(chain, Chain::Done(_, K::ExprClosure)) {
+                break;
+            }
             chain = member(p, chain, true);
             chain = tight_ops(p, chain, false, &mut binds);
         }
@@ -368,7 +413,7 @@ fn at_optional_bind(p: &Parser<'_>) -> bool {
     p.at(K::Question) && p.nth_at(1, K::Dot) && p.joined_at(p.token_pos() + 1)
 }
 
-/// Calls, adjacent member accesses, `?.` binds, `!` and `..`. In a
+/// Calls, adjacent member accesses, `?.` binds and `!`. In a
 /// condition, `.` may also follow a line break and `init` is not a member
 /// name. Sets `binds` when a `?.` is consumed.
 fn tight_ops(p: &mut Parser<'_>, mut chain: Chain, cond: bool, binds: &mut bool) -> Chain {
@@ -392,7 +437,7 @@ fn tight_ops(p: &mut Parser<'_>, mut chain: Chain, cond: bool, binds: &mut bool)
                 // `?.b` / `?.0`: the joined-`.` arm takes the member next.
                 chain = Chain::Done(w.cm, w.kind);
             },
-            Some(K::Bang | K::DotDot) => {
+            Some(K::Bang) => {
                 let info = close(p, chain);
                 let w = wrap(p, info.cm, K::ExprPostfix, |p| p.bump_any());
                 chain = Chain::Done(w.cm, w.kind);
@@ -503,11 +548,47 @@ fn at_trailing_closure(p: &Parser<'_>) -> bool {
         && !p.nth_nl_before(2)
 }
 
+/// In a condition (`if`/`while`/`match`/`for` head), a same-line `{ … }` is
+/// a trailing closure only if the head goes on, on that line, to another
+/// `{` — the body. Anything that ends an expression first (`;`, `,`, `=`,
+/// `=>`, `else`, a closer, a line break) means this `{` is the body.
+fn at_cond_trailing_closure(p: &Parser<'_>) -> bool {
+    if !p.at(K::LBrace) || p.nl_before() {
+        return false;
+    }
+    let Some(close) = p.closer_of(p.token_pos()) else {
+        return false;
+    };
+    let mut i = close + 1;
+    while !p.nl_before_at(i) {
+        match p.kind_at(i) {
+            Some(K::LBrace) => return true,
+            Some(K::LParen | K::LBracket) => match p.closer_of(i) {
+                Some(c) => i = c + 1,
+                None => return false,
+            },
+            Some(
+                K::Semicolon
+                | K::Comma
+                | K::Equals
+                | K::FatArrow
+                | K::Else
+                | K::RBrace
+                | K::RParen
+                | K::RBracket,
+            )
+            | None => return false,
+            Some(_) => i += 1,
+        }
+    }
+    false
+}
+
 /// Attach trailing closures. They join an open call's argument list (after
 /// its `)`, in source order) or turn a path into a call; other operands take
-/// none.
-fn trailing_closures(p: &mut Parser<'_>, chain: Chain) -> Chain {
-    if !at_trailing_closure(p) {
+/// none. `at` says whether the cursor starts one.
+fn trailing_closures(p: &mut Parser<'_>, chain: Chain, at: fn(&Parser<'_>) -> bool) -> Chain {
+    if !at(p) {
         return chain;
     }
     let (call, args) = match chain {
@@ -518,7 +599,7 @@ fn trailing_closures(p: &mut Parser<'_>, chain: Chain) -> Chain {
             (info.cm.precede(p), p.start())
         },
     };
-    while at_trailing_closure(p) {
+    while at(p) {
         let a = p.start();
         if p.at(K::Identifier) {
             p.bump(K::Identifier);
@@ -536,6 +617,7 @@ fn trailing_closures(p: &mut Parser<'_>, chain: Chain) -> Chain {
 fn at_stmt_like(p: &Parser<'_>) -> bool {
     match p.current() {
         Some(K::If | K::While | K::Loop | K::For | K::Match | K::Return | K::Throw) => true,
+        Some(K::Unsafe) => p.nth_at(1, K::LBrace),
         Some(K::Identifier) => {
             p.nth_at(1, K::Colon) && p.at_any_nth(2, &[K::While, K::Loop, K::For])
         },
@@ -548,8 +630,17 @@ fn stmt_like(p: &mut Parser<'_>) -> ExprInfo {
         Some(K::If) => if_expr(p),
         Some(K::Match) => match_expr(p),
         Some(K::Return | K::Throw) => return_or_throw(p),
+        Some(K::Unsafe) => unsafe_block(p),
         _ => loop_expr(p),
     }
+}
+
+/// `unsafe { … }`: a block (not a closure) whose items are an unsafe context.
+fn unsafe_block(p: &mut Parser<'_>) -> ExprInfo {
+    let m = start2(p);
+    p.bump(K::Unsafe);
+    blocks::inline_block(p);
+    finish2(p, m, K::ExprUnsafeBlock)
 }
 
 fn primary(p: &mut Parser<'_>) -> Option<Chain> {
@@ -577,7 +668,7 @@ fn primary(p: &mut Parser<'_>) -> Option<Chain> {
 /// chain like any primary. Outside arguments it is E811; the node is still
 /// built so recovery sees one operand.
 fn placeholder_use(p: &mut Parser<'_>) -> ExprInfo {
-    if !p.in_arguments() {
+    if !p.in_arguments() && !at_bare_tuple_element(p) {
         let range = p.range_of(p.token_pos());
         p.push_error(SyntaxError::new(
             codes::MISPLACED_PLACEHOLDER,
@@ -589,6 +680,16 @@ fn placeholder_use(p: &mut Parser<'_>) -> ExprInfo {
     let m = start2(p);
     p.bump(K::Underscore);
     finish2(p, m, K::ExprPlaceholderUse)
+}
+
+/// `_` alone as a tuple element: `(a, _) = pair()` discards that part. Only
+/// an assignment target can say that, which lowering knows and the parser
+/// doesn't, so lowering reports E811 for every other use.
+fn at_bare_tuple_element(p: &Parser<'_>) -> bool {
+    let pos = p.token_pos();
+    let after = p.nth_at(1, K::Comma) || p.nth_at(1, K::RParen);
+    let before = pos > 0 && matches!(p.kind_at(pos - 1), Some(K::LParen | K::Comma));
+    after && before
 }
 
 fn cond_primary(p: &mut Parser<'_>) -> Option<Chain> {
@@ -848,7 +949,7 @@ fn implicit_member(p: &mut Parser<'_>) -> ExprInfo {
     finish2(p, m, K::ExprImplicitMemberAccess)
 }
 
-/// `{ (params) in body }` or `{ body }`.
+/// `{ (params) in body }`, `{ a, b in body }` or `{ body }`.
 /// A closure literal resets the argument depth: `_` in its body is not a
 /// placeholder of an enclosing call (`f({ _.x })` is E811; use `it`).
 pub(super) fn closure(p: &mut Parser<'_>) -> ExprInfo {
@@ -858,11 +959,47 @@ pub(super) fn closure(p: &mut Parser<'_>) -> ExprInfo {
     if p.at(K::LParen) && at_closure_params(p) {
         closure_params(p);
         p.expect(K::In);
+    } else if let Some(count) = bare_closure_param_count(p) {
+        bare_closure_params(p, count);
+        p.bump(K::In);
     }
     blocks::block_items(p, BlockFlavor::Closure);
     p.expect(K::RBrace);
     p.set_arg_depth(depth);
     finish2(p, m, K::ExprClosure)
+}
+
+/// Shorthand parameters without parentheses: `{ c in … }`, `{ a, b in … }`,
+/// `{ _ in … }`. Names and `_` only (types need the parenthesized form).
+/// Returns how many there are when the list ends in `in`.
+fn bare_closure_param_count(p: &Parser<'_>) -> Option<usize> {
+    let mut n = 0;
+    loop {
+        if !p.at_any_nth(2 * n, &[K::Identifier, K::Underscore]) {
+            return None;
+        }
+        n += 1;
+        match p.nth(2 * n - 1) {
+            Some(K::In) => return Some(n),
+            Some(K::Comma) => {},
+            _ => return None,
+        }
+    }
+}
+
+/// `a, b` before `in`, as the same `ClosureParams` node the parenthesized
+/// form builds.
+fn bare_closure_params(p: &mut Parser<'_>, count: usize) {
+    let m = p.start();
+    for i in 0..count {
+        if i > 0 {
+            p.bump(K::Comma);
+        }
+        let param = p.start();
+        param_pattern(p);
+        param.complete(p, K::ClosureParam);
+    }
+    m.complete(p, K::ClosureParams);
 }
 
 /// The `(` at the cursor closes on a `)` that is followed by `in`.
@@ -986,8 +1123,13 @@ fn match_expr(p: &mut Parser<'_>) -> ExprInfo {
     cond_expr(p);
     if p.expect(K::LBrace) {
         while !p.at(K::RBrace) && !p.at_eof() {
-            match_arm(p);
+            let block_body = match_arm(p);
             if p.eat(K::Comma) {
+                continue;
+            }
+            // Like Rust, a `=> { … }` arm needs no comma before an arm on
+            // the next line.
+            if block_body && p.nl_before() && super::patterns::at_pattern_start(p) {
                 continue;
             }
             if !p.at(K::RBrace) && !p.at_eof() {
@@ -1001,11 +1143,12 @@ fn match_expr(p: &mut Parser<'_>) -> ExprInfo {
     finish2(p, m, K::ExprMatch)
 }
 
-fn match_arm(p: &mut Parser<'_>) {
+/// Parse one arm; returns whether its body is a `{ … }` block.
+fn match_arm(p: &mut Parser<'_>) -> bool {
     if !super::patterns::at_pattern_start(p) {
         p.error_expected_what("pattern");
         p.err_recover_balanced(|p| p.at_any(&[K::Comma, K::RBrace]));
-        return;
+        return false;
     }
     let m = p.start();
     pattern(p);
@@ -1015,8 +1158,13 @@ fn match_arm(p: &mut Parser<'_>) {
         cond_expr(p);
         g.complete(p, K::MatchArmGuard);
     }
+    let mut block_body = false;
     if p.expect(K::FatArrow) {
+        block_body = p.at(K::LBrace);
         expr(p);
+        // `=> { … } + 1` is not a block body.
+        block_body &= p.kind_at(p.token_pos().wrapping_sub(1)) == Some(K::RBrace);
     }
     m.complete(p, K::MatchArm);
+    block_body
 }

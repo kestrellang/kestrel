@@ -83,7 +83,7 @@ impl DeclCheck for RestrictedSignatureAnalyzer {
         }
         if let Some(Conformances(items)) = q.get::<Conformances>(cx.entity) {
             for item in items {
-                let (ConformanceItem::Positive(ty, _) | ConformanceItem::Negative(ty, _)) = item;
+                let (ConformanceItem::Positive(ty, ..) | ConformanceItem::Negative(ty, _)) = item;
                 walk.ty(ty);
             }
         }
@@ -157,7 +157,8 @@ impl SignatureWalk<'_> {
             },
             AstType::Some { bounds, .. } => bounds.iter().for_each(|b| self.ty(b)),
             AstType::Any { .. } => ty.any_children().into_iter().for_each(|t| self.ty(t)),
-            AstType::Unit(_) | AstType::Never(_) | AstType::Inferred(_) => {},
+            AstType::Unit(_) | AstType::Never(_) | AstType::Inferred(_) | AstType::Builtin(..) => {
+            },
         }
     }
 

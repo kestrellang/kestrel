@@ -1,87 +1,41 @@
 module notes.handlers
 
-import perch.request.(Request)
-import perch.response.(Response)
-import perch.json_body.(JsonBody)
-import notes.context.(AppCtx)
-import notes.helpers.(errorJson, parseBody, requireUserId, requireIdParam, paginatedJson, parsePagination, currentTimestamp)
-import notes.requests.(CreateFolderRequest, UpdateFolderRequest)
-import notes.models.(Folder)
+import perch.(HttpError, Json, Path, Query, Created, NoContent)
+import datetime.(Instant)
+import notes.context.(AuthCtx)
+import notes.requests.(CreateFolderRequest, UpdateFolderRequest, Pagination)
+import notes.models.(Folder, Page)
 import notes.db.(listFolders, countFolders, findFolderById, createFolder, updateFolder, deleteFolder)
 
-public func handleListFolders(req: Request, ctx: AppCtx) -> Response {
-    guard let .Some(userId) = requireUserId(req.store) else { return Response.unauthorized() }
-    let db = ctx.db;
-
-    let (page, perPage) = parsePagination(req.query("page"), req.query("per_page"));
-    let offset = (page - 1) * perPage;
-
-    guard let .Ok(total) = countFolders(db, userId) else { return Response.internalServerError() }
-    guard let .Ok(folders) = listFolders(db, userId, perPage, offset) else { return Response.internalServerError() }
-    guard let .Ok(data) = folders.toValue() else { return Response.internalServerError() }
-    Response.ok(JsonBody(fromRaw: paginatedJson(data, page, perPage, total)))
-}
-
-public func handleCreateFolder(req: Request, ctx: AppCtx) -> Response {
-    guard let .Some(userId) = requireUserId(req.store) else { return Response.unauthorized() }
-    let body = match parseBody[CreateFolderRequest](req.body) {
-        .Ok(b) => b,
-        .Err(resp) => return resp
-    };
-    let db = ctx.db;
-
-    let now = currentTimestamp();
-    guard let .Ok(folder) = createFolder(db, body.name, userId, now) else {
-        return Response.internalServerError()
+// Handlers for /folders. Same shape as `Notes`.
+public struct Folders {
+    public static func list(ctx: AuthCtx, Query { value: page }: Query[Pagination]) -> Json[Page[Folder]] throws HttpError {
+        let total = try countFolders(ctx.db, ctx.userId);
+        let folders = try listFolders(ctx.db, ctx.userId, page.perPage, page.offset);
+        Json(Page(folders, page, total))
     }
-    guard let .Ok(json) = JsonBody(folder) else { return Response.internalServerError() }
-    Response.created(json)
-}
 
-public func handleGetFolder(req: Request, ctx: AppCtx) -> Response {
-    guard let .Some(userId) = requireUserId(req.store) else { return Response.unauthorized() }
-    guard let .Some(folderId) = requireIdParam(req.param("id")) else {
-        return Response.badRequest(JsonBody(fromRaw: errorJson("Invalid folder id")))
+    public static func create(ctx: AuthCtx, Json { value: new }: Json[CreateFolderRequest]) -> Created[Json[Folder]] throws HttpError {
+        let folder = try createFolder(ctx.db, new.name, ctx.userId, Instant.now().formatted());
+        Created(Json(folder))
     }
-    let db = ctx.db;
 
-    guard let .Ok(maybeFolder) = findFolderById(db, id: folderId, userId: userId) else {
-        return Response.internalServerError()
+    public static func read(ctx: AuthCtx, Path { value: id }: Path[Int64]) -> Json[Folder] throws HttpError {
+        guard let some folder = try findFolderById(ctx.db, id: id, userId: ctx.userId) else {
+            throw HttpError.notFound()
+        }
+        Json(folder)
     }
-    guard let .Some(folder) = maybeFolder else { return Response.notFound() }
-    guard let .Ok(json) = JsonBody(folder) else { return Response.internalServerError() }
-    Response.ok(json)
-}
 
-public func handleUpdateFolder(req: Request, ctx: AppCtx) -> Response {
-    guard let .Some(userId) = requireUserId(req.store) else { return Response.unauthorized() }
-    guard let .Some(folderId) = requireIdParam(req.param("id")) else {
-        return Response.badRequest(JsonBody(fromRaw: errorJson("Invalid folder id")))
+    public static func update(ctx: AuthCtx, (Path { value: id }, Json { value: edit }): (Path[Int64], Json[UpdateFolderRequest])) -> Json[Folder] throws HttpError {
+        guard let some folder = try updateFolder(ctx.db, id: id, edit.name, ctx.userId, Instant.now().formatted()) else {
+            throw HttpError.notFound()
+        }
+        Json(folder)
     }
-    let body = match parseBody[UpdateFolderRequest](req.body) {
-        .Ok(b) => b,
-        .Err(resp) => return resp
-    };
-    let db = ctx.db;
 
-    let now = currentTimestamp();
-    guard let .Ok(maybeFolder) = updateFolder(db, id: folderId, body.name, userId, now) else {
-        return Response.internalServerError()
+    public static func delete(ctx: AuthCtx, Path { value: id }: Path[Int64]) -> NoContent throws HttpError {
+        try deleteFolder(ctx.db, id: id, userId: ctx.userId);
+        NoContent()
     }
-    guard let .Some(folder) = maybeFolder else { return Response.notFound() }
-    guard let .Ok(json) = JsonBody(folder) else { return Response.internalServerError() }
-    Response.ok(json)
-}
-
-public func handleDeleteFolder(req: Request, ctx: AppCtx) -> Response {
-    guard let .Some(userId) = requireUserId(req.store) else { return Response.unauthorized() }
-    guard let .Some(folderId) = requireIdParam(req.param("id")) else {
-        return Response.badRequest(JsonBody(fromRaw: errorJson("Invalid folder id")))
-    }
-    let db = ctx.db;
-
-    guard let .Ok(_) = deleteFolder(db, id: folderId, userId: userId) else {
-        return Response.internalServerError()
-    }
-    Response.noContent()
 }

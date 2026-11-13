@@ -15,7 +15,7 @@ struct Bag {
     var first?: Int64 {
         ref {
             if self.items.count == 0 { return null; }
-            let r = &self.items(at: 0);
+            let r = &self.items(0);
             .Some(r)
         }
     }
@@ -23,7 +23,7 @@ struct Bag {
     subscript(checked i: Int64)? -> Int64 {
         ref {
             if i < 0 or i >= self.items.count { return null; }
-            let r = &self.items(at: i);
+            let r = &self.items(i);
             .Some(r)
         }
     }

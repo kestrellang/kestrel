@@ -6,7 +6,7 @@ module Test
 func findValue(pairs: Array[(String, String)], name: String) -> String? {
     var i: Int64 = 0;
     while i < pairs.count {
-        let pair = pairs(unchecked: i);
+        let pair = unsafe pairs(unchecked: i);
         if pair.0.isEqual(to: name) {
             return .Some(pair.1)
         }

@@ -3,7 +3,7 @@
 // expect-stdout: 5\n9\n
 
 module Main
-import std.io.stdio.println
+import std.streams.println
 
 public struct Foo {
     private var _v: std.numeric.Int64

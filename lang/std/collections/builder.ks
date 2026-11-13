@@ -2,9 +2,11 @@
 
 module std.collections
 
-import std.core.(Bool, fatalError)
+import std.core.(Bool, Defaultable, fatalError)
 import std.numeric.(Int64)
-import std.memory.(Layout, Pointer, UnsafeSlice, SystemAllocator, CowBox)
+import std.memory.(Layout, Pointer, Allocator, GlobalAllocator, CowBox)
+import std.ffi.(memcpy)
+import std.collections.(Slice)
 import std.iter.(Iterable)
 
 /// Write-only buffer for efficient array construction. No COW, no
@@ -34,39 +36,29 @@ import std.iter.(Iterable)
 /// construction. `build()` donates the buffer to an `Array[T]` and
 /// leaves the builder empty. `deinit` frees the buffer if `build()`
 /// was never called.
-public struct ArrayBuilder[T] {
+public struct ArrayBuilder[T, A = GlobalAllocator] where A: Allocator {
     fileprivate var ptr: Pointer[T]
     fileprivate var len: Int64
     fileprivate var cap: Int64
+    /// Where the buffer comes from; handed to the built `Array`.
+    fileprivate var allocator: A
 
-    /// @name Empty
-    /// Creates an empty builder with no allocation.
-    public init() {
+    /// @name With Allocator
+    /// An empty builder whose buffer (and the built array's) comes from
+    /// `allocator`. Nothing is allocated until the first append.
+    public init(allocator allocator: A) {
         self.ptr = Pointer[T].nullPointer();
         self.len = 0;
         self.cap = 0;
+        self.allocator = allocator;
     }
 
-    /// @name With Capacity
-    /// Creates an empty builder with at least `capacity` elements
-    /// preallocated.
-    public init(capacity capacity: Int64) {
-        if capacity > 0 {
-            let layout = Layout.array[T](capacity);
-            var allocator = SystemAllocator();
-            let result = allocator.allocate(layout);
-            if let .Some(rawPtr) = result {
-                self.ptr = rawPtr.cast[T]();
-                self.len = 0;
-                self.cap = capacity
-            } else {
-                fatalError("ArrayBuilder allocation failed")
-            }
-        } else {
-            self.ptr = Pointer[T].nullPointer();
-            self.len = 0;
-            self.cap = 0
-        }
+    /// @name With Capacity And Allocator
+    /// An empty builder with room for `capacity` elements, allocated from
+    /// `allocator`. Panics on allocation failure.
+    public init(capacity capacity: Int64, allocator allocator: A) {
+        self.init(allocator: allocator);
+        self.grow(capacity)
     }
 
     // -- Growth --------------------------------------------------------------
@@ -79,20 +71,15 @@ public struct ArrayBuilder[T] {
             newCap = newCap * 2
         }
         let layout = Layout.array[T](newCap);
-        var allocator = SystemAllocator();
-        let result = allocator.allocate(layout);
+        // A move is a bit copy, so `reallocate` moves the elements (often
+        // in place, with no copy at all).
+        let result = if self.cap == 0 {
+            self.allocator.allocate(layout)
+        } else {
+            unsafe self.allocator.reallocate(self.ptr.asRaw(), Layout.array[T](self.cap), layout)
+        };
         if let .Some(rawPtr) = result {
-            let newPtr = rawPtr.cast[T]();
-            // Move (`take`), not `read()`: the old buffer is freed without
-            // dropping its elements, so a copy here leaked one per grow.
-            for i in 0..<self.len {
-                newPtr.offset(by: i).write(self.ptr.offset(by: i).take())
-            }
-            if self.cap > 0 {
-                let oldLayout = Layout.array[T](self.cap);
-                allocator.deallocate(self.ptr.asRaw(), oldLayout)
-            }
-            self.ptr = newPtr;
+            self.ptr = rawPtr.cast[T]();
             self.cap = newCap
         } else {
             fatalError("ArrayBuilder grow failed")
@@ -104,18 +91,24 @@ public struct ArrayBuilder[T] {
     /// Appends a single element.
     public mutating func append(element: T) {
         self.grow(self.len + 1);
-        self.ptr.offset(by: self.len).write(element);
+        unsafe self.ptr.offset(by: self.len).write(element);
         self.len = self.len + 1
     }
 
-    /// Appends every element of `slice`.
-    public mutating func append(contentsOf slice: UnsafeSlice[T]) {
-        let n = slice.count;
+    /// Appends every element of `other` (an `Array`, a `Slice`, or anything
+    /// else that lends a `Slice`), copying in a single pass.
+    public mutating func append(contentsOf other: &Slice[T]) {
+        let sl = other.asUnsafeSlice();
+        let n = sl.count;
         if n == 0 { return }
         self.grow(self.len + n);
-        let src = slice.pointer;
-        for i in 0..<n {
-            self.ptr.offset(by: self.len + i).write(src.offset(by: i).read())
+        let src = sl.pointer;
+        if Bool(boolLiteral: lang.is_bitwise[T]()) {
+            let _ = unsafe memcpy(self.ptr.offset(by: self.len).asRaw(), src.asRaw(), n * Layout.of[T]().size);
+        } else {
+            for i in 0..<n {
+                unsafe self.ptr.offset(by: self.len + i).write(src.offset(by: i).read())
+            }
         }
         self.len = self.len + n
     }
@@ -132,12 +125,12 @@ public struct ArrayBuilder[T] {
 
     /// Transfers the buffer into a new `Array[T]` without copying. The
     /// builder resets to empty and can be reused.
-    public mutating func build() -> Array[T] {
+    public mutating func build() -> Array[T, A] {
         if self.len == 0 {
-            return Array[T]()
+            return Array[T, A](allocator: self.allocator)
         }
-        let storage = ArrayStorage(ptr: self.ptr, len: self.len, cap: self.cap);
-        let result = Array[T](storage: CowBox(storage));
+        let storage = ArrayStorage(ptr: self.ptr, len: self.len, cap: self.cap, allocator: self.allocator);
+        let result = Array[T, A](storage: CowBox(storage));
         self.ptr = Pointer[T].nullPointer();
         self.len = 0;
         self.cap = 0;
@@ -175,12 +168,28 @@ public struct ArrayBuilder[T] {
         if self.cap > 0 {
             var i: Int64 = 0;
             while i < self.len {
-                self.ptr.offset(by: i).dropInPlace();
+                unsafe self.ptr.offset(by: i).dropInPlace();
                 i = i + 1
             };
             let layout = Layout.array[T](self.cap);
-            var allocator = SystemAllocator();
-            allocator.deallocate(self.ptr.asRaw(), layout)
+            var allocator = self.allocator;
+            unsafe allocator.deallocate(self.ptr.asRaw(), layout)
         }
+    }
+}
+
+// Constructors that make their own allocator.
+extend ArrayBuilder[T, A] where A: Defaultable {
+    /// @name Empty
+    /// Creates an empty builder with no allocation.
+    public init() {
+        self.init(allocator: A())
+    }
+
+    /// @name With Capacity
+    /// Creates an empty builder with at least `capacity` elements
+    /// preallocated.
+    public init(capacity capacity: Int64) {
+        self.init(capacity: capacity, allocator: A())
     }
 }

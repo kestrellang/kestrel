@@ -10,7 +10,7 @@ module Test
 
 import std.numeric.(Int64)
 import std.text.(String)
-import std.io.stdio.(print)
+import std.streams.(print)
 
 enum E {
     case A(Int64)

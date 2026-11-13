@@ -146,6 +146,19 @@ pub struct FileId(pub Entity);
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct FilePath(pub String);
 
+/// Marker on a source file entity: the file is part of the standard library.
+/// Set by the loader (`Compiler::set_std_source` / `load_std_dir`), never
+/// inferred from a path or module name.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct StdlibSource;
+
+/// Marker: the top-level module the standard library's files declare
+/// (`std`). Set by `build_declarations` for [`StdlibSource`] files — THE way
+/// to find the stdlib root, so a user module named `std` is never taken
+/// for it.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct StdRootModule;
+
 /// Visibility modifier.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Vis {
@@ -196,6 +209,10 @@ pub struct AstParam {
     pub is_mut: bool,
     /// Whether this parameter specifically has consuming access mode.
     pub is_consuming: bool,
+    /// Spelled with a reference type (`x: &T`, `x: &mutating T`): `ty` is
+    /// the pointee and the ref kind set the access mode, so it passes like
+    /// `x: T` / `mutating x: T`. Only such a param may take an unsized `T`.
+    pub by_ref: bool,
 }
 
 impl AstParam {
@@ -203,6 +220,15 @@ impl AstParam {
     /// trailing closure may fill it (see `arg_binding`).
     pub fn takes_closure(&self) -> bool {
         matches!(self.ty, Some(AstType::Function { .. }))
+    }
+
+    /// A borrowed param (`x: T`, `x: &T`) is `Some(false)`, a mutably
+    /// borrowed one (`mutating x: T`, `x: &mutating T`) `Some(true)`, and a
+    /// `consuming` one `None`. A borrowed param's argument may reach it by
+    /// peeling through `Indirection` (`f(xs: &Slice[T])` accepts an
+    /// `Array[T]`, `f(a: Account)` an `RcBox[Account]`).
+    pub fn view(&self) -> Option<bool> {
+        (!self.is_consuming).then_some(self.is_mut)
     }
 }
 
@@ -263,6 +289,7 @@ impl AstParam {
             pattern: None,
             is_mut: is_consuming || SETTER_NEW_VALUE_MODE == ReceiverKind::Mutating,
             is_consuming,
+            by_ref: false,
         }
     }
 }
@@ -553,8 +580,9 @@ pub struct Conformances(pub Vec<ConformanceItem>);
 /// A single conformance entry.
 #[derive(Clone, Debug)]
 pub enum ConformanceItem {
-    /// `T: Protocol`
-    Positive(AstType, SyntaxNodePtr),
+    /// `T: Protocol`. The flag is `T: unsafe Protocol`: the conformer
+    /// vouches for an unsafe protocol's contract.
+    Positive(AstType, SyntaxNodePtr, bool),
     /// `T: not Protocol`
     Negative(AstType, SyntaxNodePtr),
 }
@@ -576,6 +604,26 @@ pub struct ExtensionTarget(pub AstType);
 /// (which leaks `T` into `extend Box[Int64]` bodies).
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct ExtensionLhsParamNames(pub Vec<String>);
+
+/// On an extension written on one of its own params, `extend[T, R] R: P[T]
+/// where R: Q`: the param's name, `R`. The builder retargets such an
+/// extension at `Q` (it is the blanket conformance `extend[T] Q: P[T]`), and
+/// `R` names that extension's `Self` (`kestrel_name_res::is_self_name`).
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct ExtensionSelfAlias(pub String);
+
+/// Candidate type parameters a NESTED position of an extension's target
+/// introduces: `X` in `extend Box[W[X]]`, `A`/`B` in `extend Box[(A, B)]`.
+/// A pattern parameter binds by matching the receiver's arg against the
+/// written pattern, not positionally against a target parameter.
+///
+/// These are only CANDIDATES: the builder can't tell `X` (a new parameter)
+/// from `Int64` (a type) in `extend Box[W[Int64]]`. Name resolution keeps
+/// the ones that resolve to no type (`ExtensionPatternParams`), the same
+/// rule a structural target's elements use. They are `TypeParameter`
+/// children of the extension but deliberately NOT in its `TypeParams`.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct ExtensionPatternCandidates(pub Vec<Entity>);
 
 /// On a TypeAlias declared as `type Protocol.Assoc = T` — the qualifying
 /// protocol path. Absence means the alias is unqualified (`type Assoc = T`).
@@ -616,6 +664,71 @@ pub struct DerivedFrom {
 /// Marker: enum has indirect representation.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct IsIndirect;
+
+/// Marker: `unsafe` was written on this declaration (or it is an unsafe
+/// `lang` intrinsic). Read through [`crate::unsafety::UnsafetyOf`], which
+/// also covers `@extern` functions; on a protocol it means conformances must
+/// be written `unsafe P` (see [`crate::unsafety::is_unsafe_protocol`]).
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct IsUnsafe;
+
+/// Marker: the seeded `lang` module. THE way to find it — never by its name,
+/// which a user module could share.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct LangModule;
+
+/// Which compiler-known type a seeded `lang` entity is. Set once by
+/// `seed_lang_module`; every site that maps a `lang` entity to its structural
+/// or primitive type reads this instead of the entity's spelling.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum LangType {
+    I1,
+    I8,
+    I16,
+    I32,
+    I64,
+    F16,
+    F32,
+    F64,
+    Str,
+    Ptr,
+    Slice,
+    /// Synthetic `()` extension target.
+    Unit,
+    /// Synthetic `!` extension target.
+    Never,
+    /// Synthetic `&T` / `&mutating T` extension target.
+    Ref {
+        mutating: bool,
+    },
+    /// Synthetic `(A, B, …)` extension target of this arity (≥ 2).
+    Tuple(usize),
+}
+
+impl LangType {
+    /// The entity's name in the `lang` module (`lang.i64`, `lang.&`, …).
+    pub fn name(self) -> String {
+        let fixed = match self {
+            LangType::I1 => "i1",
+            LangType::I8 => "i8",
+            LangType::I16 => "i16",
+            LangType::I32 => "i32",
+            LangType::I64 => "i64",
+            LangType::F16 => "f16",
+            LangType::F32 => "f32",
+            LangType::F64 => "f64",
+            LangType::Str => "str",
+            LangType::Ptr => "ptr",
+            LangType::Slice => "slice",
+            LangType::Unit => "()",
+            LangType::Never => "!",
+            LangType::Ref { mutating: false } => "&",
+            LangType::Ref { mutating: true } => "&mutating",
+            LangType::Tuple(arity) => return crate::lang_module::lang_tuple_name(arity),
+        };
+        fixed.to_string()
+    }
+}
 
 /// Marker: this is a compiler-intrinsic entity (lang module type or function).
 /// Codegen handles these specially — they don't have real bodies or layouts.

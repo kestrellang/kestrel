@@ -23,13 +23,14 @@ pub(crate) fn receiver_convention(kind: &kestrel_ast_builder::ReceiverKind) -> P
     }
 }
 
-/// The convention of a declared (non-receiver) parameter. `extern`
-/// functions take everything by value.
+/// The convention of a declared (non-receiver) parameter. A C-boundary
+/// function (`@extern` / `@export`) takes a plain `x: T` by value, and a
+/// reference param (`x: &T`, `x: &mutating T`) as a C pointer.
 pub(crate) fn param_convention(
     param: &kestrel_ast_builder::AstParam,
-    is_extern: bool,
+    is_c_boundary: bool,
 ) -> ParamConvention {
-    if is_extern || param.is_consuming {
+    if (is_c_boundary && !param.by_ref) || param.is_consuming {
         ParamConvention::Consuming
     } else if param.is_mut {
         ParamConvention::MutBorrow
@@ -85,7 +86,11 @@ pub fn lower_function_sig(ctx: &mut LowerCtx, entity: Entity) {
     collect_inherited_type_params(ctx, entity, &mut def);
 
     let attrs = attrs_of(&ctx.query, entity);
-    let is_extern = attrs.is_extern();
+    let c_boundary = attrs
+        .extern_info()
+        .map(|i| (i, false))
+        .or(attrs.export_info().map(|i| (i, true)));
+    let is_extern = c_boundary.is_some();
 
     // `@main` marks the program entry point. Set early so both the intrinsic
     // early-return path and the normal path carry it. Replaces discover-by-name.
@@ -143,17 +148,25 @@ pub fn lower_function_sig(ctx: &mut LowerCtx, entity: Entity) {
         }
     }
 
-    // @extern
-    if let Some((abi, mangle_name)) = attrs.extern_info() {
+    // @extern / @export
+    if let Some(((abi, mangle_name), export)) = c_boundary {
         let symbol_name = mangle_name.map_or_else(
             || def.name.rsplit('.').next().unwrap_or(&def.name).to_string(),
             str::to_string,
         );
+        let unsigned_params = def
+            .params
+            .iter()
+            .map(|p| is_unsigned_int(ctx, p.ty))
+            .collect();
         def.extern_info = Some(ExternInfo {
             calling_convention: match abi {
                 Abi::C => CallingConvention::C,
             },
             symbol_name,
+            export,
+            unsigned_params,
+            unsigned_ret: is_unsigned_int(ctx, def.ret),
         });
     }
 
@@ -173,6 +186,38 @@ pub fn lower_function_sig(ctx: &mut LowerCtx, entity: Entity) {
     {
         crate::body::lower_function_body(ctx, entity, entity);
     }
+}
+
+/// Whether a C-boundary integer of type `ty` is unsigned: `Bool`, or a std
+/// integer conforming to `UnsignedInteger`. Decides zero- vs sign-extension
+/// of 8- and 16-bit arguments (`ExternInfo::unsigned_params`).
+pub(crate) fn is_unsigned_int(ctx: &LowerCtx, ty: TyId) -> bool {
+    use kestrel_hir::builtin::Builtin;
+    use kestrel_mir::MirTy;
+    let entity = match ctx.module.ty_arena.get(ty) {
+        MirTy::Bool => return true,
+        MirTy::Named { entity, .. } => *entity,
+        _ => return false,
+    };
+    [Builtin::Bool, Builtin::UnsignedInteger]
+        .into_iter()
+        .any(|builtin| {
+            ctx.query
+                .query(kestrel_name_res::ResolveBuiltin {
+                    builtin,
+                    root: ctx.root,
+                })
+                .is_some_and(|proto| {
+                    proto == entity
+                        || ctx
+                            .query
+                            .query(kestrel_name_res::ConformingProtocols {
+                                entity,
+                                root: ctx.root,
+                            })
+                            .contains(&proto)
+                })
+        })
 }
 
 fn determine_function_kind(ctx: &LowerCtx, entity: Entity) -> FunctionKind {
@@ -280,13 +325,16 @@ fn collect_inherited_type_params(ctx: &mut LowerCtx, entity: Entity, def: &mut F
         }
     }
 
-    // Extension's own free type params (e.g. `extend Int64: ArrayIndex[T]`)
-    if matches!(parent_kind, Some(NodeKind::Extension))
-        && let Some(ext_params) = ctx.world.get::<TypeParams>(parent)
-    {
+    // The extension's own params: free RHS ones (`extend Int64:
+    // ArrayIndex[T]`), then pattern ones (`X` in `extend Box[W[X]]`).
+    if matches!(parent_kind, Some(NodeKind::Extension)) {
+        let ext_params = ctx.query.query(kestrel_name_res::ExtensionOwnTypeParams {
+            extension: parent,
+            root: ctx.root,
+        });
         let already_added: std::collections::HashSet<Entity> =
             def.type_params.iter().map(|tp| tp.entity).collect();
-        for &tp_entity in &ext_params.0 {
+        for &tp_entity in &ext_params {
             if already_added.contains(&tp_entity) {
                 continue;
             }
@@ -340,8 +388,45 @@ fn populate_where_clause(ctx: &mut LowerCtx, entity: Entity, def: &mut FunctionD
         }
         current = ctx.world.parent_of(e);
     }
+    mark_maybe_noncopyable_params(ctx, entity, def, &mut wc);
     if !wc.constraints.is_empty() || has_type_params {
         def.where_clause = Some(wc);
+    }
+}
+
+/// `T: not Copyable` for each in-scope param the front end judges
+/// `MayBeNonCopyable` but no explicit clause marks — the params of a type that
+/// opts out of Copyable, and target params seen from an extension (whose
+/// parent walk never reaches the nominal's own where clause). One rule:
+/// `TypeParamCopyRequirement` decides, so MIR copy behavior can't drift from
+/// the front end's.
+fn mark_maybe_noncopyable_params(
+    ctx: &LowerCtx,
+    entity: Entity,
+    def: &FunctionDef,
+    wc: &mut WhereClause,
+) {
+    let Some(copyable) = ctx.module.copyable_protocol else {
+        return;
+    };
+    for tp in &def.type_params {
+        let marked = wc.constraints.iter().any(|c| {
+            matches!(c, WhereConstraint::NotImplements { type_param, protocol }
+                if *type_param == tp.entity && *protocol == copyable)
+        });
+        if marked {
+            continue;
+        }
+        let requirement = ctx
+            .query
+            .query(kestrel_semantics::TypeParamCopyRequirement {
+                param: tp.entity,
+                context: entity,
+                root: ctx.root,
+            });
+        if requirement == kestrel_semantics::CopyRequirement::MayBeNonCopyable {
+            wc.add_constraint(WhereConstraint::not_implements(tp.entity, copyable));
+        }
     }
 }
 
@@ -379,7 +464,7 @@ pub(crate) fn lower_where_clauses(ctx: &mut LowerCtx, owner: Entity, out: &mut W
                 };
                 let args = protocol_type_args
                     .iter()
-                    .filter_map(type_arg_entity)
+                    .map(|arg| crate::ty::lower_type(ctx, arg))
                     .collect();
                 out.add_constraint(WhereConstraint::implements_with_args(
                     subject, *protocol, args,
@@ -411,21 +496,6 @@ fn subject_entity(subject: &kestrel_type_infer::resolve::WhereSubject) -> Option
         WhereSubject::Param(p) => Some(*p),
         WhereSubject::Projection { assoc, .. } => Some(*assoc),
         WhereSubject::SelfType => None,
-    }
-}
-
-/// A protocol type argument as the entity mono keys it by (`T` in
-/// `SeqIndex[T]`, or a nominal).
-fn type_arg_entity(ty: &kestrel_hir::ty::HirTy) -> Option<Entity> {
-    use kestrel_hir::ty::HirTy;
-    match ty {
-        HirTy::Param(e, _)
-        | HirTy::Struct { entity: e, .. }
-        | HirTy::Enum { entity: e, .. }
-        | HirTy::Protocol { entity: e, .. }
-        | HirTy::AbstractAssoc { entity: e, .. } => Some(*e),
-        HirTy::Alias { expanded, .. } => type_arg_entity(expanded),
-        _ => None,
     }
 }
 

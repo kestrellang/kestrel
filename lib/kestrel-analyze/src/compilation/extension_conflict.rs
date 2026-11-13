@@ -16,12 +16,11 @@
 
 use std::collections::HashMap;
 
-use super::conformance_completeness::declared_instantiations;
 use crate::context::CompilationContext;
 use crate::diagnostic::*;
 use crate::traits::{AnalyzerId, CompilationCheck, Describe};
 use crate::util;
-use kestrel_ast_builder::{Callable, Name, NodeKind, WhereClause};
+use kestrel_ast_builder::{Callable, Name, NodeKind, WhereClause, WhereConstraint};
 use kestrel_hecs::Entity;
 use kestrel_name_res::ExtensionTargetEntity;
 
@@ -78,15 +77,12 @@ impl CompilationCheck for ExtensionConflictAnalyzer {
             let target_kind = cx.query.get::<NodeKind>(*target);
             let is_concrete_type = matches!(target_kind, Some(NodeKind::Struct | NodeKind::Enum));
             if is_concrete_type {
-                for (ext_name, ext_method, ext) in &ext_methods {
-                    // Witnesses of distinct instantiations of one protocol
-                    // (`struct Int64: Multipliable` + `extend Int64:
-                    // Multipliable[Meters]`) are dispatched by argument type.
+                for (ext_name, ext_method, _ext) in &ext_methods {
                     if let Some((_, struct_method)) = target_methods.iter().find(|(n, m)| {
                         n == ext_name
                             && same_labels(cx, *m, *ext_method)
                             && !witnesses_distinct_instantiation(
-                                cx, *target, *target, *ext, ext_name,
+                                cx, *target, *target, *_ext, ext_name, *m,
                             )
                     }) {
                         diags.push(AnalyzeDiagnostic {
@@ -115,8 +111,9 @@ impl CompilationCheck for ExtensionConflictAnalyzer {
             } // is_concrete_type
 
             // Check E412: extension vs extension method (same specificity)
-            // Only for concrete types. Skip if either extension has where clauses
-            // (where clauses may differentiate the extensions, preventing real overlap).
+            // Only for concrete types. Skip if either extension has a requiring
+            // where clause (it may differentiate the extensions, preventing real
+            // overlap); a `T: not P` relaxation never does.
             if !is_concrete_type {
                 continue;
             }
@@ -130,8 +127,8 @@ impl CompilationCheck for ExtensionConflictAnalyzer {
                         continue;
                     }
 
-                    // Skip if either extension has where clauses (may not overlap)
-                    if has_where_clause(cx, *ext_i) || has_where_clause(cx, *ext_j) {
+                    // Skip if either extension's clauses may narrow it (may not overlap)
+                    if has_requirement_clause(cx, *ext_i) || has_requirement_clause(cx, *ext_j) {
                         continue;
                     }
 
@@ -160,7 +157,9 @@ impl CompilationCheck for ExtensionConflictAnalyzer {
                     // protocol by argument type, not an ambiguous direct call,
                     // so this is legal — and mirrors multi-conformance declared
                     // on the type body, which this analyzer never flags.
-                    if witnesses_distinct_instantiation(cx, *target, *ext_i, *ext_j, name_i) {
+                    if witnesses_distinct_instantiation(
+                        cx, *target, *ext_i, *ext_j, name_i, *method_i,
+                    ) {
                         continue;
                     }
 
@@ -246,11 +245,14 @@ fn same_labels(cx: &CompilationContext<'_>, a: Entity, b: Entity) -> bool {
     labels_a == labels_b
 }
 
-/// Check if an extension has any where clause constraints.
-fn has_where_clause(cx: &CompilationContext<'_>, extension: Entity) -> bool {
-    cx.query
-        .get::<WhereClause>(extension)
-        .is_some_and(|wc| !wc.0.is_empty())
+/// Does an extension have a where clause that narrows which types it applies
+/// to? `T: not P` only relaxes an implicit marker bound ("T may lack P"), so
+/// an extension whose clauses are all relaxations covers every `T`.
+fn has_requirement_clause(cx: &CompilationContext<'_>, extension: Entity) -> bool {
+    cx.query.get::<WhereClause>(extension).is_some_and(|wc| {
+        wc.0.iter()
+            .any(|c| !matches!(c, WhereConstraint::NegativeBound { .. }))
+    })
 }
 
 /// Count concrete (non-type-parameter) type args on an extension target.
@@ -391,30 +393,28 @@ fn hir_ty_eq(a: &kestrel_hir::ty::HirTy, b: &kestrel_hir::ty::HirTy) -> bool {
     }
 }
 
-/// True when `decl_i` and `decl_j` (the target type or its extensions) both
-/// declare conformance to the *same* protocol with *different* type
-/// arguments, and `method` is a requirement of that protocol. In that case
-/// the two same-named methods are witnesses to distinct protocol
-/// instantiations (e.g. `Subtractable[Duration]` and
-/// `Subtractable[Instant]`), dispatched by the protocol — not a true duplicate.
+/// `method` (in `owner_a`) and its same-label namesake (in `owner_b`) witness
+/// different instantiations of one parameterized protocol — the label-only
+/// overloading exception, judged by the shared rule in `util`.
 fn witnesses_distinct_instantiation(
     cx: &CompilationContext<'_>,
     target: Entity,
-    decl_i: Entity,
-    decl_j: Entity,
-    method: &str,
+    owner_a: Entity,
+    owner_b: Entity,
+    name: &str,
+    method: Entity,
 ) -> bool {
-    let confs_i = declared_instantiations(cx, target, decl_i);
-    let confs_j = declared_instantiations(cx, target, decl_j);
-    confs_i.iter().any(|(proto_i, args_i)| {
-        confs_j.iter().any(|(proto_j, args_j)| {
-            // Only a non-conflict if `method` is actually a requirement of
-            // that protocol — unrelated inherent helpers still conflict.
-            proto_i == proto_j
-                && args_i != args_j
-                && collect_named_children(cx, *proto_i)
-                    .iter()
-                    .any(|(name, _)| name == method)
-        })
-    })
+    let labels: Vec<Option<String>> = cx
+        .query
+        .get::<Callable>(method)
+        .map(|c| c.params.iter().map(|p| p.label.clone()).collect())
+        .unwrap_or_default();
+    util::same_label_witnesses_allowed(
+        cx.query,
+        cx.root,
+        target,
+        &[owner_a, owner_b],
+        name,
+        &labels,
+    )
 }

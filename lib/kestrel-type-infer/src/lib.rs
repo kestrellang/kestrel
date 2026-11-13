@@ -21,6 +21,7 @@ pub mod error;
 mod existential;
 pub mod generate;
 pub mod obligations;
+pub mod opaque;
 mod optional_chain;
 mod pipe;
 pub mod resolve;
@@ -50,6 +51,7 @@ pub use conformance::{
     extension_bounds_hold, resolved_satisfies, type_satisfies, type_test_blocker,
 };
 pub use error::describe_fn_kind;
+pub use opaque::{OpaqueConcrete, OpaqueConcreteTy, origin_type_params, substitute_resolved_ty};
 
 /// Resolve the logical enclosing container for a function-like entity.
 /// Setters have an `EnclosingContainer` component set at build time;
@@ -285,16 +287,12 @@ fn create_extension_self_type(
     let target_kind = query_ctx.get::<NodeKind>(target).cloned();
     let self_tv = if matches!(target_kind, Some(NodeKind::Protocol)) {
         ctx.self_type_ty(target)
-    } else if let Some(mutating) =
-        kestrel_name_res::extensions::lang_ref_mutability(query_ctx, target)
-    {
-        // Ref-target extension (`extend &T`): self IS the ref type — never
-        // the synthetic entity. `TyKind::Ref` keeps the transparent-place
-        // receiver peel working, so `self.method()` in the body dispatches
-        // on the POINTEE (via the extension's where bounds), not back onto
-        // the extension's own members.
-        let pointee = args.first().copied().unwrap_or_else(|| ctx.fresh());
-        ctx.ref_ty(pointee, mutating)
+    } else if let Some(kind) = resolve::structural_ty_kind(query_ctx, target, &args) {
+        // Structural-target extension (`extend &T`, `extend (X, Y)`): self IS
+        // the ref / tuple — never the synthetic entity. `TyKind::Ref` keeps
+        // the transparent-place receiver peel working (so `self.method()`
+        // dispatches on the POINTEE), and a tuple keeps `self.0`.
+        ctx.resolved(kind)
     } else {
         ctx.named(target, args.clone())
     };
@@ -364,6 +362,7 @@ fn emit_method_where_clauses(ctx: &mut InferCtx<'_>, query_ctx: &QueryContext<'_
             } => match &subject {
                 resolve::WhereSubject::Param(param) => emit_method_bound_constraint(
                     ctx,
+                    query_ctx,
                     *param,
                     protocol,
                     &protocol_type_args,
@@ -436,8 +435,10 @@ fn method_where_clause_subs(
 
 /// Emit a `param: Protocol[...]` bound clause: Conforms constraint plus cached
 /// witness args for protocols with explicit type args.
+#[allow(clippy::too_many_arguments)]
 fn emit_method_bound_constraint(
     ctx: &mut InferCtx<'_>,
+    query_ctx: &QueryContext<'_>,
     param: Entity,
     protocol: Entity,
     protocol_type_args: &[kestrel_hir::ty::HirTy],
@@ -465,6 +466,43 @@ fn emit_method_bound_constraint(
         .map(|hir_ty| generate::lower_hir_ty_with_subs(ctx, hir_ty, &subs))
         .collect();
     ctx.bound_typearg(tv, protocol, arg_tvs, span.clone());
+    emit_protocol_self_equalities(ctx, query_ctx, protocol, tv, span);
+}
+
+/// Carry a bound protocol's own `where Self.P.Assoc = X` clauses, and those
+/// of every protocol it refines, onto the conformer: `T: Numeric` then knows
+/// `T.Addable.Output = T`, so `a + b` has type `T` in the body.
+fn emit_protocol_self_equalities(
+    ctx: &mut InferCtx<'_>,
+    query_ctx: &QueryContext<'_>,
+    protocol: Entity,
+    subject_tv: ty::TyVar,
+    span: &Span,
+) {
+    for proto in kestrel_name_res::expand_protocol_closure(query_ctx, ctx.root, [protocol]) {
+        let clauses = query_ctx.query(crate::where_clauses::WhereClausesOf {
+            entity: proto,
+            root: ctx.root,
+        });
+        for clause in clauses {
+            let resolve::WhereClause::Equality {
+                subject: resolve::WhereSubject::Projection { base, assoc },
+                rhs,
+            } = clause
+            else {
+                continue;
+            };
+            if !matches!(*base, resolve::WhereSubject::SelfType) {
+                continue;
+            }
+            let assoc_result = ctx.fresh();
+            ctx.associated_entity(subject_tv, assoc, assoc_result, span.clone());
+            // The clause's `Self` is this protocol's; bind it to the conformer.
+            let rhs_tv = generate::lower_hir_ty_with_subs(ctx, &rhs, &[(proto, subject_tv)]);
+            ctx.push_assoc_sub(Some(subject_tv), assoc, rhs_tv);
+            ctx.equal(assoc_result, rhs_tv, span.clone());
+        }
+    }
 }
 
 /// Emit a `T.Assoc: Protocol` bound: constrain the PROJECTION
@@ -811,6 +849,7 @@ fn emit_container_where_clauses(
                     .map(|hir_ty| generate::lower_hir_ty_with_subs(ctx, hir_ty, &subs))
                     .collect();
                 ctx.bound_typearg(subject_tv, protocol, arg_tvs, span.clone());
+                emit_protocol_self_equalities(ctx, query_ctx, protocol, subject_tv, &span);
 
                 // Propagate where clauses from the protocol's associated types.
                 // E.g., `type Iter: Iterator where Iter.Item = Item` on Iterable
@@ -1069,6 +1108,13 @@ fn get_or_create_subject_tv(
         return result_tv;
     }
 
+    // An extension-owned param (a pattern param `X` in `extend Box[W[X]]`,
+    // or a free RHS one): in the body it is the abstract param itself — the
+    // same `ctx.param` its uses lower to — so the clause bounds THAT.
+    if query_ctx.get::<NodeKind>(param) == Some(&NodeKind::TypeParameter) {
+        return ctx.param(param);
+    }
+
     // Fallback: create a fresh TyVar
     ctx.fresh()
 }
@@ -1102,14 +1148,17 @@ impl QueryFn for RetRefPointerDerived {
     type Output = bool;
 
     fn execute(&self, ctx: &QueryContext<'_>) -> bool {
+        // A place (`var value: T { ref { ptr_ref(…) } }`) is a wrapper when
+        // its read accessor is: that body holds the intrinsic call.
+        let entity = place_read_accessor(ctx, self.entity).unwrap_or(self.entity);
         let Some(hir) = ctx.query(LowerBody {
-            entity: self.entity,
+            entity,
             root: self.root,
         }) else {
             return false;
         };
         let Some(typed) = ctx.query(InferBody {
-            entity: self.entity,
+            entity,
             root: self.root,
         }) else {
             return false;
@@ -1129,6 +1178,21 @@ impl QueryFn for RetRefPointerDerived {
                 .iter()
                 .all(|&e| is_ptr_ref_intrinsic_call(ctx, &hir, &typed, e))
     }
+}
+
+/// The non-mutating `ref` accessor of a place member (field or subscript),
+/// or `None` when `member` isn't a place with one.
+fn place_read_accessor(ctx: &QueryContext<'_>, member: Entity) -> Option<Entity> {
+    use kestrel_ast_builder::{MutatingAccessor, NodeKind};
+    if !matches!(
+        ctx.get::<NodeKind>(member),
+        Some(NodeKind::Field | NodeKind::Subscript)
+    ) {
+        return None;
+    }
+    ctx.children_of(member).iter().copied().find(|&c| {
+        ctx.get::<NodeKind>(c) == Some(&NodeKind::RefAccessor) && !ctx.has::<MutatingAccessor>(c)
+    })
 }
 
 fn is_ptr_ref_intrinsic_call(
@@ -1162,4 +1226,34 @@ fn is_ptr_ref_intrinsic_call(
         ctx.get::<Name>(e).map(|n| n.0.as_str()),
         Some("ptr_ref" | "ptr_mut_ref")
     )
+}
+
+/// The accessor an `Indirection` peel lends the pointee through: the `ref` of
+/// `Indirection`'s `value` requirement, or (`mutating`) the `mutating ref` of
+/// `MutableIndirection`'s. Calls to it dispatch through the wrapper's witness
+/// table, so any conformer works: a type's own ref accessors or a stored
+/// field.
+pub fn indirection_accessor(
+    ctx: &QueryContext<'_>,
+    root: Entity,
+    mutating: bool,
+) -> Option<Entity> {
+    use kestrel_ast_builder::{MutatingAccessor, Name, NodeKind};
+    use kestrel_hir::Builtin;
+    let builtin = if mutating {
+        Builtin::MutableIndirection
+    } else {
+        Builtin::Indirection
+    };
+    let protocol = ctx.query(kestrel_name_res::ResolveBuiltin { builtin, root })?;
+    let place = ctx.children_of(protocol).iter().copied().find(|&c| {
+        ctx.get::<NodeKind>(c) == Some(&NodeKind::Field)
+            && ctx
+                .get::<Name>(c)
+                .is_some_and(|n| n.0 == kestrel_hir::INDIRECTION_PLACE)
+    })?;
+    ctx.children_of(place).iter().copied().find(|&c| {
+        ctx.get::<NodeKind>(c) == Some(&NodeKind::RefAccessor)
+            && ctx.has::<MutatingAccessor>(c) == mutating
+    })
 }

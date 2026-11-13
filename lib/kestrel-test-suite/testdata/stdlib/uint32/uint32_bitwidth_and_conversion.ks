@@ -46,7 +46,7 @@ module Test
 
             // init(from:) — from Int64
             let fromI64Val: std.numeric.Int64 = 3000000000;
-            let fromI64 = std.numeric.UInt32(from: fromI64Val);
+            let fromI64 = std.numeric.UInt32(exactly: fromI64Val)!;
             let lit3000000000: std.numeric.UInt32 = 3000000000;
             if fromI64.isEqual(to: lit3000000000) == false { return 11 }
 
@@ -58,25 +58,25 @@ module Test
 
             // parse — valid value
             let parsed = std.numeric.UInt32(parsing: "4294967295");
-            if parsed.isNone() { return 13 }
+            if parsed.isNone { return 13 }
             if parsed.unwrap().isEqual(to: std.numeric.UInt32.maxValue) == false { return 14 }
 
             // parse — zero
             let parsedZero = std.numeric.UInt32(parsing: "0");
-            if parsedZero.isNone() { return 15 }
+            if parsedZero.isNone { return 15 }
             if parsedZero.unwrap().isEqual(to: std.numeric.UInt32.zero) == false { return 16 }
 
             // parse — out of range (4294967296 > 4294967295)
             let parsedOver = std.numeric.UInt32(parsing: "4294967296");
-            if parsedOver.isSome() { return 17 }
+            if parsedOver.isSome { return 17 }
 
             // parse — negative not allowed for unsigned
             let parsedNeg = std.numeric.UInt32(parsing: "-1");
-            if parsedNeg.isSome() { return 18 }
+            if parsedNeg.isSome { return 18 }
 
             // parse — empty string
             let parsedEmpty = std.numeric.UInt32(parsing: "");
-            if parsedEmpty.isSome() { return 19 }
+            if parsedEmpty.isSome { return 19 }
 
             0
         }

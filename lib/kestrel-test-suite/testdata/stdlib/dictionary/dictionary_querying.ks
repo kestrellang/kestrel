@@ -54,15 +54,15 @@ module Test
             if countAbove15 != 2 { return 9 }
 
             // Test first(where:)
-            let found = dict.first(where: { (k, v) in v == 20 });
-            if found.isNone() { return 10 }
+            let found = dict.find(where: { (k, v) in v == 20 });
+            if found.isNone { return 10 }
             let (fk, fv) = found.unwrap();
             if fk != 2 { return 11 }
             if fv != 20 { return 12 }
 
             // Test first(where:) - not found
-            let notFound = dict.first(where: { (k, v) in v == 999 });
-            if notFound.isSome() { return 13 }
+            let notFound = dict.find(where: { (k, v) in v == 999 });
+            if notFound.isSome { return 13 }
 
             // Test all(where:) on empty dictionary - vacuous truth
             var emptyDict = std.collections.Dictionary[std.numeric.Int64, std.numeric.Int64]();

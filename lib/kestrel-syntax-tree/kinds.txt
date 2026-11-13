@@ -290,3 +290,8 @@ node    ModifyingGetterClause            # modifying get { ... } (mutable receiv
 node    ModifyingRefClause               # modifying ref { ... } (mutable receiver, yields &T)
 node    WillSetClause                    # willSet { ... } property observer
 node    DidSetClause                     # didSet { ... } property observer
+token   Unsafe 'unsafe'
+node    UnsafeModifier                   # unsafe before func/init/subscript/var/protocol: callers must vouch for its contract
+node    ExprUnsafe                       # unsafe expr - the operand is an unsafe context
+node    ExprUnsafeBlock                  # unsafe { ... } - a block that is an unsafe context
+node    UnsafeConformance                # unsafe P in a conformance list: the conformer vouches for P's contract

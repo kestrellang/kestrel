@@ -38,7 +38,6 @@ use crate::context::BodyContext;
 use crate::diagnostic::*;
 use crate::traits::{AnalyzerId, BodyCheck, Describe};
 use crate::util;
-use kestrel_ast_builder::{Name, NodeKind};
 use kestrel_hir::body::{HirBody, HirExpr, HirExprId, HirStmt};
 use kestrel_hir::res::LocalId;
 use kestrel_hir_lower::CallableRefReturn;
@@ -211,16 +210,10 @@ fn trace_pointer_to_local(cx: &BodyContext<'_>, expr: HirExprId) -> Option<(Loca
     }
 }
 
-/// Is this entity the stdlib `Pointer.init(to:)`?
+/// Is this entity the stdlib `Pointer.init(to:)` (by its `@builtin` tag)?
 fn is_pointer_to_init(cx: &BodyContext<'_>, entity: kestrel_hecs::Entity) -> bool {
-    if !matches!(
-        cx.query.get::<NodeKind>(entity),
-        Some(NodeKind::Initializer)
-    ) {
-        return false;
-    }
-    cx.query
-        .parent_of(entity)
-        .and_then(|p| cx.query.get::<Name>(p))
-        .is_some_and(|n| n.0 == "Pointer")
+    cx.query.query(kestrel_name_res::ResolveBuiltin {
+        builtin: kestrel_hir::Builtin::PointerToInit,
+        root: cx.root,
+    }) == Some(entity)
 }

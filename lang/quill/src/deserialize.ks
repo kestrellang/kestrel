@@ -80,7 +80,7 @@ extend Float64: Deserialize {
     public static func fromValue(value: Value) -> Float64 throws DeserializeError {
         match value {
             .Float(f) => .Ok(f),
-            .Int(n) => .Ok(Float64(from: n)),
+            .Int(n) => .Ok(Float64(rounding: n)),
             _ => throw DeserializeError.typeMismatch(expected: "float", got: value.typeName())
         }
     }
@@ -230,7 +230,7 @@ public func extractFloat(from value: Value, key: String) -> Float64 throws Deser
     let v = try findKey(from: value, key);
     match v {
         .Float(f) => .Ok(f),
-        .Int(n) => .Ok(Float64(from: n)),
+        .Int(n) => .Ok(Float64(rounding: n)),
         _ => throw DeserializeError.typeMismatch(expected: "float", got: v.typeName())
     }
 }

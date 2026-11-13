@@ -187,6 +187,34 @@ to their structural `MirTy` (`I64` / `Tuple([])` / `Never`) via
 witness never matches the `I64` self → `Callee::Witness not resolved`. See the
 type-infer AGENTS.md note for the parallel conformance/member-lookup mapping.
 
+**Binding a requirement to its witness is by SIGNATURE, never declaration
+order.** `requirement_subst` maps the protocol's params to the conformance's
+args (unwritten ones take their declared default ONCE, in
+`with_default_protocol_args` — the same list is stored as
+`witness.proto_type_args`), each declaring protocol's `Self` to the
+implementing type, and `Self.Assoc` to the bindings recorded first by
+`bind_associated_types`. `find_impl_among` matches candidates against that.
+Several same-label overloads with none matching is `None` (fall through to a
+protocol default, else unbound → loud mono error) — never "the first one".
+
+## Phase order — bodies lower BEFORE witness tables exist
+
+`lower_module` lowers every body (phase 1) before `lower_witnesses` builds the
+witness tables (phase 2). Body lowering must **never read `module.witnesses`**
+to decide anything (e.g. "does `T` conform?"): the table is empty, the answer
+is silently "no". Ask the front-end query (`ConformingProtocols`, the tagged
+requirement via `ResolveBuiltin`) and emit a `Callee::Witness`; mono resolves it.
+
+## Literals call their protocol requirement through the witness table
+
+Every literal kind resolves its `@builtin(.XLiteralInit)` requirement
+(`body/literal.rs::literal_init`) and emits a `Callee::Witness` with
+`self_type` = the literal's type — for concrete, `TypeParam` and projection
+types alike. The buffer/element types come from the requirement's own param
+types with `Self` substituted, never from the type's first generic arg or an
+init found by shape/labels (that picked a String init for an array literal).
+Only a type with no conformance falls back to the primitive.
+
 ## Body params: the first `param_count` ValueIds ARE the params
 
 `lower_body`'s param loop must allocate exactly one ValueId per parameter,

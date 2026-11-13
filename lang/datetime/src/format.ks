@@ -136,7 +136,7 @@ public struct Format: ExpressibleByStringInterpolation, Cloneable {
         self.components = [FormatComponent.Literal(String(stringLiteral: ptr, length))];
     }
 
-    public init(interpolation: FormatAccumulator) {
+    public init(consuming interpolation: FormatAccumulator) {
         self.components = interpolation.components;
     }
 

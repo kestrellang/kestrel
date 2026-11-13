@@ -4,7 +4,7 @@ bb0:
     %v1 = literal i64 1  // @owned Int64
     %v2 = op1 StackAlloc(TyId(6)) %v1  // @owned Pointer[std.numeric.Int64]
     %v3 = begin_borrow %v0  // @guaranteed Int64
-    call std.numeric.Int64.init(@mut_borrow %v2, @borrow %v3)
+    call @witness std.core.ExpressibleByIntLiteral.init(intLiteral:) for std.numeric.Int64(@mut_borrow %v2, @borrow %v3)
     end_borrow %v3
     %v4 = take %v2, std.numeric.Int64  // @owned std.numeric.Int64
     %v5 = struct Test.Counter { .0: %v4 }  // @owned Test.Counter
@@ -27,7 +27,7 @@ bb1(%v11: @owned Int64, %v12: @owned Int64, %v13: @owned Pointer[std.numeric.Int
     end_borrow %v23
     %v25 = struct_extract %v24, .0  // @guaranteed std.numeric.Int64
     %v26 = copy_value %v25  // @owned std.numeric.Int64
-    %v27 = call std.result.Optional.from[std.numeric.Int64](%v26)  // @owned std.result.Optional[std.numeric.Int64]
+    %v27 = call @witness std.core.FromValue.from(_:) for std.result.Optional[std.numeric.Int64][std.numeric.Int64](%v26)  // @owned std.result.Optional[std.numeric.Int64]
     end_borrow %v24
     jump bb3(%v27, %v11, %v12, %v13, %v14, %v15)
 
@@ -55,7 +55,7 @@ bb4(%v39: @owned Int64, %v40: @owned Int64, %v41: @owned Pointer[std.numeric.Int
     end_borrow %v55
     %v57 = call Test.Counter.bump(@mut_borrow %v56)  // @owned ()
     end_borrow %v56
-    %v58 = call std.result.Optional.from[()](%v57)  // @owned std.result.Optional[()]
+    %v58 = call @witness std.core.FromValue.from(_:) for std.result.Optional[()][()](%v57)  // @owned std.result.Optional[()]
     jump bb6(%v58, %v39, %v40, %v41, %v42, %v43, %v44, %v45)
 
 bb5(%v47: @owned Int64, %v48: @owned Int64, %v49: @owned Pointer[std.numeric.Int64], %v50: @owned Pointer[std.result.Optional[Test.Counter]], %v51: @owned std.result.Optional[&Test.Counter], %v52: @owned Pointer[std.result.Optional[std.numeric.Int64]], %v53: @owned std.result.Optional[&mutating Test.Counter], %v54: @owned Int32):
@@ -85,7 +85,7 @@ bb7(%v71: @owned Int64, %v72: @owned Int64, %v73: @owned Pointer[std.numeric.Int
     %v94 = begin_borrow_addr %v93, std.numeric.Int64  // @guaranteed std.numeric.Int64
     %v95 = copy_value %v94  // @owned std.numeric.Int64
     end_borrow %v94
-    %v96 = call std.result.Optional.from[std.numeric.Int64](%v95)  // @owned std.result.Optional[std.numeric.Int64]
+    %v96 = call @witness std.core.FromValue.from(_:) for std.result.Optional[std.numeric.Int64][std.numeric.Int64](%v95)  // @owned std.result.Optional[std.numeric.Int64]
     destroy_value %v93
     destroy_addr %v92, Test.Counter
     destroy_value %v92

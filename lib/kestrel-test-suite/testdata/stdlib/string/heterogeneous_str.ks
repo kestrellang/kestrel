@@ -3,8 +3,6 @@
 
 module Test
 
-import std.text.(Str)
-
 @main
 func main() -> lang.i64 {
     let owned: String = "alpha,beta";
@@ -22,12 +20,12 @@ func main() -> lang.i64 {
     if owned.starts(with: alpha) == false { return 6 }
     if owned.ends(with: beta) == false { return 7 }
 
-    let parts = owned.asSlice().split(comma).collect();
+    let parts = owned.asSlice().split(by: comma).collect();
     if parts.count != 2 { return 8 }
     let alphaOwned: String = "alpha";
     let betaOwned: String = "beta";
-    if parts(unchecked: 0) != alphaOwned { return 9 }
-    if parts(unchecked: 1) != betaOwned { return 10 }
+    if unsafe parts(unchecked: 0) != alphaOwned { return 9 }
+    if unsafe parts(unchecked: 1) != betaOwned { return 10 }
 
     let replaced: String = owned.asSlice().replaced(alpha, with: beta);
     if replaced.isEqual(to: "beta,beta") == false { return 11 }

@@ -8,7 +8,7 @@ use kestrel_mir::inst::CallArg;
 use kestrel_mir::{MirTy, Op, ParamConvention, TyId, ValueId};
 
 use super::OssaBodyCtx;
-use crate::existential::{bounds_of, dispatch_path};
+use crate::existential::{bounds_of, box_peel, dispatch_path};
 
 impl OssaBodyCtx<'_, '_> {
     /// A requirement call whose receiver is a raw existential (`args[0]`, a
@@ -22,11 +22,47 @@ impl OssaBodyCtx<'_, '_> {
         args: Vec<CallArg>,
         result_ty: TyId,
     ) -> Option<ValueId> {
+        self.emit_table_call(requirement, false, receiver_ty, args, result_ty)
+    }
+
+    /// Write `value` to `{ get set }` property `property` of the payload
+    /// behind `view` (a `&mutating` raw existential, the box's `mutating
+    /// ref` peel), through the table's setter slot.
+    pub(crate) fn emit_dynamic_setter_call(
+        &mut self,
+        property: Entity,
+        receiver_ty: TyId,
+        view: ValueId,
+        value: ValueId,
+    ) -> Option<ValueId> {
+        // Check for the slot before emitting anything for the arguments.
+        dispatch_path(self.ctx, &bounds_of(self.ctx, receiver_ty), property, true)?;
+        let args = vec![
+            CallArg {
+                value: view,
+                convention: ParamConvention::MutBorrow,
+            },
+            self.prepare_call_arg(value, super::setter_value()),
+        ];
+        let unit = self.ctx.module.ty_arena.unit();
+        self.emit_table_call(property, true, receiver_ty, args, unit)
+    }
+
+    /// Call slot `requirement` (its setter slot, with `setter`) of the
+    /// table behind `args[0]`.
+    fn emit_table_call(
+        &mut self,
+        requirement: Entity,
+        setter: bool,
+        receiver_ty: TyId,
+        args: Vec<CallArg>,
+        result_ty: TyId,
+    ) -> Option<ValueId> {
         let bounds = bounds_of(self.ctx, receiver_ty);
-        let (hops, slot) = dispatch_path(self.ctx, &bounds, requirement)?;
+        let (hops, slot) = dispatch_path(self.ctx, &bounds, requirement, setter)?;
         kestrel_debug::ktrace!(
             "vtable",
-            "dynamic call {} slot {slot} via {hops:?}",
+            "dynamic call {} (setter: {setter}) slot {slot} via {hops:?}",
             kestrel_ast_builder::qualified_name(self.ctx.world, requirement)
         );
         let raw = self.raw_ptr_ty();
@@ -52,13 +88,61 @@ impl OssaBodyCtx<'_, '_> {
         call_args.extend(args.into_iter().skip(1));
         let result = self.emit_call_returning(Callee::Thin(thunk), call_args, result_ty);
         self.emit_destroy_value(thunk);
-        // The receiver view (a `pointeeRef`/`pointeeMutRef` result) was used
+        // The receiver view (a `value` ref accessor result) was used
         // only for its words: end it now, as a direct call ends a borrowed
         // ref argument, so it can't reach a control-flow merge (E497).
-        if self.ref_results.contains(&recv) && !self.ref_binding_vals.contains_key(&recv) {
-            self.emit_end_borrow(recv);
+        if self.ref_results.contains(&recv) {
+            self.end_ref_and_sources(recv);
         }
         Some(result)
+    }
+
+    /// A get→modify→set writeback of property requirement `member` on an
+    /// existential receiver place `place` (of box type `box_ty`,
+    /// `B[rawany P]`): peel the box through its `mutating ref` (a
+    /// `CowBox` forks here, before the write) and return the payload view
+    /// with its raw existential type. The writeback's get and set then go
+    /// through the table. `None` for any other receiver.
+    pub(crate) fn peel_existential_receiver(
+        &mut self,
+        place: ValueId,
+        box_ty: TyId,
+        member: Entity,
+    ) -> Option<(ValueId, TyId)> {
+        if !kestrel_semantics::is_requirement(&self.ctx.query, member) {
+            return None;
+        }
+        let MirTy::Named { entity, type_args } = self.ctx.module.ty_arena.get(box_ty) else {
+            return None;
+        };
+        // The payload is the first arg; any others are the box's allocator.
+        let (boxed, box_args) = (*entity, type_args.clone());
+        let &raw = box_args.first()?;
+        if !matches!(
+            self.ctx.module.ty_arena.get(raw),
+            MirTy::RawExistential { .. }
+        ) {
+            return None;
+        }
+        let peel = box_peel(self.ctx, boxed, true)?;
+        self.ctx.register_name(peel);
+        let view = self.emit_call_returning(
+            Callee::direct_with_args(peel, box_args, None),
+            vec![CallArg {
+                value: place,
+                convention: ParamConvention::MutBorrow,
+            }],
+            raw,
+        );
+        Some((view, raw))
+    }
+
+    /// Is `ty` a raw existential (a payload view's type)?
+    pub(crate) fn is_raw_existential(&self, ty: TyId) -> bool {
+        matches!(
+            self.ctx.module.ty_arena.get(ty),
+            MirTy::RawExistential { .. }
+        )
     }
 
     /// The table of fat value `value`, then each word of `hops` in turn
@@ -106,7 +190,11 @@ impl OssaBodyCtx<'_, '_> {
         let bounds = bounds_of(self.ctx, raw);
         match conv.kind {
             ConversionKind::Box => {
-                let boxed_ty = self.ctx.module.ty_arena.named(boxed, vec![from_ty]);
+                // The payload swapped for the concrete type; the box's other
+                // args (its allocator) carry over.
+                let mut args = type_args.clone();
+                args[0] = from_ty;
+                let boxed_ty = self.ctx.module.ty_arena.named(boxed, args);
                 let Some(made) = self.emit_box_init(boxed_ty, value) else {
                     return value;
                 };
@@ -292,7 +380,7 @@ impl OssaBodyCtx<'_, '_> {
 
 impl OssaBodyCtx<'_, '_> {
     /// The receiver of a `consuming` requirement called on an existential:
-    /// the box is taken by value and viewed through `pointeeRef`; the
+    /// the box is taken by value and viewed through `value`; the
     /// consuming thunk then moves the payload out of the view. Returns the
     /// view argument and `(box, borrow)` for
     /// [`Self::emit_release_consumed_box`]. `None` for any other call.
@@ -358,17 +446,12 @@ impl OssaBodyCtx<'_, '_> {
         };
         let Some(requirement) = self
             .ctx
-            .world
-            .children_of(protocol)
-            .iter()
-            .copied()
-            .find(|&c| {
-                self.ctx
-                    .world
-                    .get::<kestrel_ast_builder::Name>(c)
-                    .map(|n| n.0.as_str())
-                    == Some("consumePointee")
+            .query
+            .query(kestrel_name_res::ResolveBuiltin {
+                builtin: kestrel_hir::Builtin::ConsumingIndirectionConsumePointee,
+                root: self.ctx.root,
             })
+            .filter(|&r| self.ctx.world.parent_of(r) == Some(protocol))
         else {
             return;
         };
@@ -415,7 +498,7 @@ impl OssaBodyCtx<'_, '_> {
 // ===== Type tests and downcasts (existentials design §8, §8b) =====
 
 impl OssaBodyCtx<'_, '_> {
-    /// The box's payload as a raw existential view (`Indirection.pointeeRef`),
+    /// The box's payload as a raw existential view (`Indirection.value`),
     /// or `None` when `box_ty` is not a box over a raw existential.
     fn emit_existential_view(&mut self, boxed: ValueId, box_ty: TyId) -> Option<(ValueId, TyId)> {
         let MirTy::Named { type_args, .. } = self.ctx.module.ty_arena.get(box_ty) else {
@@ -428,20 +511,11 @@ impl OssaBodyCtx<'_, '_> {
         ) {
             return None;
         }
-        let protocol = self.ctx.query.query(kestrel_name_res::ResolveBuiltin {
-            builtin: kestrel_hir::Builtin::Indirection,
-            root: self.ctx.root,
-        })?;
-        let requirement = self.protocol_requirement(protocol, "pointeeRef")?;
-        self.ctx.register_name(protocol);
-        let method = self.ctx.witness_method_key(requirement);
+        let requirement =
+            kestrel_type_infer::indirection_accessor(&self.ctx.query, self.ctx.root, false)?;
+        let callee = self.place_accessor_callee(requirement, box_ty, Vec::new());
         let view = self.emit_call_returning(
-            Callee::Witness {
-                protocol,
-                method,
-                self_type: box_ty,
-                method_type_args: Vec::new(),
-            },
+            callee,
             vec![CallArg {
                 value: boxed,
                 convention: ParamConvention::Borrow,
@@ -454,25 +528,9 @@ impl OssaBodyCtx<'_, '_> {
     /// End a view from [`Self::emit_existential_view`] once only its words
     /// were read.
     fn end_existential_view(&mut self, view: ValueId) {
-        if self.ref_results.contains(&view) && !self.ref_binding_vals.contains_key(&view) {
-            self.emit_end_borrow(view);
+        if self.ref_results.contains(&view) {
+            self.end_ref_if_single_use(view);
         }
-    }
-
-    /// `protocol`'s requirement named `name`.
-    fn protocol_requirement(&self, protocol: Entity, name: &str) -> Option<Entity> {
-        self.ctx
-            .world
-            .children_of(protocol)
-            .iter()
-            .copied()
-            .find(|&c| {
-                self.ctx
-                    .world
-                    .get::<kestrel_ast_builder::Name>(c)
-                    .map(|n| n.0.as_str())
-                    == Some(name)
-            })
     }
 
     /// Bool: is the payload of `boxed` a `target`? Payloads are told apart by
@@ -563,7 +621,10 @@ impl OssaBodyCtx<'_, '_> {
             builtin: kestrel_hir::Builtin::ConsumingIndirection,
             root: self.ctx.root,
         });
-        let requirement = protocol.and_then(|p| self.protocol_requirement(p, "consumePointee"));
+        let requirement = self.ctx.query.query(kestrel_name_res::ResolveBuiltin {
+            builtin: kestrel_hir::Builtin::ConsumingIndirectionConsumePointee,
+            root: self.ctx.root,
+        });
         let (Some(raw), Some(protocol), Some(requirement)) = (raw, protocol, requirement) else {
             return self.emit_literal(kestrel_mir::immediate::Immediate::unit());
         };

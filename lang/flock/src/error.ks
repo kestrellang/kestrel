@@ -56,7 +56,7 @@ public enum FlockError: Cloneable {
             .ManifestNotFound(path) => "flock.toml not found: \(path)",
             .ManifestParse(msg) => "failed to parse manifest: \(msg)",
             .InvalidVersion(msg) => "invalid version: \(msg)",
-            .DependencyCycle(names) => "dependency cycle detected: \(names.joined(" -> "))",
+            .DependencyCycle(names) => "dependency cycle detected: \(names.joined(by: " -> "))",
             .DependencyNotFound(name) => "dependency not found: \(name)",
             .CompilerFailed(code) => "compiler exited with code \(Int64(from: code))",
             .IoError(msg) => "I/O error: \(msg)",

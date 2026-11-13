@@ -15,6 +15,7 @@
 
 use kestrel_ast::AstType;
 use kestrel_ast_builder::ast_type::ast_type_from_cst;
+use kestrel_hir::Builtin;
 use kestrel_hir::body::*;
 use kestrel_hir::ty::HirTy;
 use kestrel_span::Span;
@@ -168,22 +169,6 @@ impl LowerCtx<'_> {
         })
     }
 
-    /// `.name(arg)` / `.name`.
-    fn implicit_member(&mut self, name: &str, arg: Option<HirExprId>, span: &Span) -> HirExprId {
-        self.alloc_expr(HirExpr::ImplicitMember {
-            owner: None,
-            name: HirName::name(name),
-            args: arg.map(|value| {
-                vec![HirCallArg {
-                    trailing_closure: false,
-                    label: None,
-                    value,
-                }]
-            }),
-            span: span.clone(),
-        })
-    }
-
     /// `{ let $name: ty = value; $name }`, so the implicit members inside
     /// `value` have a type to resolve against.
     fn ascribed_block(
@@ -230,8 +215,8 @@ impl LowerCtx<'_> {
         });
         let otherwise = self.alloc_pat(HirPat::Wildcard { span: span.clone() });
         let hit_ref = self.alloc_expr(HirExpr::Local(hit_local, span.clone()));
-        let some = self.implicit_member("Some", Some(hit_ref), span);
-        let none = self.implicit_member("None", None, span);
+        let some = self.lang_case_value(Builtin::OptionalSomeCase, Some(hit_ref), "`as?`", span);
+        let none = self.lang_case_value(Builtin::OptionalNoneCase, None, "`as?`", span);
         let matched = self.alloc_expr(HirExpr::Match {
             scrutinee,
             arms: vec![
@@ -277,9 +262,14 @@ impl LowerCtx<'_> {
             target: target.clone(),
             span: span.clone(),
         });
-        let ok = self.implicit_member("Ok", Some(payload), span);
+        let ok = self.lang_case_value(
+            Builtin::ResultOkCase,
+            Some(payload),
+            "`consuming as?`",
+            span,
+        );
         let back = self.alloc_expr(HirExpr::Local(boxed, span.clone()));
-        let err = self.implicit_member("Err", Some(back), span);
+        let err = self.lang_case_value(Builtin::ResultErrCase, Some(back), "`consuming as?`", span);
         let branch = self.alloc_expr(HirExpr::If {
             condition,
             then_body: HirBlock {

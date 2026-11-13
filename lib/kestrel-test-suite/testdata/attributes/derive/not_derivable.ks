@@ -2,8 +2,8 @@
 // stdlib: true
 //
 // E950: every `@derive` argument names a protocol. E951: that protocol has a
-// built-in deriver. `Copyable` and `Cloneable` are never derived: they follow
-// from the fields (design §C1).
+// built-in deriver. `Copyable` is never derived: it follows from the fields
+// (design §C1). `Cloneable` is derived; see `cloneable.ks`.
 
 module Main
 
@@ -27,13 +27,8 @@ struct Wrong {
     var x: Int64
 }
 
-@derive(Shiny) // ERROR: 'Shiny' cannot be derived; the derivable protocols are Equatable, Hashable, Comparable, Formattable and Defaultable
+@derive(Shiny) // ERROR: 'Shiny' cannot be derived; the derivable protocols are Equatable, Hashable, Comparable, Formattable, Defaultable and Cloneable
 struct Bright {
-    var x: Int64
-}
-
-@derive(Cloneable) // ERROR: 'Cloneable' is not derived: whether 'Doc' is Cloneable follows from its fields
-struct Doc {
     var x: Int64
 }
 

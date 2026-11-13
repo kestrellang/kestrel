@@ -13,8 +13,8 @@ import std.numeric.(Int64, Int32)
 ///
 /// Returns a pointer to the start of the block, or null on failure.
 /// The memory is **uninitialised** — read it only after writing
-/// every byte you intend to use, or follow up with `memset` /
-/// `calloc` (not exposed here). Free with `free`.
+/// every byte you intend to use, or use `calloc` / `memset` for zeroed
+/// memory. Free with `free`.
 ///
 /// # Safety
 ///
@@ -31,6 +31,26 @@ import std.numeric.(Int64, Int32)
 /// ```
 @extern(.C, mangleName: "malloc")
 public func malloc(consuming size: Int64) -> RawPointer
+
+/// Wraps `calloc(3)` — allocates `count * size` bytes of zeroed memory.
+///
+/// Returns null on failure (including when `count * size` overflows).
+/// Large blocks come straight from the kernel already zeroed, so pages
+/// are only touched when first written. Free with `free`.
+///
+/// # Safety
+///
+/// The returned pointer is raw: pair every successful call with exactly
+/// one `free`, and stay within `count * size` bytes.
+///
+/// # Examples
+///
+/// ```
+/// let buf = calloc(1024, 1);  // 1 KB of zero bytes
+/// free(buf);
+/// ```
+@extern(.C, mangleName: "calloc")
+public func calloc(consuming count: Int64, consuming size: Int64) -> RawPointer
 
 /// Wraps `free(3)` — releases memory previously returned by `malloc` / `realloc`.
 ///

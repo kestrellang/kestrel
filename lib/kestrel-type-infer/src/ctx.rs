@@ -119,14 +119,22 @@ pub struct InferCtx<'a> {
     /// never see a ref. Patterns stay wired directly to the scrutinee var.
     pub(crate) scrutinee_exprs: HashSet<HirExprId>,
 
-    /// The scrutinees whose arms write through a `&mutating` binder: a
-    /// failable member read there goes through its `mutating ref`.
-    pub(crate) mutating_scrutinee_exprs: HashSet<HirExprId>,
+    /// Reads in a context that needs a mutable place: a scrutinee whose arms
+    /// write through a `&mutating` binder, or a value returned as
+    /// `&mutating T`. A place member read there goes through its `mutating
+    /// ref` and is typed `&mutating T` (`Optional[&mutating T]` failable).
+    pub(crate) mutating_place_reads: HashSet<HirExprId>,
 
     /// HirExprIds that are a `Call`'s direct callee. A direct callee Def
     /// legitimately carries `TyKind::Function { ret: Ref }` — exempted from
     /// the E491 function-as-value check in `validate_ref_placement`.
     pub(crate) direct_callee_exprs: HashSet<HirExprId>,
+
+    /// For a direct call of a named function, the parameter slot each
+    /// argument fills, in argument order. Skipping a defaulted parameter
+    /// shifts later arguments past it, so the solver's `Function` arm reads
+    /// this instead of pairing arguments with parameters by position.
+    pub(crate) call_arg_slots: HashMap<HirExprId, Vec<usize>>,
 
     /// Call expressions whose callee NAMES a type (`T(...)`, `Self(...)`,
     /// `B.Item(...)`) rather than holding a value. The callee's type can't
@@ -141,6 +149,11 @@ pub struct InferCtx<'a> {
     /// would defeat the coerce-side decay arm).
     pub(crate) binding_init_exprs: HashSet<HirExprId>,
 
+    /// The `binding_init_exprs` whose binding has a type annotation: its type
+    /// flows into the initializer (a generic return infers from it), so a
+    /// not-yet-known return never waits on the deferred decay.
+    pub(crate) annotated_init_exprs: HashSet<HirExprId>,
+
     /// HirExprIds that are an `Assign`'s TARGET. A `&mutating T`-returning
     /// target (`arr.mutableAt(index: i) = v`) types as the POINTEE so the
     /// value's Coerce just works — order-independently (the value side may
@@ -148,6 +161,12 @@ pub struct InferCtx<'a> {
     /// for the analyzer and MIR comes from the resolved callee's
     /// `CallableRefReturn`, not from this expression's recorded type.
     pub(crate) assign_target_exprs: HashSet<HirExprId>,
+
+    /// The VALUE exprs of assignments whose target is a call / member
+    /// access (`d(k) = v`), so `solve_assign_target` can tell a lent
+    /// failable place (never assignable: the analyzer reports E214) from an
+    /// `Optional[&T]` local being rebound.
+    pub(crate) place_assign_values: HashSet<HirExprId>,
 
     /// HirExprIds in ALWAYS-DECAY value positions: `if`/`match` ARM VALUES
     /// (refs cannot cross merges) and array/tuple/dict LITERAL ELEMENTS
@@ -159,6 +178,14 @@ pub struct InferCtx<'a> {
     /// defaulting, ExpressibleByArrayLiteral targeting) is untouched.
     pub(crate) always_decay_exprs: HashSet<HirExprId>,
 
+    /// HirExprIds that are a call's ARGUMENT. Params never carry ref types
+    /// (E480), so an argument's value type is the POINTEE: a ref-returning
+    /// call here binds its result to the pointee in `bind_call_result`,
+    /// before a generic param (`m(s(i))`, `I` of the outer subscript) can
+    /// adopt the pending ref wholesale. The place itself still reaches MIR
+    /// through `ref_return_calls`.
+    pub(crate) call_arg_exprs: HashSet<HirExprId>,
+
     /// Check-mode leaves whose type comes from their OWN pending constraint
     /// (a call, method call or operator — bidi §2.1 synth). While
     /// `synth_gate` is up, a Coerce from such a leaf waits for that type
@@ -168,6 +195,31 @@ pub struct InferCtx<'a> {
     /// whose type only the target can give (`none()`) still unifies.
     pub(crate) synth_pending_exprs: HashSet<HirExprId>,
     pub(crate) synth_gate: bool,
+    /// While up, a borrowed argument whose own type is still pending (a
+    /// method call's result) waits for it before coercing, so it can peel
+    /// through `Indirection` instead of being pinned to the param's type.
+    /// Drops after the first flush, before literal defaults, so a pending
+    /// argument only the param can type (`x.f(1 << 26)`) still unifies with
+    /// it ahead of defaulting.
+    pub(crate) view_peel_gate: bool,
+    /// While up, a borrowed argument whose type is still open is not linked
+    /// to an equally open param type (`show(sl)` with `let sl = xs(0..<2)`
+    /// still deferred): the argument may yet turn out to be a ref, which
+    /// passes its pointee. Drops after the defaults, so an argument only the
+    /// param can type (`show(.none)`) still unifies with it.
+    pub(crate) view_link_gate: bool,
+    /// The receiver a member lookup started on, for one that peeled through
+    /// `Indirection`: a miss reports the type the user wrote (`String`), not
+    /// the pointee the lookup ended on (`StringSlice`).
+    pub(crate) peel_receivers: HashMap<HirExprId, TyVar>,
+    /// Values assigned to a `var` local (`a = s.trimmedStart()`). When the
+    /// local holds a shared ref, the assignment REBINDS it to the new ref:
+    /// writing through a `&` is never legal, so nothing else can be meant.
+    pub(crate) rebind_values: HashSet<HirExprId>,
+    /// Array / dictionary literal elements: a slice element decays to its
+    /// pointee (a collection's element must be Static, which a ref never
+    /// is), so the error is the clearer "it is unsized" one.
+    pub(crate) collection_elements: HashSet<HirExprId>,
     /// Tail leaves of optional-chain arms. Their pending coerce waits for
     /// the leaf's own type even after `synth_gate` drops: unifying first
     /// would assume flattening, a silent miscompile when the tail is not an
@@ -187,6 +239,10 @@ pub struct InferCtx<'a> {
     /// emits while deciding another one — an overload candidate's parameter
     /// equalities, say — stay queued, since that decision may still back out.
     pub(crate) solving_depth: u32,
+    /// Span of the member or call constraint being solved. Types formed by
+    /// instantiating the callee's signature report their well-formedness
+    /// here (the user's `.collect()`), not at the signature in std.
+    pub(crate) formation_site: Option<Span>,
     /// Off while the body's assumptions Γ (params, where clauses) are being
     /// set up: those constraints are interdependent and settle as one batch.
     /// On once the walker starts (bidi P5).
@@ -201,6 +257,11 @@ pub struct InferCtx<'a> {
     /// gen helpers before they recurse into `inner`.
     pub(crate) poison_protocol_call_recv_on_failure: HashSet<HirExprId>,
 
+    /// Compound-assign ProtocolCalls whose receiver is a member place
+    /// (`d(k) += 1`, `b.head += 1`): their receiver Conforms uses
+    /// [`ConformsOrigin::CompoundPlace`](crate::constraint::ConformsOrigin).
+    pub(crate) compound_place_calls: HashSet<HirExprId>,
+
     /// The `Iterable.iter()` ProtocolCall of each `for` loop. Its `gen_expr`
     /// arm emits `Constraint::ForLoopIterator` instead of a plain protocol
     /// call, which picks "the iterable is the iterator" vs `iter()` once the
@@ -210,6 +271,18 @@ pub struct InferCtx<'a> {
     /// The `for_loop_iter_calls` whose iterable is itself an `Iterator`.
     /// Surfaced on `TypedBody.direct_iterators`.
     pub(crate) direct_iterators: HashSet<HirExprId>,
+
+    /// Place reads typed `&mutating T` (see `mutating_place_reads`).
+    /// Surfaced on `TypedBody.mutating_lends`.
+    pub(crate) mutating_lends: HashSet<HirExprId>,
+
+    /// Expressions whose `Optional[&T]` value decays to `Optional[T]`: bound
+    /// initializers and operator receivers. Surfaced on `TypedBody.optional_ref_decays`.
+    pub(crate) optional_ref_decays: HashSet<HirExprId>,
+
+    /// Every resolved call's instantiated return var (`bind_call_result`).
+    /// Those that resolve to a ref surface as `TypedBody.ref_return_calls`.
+    pub(crate) call_return_tvs: HashMap<HirExprId, TyVar>,
 
     /// Member-access exprs that came from a desugared `ProtocolCall`
     /// (operators, for-in, try). The lazy `Indirection` peel in `solve_member`
@@ -226,6 +299,19 @@ pub struct InferCtx<'a> {
     /// Maps the expr to its operator protocol (`Addable`, `Equal`, …), which
     /// Rule L checks the right operand against.
     pub(crate) operator_members: HashMap<HirExprId, Entity>,
+    /// Operator call → its receiver (left operand) expression.
+    pub(crate) operator_receivers: HashMap<HirExprId, HirExprId>,
+    /// Receivers of instance method calls (`xs.first().map(f)`): a lent
+    /// `Optional[&T]` there decays to `Optional[T]` (`optional_ref_decay_site`).
+    pub(crate) method_receiver_exprs: HashSet<HirExprId>,
+
+    /// Protocol calls that name their requirement (HIR
+    /// `ProtocolCall.requirement`): the member IS that entity, so on a
+    /// concrete receiver `solve_member` resolves it directly instead of
+    /// looking the name up among the receiver's members (which could type
+    /// `V + 1.5` against an unrelated `add(Float64)` while codegen calls the
+    /// `Addable[V]` witness).
+    pub(crate) protocol_call_requirements: HashMap<HirExprId, Entity>,
 
     // === Results (populated during solving) ===
     /// Resolved entity for MethodCall/Field expressions.
@@ -235,6 +321,27 @@ pub struct InferCtx<'a> {
     /// Accumulated by the peel arm in `solve_member`; `build_result` resolves
     /// each `target_tv` and copies the chain to `TypedBody.indirection_peels`.
     pub(crate) indirection_peels: HashMap<HirExprId, Vec<PendingPeel>>,
+
+    /// Arguments bound to a borrowed param (`false`) or a mutably borrowed
+    /// one (`true`). Only these may peel through `Indirection`
+    /// (`solve_coerce`); a `consuming` argument never does.
+    pub(crate) view_args: HashMap<HirExprId, bool>,
+
+    /// Borrowed arguments converted by `DecaysFrom` (`see(x: String)` given a
+    /// slice): the call copies a view it could have borrowed, so a lint
+    /// suggests taking `&View` instead.
+    pub(crate) borrowed_decay_args: HashSet<HirExprId>,
+
+    /// While up, a ref whose pointee is still open waits before coercing
+    /// into a `DecaysFrom` target, so the view isn't pinned to the owned
+    /// type. Dropped once every default has run.
+    pub(crate) decay_wait_gate: bool,
+
+    /// `Indirection`-peel chain per ARGUMENT expr (`takes(xs)` with
+    /// `takes(xs: &Slice[T])` and `xs: Array[T]`). Kept apart from
+    /// `indirection_peels`, which an argument that is itself a peeled member
+    /// access (`takes(box.items)`) also uses.
+    pub(crate) arg_indirection_peels: HashMap<HirExprId, Vec<PendingPeel>>,
 
     /// MethodCall exprs where the resolution went through a field access.
     /// Maps expr → field entity. MIR lowering must interpose a field
@@ -253,6 +360,11 @@ pub struct InferCtx<'a> {
     /// point at the right call site without threading HirBody through
     /// the solver.
     pub(crate) type_arg_spans: HashMap<HirExprId, Span>,
+    /// For a recorded type-arg list whose slots aren't the callee's own
+    /// `TypeParams` (a member reached through a protocol extension leads
+    /// with the protocol's params), the param each slot stands for, `None`
+    /// where it has no name. Read by `report_unresolved_type_params`.
+    pub(crate) type_arg_params: HashMap<HirExprId, Vec<Option<Entity>>>,
 
     /// Source span of each collection-literal TyVar (array / dictionary), so
     /// the type it defaults to (`Array[?E]`) is well-formedness-checked at
@@ -277,7 +389,6 @@ pub struct InferCtx<'a> {
     pub(crate) return_ty_span: Option<Span>,
 
     /// Entity being inferred (function/init/getter).
-    #[allow(dead_code)]
     pub(crate) owner: Entity,
     pub(crate) root: Entity,
 
@@ -327,6 +438,10 @@ pub struct InferCtx<'a> {
     pub(crate) kind_coercions:
         HashMap<HirExprId, (kestrel_ast::FnTypeKind, kestrel_ast::FnTypeKind)>,
 
+    /// A method call that calls a field's value (`s.callback(x)`): the type
+    /// of the value called. Surfaced on `TypedBody.field_callee_types`.
+    pub(crate) field_callee_types: HashMap<HirExprId, TyVar>,
+
     /// Existential conversions accepted at check leaves (`T → any P`,
     /// `B[T] → any[B] P`, `any Q → any P`), keyed by the converted
     /// expression. Surfaced on `TypedBody.existential_conversions`; the
@@ -337,11 +452,19 @@ pub struct InferCtx<'a> {
     /// Surfaced on `TypedBody.type_tests`.
     pub(crate) type_tests: HashMap<kestrel_hir::body::HirPatId, TyVar>,
 
+    /// Literal and range patterns, keyed by pattern, with the type of the
+    /// value they match. Surfaced on `TypedBody.literal_pat_types`.
+    pub(crate) literal_pats: HashMap<kestrel_hir::body::HirPatId, TyVar>,
+
     /// HirExprIds of closure-*literal* expressions, recorded during constraint
     /// generation. `solve_call` uses this to gate the no-annotation `MutBorrow`
     /// convention upgrade to literals only — a named function value's
     /// conventions reflect its real ABI and must not be rewritten.
     pub(crate) closure_literal_exprs: HashSet<HirExprId>,
+    /// Collection-literal arguments generated as a placeholder and checked
+    /// against the param's type later (`gen_call_args_phased`). Their
+    /// coercion is what hands them that type, so it never waits.
+    pub(crate) postponed_literal_args: HashSet<HirExprId>,
 
     /// TyVars that were unified with `Never` while still unresolved.
     /// `unify(Never, Unresolved)` is intentionally a no-op — Never is
@@ -364,16 +487,13 @@ pub struct InferCtx<'a> {
     /// `check_expr`'s caller must not coerce the whole expression again.
     pub(crate) expectation_pushed: bool,
 
-    /// Expression ID of the accumulator init call inside a Sugar::StringInterpolation.
-    /// Set by `mark_sugar_primary`, consumed by `gen_expr` for Call. Replaces the
-    /// concrete DefaultStringInterpolation init with a deferred type variable so
-    /// the accumulator type can be resolved from context.
-    pub(crate) interpolation_init_expr: Option<kestrel_hir::body::HirExprId>,
-
-    /// The accumulator type variable for the current string interpolation.
-    /// Set during the init interception, consumed by the Sugar handler to
-    /// emit the InterpolationLink constraint.
-    pub(crate) interpolation_acc_tv: Option<TyVar>,
+    /// The `init(interpolation:)` calls that finish a string interpolation
+    /// (set by `mark_sugar_primary`). `gen_expr` types each as an open
+    /// `LiteralKind::StringInterpolation` var: the interpolated literal's
+    /// type, taken from context or defaulted to `String`. A set, not one
+    /// slot: a hole may hold another interpolation, generated before the
+    /// outer tail.
+    pub(crate) interpolation_results: HashSet<kestrel_hir::body::HirExprId>,
 
     /// TyVars created from an explicit `_` (HirTy::Infer) in a type-argument
     /// position. These intentionally stay unresolved when the caller doesn't
@@ -405,6 +525,10 @@ pub struct InferCtx<'a> {
     /// Applied after constraint solving: only type vars still unconstrained
     /// get their default, so generic bodies like `Set.init()` keep `H` free.
     pub(crate) type_param_defaults: Vec<(TyVar, HirTy)>,
+    /// Vars instantiating a `not Static` type param: a ref argument binds
+    /// them to the ref itself, not to a copy of its pointee (see
+    /// `apply_ref_decay_defaults_into`).
+    pub(crate) ref_admitting_vars: Vec<TyVar>,
 
     /// De-dup set for TYPE-ARGUMENT conformance FAILURES, keyed by
     /// `(structural type string, protocol)`. The same wellformedness
@@ -426,6 +550,9 @@ pub struct PromotionInfo {
     pub method: Entity,
     /// Target type (what we're promoting to).
     pub target_ty: TyVar,
+    /// A `DecaysFrom` conversion's view type (`StringSlice`), held by
+    /// reference; `None` for a `FromValue` promotion.
+    pub view: Option<TyVar>,
 }
 
 /// Metadata for a function with an opaque return type (`some P`).
@@ -463,30 +590,52 @@ impl<'a> InferCtx<'a> {
             error_is_cascade: Vec::new(),
             errored_coerce_exprs: HashSet::default(),
             scrutinee_exprs: HashSet::default(),
-            mutating_scrutinee_exprs: HashSet::default(),
+            mutating_place_reads: HashSet::default(),
             assign_target_exprs: HashSet::default(),
+            place_assign_values: HashSet::default(),
             always_decay_exprs: HashSet::default(),
+            call_arg_exprs: HashSet::default(),
             direct_callee_exprs: HashSet::default(),
+            call_arg_slots: HashMap::default(),
             type_callee_calls: HashSet::default(),
             binding_init_exprs: HashSet::default(),
+            annotated_init_exprs: HashSet::default(),
             synth_pending_exprs: HashSet::default(),
             optional_chain_leaves: HashSet::default(),
             chain_modes: HashMap::default(),
             synth_gate: true,
+            view_peel_gate: true,
+            view_link_gate: true,
+            peel_receivers: HashMap::default(),
+            rebind_values: HashSet::default(),
+            collection_elements: HashSet::default(),
             interpolation_depth: 0,
             solving_depth: 0,
+            formation_site: None,
             eager: false,
             poison_protocol_call_recv_on_failure: HashSet::default(),
+            compound_place_calls: HashSet::default(),
             for_loop_iter_calls: HashSet::default(),
             direct_iterators: HashSet::default(),
+            mutating_lends: HashSet::default(),
+            optional_ref_decays: HashSet::default(),
+            call_return_tvs: HashMap::default(),
             protocol_dispatch_members: HashSet::default(),
             operator_members: HashMap::default(),
+            protocol_call_requirements: HashMap::default(),
+            operator_receivers: HashMap::default(),
+            method_receiver_exprs: HashSet::default(),
             resolutions: HashMap::default(),
             indirection_peels: HashMap::default(),
+            view_args: HashMap::default(),
+            borrowed_decay_args: HashSet::default(),
+            decay_wait_gate: true,
+            arg_indirection_peels: HashMap::default(),
             field_subscripts: HashMap::default(),
             promotions: HashMap::default(),
             type_args: HashMap::default(),
             type_arg_spans: HashMap::default(),
+            type_arg_params: HashMap::default(),
             literal_spans: HashMap::default(),
             literal_default_args: Vec::new(),
             expr_types: HashMap::default(),
@@ -502,19 +651,22 @@ impl<'a> InferCtx<'a> {
             closure_it: HashSet::default(),
             kind_flex: HashSet::default(),
             kind_coercions: HashMap::default(),
+            field_callee_types: HashMap::default(),
             existential_conversions: HashMap::default(),
             type_tests: HashMap::default(),
+            literal_pats: HashMap::default(),
             closure_literal_exprs: HashSet::default(),
+            postponed_literal_args: HashSet::default(),
             never_fallback_targets: HashSet::default(),
             expectation: None,
             expectation_pushed: false,
-            interpolation_init_expr: None,
-            interpolation_acc_tv: None,
+            interpolation_results: HashSet::default(),
             wildcard_tvars: HashSet::default(),
             witness_protocol_args: HashMap::default(),
             loop_break_tys: Vec::new(),
             opaque_return: None,
             type_param_defaults: Vec::new(),
+            ref_admitting_vars: Vec::new(),
             reported_typearg_conformance: HashSet::default(),
         }
     }
@@ -584,6 +736,48 @@ impl<'a> InferCtx<'a> {
         let idx = self.types.len() as u32;
         self.types.push(TySlot::Unresolved { literal: None });
         TyVar(idx)
+    }
+
+    /// Give `tv` type param `param`'s declared default (`A = GlobalAllocator`)
+    /// if nothing pins it by the end of solving. No-op without a default.
+    pub(crate) fn defer_type_param_default(&mut self, tv: TyVar, param: Entity) {
+        self.note_type_param_var(tv, param);
+        if let Some(default_ty) = self
+            .query_ctx
+            .query(kestrel_hir_lower::LowerTypeAnnotation {
+                entity: param,
+                root: self.root,
+            })
+        {
+            self.type_param_defaults.push((tv, default_ty));
+        }
+    }
+
+    /// Record that `tv` instantiates type param `param`. A `not Static`
+    /// param may hold a reference, so it joins `ref_admitting_vars`. An
+    /// enum's params don't: an unpinned payload (`.Some(r)`) is an owned
+    /// snapshot of the pointee, and `Optional[&T]` takes an annotation.
+    pub(crate) fn note_type_param_var(&mut self, tv: TyVar, param: Entity) {
+        let context = self.query_ctx.parent_of(param).unwrap_or(param);
+        if self.query_ctx.get::<kestrel_ast_builder::NodeKind>(context)
+            == Some(&kestrel_ast_builder::NodeKind::Enum)
+        {
+            return;
+        }
+        let requirement = self.query_ctx.query(kestrel_semantics::TypeParamStaticRequirement {
+            param,
+            context,
+            root: self.root,
+        });
+        if requirement == kestrel_semantics::StaticRequirement::MayBeNonStatic {
+            self.ref_admitting_vars.push(tv);
+        }
+    }
+
+    /// Whether `tv` instantiates a `not Static` type param.
+    pub(crate) fn admits_ref(&self, tv: TyVar) -> bool {
+        let tv = self.resolve(tv);
+        self.ref_admitting_vars.iter().any(|&v| self.resolve(v) == tv)
     }
 
     /// Allocate a fresh type variable with a literal marker.
@@ -874,6 +1068,13 @@ impl<'a> InferCtx<'a> {
         }
     }
 
+    /// Allocate a TyVar already resolved to `kind`.
+    pub fn resolved(&mut self, kind: TyKind) -> TyVar {
+        let idx = self.types.len() as u32;
+        self.types.push(TySlot::Resolved(kind));
+        TyVar(idx)
+    }
+
     /// Allocate a TyVar bound to a Tuple type.
     pub fn tuple(&mut self, elements: Vec<TyVar>) -> TyVar {
         let idx = self.types.len() as u32;
@@ -1071,6 +1272,23 @@ impl<'a> InferCtx<'a> {
         self.types[root.0 as usize] = TySlot::Resolved(TyKind::Error);
     }
 
+    /// Poison `tv` for a failure that is still to be reported about it, and
+    /// return a copy of its type as it was, for the diagnostic to name.
+    /// Poisoning first left the message naming the Error type (`_ !:
+    /// AddAssign`).
+    /// An unresolved `tv` has nothing to show: it is returned poisoned, so the
+    /// report is suppressed as a cascade like any other on an Error type.
+    pub fn poison_keeping_shown(&mut self, tv: TyVar) -> TyVar {
+        let slot = self.slot(self.resolve(tv)).clone();
+        self.poison(tv);
+        if !matches!(slot, TySlot::Resolved(ref k) if !matches!(k, TyKind::Error)) {
+            return tv;
+        }
+        let shown = self.fresh();
+        self.types[shown.0 as usize] = slot;
+        shown
+    }
+
     /// Mark `tv` as a wildcard (created from explicit `_` in a type-arg position).
     /// Wildcard TyVars that stay Unresolved don't generate "could not infer type"
     /// diagnostics. Call after creating the TyVar; propagation to unified vars
@@ -1109,6 +1327,23 @@ impl<'a> InferCtx<'a> {
 
     pub fn coerce(&mut self, from: TyVar, to: TyVar, expr: HirExprId, span: Span) {
         self.coerce_because(from, to, expr, span, Reason::Unspecified);
+    }
+
+    /// `coerce` for a call argument; `view` is its param's
+    /// `AstParam::view`. A borrowed argument may reach the param's type by
+    /// peeling through `Indirection`.
+    pub(crate) fn coerce_arg(
+        &mut self,
+        from: TyVar,
+        to: TyVar,
+        expr: HirExprId,
+        view: Option<bool>,
+        span: Span,
+    ) {
+        if let Some(mutating) = view {
+            self.view_args.insert(expr, mutating);
+        }
+        self.coerce(from, to, expr, span);
     }
 
     /// `coerce` with the user-facing cause of the expected type `to`.
@@ -1259,13 +1494,19 @@ impl<'a> InferCtx<'a> {
         });
     }
 
-    pub fn conforms_poisoning(&mut self, ty: TyVar, protocol: Entity, span: Span) {
+    pub fn conforms_poisoning(
+        &mut self,
+        ty: TyVar,
+        protocol: Entity,
+        span: Span,
+        origin: crate::constraint::ConformsOrigin,
+    ) {
         self.emit(Constraint::Conforms {
             ty,
             protocol,
             span,
             poison_ty_on_failure: true,
-            origin: crate::constraint::ConformsOrigin::Expr,
+            origin,
             protocol_args: Vec::new(),
         });
     }
@@ -1448,14 +1689,6 @@ impl<'a> InferCtx<'a> {
             args,
             result,
             expr,
-            span,
-        });
-    }
-
-    pub fn interpolation_link(&mut self, result_tv: TyVar, acc_tv: TyVar, span: Span) {
-        self.emit(Constraint::InterpolationLink {
-            result_tv,
-            acc_tv,
             span,
         });
     }

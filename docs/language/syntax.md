@@ -112,13 +112,11 @@ enum Shape {
     case Point // No associated value
 }
 
-// Recursive enum (must be marked indirect) - (Future)
-// Recursive cases require `indirect` (E429), but indirect enums are
-// not yet supported by the compiler (E465).
-// indirect enum List[T] {
-//     case Cons(head: T, tail: List[T])
-//     case Empty
-// }
+// Recursive enum: `indirect` boxes the recursive cases (E429 without it)
+indirect enum List[T] {
+    case Cons(head: T, tail: List[T])
+    case Empty
+}
 
 // Implicit Member Access
 let d: Direction = .North;
@@ -260,7 +258,7 @@ module my_app.utils;
 
 // Imports
 import std.collections.Map;
-import std.io as IO; // Renaming
+import std.files as Files; // Renaming
 ```
 
 ## Access Control
@@ -277,6 +275,7 @@ private struct C { ... }    // Visible in this file/scope
 // Ranges — usable as values, in for-in loops, and in match arms
 let r = 0..<10;          // half-open range
 for i in 0..=9 { }       // inclusive range
+let tail = xs(n - 2..);  // from `n - 2` to the end; `..<n` / `..=n` up to `n`
 // In match arms:
 //   0..<10 => "under ten",
 //   10..=100 => "up to hundred",
@@ -314,7 +313,7 @@ Loosest first. Every binary operator is left-associative except `??`.
 | `??` | right-associative |
 | `and` | |
 | `==` `!=` `<` `>` `<=` `>=` `is` | |
-| `..=` `..<` | |
+| `..=` `..<` | also the one-sided `a..`, `..<b`, `..=b` |
 | `+` `-` `\|` `^` | |
 | `*` `/` `%` `&` | |
 | `<<` `>>` | |
@@ -322,6 +321,10 @@ Loosest first. Every binary operator is left-associative except `??`.
 
 Because `|>` binds loosest, `x |> f ?? d` is `x |> (f ?? d)`. Write
 `(x |> f) ?? d` to default the result.
+
+A one-sided range groups like a binary range missing an end, so arithmetic
+stays inside it: `x + 1..` is `(x + 1)..`, `..<n - 1` is `..<(n - 1)`, and
+`-2..` starts at `-2`.
 
 ## Error Handling
 
@@ -355,7 +358,7 @@ Semicolons are **required** after:
 - Expression statements: `doSomething();`
 - Assignment statements: `count = count + 1;`
 - Module declarations: `module my_app.utils;`
-- Import statements: `import std.io;`
+- Import statements: `import std.files;`
 
 ### Optional/Omitted Semicolons
 

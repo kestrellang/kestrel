@@ -4,29 +4,48 @@
 
 // `some P and not Static` in parameter position relaxes the implicit
 // `Static` bound, like `where T: not Static` on a named generic: a
-// borrowing `ArraySlice` is accepted, and a defaulted argument still
+// borrowing view is accepted, and a defaulted argument still
 // type-checks (the default's annotation used to reject `not Static`, E140).
 
 module Test
 
-import std.collections.(Array, ArraySlice, Slice)
+import std.collections.(Array, Slice)
+import std.memory.(UnsafeSlice, UnsafeSliceIterator)
 
-func total(xs: some Slice[Int64] and not Static) -> Int64 {
+// `Lends` stands in for the removed std `Sliceable`: a protocol whose
+// conformers lend their elements as a `Slice`.
+protocol Lends[T] { func asSlice() -> &Slice[T] }
+extend Array[T, A]: Lends[T] { }
+
+// A borrowing view: it holds a reference, so it is not `Static`.
+struct Borrowed { let base: &Array[Int64] }
+
+extend Borrowed: Lends[Int64], Iterable {
+    type Item = Int64
+    type TargetIterator = UnsafeSliceIterator[Int64]
+    func asSlice() -> &Slice[Int64] { self.base.asSlice() }
+    func iter() -> UnsafeSliceIterator[Int64] { self.base.asUnsafeSlice().iter() }
+}
+
+func total(xs: some Lends[Int64] and not Static) -> Int64 {
     var t: Int64 = 0;
-    for x in xs.asUnsafeSlice() { t += x; }
+    for x in xs.asSlice().asUnsafeSlice() { t += x; }
     t
 }
 
-func totalOr(xs: some Slice[Int64] and not Static = Array[Int64]()) -> Int64 {
+func totalOr(xs: some Lends[Int64] and not Static = Array[Int64]()) -> Int64 {
     total(xs)
 }
 
 @main
 func main() -> lang.i64 {
     let xs = [1, 2, 3, 4];
+    let ys = [4, 5];
+    let bx = &xs;
+    let by = &ys;
     if total(xs) != 10 { return 1 }
-    if total(xs(1..)) != 9 { return 2 }      // borrowing slice: not Static
-    if totalOr(xs(..<2)) != 3 { return 3 }
+    if total(Borrowed(base: bx)) != 10 { return 2 }   // borrowing view: not Static
+    if totalOr(Borrowed(base: by)) != 9 { return 3 }
     if totalOr() != 0 { return 4 }          // default argument
     0
 }

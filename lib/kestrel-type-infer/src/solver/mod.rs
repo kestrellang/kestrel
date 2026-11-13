@@ -21,7 +21,9 @@ use crate::generate::SubjectRoot;
 use crate::resolve::EqualityLhs;
 use crate::ty::{LiteralKind, TyKind, TySlot, TyVar};
 use crate::unify::{self, UnifyError};
-use kestrel_ast_builder::arg_binding::{BindArg, BindError, BindParam, Binding, bind_arguments};
+use kestrel_ast_builder::arg_binding::{
+    BindArg, BindError, BindParam, Binding, bind_arguments, names_unlabeled_param,
+};
 use kestrel_ast_builder::{Callable, InitEffect, Intrinsic, Name, NodeKind, TypeParams};
 use kestrel_copy_fold::CopyLayer;
 use kestrel_hecs::Entity;
@@ -50,8 +52,8 @@ pub(crate) use conformance::*;
 pub(crate) use defaults::*;
 pub(crate) use equality::*;
 use lower::*;
-pub(crate) use member::try_indirection_peel;
 use member::*;
+pub(crate) use member::{extension_applies, requirement_call, try_indirection_peel};
 
 /// Diagnose type parameters at generic call sites that inference couldn't
 /// pin down. Lib1 silently defaulted these to `Never` (RFC 1216-style
@@ -71,18 +73,21 @@ pub(crate) fn report_unresolved_type_params(ctx: &mut InferCtx<'_>) {
         .collect();
 
     for (expr, tvs, span) in entries {
-        // Map each TyVar back to its originating TypeParameter entity
-        // via the resolved callee's `TypeParams` component. Without a
-        // resolution (e.g. the call errored upstream) we can't name
-        // the param, so skip — the upstream error already covers it.
-        let Some(&callee) = ctx.resolutions.get(&expr) else {
-            continue;
+        // The param each slot stands for: recorded with the slots, or the
+        // resolved callee's own `TypeParams`. Neither (the call errored
+        // upstream): skip — the upstream error already covers it.
+        let params: Vec<Option<Entity>> = match ctx.type_arg_params.get(&expr) {
+            Some(slots) => slots.clone(),
+            None => {
+                let Some(&callee) = ctx.resolutions.get(&expr) else {
+                    continue;
+                };
+                ctx.query_ctx
+                    .get::<TypeParams>(callee)
+                    .map(|tp| tp.0.iter().map(|&p| Some(p)).collect())
+                    .unwrap_or_default()
+            },
         };
-        let params: Vec<Entity> = ctx
-            .query_ctx
-            .get::<TypeParams>(callee)
-            .map(|tp| tp.0.clone())
-            .unwrap_or_default();
 
         for (i, &tv) in tvs.iter().enumerate() {
             let resolved = ctx.resolve(tv);
@@ -94,9 +99,13 @@ pub(crate) fn report_unresolved_type_params(ctx: &mut InferCtx<'_>) {
             ) {
                 continue;
             }
-            let Some(&param) = params.get(i) else {
-                continue;
-            };
+            // A slot the callee's params can't name is still reported:
+            // skipping it let the hole reach monomorphization as `Error`.
+            let param = params.get(i).copied().flatten();
+            kestrel_debug::ktrace!(
+                "infer",
+                "unresolved type arg {i} of {expr:?}: param {param:?}"
+            );
             ctx.report_error(InferError::UnresolvedTypeParam {
                 param,
                 span: span.clone(),
@@ -666,9 +675,12 @@ pub(crate) fn report_unsolved(ctx: &mut InferCtx<'_>) {
                     kestrel_debug::ktrace!("entail", "conformance left undecided by an open var");
                     continue;
                 }
-                if poison_ty_on_failure {
-                    ctx.poison(ty);
-                }
+                // The diagnostic names the type as it was, not the poison.
+                let ty = if poison_ty_on_failure {
+                    ctx.poison_keeping_shown(ty)
+                } else {
+                    ty
+                };
                 (
                     InferError::DoesNotConform {
                         ty,
@@ -714,9 +726,12 @@ pub(crate) fn report_unsolved(ctx: &mut InferCtx<'_>) {
                 span,
                 is_call,
                 result,
+                expr,
                 ..
             } => {
-                if ctx.is_error(ctx.resolve(receiver)) {
+                // An operator's hidden method: its `Conforms` reports the
+                // failure (see `solve_member`), so don't leak the hook name.
+                if ctx.is_error(ctx.resolve(receiver)) || ctx.operator_members.contains_key(&expr) {
                     ctx.poison(result);
                     continue;
                 }
@@ -726,6 +741,7 @@ pub(crate) fn report_unsolved(ctx: &mut InferCtx<'_>) {
                         name,
                         is_call,
                         span,
+                        searched_pointee: None,
                     },
                     Some(result),
                 )
@@ -746,6 +762,7 @@ pub(crate) fn report_unsolved(ctx: &mut InferCtx<'_>) {
                         name: "subscript".into(),
                         is_call: true,
                         span,
+                        searched_pointee: None,
                     },
                     Some(result),
                 )
@@ -770,6 +787,7 @@ pub(crate) fn report_unsolved(ctx: &mut InferCtx<'_>) {
                         name,
                         is_call: true,
                         span,
+                        searched_pointee: None,
                     },
                     Some(result),
                 )
@@ -822,9 +840,6 @@ pub(crate) fn report_unsolved(ctx: &mut InferCtx<'_>) {
                 ctx.poison(result);
                 continue;
             },
-            // Unresolved InterpolationLink: the accumulator was resolved by
-            // literal defaults. Absorb silently.
-            Constraint::InterpolationLink { .. } => continue,
             // The iterable never resolved — its own "could not infer"
             // diagnostic covers it; poison the iterator so the loop body
             // doesn't cascade.
@@ -856,6 +871,7 @@ pub(crate) fn report_unsolved(ctx: &mut InferCtx<'_>) {
                         name,
                         is_call,
                         span,
+                        searched_pointee: None,
                     },
                     None,
                 )
@@ -902,7 +918,18 @@ pub(super) fn carry_reason(r: SolveResult, reason: &Reason) -> SolveResult {
 pub(super) fn try_solve(ctx: &mut InferCtx<'_>, c: Constraint) -> SolveResult {
     ctx.solving_depth += 1;
     kestrel_debug::ktrace!("p5-solve", "d={} {:?}", ctx.solving_depth, c);
+    let site = match &c {
+        Constraint::Member { span, .. }
+        | Constraint::Call { span, .. }
+        | Constraint::OverloadedCall { span, .. } => Some(span.clone()),
+        _ => None,
+    };
+    let outer_site = match site {
+        Some(site) => ctx.formation_site.replace(site),
+        None => ctx.formation_site.clone(),
+    };
     let r = try_solve_inner(ctx, c);
+    ctx.formation_site = outer_site;
     kestrel_debug::ktrace!(
         "p5-solve",
         "  -> {}",
@@ -1051,7 +1078,14 @@ pub(super) fn try_solve_inner(ctx: &mut InferCtx<'_>, c: Constraint) -> SolveRes
             span,
         } => {
             let r = solve_implicit(ctx, expected, &name, args, result, expr, span);
-            if matches!(r, SolveResult::Error(_)) {
+            // `result` is the expected type's var (`.name` is typed as its
+            // home), and an error is only reported once that is concrete —
+            // poisoning it would overwrite a known type shared with the
+            // context (a `return .x`'s function return type), cascading
+            // `_` into every later use. Only an unresolved result is poisoned.
+            if matches!(r, SolveResult::Error(_))
+                && matches!(ctx.slot(ctx.resolve(result)), TySlot::Unresolved { .. })
+            {
                 ctx.poison(result);
             }
             r
@@ -1059,10 +1093,11 @@ pub(super) fn try_solve_inner(ctx: &mut InferCtx<'_>, c: Constraint) -> SolveRes
         Constraint::ImplicitPat {
             scrutinee,
             name,
+            case,
             arg_tys,
             labels,
             span,
-        } => solve_implicit_pat(ctx, scrutinee, &name, arg_tys, labels, span),
+        } => solve_implicit_pat(ctx, scrutinee, &name, case, arg_tys, labels, span),
         Constraint::TupleRestPat {
             scrutinee,
             prefix_tys,
@@ -1086,12 +1121,6 @@ pub(super) fn try_solve_inner(ctx: &mut InferCtx<'_>, c: Constraint) -> SolveRes
             }
             r
         },
-
-        Constraint::InterpolationLink {
-            result_tv,
-            acc_tv,
-            span,
-        } => solve_interpolation_link(ctx, result_tv, acc_tv, span),
 
         Constraint::ForLoopIterator {
             iterable,

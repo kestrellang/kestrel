@@ -165,6 +165,117 @@ func processPoint(p: Point) -> Int32
 
 _Defined in `lang/std/ffi/ffi.ks`._
 
+## struct `NullableCFunction`
+
+```kestrel
+public struct NullableCFunction[F] where F: not Static { /* private fields */ }
+```
+
+A C function of type `F` (`@extern(.C) (…) -> …`), or C's `NULL`.
+
+A C function type is never null, so a C API whose callback is optional
+takes a `NullableCFunction` instead: an `FFISafe` struct field or
+`@extern` parameter of this type has exactly the layout of a C function
+pointer, and the `null` literal is `NULL`.
+
+### Examples
+
+```
+@export(.C, mangleName: "on_log")
+func onLog(level: Int32, message: CString) { ... }
+
+var hooks = Hooks(log: NullableCFunction(onLog), panic: null)
+if let .Some(log) = hooks.log.function {
+    unsafe log(1, message)
+}
+```
+
+`F` must be a C function type (E647).
+
+_Defined in `lang/std/ffi/nullable_cfunction.ks`._
+
+### Members
+
+#### initializer `From Function`
+
+```kestrel
+public init(F)
+```
+
+`f`, never null.
+
+_Defined in `lang/std/ffi/nullable_cfunction.ks`._
+
+#### initializer `Null Literal`
+
+```kestrel
+public init()
+```
+
+C's `NULL` (`null`), for a callback left unset.
+
+_Defined in `lang/std/ffi/nullable_cfunction.ks`._
+
+#### field `function`
+
+```kestrel
+public var function: F? { get }
+```
+
+The C function, or `None` when this is `null`.
+
+_Defined in `lang/std/ffi/nullable_cfunction.ks`._
+
+#### field `isNull`
+
+```kestrel
+public var isNull: Bool { get }
+```
+
+Whether this is `null`.
+
+_Defined in `lang/std/ffi/nullable_cfunction.ks`._
+
+#### field `pointer`
+
+```kestrel
+public var pointer: RawPointer { get }
+```
+
+The address as an untyped pointer.
+
+_Defined in `lang/std/ffi/nullable_cfunction.ks`._
+
+### Implements `FFISafe`
+
+### Implements `ExpressibleByNullLiteral`
+
+## function `calloc`
+
+```kestrel
+public func calloc(consuming Int64, consuming Int64) -> RawPointer
+```
+
+Wraps `calloc(3)` — allocates `count * size` bytes of zeroed memory.
+
+Returns null on failure (including when `count * size` overflows).
+Large blocks come straight from the kernel already zeroed, so pages
+are only touched when first written. Free with `free`.
+
+### Safety
+
+The returned pointer is raw: pair every successful call with exactly
+one `free`, and stay within `count * size` bytes.
+
+### Examples
+
+```
+let buf = calloc(1024, 1);  // 1 KB of zero bytes
+free(buf);
+```
+
+_Defined in `lang/std/ffi/libc.ks`._
+
 ## function `free`
 
 ```kestrel
@@ -195,8 +306,8 @@ Wraps `malloc(3)` — allocates `size` bytes of uninitialised memory.
 
 Returns a pointer to the start of the block, or null on failure.
 The memory is **uninitialised** — read it only after writing
-every byte you intend to use, or follow up with `memset` /
-`calloc` (not exposed here). Free with `free`.
+every byte you intend to use, or use `calloc` / `memset` for zeroed
+memory. Free with `free`.
 
 ### Safety
 

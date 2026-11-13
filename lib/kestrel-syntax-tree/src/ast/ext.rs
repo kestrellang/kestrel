@@ -68,6 +68,14 @@ pub trait HasStatic: AstNode {
     }
 }
 
+/// A declaration that may be `unsafe`. The modifier is found by kind, so
+/// `unsafe static` and `static unsafe` read the same.
+pub trait HasUnsafe: AstNode {
+    fn is_unsafe(&self) -> bool {
+        support::child::<UnsafeModifier>(self.syntax()).is_some()
+    }
+}
+
 macro_rules! impl_trait {
     ($tr:ident: $($t:ident),* $(,)?) => { $(impl $tr for $t {})* };
 }
@@ -87,6 +95,8 @@ impl_trait!(HasGenerics: StructDeclaration, EnumDeclaration, ProtocolDeclaration
 impl_trait!(HasConformances: StructDeclaration, EnumDeclaration, ProtocolDeclaration,
     TypeAliasDeclaration, ExtensionDeclaration);
 impl_trait!(HasStatic: FunctionDeclaration, FieldDeclaration, SubscriptDeclaration);
+impl_trait!(HasUnsafe: FunctionDeclaration, FieldDeclaration, SubscriptDeclaration,
+    InitializerDeclaration, ProtocolDeclaration);
 
 impl Name {
     pub fn text(&self) -> Option<String> {
@@ -158,6 +168,14 @@ impl TyFunction {
             .filter_map(|e| e.into_token())
             .find(|t| !t.kind().is_trivia())
     }
+
+    /// The convention attribute of a C function type (`@extern(.C)`).
+    pub fn convention(&self) -> Option<Attribute> {
+        self.syntax()
+            .children()
+            .take_while(|n| n.kind() != SyntaxKind::TyList)
+            .find_map(Attribute::cast)
+    }
 }
 
 impl TypeAliasDeclaration {
@@ -182,9 +200,10 @@ impl FieldDeclaration {
         self.expressions().next()
     }
 
-    /// `lazy let|var`.
+    /// `lazy let|var`. The grammar takes `lazy` before or after `static`
+    /// (`lazy static var`, `static lazy var`), hence `lazy_modifiers`.
     pub fn is_lazy(&self) -> bool {
-        self.lazy_modifier().is_some()
+        support::child::<LazyModifier>(self.syntax()).is_some()
     }
 
     /// Instance storage the user declared: not `static`, not `lazy` (its
@@ -277,8 +296,10 @@ impl PropertyAccessors {
         self.code_block().is_some()
             || self.getter().is_some_and(|g| g.code_block().is_some())
             || self.setter().is_some_and(|s| s.code_block().is_some())
-            || self.ref_clause().is_some()
-            || self.mutating_ref_clause().is_some()
+            || self.ref_clause().is_some_and(|r| r.code_block().is_some())
+            || self
+                .mutating_ref_clause()
+                .is_some_and(|r| r.code_block().is_some())
             || self.modifying_getter().is_some()
             || self.modifying_ref_clause().is_some()
     }

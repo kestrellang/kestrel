@@ -138,6 +138,10 @@ pub struct Layout {
     /// every `Dispatchable` entry, in this order; parents' requirements live
     /// in the parents' tables.
     pub requirements: Vec<(Entity, Dispatch)>,
+    /// The dispatchable `{ get set }` property requirements, in declaration
+    /// order: each gets a setter slot after every [`Layout::slots`] entry, so
+    /// a write through an existential reaches the payload's setter.
+    pub setters: Vec<Entity>,
     /// Directly refined protocols (one parent-table pointer each).
     pub parents: Vec<Entity>,
 }
@@ -149,6 +153,17 @@ impl Layout {
             .iter()
             .filter(|(_, d)| matches!(d, Dispatch::Dispatchable { .. }))
             .map(|(e, _)| *e)
+    }
+
+    /// Where `requirement` lives among the table's function words (after
+    /// the parent-table pointers): its getter/method slot, or with `setter`
+    /// its setter slot.
+    pub fn slot_index(&self, requirement: Entity, setter: bool) -> Option<usize> {
+        if !setter {
+            return self.slots().position(|r| r == requirement);
+        }
+        let i = self.setters.iter().position(|&r| r == requirement)?;
+        Some(self.slots().count() + i)
     }
 }
 
@@ -167,7 +182,7 @@ impl QueryFn for ExistentialLayout {
             protocol: self.protocol,
             root: self.root,
         });
-        let requirements = members
+        let requirements: Vec<(Entity, Dispatch)> = members
             .iter()
             .filter(|m| m.extension.is_none() && m.declaring_protocol == self.protocol)
             .map(|m| {
@@ -177,6 +192,15 @@ impl QueryFn for ExistentialLayout {
                 });
                 (m.entity, dispatch)
             })
+            .collect();
+        let setters = requirements
+            .iter()
+            .filter(|(r, d)| {
+                matches!(d, Dispatch::Dispatchable { .. })
+                    && ctx.get::<NodeKind>(*r) == Some(&NodeKind::Field)
+                    && ctx.get::<kestrel_ast_builder::Settable>(*r).is_some()
+            })
+            .map(|(r, _)| *r)
             .collect();
         let parents = ctx
             .query(ConformingProtocols {
@@ -189,6 +213,7 @@ impl QueryFn for ExistentialLayout {
             .collect();
         Arc::new(Layout {
             requirements,
+            setters,
             parents,
         })
     }
@@ -240,7 +265,8 @@ pub fn self_conformance(
     for p in bound_closure(ctx, &[protocol], root) {
         let layout = ctx.query(ExistentialLayout { protocol: p, root });
         for (requirement, dispatch) in &layout.requirements {
-            if !dispatch.allowed(bound) {
+            if !dispatch.allowed(bound) && existential_default(ctx, p, *requirement, root).is_none()
+            {
                 out.blocker.get_or_insert(*requirement);
             }
             match ctx
@@ -254,6 +280,36 @@ pub fn self_conformance(
         }
     }
     out
+}
+
+/// The `@existentialOnly` default in `extend protocol` that stands in for
+/// `requirement` on `any P`, when the requirement can't go through the table
+/// (`Formattable.format(into:)` is generic). The box binds it like any other
+/// protocol extension default; concrete conformers ignore it.
+pub fn existential_default(
+    ctx: &QueryContext<'_>,
+    protocol: Entity,
+    requirement: Entity,
+    root: Entity,
+) -> Option<Entity> {
+    use kestrel_name_res::helpers::member_lookup_name;
+    let name = member_lookup_name(ctx, requirement)?;
+    let labels = labels_of(ctx, requirement);
+    ctx.query(ProtocolMembers { protocol, root })
+        .named(name)
+        .filter(|m| m.extension.is_some() && m.declaring_protocol == protocol)
+        .map(|m| m.entity)
+        .find(|&d| {
+            kestrel_ast_builder::attrs::attrs_of(ctx, d).is_existential_only()
+                && labels_of(ctx, d) == labels
+        })
+}
+
+/// Argument labels (`None` for an unlabelled parameter).
+fn labels_of(ctx: &QueryContext<'_>, entity: Entity) -> Vec<Option<String>> {
+    ctx.get::<kestrel_ast_builder::Callable>(entity)
+        .map(|c| c.params.iter().map(|p| p.label.clone()).collect())
+        .unwrap_or_default()
 }
 
 /// The bounds and every protocol they refine, through declared `: Parent`

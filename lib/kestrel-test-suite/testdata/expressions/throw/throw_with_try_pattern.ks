@@ -7,7 +7,9 @@ struct Error {
     var code: lang.i64
 }
 enum Result[T, E] {
+    @builtin(.ResultOkCase)
     case Ok(T)
+    @builtin(.ResultErrCase)
     case Err(E)
 }
 extend Result[T, E]: Prelude.Tryable {

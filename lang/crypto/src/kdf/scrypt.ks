@@ -21,8 +21,8 @@ public struct Scrypt {
     /// `parallelism` are at least 1 with `blockSize × parallelism < 2^30`;
     /// throws `.InvalidLength` for a negative `length`.
     public static func deriveKey(
-        password: some Slice[UInt8] and not Static,
-        salt salt: some Slice[UInt8] and not Static,
+        password: &Slice[UInt8],
+        salt salt: &Slice[UInt8],
         logN logN: Int64,
         blockSize r: Int64,
         parallelism p: Int64,
@@ -110,12 +110,12 @@ public struct Scrypt {
             Scrypt.step(w, 12, 15, 14, 7); Scrypt.step(w, 13, 12, 15, 9);
             Scrypt.step(w, 14, 13, 12, 13); Scrypt.step(w, 15, 14, 13, 18);
         }
-        for i in 0..<16 { x(i) = x(i) + w(i); }
+        for i in 0..<16 { x(i) = x(i).addWrapping(w(i)); }
     }
 
     /// One Salsa20 step: `w[target] ^= (w[a] + w[b]) <<< shift`.
     static func step(mutating w: Array[UInt32], target: Int64, a: Int64, b: Int64, shift: Int64) {
-        w(target) = w(target) ^ (w(a) + w(b)).rotateLeft(by: shift);
+        w(target) = w(target) ^ (w(a).addWrapping(w(b))).rotateLeft(by: shift);
     }
 
     static func wordsFromBytes(bytes: Array[UInt8]) -> Array[UInt32] {

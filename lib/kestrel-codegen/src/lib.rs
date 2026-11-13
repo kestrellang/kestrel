@@ -8,9 +8,10 @@
 //! `-O0` (Cranelift) and `-O1`/`-O2` (LLVM) disagree about the same type.
 
 pub mod abi;
+pub mod c_abi;
 pub mod layout;
 pub mod repr;
 
 pub use abi::{PassMode, ReturnMode, param_pass_mode, return_mode};
 pub use kestrel_target::TargetConfig;
-pub use repr::{ScalarModel, TypeCache, TypeRepr};
+pub use repr::{ScalarModel, TypeCache, TypeRepr, ref_slot_loads_pointee};

@@ -5,14 +5,21 @@
 // An opaque `some P` parameter with a default can be omitted: its type is
 // the default expression's (`Array[UInt8]` here), as Swift's SE-0347 infers
 // a generic parameter from its default. It used to fail with E107 "does not
-// satisfy constraint `_ !: Slice[UInt8]`" — nothing pinned the parameter.
+// satisfy constraint `_ !: Sliceable[UInt8]`" — nothing pinned the parameter.
 
 module Test
 
-func total(data: some Slice[UInt8], extra extra: some Slice[UInt8] = Array[UInt8]()) -> Int64 {
+import std.collections.(Slice)
+
+// `Lends` stands in for the removed std `Sliceable`: a protocol whose
+// conformers lend their elements as a `Slice`.
+protocol Lends[T] { func asSlice() -> &Slice[T] }
+extend Array[T, A]: Lends[T] { }
+
+func total(data: some Lends[UInt8], extra extra: some Lends[UInt8] = Array[UInt8]()) -> Int64 {
     var sum: Int64 = 0;
-    for b in data.asUnsafeSlice() { sum = sum + Int64(from: b); }
-    for b in extra.asUnsafeSlice() { sum = sum + Int64(from: b); }
+    for b in data.asSlice().asUnsafeSlice() { sum = sum + Int64(from: b); }
+    for b in extra.asSlice().asUnsafeSlice() { sum = sum + Int64(from: b); }
     sum
 }
 

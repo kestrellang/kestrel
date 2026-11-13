@@ -191,6 +191,12 @@ fn mangle_type(
             mangle_type(arena, entity_names, inner, out);
         },
 
+        MirTy::Slice(elem) => {
+            let elem = *elem;
+            out.push('Q');
+            mangle_type(arena, entity_names, elem, out);
+        },
+
         // `Z` + each bound (path + args) + `B` + each pinned associated
         // type (path + type) + `E`.
         MirTy::RawExistential { bounds, bindings } => {
@@ -254,6 +260,23 @@ fn mangle_type(
             out.push_str(&params.len().to_string());
             out.push('_');
             for (p, _conv) in &params {
+                mangle_type(arena, entity_names, *p, out);
+            }
+            mangle_type(arena, entity_names, ret, out);
+            out.push('E');
+        },
+
+        // `X` for a C function; conventions matter (value vs pointer).
+        MirTy::FuncC { params, ret, .. } => {
+            let params = params.clone();
+            let ret = *ret;
+            out.push('X');
+            out.push_str(&params.len().to_string());
+            out.push('_');
+            for (p, conv) in &params {
+                if *conv != ParamConvention::Consuming {
+                    out.push('R');
+                }
                 mangle_type(arena, entity_names, *p, out);
             }
             mangle_type(arena, entity_names, ret, out);

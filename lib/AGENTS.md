@@ -124,3 +124,28 @@ Run `rustfmt --edition 2024 <file>` on the specific files you changed, not
 declarations, so formatting a `lib.rs` also reformats every child module, and
 several files in the tree are not rustfmt-clean today. Formatting them in a
 feature commit buries the real change in unrelated hunks.
+
+## Compiler-generated protocol calls name their requirement — never a string
+
+A call the compiler emits on the user's behalf (desugarings like `for`, `try`,
+`?.`, operators and interpolation; promotion; `boolValue`; `@main`'s
+`report()`; closure `clone()`; box members) calls one `@builtin`-tagged
+**requirement entity**, never "whatever member is named `iter`". A by-name
+lookup picks up a same-named witness of a different protocol (E103 ambiguity,
+or silently the wrong method — `try` once segfaulted this way).
+
+| Layer | Helper |
+|---|---|
+| HIR lower | `protocol_requirement(protocol, Builtin)` → `ProtocolCall.requirement` / `ImplicitMember.requirement` |
+| Type infer | `requirement_call` (typed from the requirement, `Self` = receiver/expected type); `requirement_breaks_tie` for abstract receivers |
+| MIR lower | `protocol_call_target` / `LowerCtx::builtin_witness_key(Builtin)` → `Callee::Witness` |
+| Analyzer | `util::protocol_call_method(cx, expr)` |
+| Assoc types | name-res `AssociatedTypeBinding` — the only lookup |
+
+- A new requirement tag needs arms in all 4 tables in `kestrel-hir/src/builtin.rs`.
+- An **init** requirement (`Interpolatable.init`, `init(interpolation:)`)
+  produces `Self` (its declared return is `()`), and MIR must call it with the
+  init convention (`emit_init_call`: out-pointer `self` first), not as a plain call.
+- Deliberate exception: interpolation's `appendInterpolation` is not a
+  requirement — each accumulator declares its own overloads (which hole types
+  it accepts), so it is an ordinary method call on the concrete accumulator.

@@ -4,7 +4,7 @@ Kestrel uses a file-based module system where each file declares its module path
 
 ## Module Declarations
 
-Every Kestrel source file must declare its module path using the `module` keyword.
+Every Kestrel source file must declare its module path using the `module` keyword. A file that declares anything without one is an error (E414). A file holding only comments, such as a package's doc-only `main.ks`, needs none.
 
 ### Syntax
 
@@ -455,7 +455,7 @@ module DataProcessor
 import std.collections.(Array)
 import std.text.(String)
 import std.result.(Result, Optional)
-import std.io.(File, ReadError, WriteError)
+import std.files.(File, ReadError, WriteError)
 
 func processFile(path: String) -> Result[Array[String], ReadError] {
     // Implementation uses only imported types

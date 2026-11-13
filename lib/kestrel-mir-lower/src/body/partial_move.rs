@@ -17,7 +17,6 @@ use std::collections::{HashMap, HashSet};
 use kestrel_ast_builder::{Callable, ReceiverKind};
 use kestrel_hir::body::{HirBlock, HirCallArg, HirExpr, HirExprId, HirStmt};
 use kestrel_hir::res::LocalId as HirLocalId;
-use kestrel_mir::item::witness::WitnessMethodKey;
 use kestrel_mir::{FieldIdx, MirTy, TyId};
 use kestrel_type_infer::captures::{PlaceKey, ProjElem};
 
@@ -154,6 +153,12 @@ impl OssaBodyCtx<'_, '_> {
             let mut moves = Vec::new();
             let mut root = None;
             for (binding, place) in places {
+                // A ref binding (a `&T` tuple/payload slot) copies the stored
+                // address and never moves: `resolve_local_type` peels it to
+                // the pointee, which may be NotCopyable (`&Slice[T]`).
+                if self.local_is_ref(binding) {
+                    continue;
+                }
                 let ty = self.resolve_local_type(binding);
                 if !(self.is_non_copyable(ty) || self.copy_behavior_is_mono_dependent(ty)) {
                     continue;
@@ -303,12 +308,17 @@ impl OssaBodyCtx<'_, '_> {
                     receiver,
                     protocol,
                     method,
+                    requirement,
                     args,
                     ..
                 } => {
-                    let labels = args.iter().map(|a| a.label.clone()).collect();
-                    let key = WitnessMethodKey::new(method.as_str_or_empty(), labels);
-                    let entity = self.find_protocol_method_entity(*protocol, &key);
+                    let requirement = self.chain_requirement(id).or(*requirement);
+                    let (_, entity) = self.protocol_call_target(
+                        requirement,
+                        *protocol,
+                        method.as_str_or_empty(),
+                        args,
+                    );
                     f(entity, Some(*receiver), args);
                 },
                 _ => {},

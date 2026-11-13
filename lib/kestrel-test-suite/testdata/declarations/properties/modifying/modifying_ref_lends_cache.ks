@@ -9,7 +9,7 @@ module Test
 
 import std.numeric.(Int64)
 import std.collections.(Array)
-import std.io.stdio.(println)
+import std.streams.(println)
 
 struct Doc {
     var words: Array[Int64]

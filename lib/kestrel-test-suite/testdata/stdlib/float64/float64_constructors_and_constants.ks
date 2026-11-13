@@ -20,7 +20,7 @@ module Test
 
             // init(from: Int64)
             let intVal: std.numeric.Int64 = 100;
-            let fromInt64 = std.numeric.Float64(from: intVal);
+            let fromInt64 = std.numeric.Float64(rounding: intVal);
             let expected100: std.numeric.Float64 = 100.0;
             if fromInt64.isEqual(to: expected100) == false { return 4 }
 

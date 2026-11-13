@@ -44,6 +44,7 @@ pub fn default_analyzers() -> AnalyzerRegistry {
     r.add_body_check(body::guard::GuardDivergenceAnalyzer);
     r.add_body_check(body::condition_check::ConditionCheckAnalyzer);
     r.add_body_check(body::type_test::TypeTestAnalyzer);
+    r.add_body_check(body::c_function::CFunctionAnalyzer);
     r.add_body_check(body::param_pattern::ParamPatternAnalyzer);
     r.add_body_check(body::assignment::AssignmentAnalyzer);
 
@@ -68,7 +69,9 @@ pub fn default_analyzers() -> AnalyzerRegistry {
     r.add_body_check(body::string_escape::StringEscapeAnalyzer);
     r.add_body_check(body::integer_literal_range::IntegerLiteralRangeAnalyzer);
     r.add_body_check(body::restricted_use::RestrictedUseAnalyzer);
+    r.add_body_check(body::unsafe_use::UnsafeUseAnalyzer);
     r.add_body_check(body::packed_field_borrow::PackedFieldBorrowAnalyzer);
+    r.add_body_check(body::view_conversion::ViewConversionAnalyzer);
 
     // Declaration checks
     r.add_decl_check(decl::function_body::FunctionBodyAnalyzer);
@@ -104,8 +107,8 @@ pub fn default_analyzers() -> AnalyzerRegistry {
     r.add_decl_check(decl::conformance_target::ConformanceTargetAnalyzer);
     r.add_decl_check(decl::import_target::ImportTargetAnalyzer);
     r.add_decl_check(decl::recursive_enum::RecursiveEnumAnalyzer);
-    r.add_decl_check(decl::indirect_enum::IndirectEnumAnalyzer);
-    r.add_decl_check(decl::parent_protocol_conformance::ParentProtocolConformanceAnalyzer);
+    r.add_decl_check(decl::opaque_cycle::OpaqueCycleAnalyzer);
+    r.add_decl_check(decl::unsafe_field::UnsafeFieldAnalyzer);
     r.add_decl_check(decl::protocol_field_conformance::ProtocolFieldConformanceAnalyzer);
     r.add_decl_check(decl::generics::GenericsAnalyzer);
     r.add_decl_check(decl::generics::TypeArgArityAnalyzer);
@@ -128,6 +131,7 @@ pub fn default_analyzers() -> AnalyzerRegistry {
     );
     r.add_compilation_check(compilation::attribute_validation::AttributeValidationAnalyzer);
     r.add_compilation_check(compilation::entry_point::EntryPointAnalyzer);
+    r.add_compilation_check(compilation::module_declaration::ModuleDeclarationAnalyzer);
 
     r
 }

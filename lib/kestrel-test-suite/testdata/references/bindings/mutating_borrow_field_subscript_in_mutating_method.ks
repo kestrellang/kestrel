@@ -2,7 +2,7 @@
 // stdlib: true
 // backends: cranelift,llvm
 
-// `&mutating self.items(at: i)` inside a `mutating` method: a subscript on
+// `&mutating self.items(i)` inside a `mutating` method: a subscript on
 // a `var` field of a mutable `self` is a mutable place. It used to be
 // rejected as "a `&mutating` borrow through a shared reference" (E210),
 // because the method-call-shaped field subscript was classified by its
@@ -17,7 +17,7 @@ struct Bag {
 
     mutating func firstMut() -> Optional[&mutating Int64] {
         if self.items.count == 0 { return null; }
-        let r = &mutating self.items(at: 0);
+        let r = &mutating self.items(0);
         .Some(r)
     }
 }
@@ -30,6 +30,6 @@ func main() -> lang.i64 {
         .Some(e) => { e += 10; },
         .None => {},
     }
-    if b.items(at: 0) != 14 { return 1; }
+    if b.items(0) != 14 { return 1; }
     0
 }

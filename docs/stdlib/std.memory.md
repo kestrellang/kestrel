@@ -10,7 +10,7 @@ Protocol for raw-memory allocators.
 
 `Allocator` is the indirection collections use so they can be parameterised
 over allocation strategy (e.g. `Array[T, A]`, `Buffer[T, A]`, custom
-arenas). All three methods are `mutating` so stateful allocators (arenas,
+arenas). Every method is `mutating` so stateful allocators (arenas,
 pools) can update their bookkeeping; stateless wrappers around `malloc`
 don't need to.
 
@@ -36,6 +36,28 @@ mutating func allocate(Layout) -> RawPointer?
 
 Returns a pointer to a fresh region matching `layout`, or `.None`
 when allocation fails. Returned memory is uninitialised.
+
+_Defined in `lang/std/memory/allocator.ks`._
+
+#### function `allocateZeroed`
+
+```kestrel
+mutating func allocateZeroed(Layout) -> RawPointer?
+```
+
+Like `allocate`, but every byte of the returned region is zero.
+The default allocates and then zeroes; an allocator that can get
+zeroed memory more cheaply (`calloc`) overrides it.
+
+_Defined in `lang/std/memory/allocator.ks`._
+
+#### function `allocateZeroed`
+
+```kestrel
+public mutating func allocateZeroed(Layout) -> RawPointer?
+```
+
+Default `allocateZeroed`: `allocate`, then zero the bytes.
 
 _Defined in `lang/std/memory/allocator.ks`._
 
@@ -69,245 +91,139 @@ returned pointer instead.
 
 _Defined in `lang/std/memory/allocator.ks`._
 
-## struct `ArraySlice`
+## struct `ArenaAllocator`
 
 ```kestrel
-public struct ArraySlice[T] { /* private fields */ }
+public struct ArenaAllocator { /* private fields */ }
 ```
 
-Non-owning view over a contiguous run of `T` values.
+A bump allocator: hands out memory from big chunks by moving a cursor,
+and gives it all back at once with `reset()` or `release()`.
 
-`Slice` is the standard "borrow" type for arrays, buffers, and any
-other contiguous storage: it stores a pointer + length and provides
-safe and unchecked indexing, sub-slicing, iteration, and pattern
-matching. The slice does **not** track or extend the lifetime of the
-underlying storage — keeping a slice past the end of its source is a
-use-after-free.
+Allocating is a pointer bump; `deallocate` does nothing except take
+back the most recent allocation, and `reallocate` grows the most
+recent allocation in place when it fits. That suits many short-lived
+objects that die together: a tree built and thrown away, per-request
+scratch arrays, a parser's nodes.
+
+`ArenaAllocator` is a handle: copies share one arena. That is what lets
+a collection keep a copy of its allocator (`Array[T, ArenaAllocator]`).
+Nothing frees the arena automatically; call `release()` once nothing
+allocated from it is used any more.
 
 ### Examples
 
 ```
-let arr = [1, 2, 3, 4];
-let s = arr.asSlice();
-s[safe: 0]                    // .Some(1)
-s[safe: 99]                   // .None
-for x in s.iter() { print(x) }
+var arena = ArenaAllocator();
+for _ in 0..<1000 {
+    var xs = Array[Int64, ArenaAllocator](allocator: arena);
+    for i in 0..<100 { xs.append(i); }
+    // ... use xs; it must be gone before the reset
+    arena.reset();   // keeps the memory for the next round
+}
+arena.release();
 ```
-
-### Memory Model
-
-Non-owning. Drop the source (`Array`, `Buffer`, literal scope) and the
-slice becomes dangling. Slices freely copy — they're just `(ptr, len)`
-pairs.
-
-_Defined in `lang/std/memory/pointer.ks`._
-
-### Members
-
-#### initializer `From Pointer`
-
-```kestrel
-public init(pointer: Pointer[T], count: Int64)
-```
-
-Builds a slice from an existing pointer and element count. The
-caller is responsible for ensuring `count` elements live at `pointer`.
-
-_Defined in `lang/std/memory/pointer.ks`._
-
-#### field `count`
-
-```kestrel
-public var count: Int64 { get }
-```
-
-Element count.
-
-_Defined in `lang/std/memory/pointer.ks`._
-
-#### function `first`
-
-```kestrel
-public func first() -> Optional[T]
-```
-
-First element, or `.None` for an empty slice.
-
-_Defined in `lang/std/memory/pointer.ks`._
-
-#### field `isEmpty`
-
-```kestrel
-public var isEmpty: Bool { get }
-```
-
-`true` when `count == 0`.
-
-_Defined in `lang/std/memory/pointer.ks`._
-
-#### function `last`
-
-```kestrel
-public func last() -> Optional[T]
-```
-
-Last element, or `.None` for an empty slice.
-
-_Defined in `lang/std/memory/pointer.ks`._
-
-#### field `pointer`
-
-```kestrel
-public var pointer: Pointer[T] { get }
-```
-
-Pointer to the first element. `pointer.offset(by: i)` reaches
-element `i` (0-indexed).
-
-_Defined in `lang/std/memory/pointer.ks`._
-
-### Implements `ArrayMatchable`
-
-#### typealias `Element`
-
-```kestrel
-type Element = T
-```
-
-_Defined in `lang/std/memory/pointer.ks`._
-
-#### function `matchGet`
-
-```kestrel
-public func matchGet(Int64) -> T
-```
-
-Compiler-driven element read; safe to skip the bounds check
-because the matcher emits `index < matchLength()` first.
-
-_Defined in `lang/std/memory/pointer.ks`._
-
-#### function `matchLength`
-
-```kestrel
-public func matchLength() -> Int64
-```
-
-Element count, exposed to the pattern matcher.
-
-_Defined in `lang/std/memory/pointer.ks`._
-
-#### function `matchSlice`
-
-```kestrel
-public func matchSlice(Int64, Int64) -> ArraySlice[T]
-```
-
-Sub-slice for rest-pattern bindings (`..rest`). As above, the
-matcher guarantees `0 <= from <= to <= matchLength()`.
-
-_Defined in `lang/std/memory/pointer.ks`._
-
-### Implements `Slice`
-
-#### function `asSlice`
-
-```kestrel
-public func asSlice() -> ArraySlice[T]
-```
-
-Returns `self` — `ArraySlice` is already the borrowed view.
-
-_Defined in `lang/std/memory/pointer.ks`._
-
-#### function `ensureUnique`
-
-```kestrel
-public mutating func ensureUnique()
-```
-
-No-op — `ArraySlice` is a non-owning view with no COW barrier.
-
-_Defined in `lang/std/memory/pointer.ks`._
-
-### Implements `Iterable`
-
-#### typealias `Item`
-
-```kestrel
-type Item = T
-```
-
-_Defined in `lang/std/memory/pointer.ks`._
-
-#### typealias `TargetIterator`
-
-```kestrel
-type TargetIterator = ArraySliceIterator[T]
-```
-
-_Defined in `lang/std/memory/pointer.ks`._
-
-#### function `iter`
-
-```kestrel
-public func iter() -> ArraySliceIterator[T]
-```
-
-Forward iterator over the elements.
-
-_Defined in `lang/std/memory/pointer.ks`._
-
-### Implements `Equatable`
-
-_Conditional: `where T: Equatable`._
-
-## struct `ArraySliceIterator`
-
-```kestrel
-public struct ArraySliceIterator[T] { /* private fields */ }
-```
-
-Forward iterator over an `ArraySlice[T]`. Holds a moving pointer and a
-remaining count; advancing reads through the pointer.
 
 ### Representation
 
-A `Pointer[T]` cursor and an `Int64` countdown.
+One pointer to a heap `ArenaState`: the current chunk, the cursor and
+end within it, and the size of the next chunk. Each chunk starts with
+a header linking it to the previous one.
 
-_Defined in `lang/std/memory/pointer.ks`._
+### Memory Model
+
+Not thread-safe. Memory from the arena is valid until the next `reset()`
+or `release()`; using it after that is a use-after-free, and values
+still holding arena memory then must not be dropped afterwards either.
+
+_Defined in `lang/std/memory/arena.ks`._
 
 ### Members
 
-#### initializer `From Storage`
+#### initializer `Chunk Size`
 
 ```kestrel
-public init(ptr: Pointer[T], remaining: Int64)
+public init(chunkSize: Int64)
 ```
 
-Builds an iterator from a starting pointer and remaining count.
+An empty arena whose first chunk holds `chunkSize` bytes. Later
+chunks double, up to 16 MiB.
 
-_Defined in `lang/std/memory/pointer.ks`._
+_Defined in `lang/std/memory/arena.ks`._
 
-### Implements `Iterator`
-
-#### typealias `Item`
+#### initializer `Default`
 
 ```kestrel
-type Item = T
+public init()
 ```
 
-_Defined in `lang/std/memory/pointer.ks`._
+An empty arena whose first chunk is 64 KiB.
 
-#### function `next`
+_Defined in `lang/std/memory/arena.ks`._
+
+#### function `release`
 
 ```kestrel
-public mutating func next() -> Optional[T]
+public consuming func release()
 ```
 
-Yields the next element, or `.None` when the count reaches zero.
+Frees every chunk and the arena itself. Every copy of this handle
+is invalid afterwards.
 
-_Defined in `lang/std/memory/pointer.ks`._
+_Defined in `lang/std/memory/arena.ks`._
+
+#### field `reservedBytes`
+
+```kestrel
+public var reservedBytes: Int64 { get }
+```
+
+Bytes reserved from the system, across all chunks.
+
+_Defined in `lang/std/memory/arena.ks`._
+
+#### function `reset`
+
+```kestrel
+public mutating func reset()
+```
+
+Frees every chunk but the newest (the largest) and starts over in
+it. Everything allocated before is invalid afterwards.
+
+_Defined in `lang/std/memory/arena.ks`._
+
+### Implements `Allocator`
+
+#### function `allocate`
+
+```kestrel
+public mutating func allocate(Layout) -> RawPointer?
+```
+
+_Defined in `lang/std/memory/arena.ks`._
+
+#### function `deallocate`
+
+```kestrel
+public mutating func deallocate(RawPointer, Layout)
+```
+
+Takes the memory back only when `ptr` is the most recent
+allocation; otherwise it waits for `reset()`.
+
+_Defined in `lang/std/memory/arena.ks`._
+
+#### function `reallocate`
+
+```kestrel
+public mutating func reallocate(RawPointer, Layout, Layout) -> RawPointer?
+```
+
+Grows or shrinks the most recent allocation in place when it fits;
+otherwise allocates afresh and copies.
+
+_Defined in `lang/std/memory/arena.ks`._
 
 ## struct `Buffer`
 
@@ -352,7 +268,7 @@ _Defined in `lang/std/memory/buffer.ks`._
 #### initializer `With Capacity`
 
 ```kestrel
-public init(Int64, A)
+public init(Int64, consuming A)
 ```
 
 Allocates a buffer holding `capacity` elements. Storage is
@@ -366,13 +282,13 @@ returns `.None`.
 
 _Defined in `lang/std/memory/buffer.ks`._
 
-#### function `asSlice`
+#### function `asUnsafeSlice`
 
 ```kestrel
-public func asSlice() -> ArraySlice[T]
+public func asUnsafeSlice() -> UnsafeSlice[T] where T: Copyable
 ```
 
-Returns a `ArraySlice[T]` over the entire buffer. The slice does not
+Returns a `UnsafeSlice[T]` over the entire buffer. The slice does not
 extend the buffer's lifetime; callers must keep the buffer alive
 for as long as they use the slice.
 
@@ -401,7 +317,7 @@ _Defined in `lang/std/memory/buffer.ks`._
 #### function `read`
 
 ```kestrel
-public func read(unchecked: Int64) -> T
+public func read(unchecked: Int64) -> T where T: Copyable
 ```
 
 Reads slot `index` without bounds checking.
@@ -417,11 +333,15 @@ _Defined in `lang/std/memory/buffer.ks`._
 #### function `read`
 
 ```kestrel
-public func read(at: Int64) -> T?
+public func read(at: Int64) -> T? where T: Copyable
 ```
 
-Reads slot `index`, returning `.None` when out of range. As with
-the unchecked form, the slot must already hold an initialised `T`.
+Reads slot `index`, returning `.None` when out of range.
+
+##### Safety
+
+The slot must already hold an initialised `T`. The bounds check
+can't tell an initialised slot from a fresh one.
 
 _Defined in `lang/std/memory/buffer.ks`._
 
@@ -447,7 +367,7 @@ _Defined in `lang/std/memory/buffer.ks`._
 #### function `slice`
 
 ```kestrel
-public func slice(from: Int64, to: Int64) -> ArraySlice[T]?
+public func slice(from: Int64, to: Int64) -> UnsafeSlice[T]? where T: Copyable
 ```
 
 Returns a slice over `[start, end)`, or `.None` when the range
@@ -459,7 +379,7 @@ _Defined in `lang/std/memory/buffer.ks`._
 #### function `write`
 
 ```kestrel
-public func write(unchecked: Int64, T)
+public func write(unchecked: Int64, consuming T)
 ```
 
 Writes `value` into slot `index` without bounds checking.
@@ -473,43 +393,24 @@ _Defined in `lang/std/memory/buffer.ks`._
 #### function `write`
 
 ```kestrel
-public func write(at: Int64, T) -> Bool
+public func write(at: Int64, consuming T) -> Bool
 ```
 
 Writes `value` to slot `index`. Returns `false` (and does
 nothing) when out of range.
+
+##### Safety
+
+The old contents of the slot are overwritten, not dropped, so the
+slot must be uninitialised or hold a value that needs no drop.
 
 _Defined in `lang/std/memory/buffer.ks`._
 
 ## struct `CowBox`
 
 ```kestrel
-public struct CowBox[T] where T: Cloneable { /* private fields */ }
+public struct CowBox[T, A = GlobalAllocator] where T: Cloneable, T: not Sized, T: not Static, A: Allocator, A: Copyable { /* private fields */ }
 ```
-
-Copy-on-write wrapper around `RcBox[T]`.
-
-Mutable owners use `CowBox`; read-only shared owners (like
-`StringSlice`) hold the inner `RcBox` directly via `shareBox()`.
-The mutation protocol is `write()` → modify → `setValue()`.
-
-### Examples
-
-```
-var box = CowBox(MyStorage());
-var s = box.write();   // COW barrier — clones if shared
-s.len = s.len + 1;
-box.setValue(s);        // write back
-```
-
-### Representation
-
-A single `RcBox[T]` field.
-
-### Memory Model
-
-Same as `RcBox`: non-atomic refcount. Cloning bumps the count;
-`write` splits off a private copy when shared.
 
 _Defined in `lang/std/memory/cowbox.ks`._
 
@@ -518,119 +419,70 @@ _Defined in `lang/std/memory/cowbox.ks`._
 #### initializer `From Value`
 
 ```kestrel
-public init(consuming T)
+public init(consuming T) where T: Sized, A: Defaultable
 ```
 
-Allocates fresh storage holding `value` with refcount 1.
+Allocates fresh storage from a default-made `A` holding `value` with
+refcount 1.
 
 _Defined in `lang/std/memory/cowbox.ks`._
 
 #### initializer `Inner`
 
 ```kestrel
-public init(inner: RcBox[T])
+public init(inner: RcBox[T, A])
 ```
 
 Adopts an existing `RcBox` without allocating.
 
 _Defined in `lang/std/memory/cowbox.ks`._
 
-#### typealias `Target`
+#### initializer `Value and Allocator`
 
 ```kestrel
-type Target = T where T: Cloneable
+public init(consuming T, allocator: A) where T: Sized
 ```
+
+Allocates storage from `allocator` holding `value` with refcount 1.
 
 _Defined in `lang/std/memory/cowbox.ks`._
 
-#### function `isUnique`
+#### function `ensureUnique`
 
 ```kestrel
-public func isUnique() -> Bool
+public mutating func ensureUnique()
 ```
 
-Returns `true` when no other clone shares this storage.
+COW barrier — makes the storage uniquely owned, cloning it if shared.
+
+The fork clones the heap value in place (`RcBox.fork`), so a
+shared box is deep-copied exactly once and an unsized payload works.
+Every write (`value`'s `mutating ref`) goes through here.
+
+Always inlined: every `Array`/`Dictionary` write runs it, and the
+unique case is one load and compare. The fork stays out of line
+(`forkStorage`) so inlining doesn't pull the deep copy into callers.
 
 _Defined in `lang/std/memory/cowbox.ks`._
 
-#### function `modify`
+#### field `isUnique`
 
 ```kestrel
-public mutating func modify[R]((T) -> R) -> R
+public var isUnique: Bool { get }
 ```
 
-In-place mutation barrier: ensures unique storage (deep-copying if
-shared), then passes the heap value to `body` as a `mutating` argument
-to mutate directly — no per-call clone or write-back. This is the O(1)
-replacement for the `read()` → modify → `setValue()` dance.
-
-_Defined in `lang/std/memory/cowbox.ks`._
-
-#### function `pointeeRef`
-
-```kestrel
-public func pointeeRef() -> &T where T: Cloneable
-```
-
-_Defined in `lang/std/memory/cowbox.ks`._
-
-#### function `read`
-
-```kestrel
-public func read() -> T
-```
-
-Read access — clones the value so the caller gets an independent
-copy. getValue() returns a raw bitwise copy from the heap; cloning
-ensures owned resources (byte buffers, etc.) are properly duplicated.
-
-_Defined in `lang/std/memory/cowbox.ks`._
-
-#### function `setValue`
-
-```kestrel
-public func setValue(consuming T)
-```
-
-Writes `value` into the storage in place. Only valid after
-a preceding `write()` call (which ensures uniqueness).
-Takes `value` by consuming so the drop pass sees the caller's
-local as moved (Dead) — prevents double-free of shared buffers.
-
-_Defined in `lang/std/memory/cowbox.ks`._
-
-#### function `shareBox`
-
-```kestrel
-public func shareBox() -> RcBox[T]
-```
-
-Returns a shared `RcBox` pointing at the same storage
-(refcount bumped). Use this to hand read-only access to
-types like `StringSlice`.
+`true` when no other copy shares this storage.
 
 _Defined in `lang/std/memory/cowbox.ks`._
 
 #### function `valuePtr`
 
 ```kestrel
-public func valuePtr() -> Pointer[T]
+internal func valuePtr() -> Pointer[T]
 ```
 
-Returns a pointer to the wrapped value on the heap, bypassing
-the clone that `read()` / `getValue()` would create. Use this
-to read individual scalar fields without triggering `T.deinit`.
-
-_Defined in `lang/std/memory/cowbox.ks`._
-
-#### function `write`
-
-```kestrel
-public mutating func write() -> T
-```
-
-Write access — clones storage if shared, then returns the
-(now unique) value. Caller modifies and calls `setValue`.
+Pointer to the payload on the heap. Internal plumbing for the
+accessors below; writing through it skips the fork.
 
 _Defined in `lang/std/memory/cowbox.ks`._
 
@@ -639,24 +491,89 @@ _Defined in `lang/std/memory/cowbox.ks`._
 #### function `clone`
 
 ```kestrel
-public func clone() -> CowBox[T]
+public func clone() -> CowBox[T, A]
 ```
 
 Shares storage with the returned clone (refcount bump).
 
 _Defined in `lang/std/memory/cowbox.ks`._
 
+### Implements `Indirection`
+
+#### typealias `Target`
+
+```kestrel
+type Target = T
+```
+
+_Defined in `lang/std/memory/cowbox.ks`._
+
+#### field `value`
+
+```kestrel
+public var value: T { ref mutating ref }
+```
+
+The payload, in place. Reading borrows the shared storage; writing
+(`c.value.len = 0`, a `mutating` argument, a mutating method) forks a
+shared box first, so other copies never see the change.
+
+_Defined in `lang/std/memory/cowbox.ks`._
+
+### Implements `ExistentialBox`
+
+_Conditional: `where A: Defaultable`._
+
 ### Implements `MutableIndirection`
 
 _Conditional: `where T: Cloneable`._
 
-#### function `pointeeMutRef`
+## typealias `DefaultBox`
 
 ```kestrel
-public mutating func pointeeMutRef() -> &mutating T where T: Cloneable
+public type DefaultBox[T] = RcBox[T]
 ```
 
-_Defined in `lang/std/memory/cowbox.ks`._
+The box `any P` is written in: `any P` is `DefaultBox[<raw existential>]`,
+so copies of an `any P` share one payload (reference semantics). Rebinding
+this alias changes every default existential at once; write `any[B] P` to
+pick a box at one site (docs/plans/existentials/existentials-design.md).
+
+_Defined in `lang/std/memory/rcbox.ks`._
+
+## protocol `ExistentialBox`
+
+```kestrel
+public protocol ExistentialBox
+```
+
+The contract a box type meets to hold an existential: `any[B] P` is
+`B[<raw existential>]` (docs/plans/existentials/existentials-design.md §3).
+
+Beyond conforming, `B` must have exactly one type parameter without a
+default (others, like an allocator, must have one), declared `not Sized`, and store it only behind a pointer, so the compiler can widen
+`B[T]` to `B[<raw existential>]` (E402 checks this).
+
+_Defined in `lang/std/memory/sharedbox.ks`._
+
+### Members
+
+#### initializer `init`
+
+```kestrel
+init(consuming Target)
+```
+
+Takes ownership of `value`, moves it into the box's storage and
+returns the first handle onto it. Only ever called at a sized
+`Target`; boxing an existential converts the result afterwards.
+
+`value` is a single-name parameter, so call sites are positional:
+`B(payload)`, never `B(value: payload)`.
+
+_Defined in `lang/std/memory/sharedbox.ks`._
+
+### Implements `Indirection`
 
 ## typealias `GlobalAllocator`
 
@@ -772,11 +689,23 @@ _Defined in `lang/std/memory/layout.ks`._
 #### function `of`
 
 ```kestrel
-public static func of[T]() -> Layout where T: not Copyable
+public static func of[T]() -> Layout where T: not Copyable, T: not Static
 ```
 
 Layout for a single value of `T` — uses the compiler-known
 `sizeof` and `alignof` for the type.
+
+_Defined in `lang/std/memory/layout.ks`._
+
+#### function `ofValue`
+
+```kestrel
+public static func ofValue[T](at: Pointer[T]) -> Layout where T: not Copyable, T: not Sized, T: not Static
+```
+
+Layout of the value at `pointer` — the one way to measure a payload
+that may be unsized (a raw existential, whose size and alignment
+live in its function table). For a sized `T` this is `of[T]()`.
 
 _Defined in `lang/std/memory/layout.ks`._
 
@@ -1052,8 +981,8 @@ public struct MutRefSliceIterator[T] { /* private fields */ }
 
 Forward iterator yielding MUTABLE REFERENCES (`&mutating T`) to
 contiguous elements — in-place mutation without writeback
-(`for x in arr.mutableRefs() { x += 1 }`). Surfaced as
-`Array.mutableRefs()`, which runs the COW barrier before handing out
+(`for x in arr.mutatingRefs() { x += 1 }`). Surfaced as
+`Array.mutatingRefs()`, which runs the COW barrier before handing out
 the buffer.
 
 ### Invalidation
@@ -1102,10 +1031,113 @@ Yields a mutable reference to the next element in place, or
 
 _Defined in `lang/std/memory/pointer.ks`._
 
+## struct `OwnedBox`
+
+```kestrel
+public struct OwnedBox[T, A = GlobalAllocator]: not Copyable where T: not Copyable, T: not Sized, T: not Static, A: Allocator, A: Copyable { /* private fields */ }
+```
+
+_Defined in `lang/std/memory/ownedbox.ks`._
+
+### Members
+
+#### initializer `From Value`
+
+```kestrel
+public init(consuming T) where T: Sized, A: Defaultable
+```
+
+Allocates a block holding `value` from a default-made `A`.
+
+##### Errors
+
+Panics with `"OwnedBox allocation failed"` on allocation failure.
+
+_Defined in `lang/std/memory/ownedbox.ks`._
+
+#### typealias `Target`
+
+```kestrel
+type Target = T
+```
+
+_Defined in `lang/std/memory/ownedbox.ks`._
+
+#### initializer `Value and Allocator`
+
+```kestrel
+public init(consuming T, allocator: A) where T: Sized
+```
+
+Moves `value` into a block allocated from `allocator`.
+
+##### Errors
+
+Panics with `"OwnedBox allocation failed"` on allocation failure.
+
+_Defined in `lang/std/memory/ownedbox.ks`._
+
+#### function `takeValue`
+
+```kestrel
+public consuming func takeValue() -> T where T: Sized
+```
+
+_Defined in `lang/std/memory/ownedbox.ks`._
+
+#### function `valuePtr`
+
+```kestrel
+internal func valuePtr() -> Pointer[T]
+```
+
+Pointer to the payload. Valid while the box is alive.
+
+_Defined in `lang/std/memory/ownedbox.ks`._
+
+### Implements `MutableIndirection`
+
+#### field `value`
+
+```kestrel
+public var value: T { ref mutating ref }
+```
+
+The payload, in place: `&b.value` borrows it, `b.value.x = 1` writes
+it. The box is its only owner, so a write needs a mutable box.
+
+_Defined in `lang/std/memory/ownedbox.ks`._
+
+### Implements `ConsumingIndirection`
+
+#### function `consumePointee`
+
+```kestrel
+public consuming func consumePointee[R]((Pointer[T]) -> R) -> R where R: not Copyable, R: not Static
+```
+
+_Defined in `lang/std/memory/ownedbox.ks`._
+
+### Implements `ExistentialBox`
+
+_Conditional: `where A: Defaultable`._
+
+### Implements `Cloneable`
+
+_Conditional: `where T: Copyable, T: Sized`._
+
+#### function `clone`
+
+```kestrel
+public func clone() -> OwnedBox[T, A] where T: Copyable, T: Sized
+```
+
+_Defined in `lang/std/memory/ownedbox.ks`._
+
 ## struct `Pointer`
 
 ```kestrel
-public struct Pointer[T] where T: not Copyable, T: not Static { /* private fields */ }
+public struct Pointer[T] where T: not Copyable, T: not Static, T: not Sized { /* private fields */ }
 ```
 
 _Defined in `lang/std/memory/pointer.ks`._
@@ -1122,18 +1154,10 @@ Wraps an existing primitive pointer.
 
 _Defined in `lang/std/memory/pointer.ks`._
 
-#### typealias `Target`
-
-```kestrel
-type Target = T
-```
-
-_Defined in `lang/std/memory/pointer.ks`._
-
 #### initializer `To Value`
 
 ```kestrel
-public init(to: T)
+public init(to: T) where T: Sized
 ```
 
 Takes the address of `value`. Equivalent to `&value` in C — the
@@ -1182,10 +1206,23 @@ Drops the type tag, returning a `RawPointer` to the same address.
 
 _Defined in `lang/std/memory/pointer.ks`._
 
+#### function `assign`
+
+```kestrel
+public func assign(consuming T) where T: Sized
+```
+
+Replaces an INITIALIZED pointee: runs the old value's destructor in
+place, then writes `value`. Use this — not `write` — to overwrite a
+live slot; `write` is for uninitialized (or moved-out) storage and
+drops nothing, so overwriting a live heap value with it leaks.
+
+_Defined in `lang/std/memory/pointer.ks`._
+
 #### function `cast`
 
 ```kestrel
-public func cast[U]() -> Pointer[U] where U: not Copyable
+public func cast[U]() -> Pointer[U] where U: not Copyable, U: not Sized, U: not Static
 ```
 
 Reinterprets the address as a `Pointer[U]`.
@@ -1254,27 +1291,11 @@ _Defined in `lang/std/memory/pointer.ks`._
 #### function `offset`
 
 ```kestrel
-public func offset(by: Int64) -> Pointer[T]
+public func offset(by: Int64) -> Pointer[T] where T: Sized
 ```
 
 Strides the pointer by `n` *elements* (multiplied by `sizeof[T]`).
 Compare with `RawPointer.offset`, which strides by raw bytes.
-
-_Defined in `lang/std/memory/pointer.ks`._
-
-#### field `pointee`
-
-```kestrel
-public var pointee: T where T: Copyable { get set }
-```
-
-_Defined in `lang/std/memory/pointer.ks`._
-
-#### function `pointeeRef`
-
-```kestrel
-public func pointeeRef() -> &T
-```
 
 _Defined in `lang/std/memory/pointer.ks`._
 
@@ -1296,14 +1317,14 @@ public func read() -> T where T: Copyable
 
 Bit-copies `T` out of the address — `T.deinit` does not run. This is
 a copy, so it requires `T: Copyable`; for non-Copyable pointees use
-`with` (borrow) or `move` (consuming read-out).
+`value` (borrow) or `take` (consuming read-out).
 
 _Defined in `lang/std/memory/pointer.ks`._
 
 #### function `take`
 
 ```kestrel
-public func take() -> T
+public func take() -> T where T: Sized
 ```
 
 Moves `T` out of the address bitwise — a *consuming* read-out. Unlike
@@ -1326,13 +1347,15 @@ _Defined in `lang/std/memory/pointer.ks`._
 #### field `value`
 
 ```kestrel
-public var value: &T { get }
+public var value: T { ref mutating ref }
 ```
 
-Borrowed view of the pointee — no copy, no clone, no `T: Copyable`
+The pointee, in place — no copy, no clone, no `T: Copyable`
 requirement. Member access, operators, and borrow-convention calls
 go through it in place; binding it (`let x = p.value;`) stores an
-owned copy instead (binding decay).
+owned copy instead (binding decay). Writing through it (`p.value = x`,
+a mutating method) needs a `var` pointer; `mutatingValue` writes
+through any pointer.
 
 ##### Safety
 
@@ -1345,40 +1368,28 @@ owned copy instead (binding decay).
 
 _Defined in `lang/std/memory/pointer.ks`._
 
-#### function `with`
+#### function `withMetadata`
 
 ```kestrel
-public func with[R]((T) -> R) -> R
+public func withMetadata[U](of: Pointer[U]) -> Pointer[T] where U: not Copyable, U: not Sized, U: not Static
 ```
 
-Borrows the pointee in place and passes it to `body`. The pointee
-is never copied or cloned — `T.deinit` does not run. Use this
-to extract fields from heap-allocated structs without triggering
-resource cleanup on a temporary clone.
+This address, carrying `other`'s pointee metadata.
 
-_Defined in `lang/std/memory/pointer.ks`._
-
-#### function `withMut`
-
-```kestrel
-public func withMut[R]((T) -> R) -> R
-```
-
-Mutably borrows the pointee in place and passes it to `body` as a
-`mutating` argument. The pointee is mutated directly on the heap —
-never copied, cloned, or written back — so `T.deinit` does not run on
-a temporary. This is the in-place primitive behind COW `modify`.
+A pointer to an unsized pointee (a raw existential) is two words: the
+address and the payload's function table. Address arithmetic through
+`asRaw()` keeps only the first; this puts the table back. For a sized
+`T` it returns `self` unchanged.
 
 _Defined in `lang/std/memory/pointer.ks`._
 
 #### function `write`
 
 ```kestrel
-public func write(consuming T)
+public func write(consuming T) where T: Sized
 ```
 
-Writes `value` through the pointer. Same safety preconditions as
-`pointee.set`.
+Writes `value` through the pointer, without dropping the old pointee.
 
 ##### Safety
 
@@ -1424,16 +1435,6 @@ _Defined in `lang/std/memory/pointer.ks`._
 ### Implements `FFISafe`
 
 _Conditional: `where T: FFISafe`._
-
-### Implements `MutableIndirection`
-
-#### function `pointeeMutRef`
-
-```kestrel
-public mutating func pointeeMutRef() -> &mutating T
-```
-
-_Defined in `lang/std/memory/pointer.ks`._
 
 ## struct `RawPointer`
 
@@ -1500,7 +1501,7 @@ _Defined in `lang/std/memory/pointer.ks`._
 #### function `cast`
 
 ```kestrel
-public func cast[T]() -> Pointer[T] where T: not Copyable
+public func cast[T]() -> Pointer[T] where T: not Copyable, T: not Sized, T: not Static
 ```
 
 Reinterprets the address as a `Pointer[T]`.
@@ -1592,7 +1593,7 @@ _Defined in `lang/std/memory/pointer.ks`._
 ## struct `RcBox`
 
 ```kestrel
-public struct RcBox[T] where T: not Copyable { /* private fields */ }
+public struct RcBox[T, A = GlobalAllocator] where T: not Copyable, T: not Sized, T: not Static, A: Allocator, A: Copyable { /* private fields */ }
 ```
 
 Heap allocation with a strong-reference count, used as the underlying
@@ -1614,13 +1615,15 @@ strong-cycle collection; the `SharedBox` protocol itself promises neither.
 ```
 let a = RcBox(value: [1, 2, 3]);
 let b = a.clone();          // shares storage; refCount == 2
-if b.isUnique() { ... } else { let c = b.deepClone(); /* ... */ }
+b.mutatingValue.append(4);  // every handle sees it
+&a.value;                   // read-only borrow: [1, 2, 3, 4]
 ```
 
 ### Representation
 
-One `Pointer[RcBoxStorage[T]]`. The pointed-to block holds an `Int64`
-refcount followed by the `T` value, allocated via `SystemAllocator`.
+A `Pointer[RcBoxStorage[T]]` plus the allocator `A` (no bytes for a
+stateless one). The pointed-to block holds an `Int64` refcount followed
+by the `T` value, allocated from that `A`.
 
 ### Memory Model
 
@@ -1630,15 +1633,21 @@ the count and shares storage; `deinit` decrements and frees on zero.
 
 ### Guarantees
 
-- `isUnique()` returning `true` means in-place mutation is safe; this is
+- `isUnique` being `true` means in-place mutation is safe; this is
   how COW types decide whether to copy.
 - The refcount is currently **not** atomic, so `RcBox` is not safe to
   share across threads.
 - The payload may be non-`Copyable` (`where T: not Copyable` is a
   relaxation, the same shape `Pointer[T]` uses): implicit boxing needs it,
   because a boxed closure environment owns its captures. The two
-  operations that copy the payload back out — `getValue()` and
-  `deepClone()` — are therefore only available when `T: Copyable`.
+  `deepClone()`, which copies the payload out, is therefore only
+  available when `T: Copyable`.
+
+`T: not Sized`: an `RcBox` can hold a raw existential — `any P` is
+`RcBox[<raw any P>]` by default. Members that move a `T` say
+`where T: Sized`; everything else works on any payload. `T: not Static`
+for the same reason: a raw existential is only `Static` when its
+protocol is, so `RcBox[T, A]` is `Static` exactly when `T` is.
 
 _Defined in `lang/std/memory/rcbox.ks`._
 
@@ -1647,11 +1656,11 @@ _Defined in `lang/std/memory/rcbox.ks`._
 #### initializer `From Value`
 
 ```kestrel
-public init(consuming T)
+public init(consuming T) where T: Sized, A: Defaultable
 ```
 
-Allocates fresh storage holding `value` with refcount 1. Panics if
-the underlying `SystemAllocator` returns `.None`.
+Allocates fresh storage from a default-made `A` holding `value` with
+refcount 1.
 
 ##### Errors
 
@@ -1667,55 +1676,52 @@ type Target = T
 
 _Defined in `lang/std/memory/rcbox.ks`._
 
+#### initializer `Value and Allocator`
+
+```kestrel
+public init(consuming T, allocator: A) where T: Sized
+```
+
+Allocates storage from `allocator` holding `value` with refcount 1.
+
+##### Errors
+
+Panics with `"RcBox allocation failed"` on allocation failure.
+
+_Defined in `lang/std/memory/rcbox.ks`._
+
 #### function `deepClone`
 
 ```kestrel
-public func deepClone() -> RcBox[T] where T: Copyable
+public func deepClone() -> RcBox[T, A] where T: Copyable
 ```
 
 Allocates fresh storage with a copy of the value. Used by COW
-types when `isUnique()` returns `false` — splits off a private
+types when `isUnique` is `false` — splits off a private
 copy so the caller can mutate without affecting other clones.
 
 _Defined in `lang/std/memory/rcbox.ks`._
 
-#### function `getValue`
+#### function `fork`
 
 ```kestrel
-public func getValue() -> T where T: Copyable
-```
-
-Reads the wrapped value out of storage. Returns a bitwise copy read
-straight from the payload slot, so no temporary `RcBoxStorage` is
-created or dropped and `T.deinit` does not run.
-
-_Defined in `lang/std/memory/rcbox.ks`._
-
-#### function `modify`
-
-```kestrel
-public func modify[R]((T) -> R) -> R
-```
-
-Mutates the wrapped value in place, passing it to `body` as a
-`mutating` argument. No clone or write-back — `body` mutates the
-heap value directly. Safe only when this is the unique owner
-(`isUnique() == true`); COW types check that first (see `CowBox.modify`).
-
-_Defined in `lang/std/memory/rcbox.ks`._
-
-#### function `pointeeRef`
-
-```kestrel
-public func pointeeRef() -> &T
+public func fork() -> RcBox[T, A] where T: Cloneable
 ```
 
 _Defined in `lang/std/memory/rcbox.ks`._
 
-#### function `refCount`
+#### field `mutatingValue`
 
 ```kestrel
-public func refCount() -> Int64
+public var mutatingValue: &mutating T { get }
+```
+
+_Defined in `lang/std/memory/rcbox.ks`._
+
+#### field `refCount`
+
+```kestrel
+public var refCount: Int64 { get }
 ```
 
 Current strong reference count. Mostly useful for tests and
@@ -1723,24 +1729,10 @@ diagnostics; production COW logic should branch on `isUnique`.
 
 _Defined in `lang/std/memory/rcbox.ks`._
 
-#### function `setValue`
-
-```kestrel
-public func setValue(consuming T)
-```
-
-Overwrites the wrapped value in place. Safe only when this is the
-unique owner (`isUnique() == true`); otherwise other clones see the
-new value, defeating COW. The COW types check `isUnique` before
-calling this and `deepClone` otherwise.
-Takes `value` by consuming — the caller's copy is dead after this.
-
-_Defined in `lang/std/memory/rcbox.ks`._
-
 #### function `valuePtr`
 
 ```kestrel
-public func valuePtr() -> Pointer[T]
+internal func valuePtr() -> Pointer[T]
 ```
 
 Returns a pointer to the wrapped value on the heap. The pointer
@@ -1755,7 +1747,7 @@ _Defined in `lang/std/memory/rcbox.ks`._
 #### function `clone`
 
 ```kestrel
-public func clone() -> RcBox[T]
+public func clone() -> RcBox[T, A]
 ```
 
 Bumps the refcount and returns a second `RcBox` pointing at the
@@ -1766,20 +1758,27 @@ _Defined in `lang/std/memory/rcbox.ks`._
 
 ### Implements `MutableIndirection`
 
-#### function `pointeeMutRef`
+#### field `value`
 
 ```kestrel
-public mutating func pointeeMutRef() -> &mutating T
+public var value: T { ref mutating ref }
 ```
+
+The payload, in place. A write through it (`rc.value.x = 1`, or a
+member write through the peel) needs a `var` handle, and every handle
+onto this storage sees it; `mutatingValue` writes through a `let`
+handle.
 
 _Defined in `lang/std/memory/rcbox.ks`._
 
 ### Implements `SharedBox`
 
+_Conditional: `where A: Defaultable`._
+
 #### function `isIdentical`
 
 ```kestrel
-public func isIdentical(to: RcBox[T]) -> Bool
+public func isIdentical(to: RcBox[T, A]) -> Bool where A: Defaultable
 ```
 
 Do the two handles point at the same storage block? Compares raw
@@ -1789,21 +1788,21 @@ values are never identical.
 
 _Defined in `lang/std/memory/rcbox.ks`._
 
-#### function `isUnique`
+#### field `isUnique`
 
 ```kestrel
-public func isUnique() -> Bool
+public var isUnique: Bool { get }
 ```
 
-Returns `true` when no other clone is sharing storage. The litmus
-test for "safe to mutate in place" in COW collections.
+`true` when no other clone is sharing storage. The litmus test for
+"safe to mutate in place" in COW collections.
 
 _Defined in `lang/std/memory/rcbox.ks`._
 
 #### function `sharedMutRef`
 
 ```kestrel
-public func sharedMutRef() -> &mutating T
+public func sharedMutRef() -> &mutating T where A: Defaultable
 ```
 
 _Defined in `lang/std/memory/rcbox.ks`._
@@ -1816,7 +1815,7 @@ public struct RefSliceIterator[T] { /* private fields */ }
 
 Forward iterator yielding SHARED REFERENCES (`&T`) to contiguous
 elements in place — no copies, no clones. The by-reference sibling of
-`ArraySliceIterator`; surfaced as `Array.refs()`.
+`UnsafeSliceIterator`; surfaced as `Array.refs()`.
 
 ### Invalidation
 
@@ -1879,7 +1878,7 @@ storage that owns one `Target`. Duplicating a handle (`clone()`) shares the
 storage; dropping the last handle destroys the payload exactly once.
 Most of the contract is inherited rather than invented — sharing is
 `Cloneable.clone()`, releasing is the conformer's own `deinit`, and reading
-the payload is `MutableIndirection.pointeeRef()` (which also supplies
+the payload is `MutableIndirection.value` (which also supplies
 transparent member access, so `box.field` reaches the payload's field).
 Only creation, shared mutation, identity and uniqueness are new.
 
@@ -1898,7 +1897,7 @@ func roundTrip[B](value: Int64) -> Int64 where B: SharedBox, B.Target = Int64 {
     let box: B = B(value);          // init(consuming value: Target)
     let alias = box.clone();        // shares the managed storage
     box.isIdentical(to: alias);     // true — one storage, two handles
-    alias.pointeeRef()              // read the payload through the peel
+    alias.value                     // read the payload in place
 }
 ```
 
@@ -1926,20 +1925,6 @@ _Defined in `lang/std/memory/sharedbox.ks`._
 
 ### Members
 
-#### initializer `init`
-
-```kestrel
-init(consuming Target)
-```
-
-Takes ownership of `value`, moves it into managed storage and returns
-the first handle onto it.
-
-`value` is a single-name parameter, so call sites are positional:
-`B(payload)`, never `B(value: payload)`.
-
-_Defined in `lang/std/memory/sharedbox.ks`._
-
 #### function `isIdentical`
 
 ```kestrel
@@ -1956,10 +1941,10 @@ however equal their payloads.
 
 _Defined in `lang/std/memory/sharedbox.ks`._
 
-#### function `isUnique`
+#### field `isUnique`
 
 ```kestrel
-func isUnique() -> Bool
+var isUnique: Bool { get }
 ```
 
 `true` only when this handle is provably the sole owner. Backs
@@ -1986,7 +1971,7 @@ storage observes the write; nothing forks and uniqueness is unchanged.
 This is the marked exception to value semantics, and the operation
 escaping closures and (later) classes are built on. Value-semantic
 clients — `any` payloads, `indirect enum`s — must not use it; they
-check `isUnique()` and fork instead.
+check `isUnique` and fork instead.
 
 ##### Safety
 
@@ -1996,6 +1981,8 @@ through it while a copy-on-write client assumes value semantics breaks
 those semantics for every sharer.
 
 _Defined in `lang/std/memory/sharedbox.ks`._
+
+### Implements `ExistentialBox`
 
 ### Implements `Cloneable`
 
@@ -2043,6 +2030,18 @@ layouts use `malloc`; over-aligned layouts use `posix_memalign`.
 
 _Defined in `lang/std/memory/allocator.ks`._
 
+#### function `allocateZeroed`
+
+```kestrel
+public mutating func allocateZeroed(Layout) -> RawPointer?
+```
+
+Zeroed storage from `calloc` when the alignment is natural, so a large
+block's pages stay untouched until written. Over-aligned layouts
+allocate and zero.
+
+_Defined in `lang/std/memory/allocator.ks`._
+
 #### function `deallocate`
 
 ```kestrel
@@ -2066,10 +2065,12 @@ and frees the old block only after allocation succeeds.
 
 _Defined in `lang/std/memory/allocator.ks`._
 
+### Implements `Defaultable`
+
 ## struct `UniqueBox`
 
 ```kestrel
-public struct UniqueBox[T]: not Copyable where T: not Copyable { /* private fields */ }
+public struct UniqueBox[T, A = GlobalAllocator]: not Copyable where T: not Copyable, A: Allocator, A: Copyable { /* private fields */ }
 ```
 
 Heap allocation with exactly one owner, used for the environment of a
@@ -2096,8 +2097,9 @@ let r = box.takeValue();   // moves the payload out and frees the block
 
 ### Representation
 
-One `Pointer[UniqueBoxStorage[T]]`. The pointed-to block holds an `Int64`
-liveness word followed by the `T` value, allocated via `SystemAllocator`.
+A `Pointer[UniqueBoxStorage[T]]` plus the allocator `A` (no bytes for a
+stateless one). The pointed-to block holds an `Int64`
+liveness word followed by the `T` value, allocated from the box's `A`.
 
 ### Memory Model
 
@@ -2122,13 +2124,24 @@ _Defined in `lang/std/memory/uniquebox.ks`._
 #### initializer `From Value`
 
 ```kestrel
-public init(consuming T)
+public init(consuming T) where A: Defaultable
 ```
 
-Allocates fresh storage holding `value`. Panics if the underlying
-`SystemAllocator` returns `.None`.
+Allocates fresh storage holding `value` from a default-made `A`.
 
 ##### Errors
+
+Panics with `"UniqueBox allocation failed"` on allocation failure.
+
+_Defined in `lang/std/memory/uniquebox.ks`._
+
+#### initializer `Value and Allocator`
+
+```kestrel
+public init(consuming T, allocator: A)
+```
+
+Moves `value` into a block allocated from `allocator`.
 
 Panics with `"UniqueBox allocation failed"` on allocation failure.
 
@@ -2171,6 +2184,314 @@ called.
 Must be called at most once per box, and never after `destroy()`.
 
 _Defined in `lang/std/memory/uniquebox.ks`._
+
+## struct `UnsafeSlice`
+
+```kestrel
+public struct UnsafeSlice[T] { /* private fields */ }
+```
+
+Unchecked view over a contiguous run of `T` values: a pointer and a
+count.
+
+The slice does **not** track or extend the lifetime of the underlying
+storage, and the compiler doesn't check it: keeping one past its source,
+or past the source's next change, is a use-after-free. Use it for FFI,
+`Buffer`s and other memory that isn't an `Array`, and inside one call.
+To view part of an `Array`, use `xs(1..<3)`, a `&Slice[T]` the
+compiler keeps from outliving the array (it is still invalidated when
+the array reallocates).
+
+### Examples
+
+```
+let arr = [1, 2, 3, 4];
+let s = arr.asUnsafeSlice();   // valid until `arr` next changes
+s(checked: 0)                  // .Some(1)
+s(checked: 99)                 // .None
+```
+
+_Defined in `lang/std/memory/pointer.ks`._
+
+### Members
+
+#### initializer `From Pointer`
+
+```kestrel
+public init(pointer: Pointer[T], count: Int64)
+```
+
+Builds a slice from an existing pointer and element count. The
+caller is responsible for ensuring `count` elements live at `pointer`.
+
+_Defined in `lang/std/memory/pointer.ks`._
+
+#### typealias `Target`
+
+```kestrel
+type Target = Slice[T]
+```
+
+_Defined in `lang/std/memory/pointer.ks`._
+
+#### function `asMutableSlice`
+
+```kestrel
+public mutating func asMutableSlice() -> &mutating Slice[T]
+```
+
+Like `asSlice()`, for writing through.
+
+_Defined in `lang/std/collections/slice_methods.ks`._
+
+#### function `asSlice`
+
+```kestrel
+public func asSlice() -> &Slice[T]
+```
+
+The elements as a `Slice`, in place.
+
+_Defined in `lang/std/collections/slice_methods.ks`._
+
+#### function `asUnsafeSlice`
+
+```kestrel
+public func asUnsafeSlice() -> UnsafeSlice[T]
+```
+
+Returns `self` — `UnsafeSlice` is already the borrowed view.
+
+_Defined in `lang/std/memory/pointer.ks`._
+
+#### field `count`
+
+```kestrel
+public var count: Int64 { get }
+```
+
+Element count.
+
+_Defined in `lang/std/memory/pointer.ks`._
+
+#### field `first`
+
+```kestrel
+public var first: Optional[T] { get }
+```
+
+First element, or `.None` for an empty slice.
+
+_Defined in `lang/std/memory/pointer.ks`._
+
+#### field `isEmpty`
+
+```kestrel
+public var isEmpty: Bool { get }
+```
+
+`true` when `count == 0`.
+
+_Defined in `lang/std/memory/pointer.ks`._
+
+#### field `last`
+
+```kestrel
+public var last: Optional[T] { get }
+```
+
+Last element, or `.None` for an empty slice.
+
+_Defined in `lang/std/memory/pointer.ks`._
+
+#### field `pointer`
+
+```kestrel
+public var pointer: Pointer[T] { get }
+```
+
+Pointer to the first element. `pointer.offset(by: i)` reaches
+element `i` (0-indexed).
+
+_Defined in `lang/std/memory/pointer.ks`._
+
+#### subscript `subscript`
+
+```kestrel
+public subscript[I](I) -> I.SliceOutput where I: SliceIndex[T] { ref mutating ref }
+```
+
+_Defined in `lang/std/collections/slice_methods.ks`._
+
+#### subscript `subscript`
+
+```kestrel
+public subscript[I](checked: I) -> I.SliceOutput? where I: SliceIndex[T] { ref mutating ref }
+```
+
+_Defined in `lang/std/collections/slice_methods.ks`._
+
+#### subscript `subscript`
+
+```kestrel
+public subscript[I](unchecked: I) -> I.SliceOutput where I: SliceIndex[T] { ref mutating ref }
+```
+
+_Defined in `lang/std/collections/slice_methods.ks`._
+
+#### subscript `subscript`
+
+```kestrel
+public subscript(clamped: Int64) -> T? { ref mutating ref }
+```
+
+_Defined in `lang/std/collections/slice_methods.ks`._
+
+#### subscript `subscript`
+
+```kestrel
+public subscript[R](within: R) -> Slice[T] where R: SeqRange { ref mutating ref }
+```
+
+_Defined in `lang/std/collections/slice_methods.ks`._
+
+#### subscript `subscript`
+
+```kestrel
+public subscript(wrapped: Int64) -> T? { ref mutating ref }
+```
+
+_Defined in `lang/std/collections/slice_methods.ks`._
+
+### Implements `Iterable`
+
+#### typealias `Item`
+
+```kestrel
+type Item = T
+```
+
+_Defined in `lang/std/memory/pointer.ks`._
+
+#### typealias `TargetIterator`
+
+```kestrel
+type TargetIterator = UnsafeSliceIterator[T]
+```
+
+_Defined in `lang/std/memory/pointer.ks`._
+
+#### function `iter`
+
+```kestrel
+public func iter() -> UnsafeSliceIterator[T]
+```
+
+Forward iterator over the elements.
+
+_Defined in `lang/std/memory/pointer.ks`._
+
+### Implements `MutableIndirection`
+
+#### field `value`
+
+```kestrel
+public var value: Slice[T] { ref mutating ref }
+```
+
+_Defined in `lang/std/memory/pointer.ks`._
+
+### Implements `Equatable`
+
+_Conditional: `where T: Equatable`._
+
+#### function `isEqual`
+
+```kestrel
+public func isEqual(to: UnsafeSlice[T]) -> Bool where T: Equatable
+```
+
+Same count, equal elements in order.
+
+_Defined in `lang/std/memory/pointer.ks`._
+
+### Implements `ArrayMatchable`
+
+#### typealias `Element`
+
+```kestrel
+type Element = T
+```
+
+_Defined in `lang/std/memory/pointer.ks`._
+
+#### typealias `Rest`
+
+```kestrel
+type Rest = UnsafeSlice[T]
+```
+
+_Defined in `lang/std/memory/pointer.ks`._
+
+## struct `UnsafeSliceIterator`
+
+```kestrel
+public struct UnsafeSliceIterator[T] { /* private fields */ }
+```
+
+Forward iterator over an `UnsafeSlice[T]`. Holds a moving pointer and a
+remaining count; advancing reads through the pointer.
+
+### Representation
+
+A `Pointer[T]` cursor and an `Int64` countdown.
+
+_Defined in `lang/std/memory/pointer.ks`._
+
+### Members
+
+#### initializer `From Storage`
+
+```kestrel
+public init(ptr: Pointer[T], remaining: Int64)
+```
+
+Builds an iterator from a starting pointer and remaining count.
+
+_Defined in `lang/std/memory/pointer.ks`._
+
+### Implements `Iterator`
+
+#### typealias `Item`
+
+```kestrel
+type Item = T
+```
+
+_Defined in `lang/std/memory/pointer.ks`._
+
+#### function `next`
+
+```kestrel
+public mutating func next() -> Optional[T]
+```
+
+Yields the next element, or `.None` when the count reaches zero.
+
+_Defined in `lang/std/memory/pointer.ks`._
+
+### Implements `DoubleEndedIterator`
+
+#### function `nextBack`
+
+```kestrel
+public mutating func nextBack() -> Optional[T]
+```
+
+Yields the last remaining element, or `.None` when the count reaches
+zero. The front cursor stays put; the count shrinks from the back.
+
+_Defined in `lang/std/memory/pointer.ks`._
 
 ## function `swap`
 

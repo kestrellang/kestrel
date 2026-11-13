@@ -34,12 +34,12 @@ module Test
 
             // Test position
             let found = arr.iter().firstIndex(where: { (x) in x > 3 });
-            if found.isNone() { return 8 }
+            if found.isNone { return 8 }
             if found.unwrap() != 3 { return 9 }
 
             // Test nth
             let third = arr.iter().nth(2);
-            if third.isNone() { return 10 }
+            if third.isNone { return 10 }
             if third.unwrap() != 3 { return 11 }
 
             // Test first and last

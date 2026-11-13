@@ -13,7 +13,7 @@ import std.collections.(Array)
 @main
 func main() -> lang.i64 {
     var xs = [1, 2, 3, 4];
-    let rev = xs.reversed();
+    let rev = xs.reversed;
     let chunks = xs.chunks(of: 2);
     xs(0) = 10;
     for i in 0..<100 { xs.append(i); }
@@ -24,7 +24,7 @@ func main() -> lang.i64 {
     if total != 10 + 2 + 3 + 4 + 4950 { return 3 }
     var ys = [1, 2, 3];
     let copy = ys;
-    for y in ys.mutableRefs() { y *= 2; }
+    for y in ys.mutatingRefs() { y *= 2; }
     if ys(2) != 6 { return 4 }
     if copy(2) != 3 { return 5 }
     0

@@ -7,6 +7,9 @@
 
 module Test
 
+@builtin(.Copyable)
+protocol Copyable {}
+
 protocol Shape {
     func area() -> lang.i64
 }

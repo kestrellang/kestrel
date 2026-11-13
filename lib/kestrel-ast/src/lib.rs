@@ -9,10 +9,12 @@
 
 pub mod arena;
 pub mod ast_type;
+pub mod builtin;
 pub mod escape;
 pub mod ops;
 pub mod pretty;
 
 pub use arena::{Arena, Idx};
 pub use ast_type::{AnyBound, AssocTypeBinding, AstType, FnTypeKind, ParamConvention, PathSegment};
+pub use builtin::Builtin;
 pub use ops::{BinaryOp, CompoundAssignOp, PostfixOp, UnaryOp};

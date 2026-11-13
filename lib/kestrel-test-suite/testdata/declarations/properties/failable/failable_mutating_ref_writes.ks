@@ -17,12 +17,12 @@ struct Bag {
     var first?: Int64 {
         ref {
             if self.items.count == 0 { return null; }
-            let r = &self.items(at: 0);
+            let r = &self.items(0);
             .Some(r)
         }
         mutating ref {
             if self.items.count == 0 { return null; }
-            let r = &mutating self.items(at: 0);
+            let r = &mutating self.items(0);
             .Some(r)
         }
     }
@@ -31,11 +31,11 @@ struct Bag {
     var last?: Int64 {
         get {
             if self.items.count == 0 { return null; }
-            .Some(self.items(at: self.items.count - 1))
+            .Some(self.items(self.items.count - 1))
         }
         mutating ref {
             if self.items.count == 0 { return null; }
-            let r = &mutating self.items(at: self.items.count - 1);
+            let r = &mutating self.items(self.items.count - 1);
             .Some(r)
         }
     }
@@ -43,12 +43,12 @@ struct Bag {
     subscript(checked i: Int64)? -> Int64 {
         ref {
             if i < 0 or i >= self.items.count { return null; }
-            let r = &self.items(at: i);
+            let r = &self.items(i);
             .Some(r)
         }
         mutating ref {
             if i < 0 or i >= self.items.count { return null; }
-            let r = &mutating self.items(at: i);
+            let r = &mutating self.items(i);
             .Some(r)
         }
     }
@@ -60,13 +60,13 @@ func main() -> lang.i64 {
     if let .Some(&mutating v) = b.first {
         v += 10;
     }
-    if b.items(at: 0) != 14 { return 1; }
+    if b.items(0) != 14 { return 1; }
 
     match b(checked: 1) {
         .Some(&mutating v) => { v = 50; },
         .None => { return 2; },
     }
-    if b.items(at: 1) != 50 { return 3; }
+    if b.items(1) != 50 { return 3; }
 
     // Out of range: nothing is written.
     if let .Some(&mutating v) = b(checked: 9) { v = 0; return 4; }

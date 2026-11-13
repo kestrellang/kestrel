@@ -16,14 +16,14 @@ struct Stack {
     var top?: Int64 {
         get {
             if self.items.count == 0 { return null; }
-            self.items(at: self.items.count - 1)
+            self.items(self.items.count - 1)
         }
     }
 
     subscript(checked i: Int64)? -> Int64 {
         get {
             if i < 0 or i >= self.items.count { return null; }
-            self.items(at: i)
+            self.items(i)
         }
     }
 }

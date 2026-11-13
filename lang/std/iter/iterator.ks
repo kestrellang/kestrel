@@ -124,7 +124,7 @@ public protocol Iterable {
 // per loop — `TypedBody.direct_iterators`), so an adapter chain still drops
 // into a `for` loop without an `iter()` call.
 
-/// An iterator that can also yield from the back. Powers `rev()` and
+/// An iterator that can also yield from the back. Powers `reversed()` and
 /// efficient "last N elements" patterns without first materialising the
 /// whole sequence.
 ///
@@ -245,7 +245,7 @@ extend Iterator {
     ///
     /// ```
     /// for (i, item) in arr.iter().enumerate() {
-    ///     print("Index \{i}: \{item}")
+    ///     print("Index \(i): \(item)")
     /// };
     /// ```
     public consuming func enumerate() -> EnumerateIterator[Self] {
@@ -426,9 +426,9 @@ extend Iterator {
     ///
     /// ```
     /// [1, 2, 3].iter()
-    ///     .inspect { print("before filter: \{it}") }
+    ///     .inspect { print("before filter: \(it)") }
     ///     .filter { it > 1 }
-    ///     .inspect { print("after filter: \{it}") }
+    ///     .inspect { print("after filter: \(it)") }
     ///     .collect();
     /// ```
     public consuming func inspect(consuming inspector: escaping (Item) -> ()) -> InspectIterator[Self] {
@@ -755,10 +755,10 @@ extend Iterator {
     /// # Examples
     ///
     /// ```
-    /// [1, 2, 3, 4, 5].iter().first { it > 3 };   // Some(4)
-    /// [1, 2, 3].iter().first { it > 10 };        // None
+    /// [1, 2, 3, 4, 5].iter().find { it > 3 };   // Some(4)
+    /// [1, 2, 3].iter().find { it > 10 };        // None
     /// ```
-    public mutating func first(where predicate: (Item) -> Bool) -> Item? {
+    public mutating func find(where predicate: (Item) -> Bool) -> Item? {
         while let .Some(item) = self.next() {
             if predicate(item) {
                 return .Some(item)
@@ -888,6 +888,49 @@ extend Iterator where Item: Comparable {
         arr
     }
 
+    /// True if elements come out in ascending order. True for empty or
+    /// single-element iterators (vacuous). Short-circuits on the first
+    /// out-of-order pair.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// [1, 2, 3, 4, 5].iter().isSorted();   // true
+    /// [1, 3, 2, 4, 5].iter().isSorted();   // false
+    /// [1, 1, 2, 2, 3].iter().isSorted();   // true (equal allowed)
+    /// ```
+    public consuming func isSorted() -> Bool {
+        if let .Some(first) = self.next() {
+            var prev = first;
+            while let .Some(item) = self.next() {
+                if item.compare(prev) == Ordering.Less {
+                    return false
+                }
+                prev = item;
+            }
+        }
+        true
+    }
+
+    /// True if elements come out in descending order. Mirror of
+    /// `isSorted`.
+    public consuming func isSortedDescending() -> Bool {
+        if let .Some(first) = self.next() {
+            var prev = first;
+            while let .Some(item) = self.next() {
+                if item.compare(prev) == Ordering.Greater {
+                    return false
+                }
+                prev = item;
+            }
+        }
+        true
+    }
+}
+
+/// Ordering helpers that don't require `Item: Comparable`: keyed
+/// `min`/`max` compare the key, and the sort checks take a comparator.
+extend Iterator {
     /// The element with the smallest `key(element)`. Ties go to the
     /// first occurrence.
     ///
@@ -932,49 +975,6 @@ extend Iterator where Item: Comparable {
         }
     }
 
-    /// True if elements come out in ascending order. True for empty or
-    /// single-element iterators (vacuous). Short-circuits on the first
-    /// out-of-order pair.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// [1, 2, 3, 4, 5].iter().isSorted();   // true
-    /// [1, 3, 2, 4, 5].iter().isSorted();   // false
-    /// [1, 1, 2, 2, 3].iter().isSorted();   // true (equal allowed)
-    /// ```
-    public consuming func isSorted() -> Bool {
-        if let .Some(first) = self.next() {
-            var prev = first;
-            while let .Some(item) = self.next() {
-                if item.compare(prev) == Ordering.Less {
-                    return false
-                }
-                prev = item;
-            }
-        }
-        true
-    }
-
-    /// True if elements come out in descending order. Mirror of
-    /// `isSorted`.
-    public consuming func isSortedDescending() -> Bool {
-        if let .Some(first) = self.next() {
-            var prev = first;
-            while let .Some(item) = self.next() {
-                if item.compare(prev) == Ordering.Greater {
-                    return false
-                }
-                prev = item;
-            }
-        }
-        true
-    }
-}
-
-/// Sort-check variants that don't require `Item: Comparable`.
-extend Iterator {
-
     /// True if every adjacent pair satisfies `comparator(prev, next)` —
     /// i.e. they are already in the order `comparator` defines.
     ///
@@ -1009,7 +1009,18 @@ extend Iterator {
     /// words.iter().isSorted { it.count };   // true
     /// ```
     public consuming func isSorted[K](consuming byKey key: (Item) -> K) -> Bool where K: Comparable {
-        self.isSorted(by: { (a, b) in key(a).compare(key(b)) != Ordering.Greater })
+        // Carry the previous key so each element's key is computed once.
+        if let .Some(first) = self.next() {
+            var prevKey = key(first);
+            while let .Some(item) = self.next() {
+                let k = key(item);
+                if k.compare(prevKey) == Ordering.Less {
+                    return false
+                }
+                prevKey = k;
+            }
+        }
+        true
     }
 }
 
@@ -1087,17 +1098,17 @@ extend DoubleEndedIterator {
     /// # Examples
     ///
     /// ```
-    /// [1, 2, 3, 4, 5].iter().rev().collect();                        // [5, 4, 3, 2, 1]
-    /// [1, 2, 3, 4, 5].iter().rev().take(3).collect();         // [5, 4, 3]
-    /// [1, 2, 3, 4, 5].iter().rev().first { it % 2 == 0 };            // Some(4)
+    /// [1, 2, 3, 4, 5].iter().reversed().collect();                        // [5, 4, 3, 2, 1]
+    /// [1, 2, 3, 4, 5].iter().reversed().take(3).collect();         // [5, 4, 3]
+    /// [1, 2, 3, 4, 5].iter().reversed().find { it % 2 == 0 };            // Some(4)
     /// ```
-    public consuming func rev() -> ReversedIterator[Self] {
+    public consuming func reversed() -> ReversedIterator[Self] {
         ReversedIterator(inner: self)
     }
 }
 
 /// `ReversedIterator` is itself double-ended when the wrapped iterator is, so
-/// `rev().rev()` gives back the original direction in `O(1)`.
+/// `reversed().reversed()` gives back the original direction in `O(1)`.
 extend ReversedIterator[I]: DoubleEndedIterator where I: DoubleEndedIterator {
 
     /// Pulls from the back of the inner iterator (which is the front of

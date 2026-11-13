@@ -1,6 +1,6 @@
 use std::borrow::Cow;
 
-use kestrel_copy_fold::{CopyLayer, CopySem, CopySemantics, instance_semantics};
+use kestrel_copy_fold::{ConditionalCopy, CopyLayer, CopySem, CopySemantics, instance_semantics};
 use kestrel_hecs::Entity;
 
 use crate::item::function::{WhereClause, WhereConstraint};
@@ -70,7 +70,7 @@ impl<'a> TypeEnv<'a> {
     /// A nominal's generic copy behavior and conditional-Copyable gating
     /// positions, from whichever of the struct / enum maps holds it.
     /// Unknown entity -> Bitwise with no gating (the `Named` fallback).
-    pub fn nominal_copy(&self, entity: Entity) -> (CopyBehavior, &'a [usize]) {
+    pub fn nominal_copy(&self, entity: Entity) -> (CopyBehavior, &'a ConditionalCopy) {
         nominal_copy_in(self.structs, self.enums, entity)
     }
 }
@@ -81,14 +81,18 @@ pub(crate) fn nominal_copy_in<'a>(
     structs: &'a IndexMap<Entity, StructDef>,
     enums: &'a IndexMap<Entity, EnumDef>,
     entity: Entity,
-) -> (CopyBehavior, &'a [usize]) {
+) -> (CopyBehavior, &'a ConditionalCopy) {
+    static UNGATED: ConditionalCopy = ConditionalCopy {
+        positions: Vec::new(),
+        clone_only: false,
+    };
     if let Some(s) = structs.get(&entity) {
         return (s.type_info.copy.clone(), &s.conditionally_copyable);
     }
     if let Some(e) = enums.get(&entity) {
         return (e.type_info.copy.clone(), &e.conditionally_copyable);
     }
-    (CopyBehavior::Bitwise, &[])
+    (CopyBehavior::Bitwise, &UNGATED)
 }
 
 impl CopyLayer for MirCopyLayer<'_> {
@@ -99,7 +103,7 @@ impl CopyLayer for MirCopyLayer<'_> {
         self.env.nominal_copy(entity).0
     }
 
-    fn gating_positions(&self, entity: Entity) -> Cow<'_, [usize]> {
+    fn conditional_copy(&self, entity: Entity) -> Cow<'_, ConditionalCopy> {
         Cow::Borrowed(self.env.nominal_copy(entity).1)
     }
 
@@ -154,6 +158,7 @@ pub fn copy_behavior_in(
         | MirTy::Str
         | MirTy::Pointer(_)
         | MirTy::FuncThin { .. }
+        | MirTy::FuncC { .. }
         // Ref never appears as a value type (signature-only; results register
         // as @guaranteed pointee values), so copy/drop on it is vacuous — a
         // pointer-scalar bit-copy keeps any defensive path harmless.
@@ -164,14 +169,15 @@ pub fn copy_behavior_in(
         // copyable. (Its values are borrowed (data, table) views, which are
         // never copied.) This keeps `Box[any P]` off conditional `Copyable`
         // and `Cloneable` impls gated on the payload.
-        MirTy::RawExistential { .. } => CopyBehavior::None,
+        // Unsized: only ever borrowed, never copied as a value.
+        MirTy::RawExistential { .. } | MirTy::Slice(_) => CopyBehavior::None,
 
         // The closure kind, not the environment payload's fold, decides the
         // closure value's copy class (docs/design/closures.md §"Copy and
         // Drop"). MUST stay in lockstep with the `needs_drop` arm below —
         // Bitwise + droppable double-frees the environment, Clone without drop
         // leaks it (lockstep 1: `expand.rs ty_needs_drop`,
-        // `audit.rs mono_needs_drop`, `clone_shim.rs ty_needs_clone_shim`,
+        // `audit.rs mono_needs_drop`, `clone_shim.rs DeepCloneQuery::ty_need`,
         // `mono/mod.rs concrete_copy`).
         //
         // - view kinds: the env holds addresses into the frame and owns
@@ -258,7 +264,13 @@ pub fn copy_behavior_in(
                             type_param,
                             protocol,
                         } if *type_param == entity => {
-                            if env.copyable_protocol == Some(*protocol) {
+                            // `not Sized` relaxes Copyable too: a `T` that
+                            // may be unsized is never held by value, so it
+                            // can't be copied (mirrors
+                            // `TypeParamCopyRequirement`).
+                            if env.copyable_protocol == Some(*protocol)
+                                || env.sized_protocol == Some(*protocol)
+                            {
                                 // Defer: a positive bound later in the list
                                 // overrides this relaxation (positive wins).
                                 not_copyable = true;
@@ -362,7 +374,7 @@ pub fn copy_is_mono_dependent_by(
     module: &MirModule,
     ty: TyId,
     where_clause: Option<&WhereClause>,
-    gating_of: &dyn Fn(Entity) -> Option<Vec<usize>>,
+    gating_of: &dyn Fn(Entity) -> Option<ConditionalCopy>,
 ) -> bool {
     match arena.get(ty) {
         MirTy::TypeParam(entity) => {
@@ -398,7 +410,7 @@ pub fn copy_is_mono_dependent_by(
                 return false;
             };
             // Only gating positions affect the container's copyability.
-            gating.iter().any(|&pos| {
+            gating.positions.iter().any(|&pos| {
                 type_args.get(pos).is_some_and(|&arg| {
                     copy_is_mono_dependent_by(arena, module, arg, where_clause, gating_of)
                 })
@@ -422,9 +434,12 @@ pub fn needs_drop(arena: &TyArena, module: &MirModule, ty: TyId) -> bool {
         | MirTy::Str
         | MirTy::Pointer(_)
         | MirTy::FuncThin { .. }
+        | MirTy::FuncC { .. }
         // Ref: a borrow view (signature or stage-2b payload/field slot) —
         // never owns its pointee, never drops.
         | MirTy::RawExistential { .. }
+        // A slice is only ever borrowed: its owner drops the elements.
+        | MirTy::Slice(_)
         | MirTy::Ref { .. }
         | MirTy::Error => false,
 
@@ -540,6 +555,8 @@ impl kestrel_structural::StaticLayer for MirStructuralLayer<'_> {
             },
             MirTy::TypeParam(param) => StaticShape::Param(*param),
             MirTy::Tuple(elems) => StaticShape::Tuple(Cow::Owned(elems.clone())),
+            // A run of `T`s is Static iff `T` is.
+            MirTy::Slice(elem) => StaticShape::Tuple(Cow::Owned(vec![*elem])),
             MirTy::RawExistential { bounds, .. } => {
                 StaticShape::RawExistential(bounds.iter().map(|(p, _)| *p).collect())
             },
@@ -550,6 +567,7 @@ impl kestrel_structural::StaticLayer for MirStructuralLayer<'_> {
             // an address, not a `T` (the unsafe escape hatch, as in the
             // front end); primitives, projections and errors never block.
             MirTy::FuncThin { .. }
+            | MirTy::FuncC { .. }
             | MirTy::Pointer(_)
             | MirTy::AssociatedProjection { .. }
             | MirTy::I8
@@ -598,6 +616,7 @@ impl kestrel_structural::SizedLayer for MirStructuralLayer<'_> {
         use kestrel_structural::SizedShape;
         match self.arena.get(ty) {
             MirTy::RawExistential { .. } => SizedShape::RawExistential,
+            MirTy::Slice(_) => SizedShape::Slice,
             MirTy::Named { entity, type_args } if self.env.structs.contains_key(entity) => {
                 SizedShape::Struct {
                     entity: *entity,

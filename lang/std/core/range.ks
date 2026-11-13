@@ -19,6 +19,7 @@ public protocol RangeConstructible[Other = Self] {
     type Output
 
     /// Builds the half-open range `[self, end)`.
+    @sugarOnly
     @builtin(.ExclusiveRangeOperatorMethod)
     func exclusiveRange(to end: Other) -> Output
 }
@@ -29,6 +30,7 @@ public protocol ClosedRangeConstructible[Other = Self] {
     type Output
 
     /// Builds the closed range `[self, end]`.
+    @sugarOnly
     @builtin(.InclusiveRangeOperatorMethod)
     func inclusiveRange(to end: Other) -> Output
 }
@@ -39,7 +41,7 @@ public protocol ClosedRangeConstructible[Other = Self] {
 /// # Representation
 ///
 /// Two values: `current` (next yield) and `end` (sentinel).
-public struct RangeIterator[T]: Iterator where T: Steppable, T: Comparable {
+public struct RangeIterator[T]: Iterator, DoubleEndedIterator where T: Steppable, T: Comparable {
     type Item = T
 
     private var current: T
@@ -59,6 +61,17 @@ public struct RangeIterator[T]: Iterator where T: Steppable, T: Comparable {
             let value = self.current;
             self.current = self.current.successor();
             .Some(value)
+        } else {
+            .None
+        }
+    }
+
+    /// Yields the last remaining value (`end`'s predecessor), or `.None`
+    /// when the front and back have met.
+    public mutating func nextBack() -> T? {
+        if self.current < self.end {
+            self.end = self.end.predecessor();
+            .Some(self.end)
         } else {
             .None
         }
@@ -135,19 +148,22 @@ public struct Range[T]: Equatable, Iterable where T: Steppable, T: Comparable {
 ///
 /// # Representation
 ///
-/// `current` (next value to yield) and `remaining` (elements left).
-public struct ClosedRangeIterator[T]: Iterator where T: Steppable, T: Comparable {
+/// `current` (next value to yield), `last` (next value to yield from the
+/// back) and `remaining` (elements left).
+public struct ClosedRangeIterator[T]: Iterator, DoubleEndedIterator where T: Steppable, T: Comparable {
     type Item = T
 
     private var current: T
+    private var last: T
     private var remaining: Int64
 
     /// @name From Bounds
-    /// Builds an iterator yielding `current` for the next `remaining`
-    /// steps. A `remaining <= 0` value produces an already-exhausted
+    /// Builds an iterator yielding `remaining` values from `current` up to
+    /// `last`. A `remaining <= 0` value produces an already-exhausted
     /// iterator.
-    public init(current current: T, remaining remaining: Int64) {
+    public init(current current: T, last last: T, remaining remaining: Int64) {
         self.current = current;
+        self.last = last;
         self.remaining = remaining;
     }
 
@@ -162,6 +178,20 @@ public struct ClosedRangeIterator[T]: Iterator where T: Steppable, T: Comparable
             // called on the final element — that's what makes `a..=T.maxValue`
             // overflow-safe (the old `finished` flag's job).
             if self.remaining > 0 { self.current = self.current.successor(); }
+            .Some(value)
+        }
+    }
+
+    /// Yields the last remaining value, or `.None` once `remaining` reaches
+    /// zero. Steps `last` back only while values remain, so `a..=T.minValue`
+    /// never calls `predecessor()` past the bound.
+    public mutating func nextBack() -> T? {
+        if self.remaining <= 0 {
+            .None
+        } else {
+            let value = self.last;
+            self.remaining = self.remaining - 1;
+            if self.remaining > 0 { self.last = self.last.predecessor(); }
             .Some(value)
         }
     }
@@ -215,7 +245,7 @@ public struct ClosedRange[T]: Equatable, Iterable where T: Steppable, T: Compara
     /// `distance(start, end) + 1`; an empty range (`start > end`) yields a
     /// non-positive count and so produces nothing.
     public func iter() -> ClosedRangeIterator[T] {
-        ClosedRangeIterator(current: self.start, remaining: self.start.distance(to: self.end) + 1)
+        ClosedRangeIterator(current: self.start, last: self.end, remaining: self.start.distance(to: self.end) + 1)
     }
 }
 
@@ -229,6 +259,7 @@ public protocol RangeFromConstructible {
     type Output
 
     /// Builds the partial range `[self, +∞)`.
+    @sugarOnly
     @builtin(.RangeFromOperatorMethod)
     func rangeFrom() -> Output
 }
@@ -241,6 +272,7 @@ public protocol RangeUpToConstructible {
     type Output
 
     /// Builds the partial range `(-∞, self)`.
+    @sugarOnly
     @builtin(.RangeUpToOperatorMethod)
     func rangeUpTo() -> Output
 }
@@ -253,6 +285,7 @@ public protocol RangeThroughConstructible {
     type Output
 
     /// Builds the partial range `(-∞, self]`.
+    @sugarOnly
     @builtin(.RangeThroughOperatorMethod)
     func rangeThrough() -> Output
 }

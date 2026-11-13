@@ -2,12 +2,9 @@
 // stdlib: true
 
 // References 2b: the bare-position rules are untouched by the aggregate
-// carve — params, binding annotations, and fn-type returns still reject.
+// carve — binding annotations and fn-type returns still reject. (A ref-typed
+// param is a borrow, see references/params.)
 module Test
-
-func takesBareRef(r: &Int64) -> Int64 { // ERROR(E480)
-    0
-}
 
 func f() {
     var x = 1;

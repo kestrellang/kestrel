@@ -4,6 +4,7 @@ pub mod closure_box;
 pub mod control;
 mod existential;
 pub mod expr;
+pub(crate) mod indirect;
 pub mod literal;
 pub mod partial_move;
 pub mod pattern;
@@ -14,7 +15,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use kestrel_hecs::Entity;
-use kestrel_hir::body::{HirBlock, HirBody, HirExpr, HirExprId};
+use kestrel_hir::body::{HirBlock, HirBody, HirExpr, HirExprId, HirStmt};
 use kestrel_hir::res::LocalId as HirLocalId;
 use kestrel_mir::block::BlockParam;
 use kestrel_mir::body::OssaBody;
@@ -431,6 +432,21 @@ pub(crate) struct OssaBodyCtx<'a, 'w> {
     /// `set_terminator` carve-out. Saved/restored across closure bodies
     /// (closures can never ret_borrow — E491 rejects the function type).
     pub(crate) ret_borrow: bool,
+    /// Set by `lower_expr_for_return` just before lowering an `if`/`match`/
+    /// block whose value leaves the function, and taken (reset) by the
+    /// first `lower_if`/`lower_match`/`lower_hir_block` entered. Their arm
+    /// tails are then return positions too, so a bare `var` there is moved
+    /// out, not copied. One-shot: anything nested reads it as false.
+    pub(crate) return_tail: bool,
+    /// The current `lower_match`'s arms are return positions (taken from
+    /// `return_tail`). Saved/restored per match, read by its arm leaves.
+    pub(crate) match_arms_return: bool,
+    /// Locals named as a bare value in a return position reached through
+    /// `if`/`match`/block arms (`if c { o } else { … }` as the function's
+    /// tail or a `return` value). Such a local may be moved out on one path
+    /// only, so it gets a drop flag at its declaration
+    /// (see [`collect_return_tail_locals`]).
+    pub(crate) return_tail_locals: HashSet<HirLocalId>,
     /// @guaranteed results of ret_borrow calls in this body. A ref is
     /// intra-block in stage 1: force-ending one at a non-Return terminator
     /// is the E497 "ref across a control-flow merge" error, not a silent
@@ -443,11 +459,21 @@ pub(crate) struct OssaBodyCtx<'a, 'w> {
     /// sweeps spare them, and lexical scope exit / terminators own their
     /// end. Saved/restored across closures.
     pub(crate) ref_binding_vals: HashMap<ValueId, HirLocalId>,
+    /// Arg borrows a ret_borrow call left open for its result: ref → the
+    /// call's @guaranteed args. They exist only to keep the ref's possible
+    /// roots alive, so they end with the ref (`end_ref`) instead of at
+    /// scope exit — otherwise `let x = xs(0); xs` would take `xs` while
+    /// the subscript's receiver borrow is still open. Saved/restored
+    /// across closures.
+    pub(crate) ref_arg_borrows: HashMap<ValueId, Vec<ValueId>>,
     /// Remaining HIR reads per ref-binding local — decremented once per
     /// read expr (`note_binding_read`). A binding live at an inside-fn
     /// terminator with remaining > 0 is the E497 binding error (bindings
     /// never cross blocks); remaining == 0 ends silently.
     pub(crate) ref_binding_remaining: HashMap<HirLocalId, usize>,
+    /// Scope depth each ref binding was declared at: a shared-ref `var` may
+    /// only be rebound there (a nested rebind would cross a merge, E497).
+    pub(crate) ref_binding_depth: HashMap<HirLocalId, usize>,
     /// Read exprs already counted against `ref_binding_remaining` — a
     /// re-lowered expr (desugar duplication) must not double-decrement.
     ref_binding_reads: std::collections::HashSet<kestrel_hir::body::HirExprId>,
@@ -467,6 +493,18 @@ pub(crate) struct OssaBodyCtx<'a, 'w> {
     /// returned borrow still chains to it is a verify consume-while-borrowed
     /// ICE (and E498 would blame the temp instead of the real storage).
     pub(crate) addr_anchors: HashMap<ValueId, ValueId>,
+    /// Borrowed arguments that peeled through `Indirection`: the final view
+    /// → the wrapper receiver it was lent from, its type, and the read
+    /// chain. `snapshot_overlapping_borrows` re-peels from a copy of the
+    /// wrapper when it overlaps a `mutating` argument.
+    pub(crate) peeled_arg_views: HashMap<
+        ValueId,
+        (
+            ValueId,
+            TyId,
+            Vec<kestrel_type_infer::result::IndirectionPeel>,
+        ),
+    >,
     /// Active while inline-lowering a default-argument expression (#148): maps
     /// the callee's type params to the call site's concrete type args. The
     /// default body was inferred against the callee's *generic* params, so every
@@ -506,8 +544,9 @@ pub(crate) struct PendingWriteback {
     type_args: Vec<TyId>,
     /// The receiver PLACE, evaluated once (@guaranteed mut place). The get
     /// call used a sub-borrow of it; the setter consumes it as its MutBorrow
-    /// receiver.
-    recv_place: ValueId,
+    /// receiver. `None` for a static member (`S.calc += 1`): its accessors
+    /// take no receiver.
+    recv_place: Option<ValueId>,
     /// Index values, lowered once; re-borrowed per call.
     index_vals: Vec<ValueId>,
     /// Temp slot holding the element during the mutating operation.
@@ -562,12 +601,18 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
             field_inits: Vec::new(),
             value_forwarding: HashMap::new(),
             ret_borrow: false,
+            return_tail: false,
+            match_arms_return: false,
+            return_tail_locals: collect_return_tail_locals(hir),
             ref_results: std::collections::HashSet::new(),
+            ref_arg_borrows: HashMap::new(),
             ref_binding_vals: HashMap::new(),
             ref_binding_remaining: HashMap::new(),
+            ref_binding_depth: HashMap::new(),
             ref_binding_reads: std::collections::HashSet::new(),
             pending_writebacks: Vec::new(),
             addr_anchors: HashMap::new(),
+            peeled_arg_views: HashMap::new(),
             default_arg_subst: None,
         }
     }
@@ -666,8 +711,35 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
             // All params stamp Param(i) — Consuming included, so a borrow of
             // a consuming param carries it to the escape check (E496 there).
             let root = RootProvenance::Param(i as u32);
-            let val = match convention {
-                ParamConvention::MutBorrow => {
+            // A REF-typed signature param, borrowed or `mutating` (an
+            // `extend &T` / `extend &mutating T` method's self): the ABI
+            // value is the ref SLOT either way. A ref is never rebound, so
+            // a `mutating` one reads like a borrowed one: peel the slot into
+            // the let-ref view below, and calls on `self` reach the pointee
+            // instead of the slot holding the address.
+            let sig_ref = matches!(
+                convention,
+                ParamConvention::Borrow | ParamConvention::MutBorrow
+            )
+            .then(|| param_sig_tys.get(i))
+            .flatten()
+            .and_then(|&t| match self.ctx.module.ty_arena.get(t) {
+                MirTy::Ref { pointee, .. } => Some((t, *pointee)),
+                _ => None,
+            });
+            let val = match (convention, sig_ref) {
+                (_, Some((ref_ty, pointee))) => {
+                    let val = self.body.alloc_value(ValueDef {
+                        ty: ref_ty,
+                        ownership: Ownership::Guaranteed,
+                        borrow_source: None,
+                        root,
+                        span: None,
+                    });
+                    pending_ref_param_views.push((val, pointee, *hir_id));
+                    val
+                },
+                (ParamConvention::MutBorrow, None) => {
                     let val = self.body.alloc_value(ValueDef {
                         ty,
                         ownership: Ownership::Guaranteed,
@@ -698,44 +770,23 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
                     }
                     val
                 },
-                ParamConvention::Borrow => {
-                    // A REF-typed SIGNATURE param (`extend &T` methods'
-                    // self/`other: Self`): the ABI value is the ref SLOT
-                    // (resolve_local_type peels to the pointee — the expr
-                    // seam — so it can't type this). Allocate the param at
-                    // its signature type; the entry peel into the let-ref
-                    // VIEW representation is deferred below the loop — the
-                    // first `params_len` ValueIds must be exactly the params.
-                    let sig_ref =
-                        param_sig_tys
-                            .get(i)
-                            .and_then(|&t| match self.ctx.module.ty_arena.get(t) {
-                                MirTy::Ref { pointee, .. } => Some((t, *pointee)),
-                                _ => None,
-                            });
-                    if let Some((ref_ty, pointee)) = sig_ref {
-                        let val = self.body.alloc_value(ValueDef {
-                            ty: ref_ty,
-                            ownership: Ownership::Guaranteed,
-                            borrow_source: None,
-                            root,
-                            span: None,
-                        });
-                        pending_ref_param_views.push((val, pointee, *hir_id));
-                        val
-                    } else {
-                        let val = self.body.alloc_value(ValueDef {
-                            ty,
-                            ownership: Ownership::Guaranteed,
-                            borrow_source: None,
-                            root,
-                            span: None,
-                        });
-                        self.local_map.insert(*hir_id, LocalBinding::Ssa(val));
-                        val
-                    }
+                (ParamConvention::Borrow, None) => {
+                    // (Ref-typed signature params took the arm above:
+                    // resolve_local_type peels to the pointee — the expr
+                    // seam — so it can't type them. The entry peel into the
+                    // let-ref VIEW is deferred below the loop — the first
+                    // `params_len` ValueIds must be exactly the params.)
+                    let val = self.body.alloc_value(ValueDef {
+                        ty,
+                        ownership: Ownership::Guaranteed,
+                        borrow_source: None,
+                        root,
+                        span: None,
+                    });
+                    self.local_map.insert(*hir_id, LocalBinding::Ssa(val));
+                    val
                 },
-                ParamConvention::Consuming => {
+                (ParamConvention::Consuming, None) => {
                     let ownership = self.ownership_for(ty);
                     let val = self.alloc_value(ty, ownership);
                     self.body.values[val.index()].root = root;
@@ -970,11 +1021,17 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
             }
         }
 
+        let Some(method) = self
+            .ctx
+            .builtin_witness_key(kestrel_hir::Builtin::BooleanConditionalBoolValue)
+        else {
+            return cond_val;
+        };
         self.ctx.register_name(protocol);
         let bool_ty = self.ctx.module.ty_arena.bool();
         let callee = Callee::Witness {
             protocol,
-            method: kestrel_mir::WitnessMethodKey::simple("boolValue"),
+            method,
             self_type: cond_ty,
             method_type_args: vec![],
         };
@@ -1223,6 +1280,9 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
     /// scope-tracked, threads through control flow). The pattern-binding
     /// analog of `lower_borrow_init`'s registration.
     pub(crate) fn register_ref_binding(&mut self, v: ValueId, local: HirLocalId) {
+        self.ref_binding_depth
+            .entry(local)
+            .or_insert(self.scope_stack.len());
         self.ref_binding_vals.insert(v, local);
         let uses = self.local_use_count(local);
         self.ref_binding_remaining.insert(local, uses);
@@ -1346,6 +1406,23 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
             .find(|e| matches!(e, ScopeEntry::Var { local: Some(l), .. } if *l == local))
     }
 
+    /// May `local` be moved out at this point without leaking it on other
+    /// paths? Yes when it has a drop flag, or when it lives in the innermost
+    /// scope frame (no arm boundary between its declaration and here, so the
+    /// move happens on every path through that frame).
+    pub(crate) fn var_movable_here(&self, local: HirLocalId) -> bool {
+        let in_top = self.scope_stack.last().is_some_and(|f| {
+            f.entries
+                .iter()
+                .any(|e| matches!(e, ScopeEntry::Var { local: Some(l), .. } if *l == local))
+        });
+        in_top
+            || matches!(
+                self.var_entry(local),
+                Some(ScopeEntry::Var { flag: Some(_), .. })
+            )
+    }
+
     pub(crate) fn var_entry(&self, local: HirLocalId) -> Option<&ScopeEntry> {
         self.scope_stack
             .iter()
@@ -1440,6 +1517,16 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
     /// Copyable container — the consuming read path takes those out of the
     /// slot too, and the scope-exit guarded destroy needs the flag). `None`
     /// for definitely-Copyable vars (never moved, never need a flag).
+    /// [`Self::maybe_alloc_var_flag`] for a declared local: a local that a
+    /// return-position arm may move out (`return_tail_locals`) gets a flag
+    /// even when Copyable, since it's moved on some paths only.
+    pub fn maybe_alloc_local_flag(&mut self, local: HirLocalId, ty: TyId) -> Option<ValueId> {
+        if self.return_tail_locals.contains(&local) {
+            return Some(self.alloc_var_flag());
+        }
+        self.maybe_alloc_var_flag(ty)
+    }
+
     pub fn maybe_alloc_var_flag(&mut self, ty: TyId) -> Option<ValueId> {
         if self.is_non_copyable(ty) || self.copy_behavior_is_mono_dependent(ty) {
             Some(self.alloc_var_flag())
@@ -1547,6 +1634,17 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
     /// `struct_ty` that has one, lowered inline (the same lowering a
     /// memberwise init's omitted argument gets), with its `FieldIdx`.
     fn field_default_values(&mut self, struct_ty: TyId) -> Vec<(FieldIdx, ValueId)> {
+        self.field_default_values_except(struct_ty, &[])
+    }
+
+    /// [`Self::field_default_values`] for the defaulted fields not already in
+    /// `given` (a memberwise construction's explicit arguments): a given
+    /// field's default is never evaluated.
+    pub(crate) fn field_default_values_except(
+        &mut self,
+        struct_ty: TyId,
+        given: &[(FieldIdx, ValueId)],
+    ) -> Vec<(FieldIdx, ValueId)> {
         let MirTy::Named {
             entity, type_args, ..
         } = self.ctx.module.ty_arena.get(struct_ty).clone()
@@ -1564,13 +1662,21 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
                         .is_some_and(|fc| fc.is_declared_storage())
             })
             .filter_map(|&c| Some((c, self.ctx.field_idx_of(c)?)))
+            .filter(|(_, idx)| !given.iter().any(|(g, _)| g == idx))
             .collect();
         let field_tys = self.struct_field_tys(struct_ty);
         defaulted
             .into_iter()
             .filter_map(|(field, idx)| {
                 let ty = *field_tys.get(idx.index())?;
-                Some((idx, self.lower_default_arg_inline(field, ty, &type_args)))
+                // A field default is stored, never a borrowed view.
+                let (value, _) = self.lower_default_arg_inline(
+                    field,
+                    ty,
+                    &type_args,
+                    ParamConvention::Consuming,
+                );
+                Some((idx, value))
             })
             .collect()
     }
@@ -1603,10 +1709,13 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
             let Some(&opt_ty) = field_tys.get(idx.index()) else {
                 continue;
             };
-            let MirTy::Named { entity: opt, .. } = self.ctx.module.ty_arena.get(opt_ty) else {
+            let MirTy::Named { .. } = self.ctx.module.ty_arena.get(opt_ty) else {
                 continue;
             };
-            let Some(none) = self.ctx.resolve_variant_idx(*opt, "None") else {
+            let Some(none) = self
+                .ctx
+                .builtin_variant_idx(kestrel_hir::Builtin::OptionalNoneCase)
+            else {
                 continue;
             };
             out.push((idx, self.emit_enum_variant(opt_ty, none, Vec::new())));
@@ -1748,14 +1857,22 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
     /// (`ImplicitMember`); failure is anything else (`return null`, `throw` →
     /// `.Err`, `try` → `fromResidual`). A void return (`None`) is not a failure.
     pub fn is_init_failure_return(&self, value: &Option<HirExprId>) -> bool {
-        match value {
-            Some(v) => !matches!(
-                &self.hir.exprs[*v],
-                HirExpr::ImplicitMember { name, .. }
-                    if matches!(name.as_str_or_empty(), "Some" | "Ok")
-            ),
-            None => false,
+        let Some(v) = value else {
+            return false;
+        };
+        if !matches!(&self.hir.exprs[*v], HirExpr::ImplicitMember { .. }) {
+            return true;
         }
+        // The success case, by the tag on the case it resolved to.
+        let resolved = self.typed.as_ref().and_then(|t| t.resolutions.get(v));
+        let is_case = |b| {
+            self.ctx.query.query(kestrel_name_res::ResolveBuiltin {
+                builtin: b,
+                root: self.ctx.root,
+            }) == resolved.copied()
+        };
+        !(is_case(kestrel_hir::Builtin::OptionalSomeCase)
+            || is_case(kestrel_hir::Builtin::ResultOkCase))
     }
 
     /// At a failure `return` in a failable init, flag-guard-drop each
@@ -2191,6 +2308,23 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
             .collect()
     }
 
+    /// The single-use expression refs (`ref_results`, not named bindings)
+    /// tracked in scope right now, in creation order.
+    pub(crate) fn tracked_expr_refs(&self) -> Vec<ValueId> {
+        self.scope_stack
+            .iter()
+            .flat_map(|s| s.entries.iter())
+            .filter_map(|e| match e {
+                ScopeEntry::Borrow(v)
+                    if self.ref_results.contains(v) && !self.ref_binding_vals.contains_key(v) =>
+                {
+                    Some(*v)
+                },
+                _ => None,
+            })
+            .collect()
+    }
+
     pub fn snapshot_scope(&self) -> ScopeSnapshot {
         ScopeSnapshot {
             scopes: self.scope_stack.iter().map(|s| s.entries.clone()).collect(),
@@ -2353,8 +2487,21 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
             return None;
         }
         // A merge param can't carry a borrow — materialize an @owned result.
-        let result = if self.body.value(result).ownership == Ownership::Guaranteed {
-            let owned = self.emit_copy_value(result);
+        // An unsized one (`if c { s.trimmed() } else { … }`, a `StringSlice`)
+        // has no value to copy out: it is a ref crossing the merge (E497).
+        // Moving the borrow keeps the IR well-formed; the error aborts.
+        let guaranteed = self.body.value(result).ownership == Ownership::Guaranteed;
+        let ty = self.body.value(result).ty;
+        let unsized_ref = guaranteed && self.ctx.module.is_unsized(ty);
+        if unsized_ref {
+            self.emit_ref_across_merge_error(result);
+        }
+        let result = if guaranteed {
+            let owned = if unsized_ref {
+                self.emit_move_value(result)
+            } else {
+                self.emit_copy_value(result)
+            };
             // Arm-value decay: when the arm value is a tracked ref (ret_borrow
             // call result), the copy-out above was its single use — end its
             // borrow before the jump to the merge, or `set_terminator`'s sweep
@@ -2506,8 +2653,19 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         // Use the slot's declared type when known (the field type), else the
         // value's own type. Only carry when that type actually carries an escape.
         let ty = slot_ty.unwrap_or(vty);
-        if self.ctx.module.escape_carry(ty).any() {
+        let carry = self.ctx.module.escape_carry(ty);
+        if carry.any() {
             let convs = self.current_param_convs();
+            // A consuming parameter's owning closure MOVED into the aggregate
+            // (`View(slice: s, predicate: predicate)`) is owned by it, not
+            // borrowed from the dying parameter: it carries no frame-bound
+            // storage, so it must not taint a sibling ref field with E496.
+            let moved_consuming = matches!(vroot, RootProvenance::Param(i)
+                if convs.get(i as usize) == Some(&kestrel_mir::ParamConvention::Consuming))
+                && self.body.value(v).ownership == Ownership::Owned;
+            if moved_consuming && !carry.any_ref && !carry.view_closure {
+                return;
+            }
             *taint = Some(match *taint {
                 None => vroot,
                 Some(t) => t.join(vroot, &convs),
@@ -2654,8 +2812,11 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
                 _ => None,
             })
             .collect();
-        for v in stale {
-            self.emit_end_borrow(v);
+        // Newest first; a ref ended as an earlier one's kept arg is skipped.
+        for v in stale.into_iter().rev() {
+            if self.is_borrow_tracked(v) {
+                self.end_ref(v);
+            }
         }
     }
 
@@ -2879,7 +3040,15 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         variant: VariantIdx,
         payload: Vec<ValueId>,
     ) -> ValueId {
-        let slot_tys = self.enum_variant_payload_tys(enum_ty, variant);
+        // A boxed `indirect` case: `payload` is the declared fields; the
+        // physical payload is their box (`body/indirect.rs`).
+        let (payload, slot_tys) = match self.indirect_case(enum_ty, variant) {
+            Some(case) => {
+                let boxed = self.emit_indirect_box(&case, payload);
+                (vec![boxed], vec![case.box_ty])
+            },
+            None => (payload, self.enum_variant_payload_tys(enum_ty, variant)),
+        };
         let result = self.alloc_value(enum_ty, Ownership::Owned);
         let mut taint: Option<RootProvenance> = None;
         let mut end_after: Vec<ValueId> = Vec::new();
@@ -3022,6 +3191,18 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         variant: VariantIdx,
         field_tys: &[TyId],
     ) -> Vec<ValueId> {
+        // A boxed `indirect` case: move the box out, then its payload.
+        if let Some(case) = self.indirect_case(self.body.value(operand).ty, variant) {
+            let boxed = self.alloc_value(case.box_ty, Ownership::Owned);
+            self.push_inst(InstKind::DestructureEnum {
+                results: vec![boxed],
+                operand,
+                variant,
+            });
+            self.consume(operand);
+            self.track_owned(boxed);
+            return self.emit_indirect_unbox(&case, boxed);
+        }
         let results: Vec<ValueId> = field_tys
             .iter()
             .map(|&ty| self.alloc_value(ty, Ownership::Owned))
@@ -3280,11 +3461,25 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
             let Some(root) = self.storage_root(a.value) else {
                 continue;
             };
+            if !mut_roots.contains(&root) {
+                continue;
+            }
+            // A peeled view (`xs.append(contentsOf: xs)` lends `xs.value`)
+            // snapshots its wrapper and peels again from the copy.
+            if let Some((base, base_ty, peels)) = self.peeled_arg_views.get(&a.value).cloned() {
+                if self.is_non_copyable(base_ty) || self.copy_behavior_is_mono_dependent(base_ty) {
+                    continue;
+                }
+                let snapshot = self.emit_copy_value(base);
+                let recv = CallArg {
+                    value: self.emit_begin_borrow(snapshot),
+                    convention: ParamConvention::Borrow,
+                };
+                a.value = self.apply_indirection_chain(recv, base_ty, &peels, false);
+                continue;
+            }
             let ty = self.body.value(a.value).ty;
-            if !mut_roots.contains(&root)
-                || self.is_non_copyable(ty)
-                || self.copy_behavior_is_mono_dependent(ty)
-            {
+            if self.is_non_copyable(ty) || self.copy_behavior_is_mono_dependent(ty) {
                 continue;
             }
             let snapshot = self.emit_copy_value(a.value);
@@ -3526,11 +3721,15 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
     // Emit calls
     // ================================================================
 
+    /// `ret_ref_hint`: the call's instantiated return is a ref (`Some(mutating)`)
+    /// per inference (`TypedBody.ref_return_calls`) — known only for calls
+    /// lowered from a HIR call expression (`emit_call_for_expr`).
     fn emit_call_inner(
         &mut self,
         callee: Callee,
         mut args: Vec<CallArg>,
         result_ty: Option<TyId>,
+        ret_ref_hint: Option<bool>,
     ) -> Option<ValueId> {
         // Resolve any arg / indirect-callee value that was renamed by a
         // block-boundary rebind since it was prepared (e.g. an @owned arg
@@ -3544,6 +3743,7 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         let callee = match callee {
             Callee::Thin(v) => Callee::Thin(self.resolve_value(v)),
             Callee::Thick(v) => Callee::Thick(self.resolve_value(v)),
+            Callee::C(v) => Callee::C(self.resolve_value(v)),
             other => other,
         };
         // ret_borrow callee? Only Direct callees can be: function values
@@ -3576,6 +3776,7 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
                 protocol, method, ..
             } => self
                 .find_protocol_method_entity(*protocol, method)
+                .or_else(|| self.find_protocol_extension_member(*protocol, method))
                 .and_then(|entity| {
                     self.ctx.query.query(kestrel_hir_lower::CallableRefReturn {
                         entity,
@@ -3585,6 +3786,10 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
                 .map(|r| r.mutating),
             _ => None,
         };
+        // A generic return that is a ref only once instantiated (`-> I.Ref`
+        // at `I.Ref = &T`): the mono instance hands back the pointer, so the
+        // caller must register it like a ret_borrow result.
+        let ret_ref_mutating = ret_ref_mutating.or(ret_ref_hint);
         // Stage 2b: a generic `-> T` callee instantiated at `T = &U`
         // (unwrap()/or() on Optional[&U], `identity[&U]`) returns the REF
         // by value — the mono instance's ret IS `MirTy::Ref` while
@@ -3757,6 +3962,17 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         if ret_ref_mutating.is_none() {
             for &borrow_val in &borrows {
                 let src = self.body.value(borrow_val).borrow_source;
+                // An unnamed ref passed straight through (`xs(0).append(v)`'s
+                // receiver) dies with this call: end it through `end_ref` so
+                // the borrows it holds on its sources (`xs`, the index) end
+                // too. A plain end_borrow left `xs` mut-borrowed to scope exit,
+                // so a later closure capture of `xs` read under it (OSSA ICE).
+                if self.ref_results.contains(&borrow_val)
+                    && !self.ref_binding_vals.contains_key(&borrow_val)
+                {
+                    self.end_ref(borrow_val);
+                    continue;
+                }
                 self.emit_end_borrow(borrow_val);
                 // A sub-borrow of a ref (receiver/arg prep) was that ref's
                 // single use — refs aren't nameable, so once the dependent
@@ -3771,9 +3987,10 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
                 }
             }
         }
-        // else: the arg borrows stay scope-tracked — every potential root
-        // must outlive the returned ref (cheap under may-alias); the scope
-        // machinery ends them at scope exit or the next terminator.
+        // else: the arg borrows stay open — every potential root must
+        // outlive the returned ref (cheap under may-alias). They are
+        // recorded in `ref_arg_borrows` below and end with the ref
+        // (`end_ref`); scope exit / the next terminator is the fallback.
         self.drain_deferred_borrows();
         if let (Some(ty), Some(r)) = (result_ty, result) {
             if matches!(self.ctx.module.ty_arena.get(ty), MirTy::Never) {
@@ -3785,6 +4002,7 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
                 self.track_borrow(r);
                 self.ref_results.insert(r);
                 self.note_lent_ref(&borrows, r);
+                self.ref_arg_borrows.insert(r, borrows);
             } else {
                 self.track_owned(r);
             }
@@ -3798,11 +4016,29 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         args: Vec<CallArg>,
         result_ty: TyId,
     ) -> ValueId {
-        self.emit_call_inner(callee, args, Some(result_ty)).unwrap()
+        self.emit_call_inner(callee, args, Some(result_ty), None)
+            .unwrap()
+    }
+
+    /// `emit_call_returning` for the call lowered from HIR expr `expr_id`:
+    /// takes the return convention inference recorded for it.
+    pub fn emit_call_for_expr(
+        &mut self,
+        expr_id: HirExprId,
+        callee: Callee,
+        args: Vec<CallArg>,
+        result_ty: TyId,
+    ) -> ValueId {
+        let hint = self
+            .typed
+            .as_ref()
+            .and_then(|t| t.ref_return_calls.get(&expr_id).copied());
+        self.emit_call_inner(callee, args, Some(result_ty), hint)
+            .unwrap()
     }
 
     pub fn emit_call_void(&mut self, callee: Callee, args: Vec<CallArg>) {
-        self.emit_call_inner(callee, args, None);
+        self.emit_call_inner(callee, args, None, None);
     }
 
     // ================================================================
@@ -4093,8 +4329,13 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
     /// value, never the place — and the copy is the ref's single use, so
     /// its borrow ends here. Mirrors binding decay in `lower_stmt` and the
     /// arm decay in `capture_arm_exit`. Non-ref values pass through.
+    ///
+    /// A named binding counts too: its name in a block it was threaded
+    /// into (a match arm, an `if` body) is a fresh param registered only in
+    /// `ref_binding_vals`, and passing that borrow through wrote it into
+    /// the buffer uncopied (`match m { .A(_) => f([m]) }`: OSSA ICE).
     pub fn decay_if_ref(&mut self, value: ValueId) -> ValueId {
-        if self.ref_results.contains(&value) {
+        if self.ref_results.contains(&value) || self.ref_binding_vals.contains_key(&value) {
             let owned = self.emit_copy_value(value);
             self.end_ref_if_single_use(value);
             owned
@@ -4110,8 +4351,95 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
     /// terminator. Every "the ref's single use — end it" site funnels here.
     pub fn end_ref_if_single_use(&mut self, v: ValueId) {
         if !self.ref_binding_vals.contains_key(&v) {
-            self.emit_end_borrow(v);
+            self.end_ref(v);
         }
+    }
+
+    /// Every borrow currently scope-tracked, outermost scope first.
+    fn tracked_borrows(&self) -> Vec<ValueId> {
+        self.scope_stack
+            .iter()
+            .flat_map(|s| s.entries.iter())
+            .filter_map(|e| match e {
+                ScopeEntry::Borrow(b) => Some(*b),
+                _ => None,
+            })
+            .collect()
+    }
+
+    pub(crate) fn is_borrow_tracked(&self, v: ValueId) -> bool {
+        self.scope_stack.iter().any(|s| {
+            s.entries
+                .iter()
+                .any(|e| matches!(e, ScopeEntry::Borrow(b) if *b == v))
+        })
+    }
+
+    /// End ref `v` and then the arg borrows its call kept open for it
+    /// (`ref_arg_borrows`), newest first. An arg borrow is skipped when it
+    /// is no longer scope-tracked (already ended, or a param / outer value
+    /// the call borrowed directly), when it is a named ref binding (its own
+    /// lifetime rules), or when another live borrow still derives from it.
+    /// A kept arg that is itself a ref ends through this same path, so a
+    /// chain (`xs(0)(1)`) unwinds fully.
+    pub(crate) fn end_ref(&mut self, v: ValueId) {
+        self.emit_end_borrow(v);
+        let Some(args) = self.ref_arg_borrows.remove(&v) else {
+            return;
+        };
+        for a in args.into_iter().rev() {
+            let live = self.tracked_borrows();
+            if !live.contains(&a)
+                || self.ref_binding_vals.contains_key(&a)
+                || live
+                    .iter()
+                    .any(|&b| b != a && self.borrow_derives_from(b, a))
+            {
+                continue;
+            }
+            if self.ref_results.contains(&a) {
+                self.end_ref(a);
+                continue;
+            }
+            self.emit_end_borrow(a);
+            // A sub-borrow of an unnamed ref (`xs(i).toOwned()` peeling
+            // through `xs(i)`'s `Indirection`) was that ref's single use:
+            // end it too, as `emit_call_inner` does for a plain call, or it
+            // reaches the next terminator as a false E497.
+            if let Some(src) = self.body.value(a).borrow_source
+                && self.ref_results.contains(&src)
+                && self.is_borrow_tracked(src)
+            {
+                self.end_ref_if_single_use(src);
+            }
+        }
+    }
+
+    /// End a single-use ref and the borrows it was lent from. A ref result
+    /// keeps its source borrow (an existential box's `value` place
+    /// receiver, say) open until scope exit, so a later read of the same
+    /// place in the same block (`a and box.method()` capturing `box`) would
+    /// hit an active borrow. Stops at a named ref binding, which outlives
+    /// any one use, and at anything not an open scope borrow.
+    pub fn end_ref_and_sources(&mut self, v: ValueId) {
+        let mut current = Some(v);
+        while let Some(value) = current {
+            if self.ref_binding_vals.contains_key(&value) || !self.is_open_scope_borrow(value) {
+                return;
+            }
+            current = self.body.value(value).borrow_source;
+            self.emit_end_borrow(value);
+        }
+    }
+
+    /// True if `value` is a borrow the scope machinery still has to end.
+    fn is_open_scope_borrow(&self, value: ValueId) -> bool {
+        self.scope_stack.iter().any(|scope| {
+            scope
+                .entries
+                .iter()
+                .any(|e| matches!(e, ScopeEntry::Borrow(v) if *v == value))
+        })
     }
 
     /// End every named ref binding declared in the current block whose last
@@ -4164,7 +4492,7 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
             self.ref_binding_vals.remove(&v);
             self.ref_results.remove(&v);
             self.ref_binding_remaining.remove(&local);
-            self.emit_end_borrow(v);
+            self.end_ref(v);
         }
     }
 
@@ -4250,6 +4578,33 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
     /// E497, binding wording: a named ref binding still has uses after an
     /// inside-fn terminator — bindings never cross blocks (no @guaranteed
     /// block params in this version).
+    /// Is `local` being rebound in the scope that declared it?
+    pub(crate) fn in_ref_binding_scope(&self, local: HirLocalId) -> bool {
+        self.ref_binding_depth.get(&local) == Some(&self.scope_stack.len())
+    }
+
+    /// E497 for rebinding a shared-ref `var` inside a nested scope.
+    pub(crate) fn emit_rebind_across_merge_error(&mut self, local: HirLocalId, value: HirExprId) {
+        let name = self.hir.locals[local].name.clone();
+        let span = expr_span(&self.hir, value);
+        self.ctx.query.accumulate(
+            Diagnostic::error()
+                .with_code("E497")
+                .with_message(format!(
+                    "ref binding '{name}' cannot be rebound inside a branch or loop in this version"
+                ))
+                .with_labels(vec![
+                    Label::primary(span.file_id, span.range())
+                        .with_message("the new reference would cross the merge"),
+                ])
+                .with_notes(vec![
+                    "rebind it in the scope that declared it, or bind the branch's \
+                     result (`let x = ...;`) instead"
+                        .into(),
+                ]),
+        );
+    }
+
     fn emit_binding_across_merge_error(&mut self, v: ValueId, local: HirLocalId) {
         let name = self.hir.locals[local].name.clone();
         let span = self
@@ -4424,23 +4779,27 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         if let Some(accessor) = self.ctx.find_ref_accessor_child(member, true) {
             self.ctx.register_name(accessor);
             let mut call_args: Vec<CallArg> = Vec::new();
-            let type_args = if is_static {
+            let callee = if is_static {
                 let AccessorReceiver::Expr(receiver_expr) = receiver else {
                     return None;
                 };
                 let self_type = self.type_from_type_ref(receiver_expr);
-                self.prepend_receiver_type_args(self_type, vec![])
+                self.place_accessor_callee(accessor, self_type, vec![])
             } else {
-                let (recv_arg, receiver_ty) = self.accessor_receiver_mut_arg(&receiver)?;
+                let (recv_arg, receiver_ty) = match &receiver {
+                    AccessorReceiver::Expr(e) => {
+                        self.member_receiver_arg(expr_id, *e, ParamConvention::MutBorrow)
+                    },
+                    _ => self.accessor_receiver_mut_arg(&receiver)?,
+                };
                 let ta = self.resolve_type_args(expr_id);
                 call_args.push(recv_arg);
-                self.prepend_receiver_type_args(receiver_ty, ta)
+                self.place_accessor_callee(accessor, receiver_ty, ta)
             };
             for a in &index_args {
                 let v = self.lower_expr(a.value);
                 call_args.push(self.prepare_call_arg(v, ParamConvention::Borrow));
             }
-            let callee = Callee::direct_with_args(accessor, type_args, None);
             let ref_val = self.emit_call_returning(callee, call_args, pointee_ty);
             return Some(CallArg {
                 value: ref_val,
@@ -4482,6 +4841,19 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
             return None;
         }
         Some(setter)
+    }
+
+    /// The setter a get→modify→set writeback of `member` calls back:
+    /// [`Self::write_setter`], or a `{ get set }` protocol requirement
+    /// itself (witness `"name.set"`). Without the requirement case a
+    /// generic `x.n -= 1` modified the getter's temporary and was lost.
+    fn writeback_setter(
+        &self,
+        member: kestrel_hecs::Entity,
+        receiver: HirExprId,
+    ) -> Option<kestrel_hecs::Entity> {
+        self.write_setter(member, Some(receiver))
+            .or_else(|| self.ctx.requirement_setter(member))
     }
 
     /// An owned copy of an observed stored field read off its receiver
@@ -4653,16 +5025,12 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         index_args: &[kestrel_hir::body::HirCallArg],
         member: kestrel_hecs::Entity,
     ) -> Option<ValueId> {
-        // Statics keep today's rejection (not carved by the analyzer either).
-        if self
+        let is_static = self
             .ctx
             .world
             .get::<kestrel_ast_builder::Static>(member)
-            .is_some()
-        {
-            return None;
-        }
-        let setter = self.write_setter(member, Some(receiver.root_expr()))?;
+            .is_some();
+        let setter = self.writeback_setter(member, receiver.root_expr())?;
         // NotCopyable elements can't ride a copy-out — backstop the analyzer
         // (mirrors emit_move_out_of_borrow_backstop's accumulate pattern).
         if self.is_non_copyable(pointee_ty) {
@@ -4694,8 +5062,20 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         // sub-borrow so the place survives the call (emit_call_inner ends
         // arg borrows after non-ret_borrow calls), and the setter consumes
         // the place itself as its MutBorrow receiver at drain time.
-        let (recv_arg, receiver_ty) = self.accessor_receiver_mut_arg(receiver)?;
-        let recv_place = recv_arg.value;
+        // A static member's receiver is its type (`S` in `S.calc += 1`):
+        // there is no place to evaluate.
+        let (recv_place, receiver_ty) = match receiver {
+            AccessorReceiver::Expr(base) if is_static => (None, self.type_from_type_ref(*base)),
+            _ if is_static => return None,
+            _ => {
+                let (recv_arg, receiver_ty) = self.accessor_receiver_mut_arg(receiver)?;
+                // A requirement on an existential is reached on the payload,
+                // through the table (the box has no witness of its own).
+                let peeled = self.peel_existential_receiver(recv_arg.value, receiver_ty, member);
+                let (place, receiver_ty) = peeled.unwrap_or((recv_arg.value, receiver_ty));
+                (Some(place), receiver_ty)
+            },
+        };
         let index_vals: Vec<ValueId> = index_args
             .iter()
             .map(|a| self.lower_expr(a.value))
@@ -4703,7 +5083,9 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
 
         // GET: copy the element out. An observed stored field reads its
         // storage directly (it has no getter to call).
-        let got = match self.read_observed_storage(recv_place, receiver_ty, member) {
+        let observed =
+            recv_place.and_then(|place| self.read_observed_storage(place, receiver_ty, member));
+        let got = match observed {
             Some(got) => got,
             None => self.emit_read_provider_call(
                 member,
@@ -4732,44 +5114,40 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         Some(slot_addr)
     }
 
-    /// Call `member`'s READ provider on a sub-borrow of `recv_place`: the
-    /// `ref` accessor child when present (a ref+set cross-mix leaves the
-    /// parent bodyless; the caller copies out of the @guaranteed ref
-    /// result), else the getter on the member itself.
+    /// Call `member`'s READ provider on a sub-borrow of `recv_place` (none
+    /// for a static member): the `ref` accessor child when present (a
+    /// ref+set cross-mix leaves the parent bodyless; the caller copies out
+    /// of the @guaranteed ref result), else the getter on the member itself.
     fn emit_read_provider_call(
         &mut self,
         member: kestrel_hecs::Entity,
-        recv_place: ValueId,
+        recv_place: Option<ValueId>,
         index_vals: &[ValueId],
         receiver_ty: TyId,
         type_args: &[TyId],
         result_ty: TyId,
     ) -> ValueId {
-        let mut args: Vec<CallArg> = vec![CallArg {
-            value: self.emit_begin_borrow(recv_place),
-            convention: ParamConvention::Borrow,
-        }];
+        let mut args: Vec<CallArg> = Vec::new();
+        if let Some(place) = recv_place {
+            args.push(CallArg {
+                value: self.emit_begin_borrow(place),
+                convention: ParamConvention::Borrow,
+            });
+        }
         for &v in index_vals {
             args.push(self.prepare_call_arg(v, ParamConvention::Borrow));
+        }
+        if self.is_raw_existential(receiver_ty)
+            && let Some(got) = self.emit_dynamic_call(member, receiver_ty, args.clone(), result_ty)
+        {
+            return got;
         }
         let read_callee = self
             .ctx
             .find_ref_accessor_child(member, false)
             .unwrap_or(member);
-        if let Some(protocol) = self.ctx.is_protocol_method(read_callee) {
-            self.ctx.register_name(protocol);
-            let key = self.ctx.witness_method_key(read_callee);
-            let callee = Callee::Witness {
-                protocol,
-                method: key,
-                self_type: receiver_ty,
-                method_type_args: type_args.to_vec(),
-            };
-            return self.emit_call_returning(callee, args, result_ty);
-        }
         self.ctx.register_name(read_callee);
-        let ta = self.prepend_receiver_type_args(receiver_ty, type_args.to_vec());
-        let callee = Callee::direct_with_args(read_callee, ta, None);
+        let callee = self.place_accessor_callee(read_callee, receiver_ty, type_args.to_vec());
         self.emit_call_returning(callee, args, result_ty)
     }
 
@@ -4822,9 +5200,16 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
     /// writeback half. Without it a nested store mutated a temporary copy
     /// and was lost, or skipped an observed field's observers.
     pub(crate) fn writeback_place_addr(&mut self, expr_id: HirExprId) -> Option<ValueId> {
+        // A `mutating ref` accessor lends the place itself: write through it.
+        // Without this a nested store (`w.value.x = 5`, `w.value.x += 1`)
+        // fell back to the READ provider and wrote through its shared `&T`,
+        // skipping the write accessor's work (a copy-on-write fork).
+        if let Some(addr) = self.mutating_ref_place_addr(expr_id) {
+            return Some(addr);
+        }
         if let Some((receiver, index_args, member, _)) = self.accessor_member_prelude(expr_id)
             && self
-                .write_setter(member, Some(receiver.root_expr()))
+                .writeback_setter(member, receiver.root_expr())
                 .is_some()
         {
             return self.fabricate_setter_writeback_slot(expr_id, &receiver, &index_args, member);
@@ -4851,6 +5236,18 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         let base_ty = self.resolve_expr_type(base);
         let base_addr = self.write_place_addr(base)?;
         Some(self.emit_field_addr(base_addr, base_ty, idx))
+    }
+
+    /// The address of an accessor-backed member (`w.value`, `x(i)`) whose
+    /// `mutating ref` accessor lends it: the accessor's `&mutating` result,
+    /// as a pointer. `None` for a member without one.
+    fn mutating_ref_place_addr(&mut self, expr_id: HirExprId) -> Option<ValueId> {
+        let (_, _, member, _) = self.accessor_member_prelude(expr_id)?;
+        self.ctx.find_ref_accessor_child(member, true)?;
+        let arg = self.try_lower_accessor_place_mut(expr_id)?;
+        let pointee = self.resolve_expr_type(expr_id);
+        let ptr_ty = self.ctx.module.ty_arena.pointer(pointee);
+        Some(self.emit_op1(Op::PtrTo(pointee), arg.value, ptr_ty))
     }
 
     /// Resolve an accessor-backed member expression (`x(i)`, `x.first`,
@@ -4941,6 +5338,173 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         ))
     }
 
+    /// Receiver for a subscript applied to a computed property
+    /// (`p.value(i)`, `p.mutatingValue(i) = v`): call the property's getter
+    /// on `receiver` and hand its result to the subscript. The property type
+    /// is substituted with the receiver's type args (the declared `&T` names
+    /// the owner's own params). A reference-typed property (`var value: &T`)
+    /// lends its pointee in place, so the subscript dispatches on — and
+    /// writes through to — the referent, never a temporary copy.
+    pub(crate) fn computed_prefix_receiver(
+        &mut self,
+        receiver: CallArg,
+        receiver_ty: TyId,
+        prop: Entity,
+        convention: ParamConvention,
+    ) -> (CallArg, TyId) {
+        let prop_ty = self.computed_prop_ty(prop, receiver_ty);
+        // A place property (`var item: T { ref … mutating ref … }`) lends
+        // through its accessor child: the `mutating ref` for a mutable use,
+        // else the `ref`. The caller prepares `receiver` with that
+        // accessor's receiver convention.
+        let mutating = convention == ParamConvention::MutBorrow;
+        if let Some(accessor) = self.ctx.find_ref_accessor_child(prop, mutating) {
+            self.ctx.register_name(accessor);
+            let callee = self.place_accessor_callee(accessor, receiver_ty, vec![]);
+            let value = self.emit_call_returning(callee, vec![receiver], prop_ty);
+            return (CallArg { value, convention }, prop_ty);
+        }
+        self.ctx.register_name(prop);
+        // Same callee rule as a plain `x.prop` read: a getter declared in a
+        // protocol extension dispatches through the witness with the
+        // receiver as `Self`, never a direct call with `Self` unbound.
+        let callee = self.place_accessor_callee(prop, receiver_ty, vec![]);
+        let result = self.emit_call_returning(callee, vec![receiver], prop_ty);
+        if let MirTy::Ref { pointee, .. } = *self.ctx.module.ty_arena.get(prop_ty) {
+            let arg = CallArg {
+                value: result,
+                convention,
+            };
+            return (arg, pointee);
+        }
+        (self.prepare_call_arg(result, convention), prop_ty)
+    }
+
+    /// The accessor child a READ of place member `member` at `expr_id` calls:
+    /// the `mutating ref` when type inference typed the read `&mutating T`
+    /// (`TypedBody::mutating_lends`), else the `ref`. `None` when the member has neither. Without the mutating case
+    /// `func f(mutating xs: [T]) -> &mutating T { xs(0) }` lent the shared
+    /// `ref` and wrote through it, skipping Array's copy-on-write.
+    pub(crate) fn read_place_provider(&self, member: Entity, expr_id: HirExprId) -> Option<Entity> {
+        let mutating = self
+            .typed
+            .as_ref()
+            .is_some_and(|t| t.mutating_lends.contains(&expr_id));
+        mutating
+            .then(|| self.ctx.find_ref_accessor_child(member, true))
+            .flatten()
+            .or_else(|| self.ctx.find_ref_accessor_child(member, false))
+    }
+
+    /// Computed property `prop`'s type at a receiver of type `receiver_ty`:
+    /// its declared type with the receiver's type args (and a protocol
+    /// requirement's `Self`) substituted.
+    pub(crate) fn computed_prop_ty(&mut self, prop: Entity, receiver_ty: TyId) -> TyId {
+        let declared = crate::ty::resolve_type_annotation(self.ctx, prop);
+        let prop_ty = self.subst_receiver_args(receiver_ty, declared);
+        self.requirement_ty_at(prop, receiver_ty, prop_ty)
+    }
+
+    /// A subscript store through a value-returning get/set computed
+    /// property (`u.g(0) = 5`, `g: G { get set }`): get `u.g` into a
+    /// writeback slot and lend the slot as the subscript's receiver, so the
+    /// property's setter writes the mutated value back when the statement
+    /// ends. `None` when the property lends a place instead (a `mutating
+    /// ref` accessor or a `&mutating` getter) or has no setter.
+    pub(crate) fn computed_prefix_writeback_receiver(
+        &mut self,
+        receiver: HirExprId,
+        receiver_ty: TyId,
+        prop: Entity,
+    ) -> Option<(CallArg, TyId)> {
+        if self.ctx.find_ref_accessor_child(prop, true).is_some() {
+            return None;
+        }
+        let prop_ty = self.computed_prop_ty(prop, receiver_ty);
+        if matches!(self.ctx.module.ty_arena.get(prop_ty), MirTy::Ref { .. }) {
+            return None;
+        }
+        self.writeback_setter(prop, receiver)?;
+        let slot_addr = self.fabricate_writeback_slot_typed(
+            prop_ty,
+            Vec::new(),
+            &AccessorReceiver::Expr(receiver),
+            &[],
+            prop,
+        )?;
+        let slot_borrow = self.emit_begin_mut_borrow_addr(slot_addr, prop_ty);
+        let arg = CallArg {
+            value: slot_borrow,
+            convention: ParamConvention::MutBorrow,
+        };
+        Some((arg, prop_ty))
+    }
+
+    /// A protocol requirement's declared type (`var item: Item`, read as
+    /// `Self.Item`) at a generic receiver `H`: `Self` → `H`, then the
+    /// function's where-clause equalities (`H.Item = Array[Int64]`) pin it.
+    /// Other members' types pass through unchanged.
+    fn requirement_ty_at(&mut self, member: Entity, receiver_ty: TyId, ty: TyId) -> TyId {
+        let Some(protocol) = self.ctx.world.parent_of(member) else {
+            return ty;
+        };
+        use kestrel_ast_builder::NodeKind;
+        if self.ctx.world.get::<NodeKind>(protocol) != Some(&NodeKind::Protocol) {
+            return ty;
+        }
+        let mut subst = kestrel_mir::SubstMap::new();
+        subst.type_params.insert(protocol, receiver_ty);
+        let ty = kestrel_mir::substitute(&mut self.ctx.module.ty_arena, ty, &subst);
+        self.normalize_where_equal(ty)
+    }
+
+    /// `ty` rewritten through the current function's where-clause equalities
+    /// (`where H.Item = Array[Int64]`): the pinned type when `ty` is one's
+    /// subject, else `ty` unchanged.
+    pub(crate) fn normalize_where_equal(&self, ty: TyId) -> TyId {
+        let Some(wc) = self
+            .ctx
+            .module
+            .functions
+            .get(&self.func_entity)
+            .and_then(|f| f.where_clause.as_ref())
+        else {
+            return ty;
+        };
+        wc.constraints
+            .iter()
+            .find_map(|c| match c {
+                kestrel_mir::item::function::WhereConstraint::Equal { subject, rhs }
+                    if *subject == ty =>
+                {
+                    Some(*rhs)
+                },
+                _ => None,
+            })
+            .unwrap_or(ty)
+    }
+
+    /// Substitute a member's declared type (written against its owner's type
+    /// params) with `receiver_ty`'s concrete type args.
+    pub(crate) fn subst_receiver_args(&mut self, receiver_ty: TyId, ty: TyId) -> TyId {
+        let MirTy::Named { entity, type_args } = self.ctx.module.ty_arena.get(receiver_ty) else {
+            return ty;
+        };
+        let (entity, type_args) = (*entity, type_args.clone());
+        let params = match self.ctx.module.structs.get(&entity) {
+            Some(s) => &s.type_params,
+            None => match self.ctx.module.enums.get(&entity) {
+                Some(e) => &e.type_params,
+                None => return ty,
+            },
+        };
+        let mut subst = kestrel_mir::SubstMap::new();
+        for (tp, &arg) in params.iter().zip(type_args.iter()) {
+            subst.type_params.insert(tp.entity, arg);
+        }
+        kestrel_mir::substitute(&mut self.ctx.module.ty_arena, ty, &subst)
+    }
+
     /// Mut-borrow receiver arg + receiver type for an accessor prelude.
     /// `FieldOf` fabricates the stored field's address from the base's var
     /// address (mirrors `try_lower_method_call_setter`'s field-addr path);
@@ -5029,10 +5593,24 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
                 self.end_lent_slot_borrow(lent, &wb.lent_refs);
             }
             let new_val = self.emit_take(wb.slot_addr, wb.elem_ty);
-            let mut args: Vec<CallArg> = vec![CallArg {
-                value: wb.recv_place,
-                convention: ParamConvention::MutBorrow,
-            }];
+            // A payload view (see `peel_existential_receiver`): set through
+            // the table.
+            if let Some(view) = wb.recv_place
+                && self.is_raw_existential(wb.receiver_ty)
+                && self
+                    .emit_dynamic_setter_call(wb.setter, wb.receiver_ty, view, new_val)
+                    .is_some()
+            {
+                continue;
+            }
+            let mut args: Vec<CallArg> = wb
+                .recv_place
+                .map(|value| CallArg {
+                    value,
+                    convention: ParamConvention::MutBorrow,
+                })
+                .into_iter()
+                .collect();
             for &v in &wb.index_vals {
                 args.push(self.prepare_call_arg(v, ParamConvention::Borrow));
             }
@@ -5227,6 +5805,10 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
     ) -> Vec<TyId> {
         let parent_args = match self.ctx.module.ty_arena.get(receiver_ty) {
             MirTy::Named { type_args, .. } => type_args.clone(),
+            // A tuple's elements are the args of its `lang.(,)` entity, the
+            // owner of `extend (X, Y)` methods (mirrors type-infer's
+            // `structural_view`; `try_lang_primitive` is the reverse).
+            MirTy::Tuple(elems) if elems.len() >= 2 => elems.clone(),
             _ => Vec::new(),
         };
         if parent_args.is_empty() {
@@ -5253,17 +5835,48 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
 
     /// Lower a block of HIR statements + optional tail expression.
     pub fn lower_hir_block(&mut self, block: &HirBlock) -> ValueId {
+        let returns = std::mem::take(&mut self.return_tail);
         for &stmt_id in &block.stmts {
             self.lower_stmt(stmt_id);
             if self.is_terminated() {
                 return self.emit_literal(Immediate::unit());
             }
         }
-        if let Some(tail) = block.tail_expr {
-            self.lower_expr(tail)
-        } else {
-            self.emit_literal(Immediate::unit())
+        let Some(tail) = block.tail_expr else {
+            return self.emit_literal(Immediate::unit());
+        };
+        if returns {
+            return self.lower_expr_for_return(tail);
         }
+        // A tail naming a local this block declared is that local's last use:
+        // the slot dies at the block's end. Move it out instead of copying —
+        // a copy is a wasted clone, and inside a type's own `clone()` (where
+        // CopyValue isn't expanded to a clone call) a bitwise alias that the
+        // scope exit then also drops (double free).
+        if self.declares_local_movably(block, tail)
+            && let Some(v) = self.try_move_var_local(tail)
+        {
+            return v;
+        }
+        self.lower_expr(tail)
+    }
+
+    /// Is `tail` a bare local declared by a `let`/`var` in `block` itself,
+    /// with no `deinit` action registered on it (which needs the value at
+    /// scope exit)?
+    fn declares_local_movably(&self, block: &HirBlock, tail: HirExprId) -> bool {
+        let HirExpr::Local(local, _) = self.hir.exprs[tail] else {
+            return false;
+        };
+        let mut declared = false;
+        for &stmt_id in &block.stmts {
+            match &self.hir.stmts[stmt_id] {
+                HirStmt::Let { local: l, .. } if *l == local => declared = true,
+                HirStmt::Deinit { local: Some(l), .. } if *l == local => return false,
+                _ => {},
+            }
+        }
+        declared
     }
 }
 
@@ -5375,6 +5988,51 @@ pub(crate) fn synthesize_instance_var_getter(
     bctx.emit_ret(result);
     let body = bctx.body;
     if let Some(f) = ctx.module.functions.get_mut(&getter_entity) {
+        f.body = Some(body);
+    }
+}
+
+/// Synthesize the MIR body of a ref accessor for a stored INSTANCE var
+/// witnessing a protocol `var { ref [mutating ref] }` requirement: it lends
+/// `self.field` in place, the body a written `ref { self.field }` lowers to
+/// (a view of the borrowed `self`; for `mutating ref`, a borrow of the field
+/// address of the mutably borrowed `self`). The FunctionDef must already
+/// exist with the `self` param at `ValueId(0)` and a `&T` / `&mutating T`
+/// return type.
+pub(crate) fn synthesize_instance_var_ref(
+    ctx: &mut LowerCtx,
+    accessor: Entity,
+    self_ty: TyId,
+    field_idx: FieldIdx,
+    field_ty: TyId,
+    mutating: bool,
+) {
+    let empty = HirBody::empty();
+    let captures = Arc::new(ClosureCaptureMap::default());
+    let mut bctx = OssaBodyCtx::new(ctx, &empty, None, captures, accessor, false);
+    let entry = bctx.new_block();
+    bctx.body.entry = entry;
+    bctx.current_block = Some(entry);
+    bctx.push_scope();
+    bctx.body.param_count = 1;
+    let self_val = bctx.body.alloc_value(ValueDef {
+        ty: self_ty,
+        ownership: Ownership::Guaranteed,
+        borrow_source: None,
+        root: RootProvenance::Param(0),
+        span: None,
+    });
+    let result = if mutating {
+        let field_addr = bctx.emit_field_addr(self_val, self_ty, field_idx);
+        let borrow = bctx.emit_begin_borrow_addr(field_addr, field_ty);
+        bctx.emit_destroy_value(field_addr);
+        borrow
+    } else {
+        bctx.emit_struct_extract(self_val, field_idx, field_ty)
+    };
+    bctx.emit_ret(result);
+    let body = bctx.body;
+    if let Some(f) = ctx.module.functions.get_mut(&accessor) {
         f.body = Some(body);
     }
 }
@@ -5596,4 +6254,46 @@ pub(crate) fn lower_function_body(ctx: &mut LowerCtx, hir_entity: Entity, func_e
         }
     }
     func.body = Some(ossa_body);
+}
+
+/// Every local named as a bare value in a return position: the body's tail
+/// or a `return` value, and recursively the arm tails of an `if`/`match`/
+/// block in such a position. Lowering moves these out instead of copying
+/// them (`lower_expr_for_return`), so each needs a drop flag for the paths
+/// that don't move it.
+fn collect_return_tail_locals(hir: &HirBody) -> HashSet<HirLocalId> {
+    fn visit(hir: &HirBody, expr: HirExprId, out: &mut HashSet<HirLocalId>) {
+        let block_tail = |b: &HirBlock, out: &mut HashSet<HirLocalId>| {
+            if let Some(t) = b.tail_expr {
+                visit(hir, t, out);
+            }
+        };
+        match &hir.exprs[expr] {
+            HirExpr::Local(l, _) => {
+                out.insert(*l);
+            },
+            HirExpr::If {
+                then_body,
+                else_body,
+                ..
+            } => {
+                block_tail(then_body, out);
+                if let Some(e) = else_body {
+                    block_tail(e, out);
+                }
+            },
+            HirExpr::Match { arms, .. } => arms.iter().for_each(|a| visit(hir, a.body, out)),
+            HirExpr::Block { body, .. } => block_tail(body, out),
+            _ => {},
+        }
+    }
+    let mut out = HashSet::new();
+    let returns = hir.exprs.iter().filter_map(|(_, e)| match e {
+        HirExpr::Return { value: Some(v), .. } => Some(*v),
+        _ => None,
+    });
+    for root in hir.tail_expr.into_iter().chain(returns) {
+        visit(hir, root, &mut out);
+    }
+    out
 }

@@ -37,6 +37,8 @@ pub(crate) struct PendingConversion {
 /// The parts of an existential type `B[rawany P and Q, A = X]`.
 struct Existential {
     box_entity: Entity,
+    /// The box's args after the payload (a defaulted allocator).
+    rest: Vec<TyVar>,
     bounds: Vec<Entity>,
     bindings: Vec<(Entity, TyVar)>,
 }
@@ -48,7 +50,8 @@ fn as_existential(ctx: &InferCtx<'_>, tv: TyVar) -> Option<Existential> {
     else {
         return None;
     };
-    let [arg] = args.as_slice() else {
+    // The payload is the first arg; any others (an allocator) ride along.
+    let [arg, rest @ ..] = args.as_slice() else {
         return None;
     };
     let TySlot::Resolved(TyKind::RawExistential { bounds, bindings }) = ctx.slot(ctx.resolve(*arg))
@@ -57,6 +60,7 @@ fn as_existential(ctx: &InferCtx<'_>, tv: TyVar) -> Option<Existential> {
     };
     Some(Existential {
         box_entity: *entity,
+        rest: rest.to_vec(),
         bounds: bounds.iter().map(|(p, _)| *p).collect(),
         bindings: bindings.clone(),
     })
@@ -82,6 +86,19 @@ pub(crate) fn try_convert(
                     span: span.clone(),
                 }));
             }
+            let rest_matches = source.rest.len() == target.rest.len()
+                && source
+                    .rest
+                    .iter()
+                    .zip(target.rest.iter())
+                    .all(|(&have, &want)| unify::unify(ctx, have, want).is_ok());
+            if !rest_matches {
+                return Some(SolveResult::Error(InferError::ExistentialBoxMismatch {
+                    from: describe_tyvar(ctx, from),
+                    to: describe_tyvar(ctx, to),
+                    span: span.clone(),
+                }));
+            }
             if !upcast_holds(ctx, &source, &target) {
                 return None;
             }
@@ -89,13 +106,26 @@ pub(crate) fn try_convert(
         },
         None => {
             // `B[T]` is unsized in place; anything else is boxed whole.
-            let (kind, payload) = match ctx.slot(ctx.resolve(from)) {
+            let same_box = match ctx.slot(ctx.resolve(from)) {
                 TySlot::Resolved(
                     TyKind::Struct { entity, args } | TyKind::Enum { entity, args },
-                ) if *entity == target.box_entity && args.len() == 1 => {
+                ) if *entity == target.box_entity && args.len() == 1 + target.rest.len() => {
+                    Some(args.clone())
+                },
+                _ => None,
+            };
+            let (kind, payload) = match same_box {
+                Some(args) => {
+                    // Unsizing changes only the payload: `B[T, X]` to
+                    // `B[rawany P, X]`.
+                    for (&have, &want) in args[1..].iter().zip(target.rest.iter()) {
+                        if unify::unify(ctx, have, want).is_err() {
+                            return None;
+                        }
+                    }
                     (ConversionKind::Unsize, args[0])
                 },
-                _ => (ConversionKind::Box, from),
+                None => (ConversionKind::Box, from),
             };
             if let Some(err) = payload_error(ctx, payload, from, to, &target, span) {
                 return Some(err);
@@ -209,13 +239,17 @@ pub(crate) fn peel_for_member(
         .resolve_member(&raw_kind, name, args)
         .or_else(|_| {
             ctx.resolver
-                .resolve_static_member(&raw_kind, name, args, is_call)
+                .resolve_static_member(&raw_kind, name, args, is_call, &|ext| {
+                    crate::solver::extension_applies(ctx, ext, &raw_kind)
+                })
         })
         .ok()?
         .entity;
     // Extension methods take the box as `Self` instead
     // ([`self_conformance_member`]).
-    if !kestrel_semantics::is_requirement(ctx.query_ctx, member) {
+    if !kestrel_semantics::is_requirement(ctx.query_ctx, member)
+        || stand_in_default(ctx, &existential, member).is_some()
+    {
         return None;
     }
     if let Some(err) = call_error(ctx, receiver, &existential, member, name, span) {
@@ -370,7 +404,21 @@ pub(crate) fn self_conformance_error(
     let needs = kestrel_semantics::self_conformance(ctx.query_ctx, protocol, &pinned, ctx.root);
     let shown = describe_tyvar(ctx, tv);
     let proto = entity_name(ctx, protocol);
+    let cloneable = ctx.resolver.builtin(Builtin::Cloneable);
     let why = match needs.blocker {
+        // `clone() -> Self` blocks every `P: Cloneable`, the protocols
+        // `any[CowBox] P` needs: say so plainly, as a known gap.
+        Some(requirement)
+            if cloneable.is_some()
+                && ctx.query_ctx.parent_of(requirement) == cloneable
+                && Some(protocol) != cloneable =>
+        {
+            format!(
+                "'{proto}' refines 'Cloneable', whose 'clone() -> Self' cannot be called \
+                 through an existential yet, so extension methods and generic code over \
+                 '{proto}' are not available on '{shown}'"
+            )
+        },
         Some(requirement) => format!(
             "requirement '{}' cannot be called through an existential",
             entity_name(ctx, requirement)
@@ -414,7 +462,7 @@ pub(crate) fn self_conformance_member(
     args: &[crate::constraint::CallArg],
     protocol_dispatch: bool,
 ) -> Option<crate::resolve::MemberResolution> {
-    as_existential(ctx, receiver)?;
+    let existential = as_existential(ctx, receiver)?;
     let (TyKind::Struct { args: box_args, .. } | TyKind::Enum { args: box_args, .. }) = recv_kind
     else {
         return None;
@@ -423,8 +471,35 @@ pub(crate) fn self_conformance_member(
         return None;
     };
     let res = ctx.resolver.resolve_member(raw_kind, name, args).ok()?;
+    if let Some(default) = stand_in_default(ctx, &existential, res.entity) {
+        return ctx.resolver.resolve_single_member(raw_kind, default).ok();
+    }
     (protocol_dispatch || !kestrel_semantics::is_requirement(ctx.query_ctx, res.entity))
         .then_some(res)
+}
+
+/// The `@existentialOnly` default a call to `member` on this existential
+/// runs instead: `member` is a requirement the table can't hold
+/// (`Formattable.format(into:)` is generic), so the default runs with the
+/// box as `Self`, as the box's witness for it does.
+fn stand_in_default(
+    ctx: &InferCtx<'_>,
+    existential: &Existential,
+    member: Entity,
+) -> Option<Entity> {
+    let q = ctx.query_ctx;
+    if !kestrel_semantics::is_requirement(q, member) {
+        return None;
+    }
+    let bound: Vec<Entity> = existential.bindings.iter().map(|(a, _)| *a).collect();
+    let dispatch = q.query(kestrel_semantics::RequirementDispatch {
+        requirement: member,
+        root: ctx.root,
+    });
+    if dispatch.allowed(&bound) {
+        return None;
+    }
+    kestrel_semantics::existential_default(q, q.parent_of(member)?, member, ctx.root)
 }
 
 /// The type an existential pins for an associated type: on the raw
@@ -438,9 +513,7 @@ pub(crate) fn pinned_assoc_of(ctx: &InferCtx<'_>, kind: &TyKind, key: &AssocKey)
         TyKind::Struct { args, .. } | TyKind::Enum { args, .. }
             if matches!(key, AssocKey::Entity(_)) =>
         {
-            let [payload] = args.as_slice() else {
-                return None;
-            };
+            let payload = args.first()?;
             match ctx.slot(ctx.resolve(*payload)) {
                 TySlot::Resolved(TyKind::RawExistential { bindings, .. }) => {
                     pinned_assoc(ctx, bindings, key)

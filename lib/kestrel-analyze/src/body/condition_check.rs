@@ -20,7 +20,7 @@ use crate::context::BodyContext;
 use crate::diagnostic::*;
 use crate::traits::{AnalyzerId, BodyCheck, Describe};
 use crate::util;
-use kestrel_ast_builder::{Intrinsic, Name, NodeKind};
+use kestrel_ast_builder::Name;
 use kestrel_hir::Builtin;
 use kestrel_hir::body::*;
 use kestrel_name_res::{ConformingProtocols, ResolveBuiltin};
@@ -143,13 +143,8 @@ fn is_bool(cx: &BodyContext<'_>, ty: &ResolvedTy) -> bool {
     let ResolvedTy::Named { entity, .. } = ty else {
         return false;
     };
-    if cx.query.get::<Intrinsic>(*entity).is_none() {
-        return false;
-    }
-    if cx.query.get::<NodeKind>(*entity) != Some(&NodeKind::Struct) {
-        return false;
-    }
-    cx.query.get::<Name>(*entity).is_some_and(|n| n.0 == "i1")
+    cx.query.get::<kestrel_ast_builder::LangType>(*entity)
+        == Some(&kestrel_ast_builder::LangType::I1)
 }
 
 /// Check if a resolved type conforms to a given protocol.

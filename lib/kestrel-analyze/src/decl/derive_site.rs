@@ -14,9 +14,11 @@
 //! 2. The type doesn't also declare the protocol itself (E953).
 //! 3. Parent protocols hold: derived alongside, declared, or inferred (E958).
 //! 4. The type is derivable here: an extension's type is in this file (E954),
-//!    no unsized tail (E954), an enum `Defaultable` has one `@default` (E957).
+//!    no unsized tail (E954), an enum `Defaultable` has one `@default` (E957),
+//!    a `Cloneable` type doesn't opt out of `Copyable` (E954).
 //! 5. Every field (or payload) conforms (E952). `Defaultable` skips fields
-//!    with an initializer, and reads only the `@default` case.
+//!    with an initializer, and reads only the `@default` case. `Cloneable`
+//!    needs only `Copyable` fields: its `clone()` copies each one.
 //! 6. No member written for the type witnesses one of the protocol's
 //!    requirements (E953).
 //!
@@ -28,9 +30,8 @@
 //!
 //! ### E951 — `derive_not_derivable` (Error, Correctness)
 //! - "'{P}' cannot be derived; the derivable protocols are Equatable, Hashable,
-//!   Comparable, Formattable and Defaultable"
+//!   Comparable, Formattable, Defaultable and Cloneable"
 //! - "'Copyable' is not derived: whether '{S}' is Copyable follows from its fields"
-//! - "'Cloneable' is not derived: whether '{S}' is Cloneable follows from its fields"
 //!
 //! ### E952 — `derive_field_not_conforming` (Error, Correctness)
 //! - "cannot derive '{P}' for '{S}': field '{f}' has type '{T}', which is not '{P}'"
@@ -45,6 +46,7 @@
 //! - "'@derive' on an extension needs a type declared in this module"
 //! - "'@derive' on an extension needs the type declared in the same file"
 //! - "cannot derive '{P}' for '{S}': its last field is unsized"
+//! - "cannot derive 'Cloneable' for '{S}': it opts out of 'Copyable'"
 //! - "cannot derive '{P}' for '{S}'" (a field type the deriver can't write)
 //!
 //! ### E957 — `derive_default_case` (Error, Correctness)
@@ -292,20 +294,51 @@ impl Site {
                 return Err(d);
             }
         }
+        // `Cloneable` refines `Copyable`, so a type that opts out of
+        // `Copyable` can't derive it (hand-written, that's E423).
+        if kind == DeriveKind::Cloneable
+            && let Some(copyable) = cx.query.query(ResolveBuiltin {
+                builtin: Builtin::Copyable,
+                root: cx.root,
+            })
+            && cx
+                .query
+                .query(kestrel_semantics::ExplicitlyNegatesProtocol {
+                    entity: ty,
+                    protocol: copyable,
+                    root: cx.root,
+                })
+        {
+            return Err(fail(
+                E954,
+                format!("cannot derive 'Cloneable' for '{name}': it opts out of 'Copyable'"),
+            ));
+        }
+        // What each field needs: the protocol itself, except `Copyable`
+        // for a derived `Cloneable` (its `clone()` copies each field).
+        let (bound, q) = match kind.field_bound() {
+            b if b == kind.builtin() => (Some(protocol), p),
+            b => (
+                cx.query.query(ResolveBuiltin {
+                    builtin: b,
+                    root: cx.root,
+                }),
+                b.name(),
+            ),
+        };
         for slot in slots(cx, ty, kind) {
-            if kestrel_type_infer::conformance::type_satisfies(
-                cx.query, &slot.ty, protocol, cx.root,
-            ) {
+            let Some(bound) = bound else { break };
+            if kestrel_type_infer::conformance::type_satisfies(cx.query, &slot.ty, bound, cx.root) {
                 continue;
             }
             let mut d = fail(
                 E952,
                 format!(
-                    "cannot derive '{p}' for '{name}': {} has type '{}', which is not '{p}'",
+                    "cannot derive '{p}' for '{name}': {} has type '{}', which is not '{q}'",
                     slot.describe, slot.ty_text
                 ),
             );
-            d.labels.push(secondary(slot.span, format!("not '{p}'")));
+            d.labels.push(secondary(slot.span, format!("not '{q}'")));
             if kind == DeriveKind::Comparable
                 && cx.query.get::<NodeKind>(ty) == Some(&NodeKind::Enum)
             {
@@ -345,19 +378,14 @@ impl Site {
             return Ok(kind);
         }
         let name = self.type_name(cx);
-        for (builtin, p) in [
-            (Builtin::Copyable, "Copyable"),
-            (Builtin::Cloneable, "Cloneable"),
-        ] {
-            if is(builtin) {
-                return Err(format!(
-                    "'{p}' is not derived: whether '{name}' is {p} follows from its fields"
-                ));
-            }
+        if is(Builtin::Copyable) {
+            return Err(format!(
+                "'Copyable' is not derived: whether '{name}' is Copyable follows from its fields"
+            ));
         }
         Err(format!(
             "'{}' cannot be derived; the derivable protocols are Equatable, Hashable, Comparable, \
-             Formattable and Defaultable",
+             Formattable, Defaultable and Cloneable",
             util::entity_name(cx.query, protocol)
         ))
     }
@@ -518,7 +546,7 @@ fn declared_protocols(cx: &DeclContext<'_>, decl: Entity) -> Vec<Entity> {
         .0
         .iter()
         .filter_map(|item| {
-            let ConformanceItem::Positive(AstType::Named { segments, .. }, _) = item else {
+            let ConformanceItem::Positive(AstType::Named { segments, .. }, ..) = item else {
                 return None;
             };
             match cx.query.query(ResolveTypePath {

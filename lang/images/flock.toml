@@ -1,0 +1,10 @@
+[package]
+name = "images"
+version = "0.1.0"
+description = "Image decoding, encoding and processing: PNG, QOI and BMP built in, more by registration"
+author = "jkpdino"
+license = "MIT"
+repository = "https://github.com/kestrellang/kestrel"
+
+[dependencies]
+deflate = { path = "../deflate" }

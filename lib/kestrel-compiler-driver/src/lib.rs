@@ -380,6 +380,7 @@ fn error_variant_name(err: &InferError) -> &'static str {
         InferError::NoMember { .. } => "NoMember",
         InferError::AmbiguousMember { .. } => "AmbiguousMember",
         InferError::MemberNotVisible { .. } => "MemberNotVisible",
+        InferError::SugarOnlyMember { .. } => "SugarOnlyMember",
         InferError::MemberIsStatic { .. } => "MemberIsStatic",
         InferError::NoAssociatedType { .. } => "NoAssociatedType",
         InferError::InfiniteType { .. } => "InfiniteType",
@@ -400,6 +401,8 @@ fn error_variant_name(err: &InferError) -> &'static str {
         InferError::NoMatchingOverload { .. } => "NoMatchingOverload",
         InferError::MemberwiseInitArity { .. } => "MemberwiseInitArity",
         InferError::MemberwiseInitLabel { .. } => "MemberwiseInitLabel",
+        InferError::MemberwiseInitMissing { .. } => "MemberwiseInitMissing",
+        InferError::MemberwiseInitUnexpected { .. } => "MemberwiseInitUnexpected",
         InferError::ItWrongArity { .. } => "ItWrongArity",
         InferError::LiteralNotAccepted { .. } => "LiteralNotAccepted",
         InferError::UnresolvedTypeParam { .. } => "UnresolvedTypeParam",
@@ -414,6 +417,7 @@ fn error_variant_name(err: &InferError) -> &'static str {
         InferError::KindMismatch { .. } => "KindMismatch",
         InferError::RefFunctionAsValue { .. } => "RefFunctionAsValue",
         InferError::RefInTypeArgument { .. } => "RefInTypeArgument",
+        InferError::UnsizedAssign { .. } => "UnsizedAssign",
         InferError::OptionalChainNotConforming { .. } => "OptionalChainNotConforming",
         InferError::PipeFixIt { .. } => "PipeFixIt",
     }
@@ -450,6 +454,12 @@ fn format_error(err: &InferError) -> String {
         InferError::MemberNotVisible { name, .. } => {
             format!(
                 "MemberNotVisible '{}' at {}:{}",
+                name, span.file_id, span.start
+            )
+        },
+        InferError::SugarOnlyMember { name, .. } => {
+            format!(
+                "SugarOnlyMember '{}' at {}:{}",
                 name, span.file_id, span.start
             )
         },
@@ -553,6 +563,18 @@ fn format_error(err: &InferError) -> String {
             "MemberwiseInitLabel '{}' expected={} got={:?} at {}:{}",
             struct_name, expected, got, span.file_id, span.start
         ),
+        InferError::MemberwiseInitMissing {
+            struct_name, field, ..
+        } => format!(
+            "MemberwiseInitMissing '{}' field={} at {}:{}",
+            struct_name, field, span.file_id, span.start
+        ),
+        InferError::MemberwiseInitUnexpected {
+            struct_name, label, ..
+        } => format!(
+            "MemberwiseInitUnexpected '{}' label={:?} at {}:{}",
+            struct_name, label, span.file_id, span.start
+        ),
         InferError::ItWrongArity { expected, .. } => {
             format!(
                 "ItWrongArity expected={} at {}:{}",
@@ -612,6 +634,9 @@ fn format_error(err: &InferError) -> String {
         },
         InferError::RefInTypeArgument { .. } => {
             format!("RefInTypeArgument at {}:{}", span.file_id, span.start)
+        },
+        InferError::UnsizedAssign { .. } => {
+            format!("UnsizedAssign at {}:{}", span.file_id, span.start)
         },
     }
 }
@@ -766,7 +791,7 @@ mod tests {
     #[test]
     fn compile_full_stdlib() {
         let mut c = Compiler::new();
-        c.load_dir(&stdlib_path());
+        c.load_std_dir(&stdlib_path());
 
         let summary = CompilerDriver::new(&c).infer_all();
         eprintln!("{}", summary);
@@ -776,7 +801,7 @@ mod tests {
     #[test]
     fn analyze_full_stdlib() {
         let mut c = Compiler::new();
-        c.load_dir(&stdlib_path());
+        c.load_std_dir(&stdlib_path());
 
         let driver = CompilerDriver::new(&c);
         let _infer = driver.infer_all();
@@ -788,7 +813,7 @@ mod tests {
     fn compile_stdlib_bool() {
         let mut c = Compiler::new();
         let core_path = stdlib_path().join("core");
-        c.load_dir(&core_path);
+        c.load_std_dir(&core_path);
 
         let summary = CompilerDriver::new(&c).infer_all();
         eprintln!("=== Bool + core ===");

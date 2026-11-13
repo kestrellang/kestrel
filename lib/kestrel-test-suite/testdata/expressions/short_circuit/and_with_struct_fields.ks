@@ -1,7 +1,7 @@
 // test: diagnostics
 
 module Main
-import std.io.stdio.println
+import std.streams.println
 
 struct Flags {
     let enabled: Bool

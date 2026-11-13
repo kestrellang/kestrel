@@ -25,6 +25,11 @@ use crate::ty::TyVar;
 pub enum ConformsOrigin {
     Expr,
     TypeArg,
+    /// An `Expr` obligation on a compound assignment's member place
+    /// (`d(k) += 1`), carrying that place. When it resolves to a failable
+    /// or throwing member, the analyzer reports E214, so it poisons silently
+    /// instead of adding E107.
+    CompoundPlace(kestrel_hir::body::HirExprId),
 }
 
 /// Which associated type an `Associated` constraint projects (G29).
@@ -241,6 +246,9 @@ pub enum Constraint {
     ImplicitPat {
         scrutinee: TyVar,
         name: String,
+        /// The case itself, for a qualified / desugared `HirPat::Variant`:
+        /// matched by identity on the scrutinee's enum, never by `name`.
+        case: Option<Entity>,
         /// TyVars for each sub-pattern binding (one per payload field).
         arg_tys: Vec<TyVar>,
         /// Each sub-pattern's label (`.A(x: a)`), checked against the case.
@@ -291,15 +299,6 @@ pub enum Constraint {
         result: TyVar,
         protocol: Entity,
         expr: HirExprId,
-        span: Span,
-    },
-
-    /// Links a string interpolation's result type to its accumulator type.
-    /// Deferred until result_tv is concrete, then resolves the accumulator
-    /// via `ExpressibleByStringInterpolation::Interpolation`.
-    InterpolationLink {
-        result_tv: TyVar,
-        acc_tv: TyVar,
         span: Span,
     },
 

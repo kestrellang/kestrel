@@ -8,6 +8,7 @@
 //!           | '!'                                     // TyNever
 //!           | '_'                                     // TyInferred
 //!           | kind '(' elems ')' '->' Ty              // TyFunction with kind
+//!           | '@' 'extern' '(' '.' 'C' ')' '(' elems ')' '->' Ty   // C function type
 //!           | '(' elems ')' ('->' Ty)?                // TyUnit / grouping / TyTuple / TyFunction
 //!           | '[' Ty (':' Ty)? ']'                    // TyArray / TyDictionary
 //!           | Path TypeArgumentList?                  // TyPath
@@ -34,18 +35,27 @@ pub(super) fn adjacent(p: &Parser<'_>, idx: usize) -> bool {
 /// Tokens that can begin a type.
 pub(super) fn at_type_start(p: &Parser<'_>) -> bool {
     match p.current() {
+        Some(K::Mutating | K::Consuming) => at_kinded_fn(p),
+        kind => starts_plain_type(kind),
+    }
+}
+
+/// Does a token of `kind` start a type on its own, without lookahead? Every
+/// type start except a kinded function type (`mutating (…) -> …`).
+pub(super) fn starts_plain_type(kind: Option<K>) -> bool {
+    matches!(
+        kind,
         Some(
             K::Ampersand
-            | K::Some
-            | K::Bang
-            | K::Underscore
-            | K::LParen
-            | K::LBracket
-            | K::Identifier,
-        ) => true,
-        Some(K::Mutating | K::Consuming) => at_kinded_fn(p),
-        _ => false,
-    }
+                | K::Some
+                | K::Bang
+                | K::Underscore
+                | K::LParen
+                | K::LBracket
+                | K::At
+                | K::Identifier
+        )
+    )
 }
 
 /// A full type. Reports "expected type" (and returns `None`) when nothing
@@ -114,6 +124,7 @@ fn base_ty(p: &mut Parser<'_>) -> Option<CompletedMarker> {
         Some(K::Identifier) if p.nth_text(0) == "escaping" && at_kinded_fn(p) => Some(kinded_fn(p)),
         Some(K::Identifier) if at_any_type(p) => Some(any_type(p)),
         Some(K::LParen) => paren_type(p),
+        Some(K::At) => Some(c_fn(p)),
         Some(K::LBracket) => Some(array_or_dict(p)),
         Some(K::Identifier) => Some(path_type(p)),
         _ => {
@@ -156,6 +167,27 @@ fn kinded_fn(p: &mut Parser<'_>) -> CompletedMarker {
     } else {
         p.bump_any();
     }
+    fn_params(p);
+    p.expect(K::Arrow);
+    ty(p);
+    f.complete(p, K::TyFunction);
+    m.complete(p, K::Ty)
+}
+
+/// `@extern(.C) (T) -> R`: a C function type. The convention is an
+/// `Attribute` child of the `TyFunction`; only `@extern(.C)` is accepted.
+fn c_fn(p: &mut Parser<'_>) -> CompletedMarker {
+    let is_extern_c = p.nth_text(1) == "extern"
+        && p.nth_at(2, K::LParen)
+        && p.nth_at(3, K::Dot)
+        && p.nth_text(4) == "C"
+        && p.nth_at(5, K::RParen);
+    let m = p.start();
+    let f = p.start();
+    if !is_extern_c {
+        p.error_expected_what("`@extern(.C)` (the only convention a function type takes)");
+    }
+    super::attrs::attribute(p);
     fn_params(p);
     p.expect(K::Arrow);
     ty(p);
@@ -367,7 +399,8 @@ fn any_type(p: &mut Parser<'_>) -> CompletedMarker {
     m.complete(p, K::Ty)
 }
 
-/// `some P and Q and not Copyable`.
+/// `some P and Q and not Copyable and not Sized`: negative bounds trail
+/// the positive ones.
 fn some_type(p: &mut Parser<'_>) -> CompletedMarker {
     let m = p.start();
     let s = p.start();
@@ -380,7 +413,7 @@ fn some_type(p: &mut Parser<'_>) -> CompletedMarker {
             p.bump(K::Not);
             some_bound(p);
             n.complete(p, K::NegativeConformance);
-            break;
+            continue;
         }
         p.bump(K::And);
         some_bound(p);

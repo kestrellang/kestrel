@@ -66,6 +66,8 @@ pub fn link_executable(
         }
     }
 
+    cmd.args(&options.link_args);
+
     for framework in &options.frameworks {
         cmd.arg("-framework");
         cmd.arg(framework);

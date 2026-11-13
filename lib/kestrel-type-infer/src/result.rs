@@ -52,13 +52,18 @@ pub struct TypedBody {
     pub opaque_concrete_type: Option<ResolvedTy>,
 
     /// `Indirection`-peel plan for member-access exprs that resolved through a
-    /// smart-pointer's pointee (`wrapper.m` → `wrapper.pointeeRef().m`). The
+    /// smart-pointer's pointee (`wrapper.m` → `wrapper.value.m`). The
     /// `Vec` is the peel CHAIN, outer→inner, for nested wrappers
     /// (`RcBox[Pointer[T]]`). MIR lowering replays it: project the receiver
-    /// through each `pointeeRef()`/`pointeeMutRef()` before the member access.
+    /// through each level's `value` accessor before the member access.
     /// Single source of truth — MIR never re-derives the peel (mirrors
     /// `resolutions` / `ClosureCaptures`).
     pub indirection_peels: HashMap<HirExprId, Vec<IndirectionPeel>>,
+
+    /// `Indirection`-peel chain per call ARGUMENT bound to a view param
+    /// (`takes(xs)` with `takes(xs: &Slice[T])`, `xs: Array[T]`). MIR passes
+    /// the chain's last pointee view instead of the argument itself.
+    pub arg_indirection_peels: HashMap<HirExprId, Vec<IndirectionPeel>>,
 
     /// Accepted CROSS-kind closure coercions: `expr → (source kind, target
     /// kind)`. Only cells where the two kinds DIFFER are recorded, and the
@@ -70,11 +75,32 @@ pub struct TypedBody {
     /// audit trail of the solver's passing-table decisions.
     pub kind_coercions: HashMap<HirExprId, (kestrel_ast::FnTypeKind, kestrel_ast::FnTypeKind)>,
 
+    /// A method call that calls a field's value (`s.callback(x)`): the type
+    /// of the value called (a function, or a subscriptable value).
+    pub field_callee_types: HashMap<HirExprId, ResolvedTy>,
+
     /// `for` loops whose iterable is already an `Iterator`: the loop's
     /// `Iterable.iter()` protocol call (keyed by its expr id) is not made —
     /// the iterable itself is CONSUMED as the loop's iterator. Decided once
     /// by inference; the move checker and MIR lowering both read it.
     pub direct_iterators: HashSet<HirExprId>,
+
+    /// Subscript / computed-property reads that lend a MUTABLE place: a
+    /// value returned as `&mutating T` (`func f(mutating xs: [T]) ->
+    /// &mutating T { xs(0) }`). Inference types them `&mutating T`; MIR
+    /// lowering calls the member's `mutating ref` accessor for them.
+    pub mutating_lends: HashSet<HirExprId>,
+    /// Expressions of type `Optional[&T]` whose value decays to `Optional[T]`:
+    /// bound initializers (`let f = b.first`) and operator receivers
+    /// (`xs.first() ?? 0`). MIR copies the payload out wherever the
+    /// expression is lowered, through `@builtin(.DecayOptionalRef)`.
+    pub optional_ref_decays: HashSet<HirExprId>,
+    /// Calls whose callee returns a ref ONCE INSTANTIATED (value: mutating),
+    /// including generic returns that only become refs through their type
+    /// arguments (`-> I.Ref` at `I.Ref = &T`, `-> T` at `T = &U`). A
+    /// declared `-> &T` is covered too. MIR lowering reads this as the
+    /// call's return convention; the declared signature alone can't say.
+    pub ref_return_calls: HashMap<HirExprId, bool>,
     /// Existential conversions at check leaves: `expr` (of type `from`)
     /// becomes the existential `to` by the recorded rule. MIR lowering emits
     /// them from here and never re-derives one (existentials design §4).
@@ -84,10 +110,15 @@ pub struct TypedBody {
     /// existential box when well-typed; analyzers report E152 otherwise).
     pub type_tests: HashMap<kestrel_hir::body::HirPatId, ResolvedTy>,
 
-    /// The method each `?.` bind calls, keyed by its scrutinee
+    /// Every literal and range pattern, with the type of the value it
+    /// matches, so analyzers range-check pattern literals (E120, E121)
+    /// exactly as they check expression literals.
+    pub literal_pat_types: HashMap<kestrel_hir::body::HirPatId, ResolvedTy>,
+
+    /// The mode each `?.` bind settled on, keyed by its scrutinee
     /// `ProtocolCall` (optional-chaining design §2). Overrides the
-    /// provisional name HIR lowering wrote; MIR lowering and `access_mode`
-    /// read it through `protocol_method_name`.
+    /// provisional requirement HIR lowering tagged; MIR lowering and the
+    /// analyzers read it through `chain_requirement`.
     pub chain_modes: HashMap<HirExprId, ChainMode>,
 }
 
@@ -103,24 +134,29 @@ pub enum ChainMode {
 }
 
 impl ChainMode {
-    /// The `OptionalChain` requirement this mode calls.
-    pub fn method_name(self) -> &'static str {
+    /// The `@builtin`-tagged `OptionalChain` requirement this mode calls.
+    pub fn requirement(self) -> kestrel_hir::Builtin {
         match self {
-            ChainMode::Borrow => "chainBorrow",
-            ChainMode::Mutate => "chainMutate",
-            ChainMode::Take => "chainTake",
+            ChainMode::Borrow => kestrel_hir::Builtin::OptionalChainBorrowMethod,
+            ChainMode::Mutate => kestrel_hir::Builtin::OptionalChainMutateMethod,
+            ChainMode::Take => kestrel_hir::Builtin::OptionalChainTakeMethod,
         }
+    }
+
+    /// The mode a bind's provisional requirement (HIR lowering's pick) names.
+    pub fn of_requirement(builtin: kestrel_hir::Builtin) -> Option<ChainMode> {
+        [ChainMode::Borrow, ChainMode::Mutate, ChainMode::Take]
+            .into_iter()
+            .find(|m| m.requirement() == builtin)
     }
 }
 
 impl TypedBody {
-    /// The method a `ProtocolCall` really calls: the written name, unless
-    /// it is a `?.` bind whose mode inference settled.
-    pub fn protocol_method_name<'a>(&self, expr: HirExprId, written: &'a str) -> &'a str {
-        match self.chain_modes.get(&expr) {
-            Some(mode) => mode.method_name(),
-            None => written,
-        }
+    /// The requirement a `?.` bind really calls once inference settled its
+    /// mode (`chainBorrow` may become `chainMutate`); `None` for any other
+    /// expression.
+    pub fn chain_requirement(&self, expr: HirExprId) -> Option<kestrel_hir::Builtin> {
+        self.chain_modes.get(&expr).map(|m| m.requirement())
     }
 }
 
@@ -146,16 +182,18 @@ pub struct ExistentialConversion {
     pub to: ResolvedTy,
 }
 
-/// One level of an `Indirection` member peel: the concrete pointee accessors
-/// on the wrapper type at this level. `mut_method` is `None` when the wrapper
+/// One level of an `Indirection` member peel: the pointee accessors the
+/// wrapper at this level lends through. `mut_method` is `None` when the wrapper
 /// is `Indirection` but not `MutableIndirection` (read-only) — a write through
 /// it is the `indirection_no_mutating_accessor` error.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct IndirectionPeel {
-    /// `pointeeRef()` on the wrapper — yields `&Target` for reads.
+    /// `Indirection.value`'s `ref` requirement — yields `&Target` for reads,
+    /// dispatched through the wrapper's witness.
     pub read_method: Entity,
-    /// `pointeeMutRef()` on the wrapper — yields `&mutating Target` for
-    /// writes / RMW / mutating-method receivers; `None` if read-only.
+    /// `MutableIndirection.value`'s `mutating ref` — yields `&mutating
+    /// Target` for writes / RMW / mutating-method receivers; `None` if the
+    /// wrapper is read-only.
     pub mut_method: Option<Entity>,
     /// The concrete pointee type (`Indirection.Target`) at this level. MIR
     /// builds the `&Target` / `&mutating Target` result type of the accessor
@@ -183,10 +221,16 @@ impl Hash for TypedBody {
             error_details,
             opaque_concrete_type,
             indirection_peels,
+            arg_indirection_peels,
             kind_coercions,
+            field_callee_types,
             direct_iterators,
+            mutating_lends,
+            optional_ref_decays,
+            ref_return_calls,
             existential_conversions,
             type_tests,
+            literal_pat_types,
             chain_modes,
         } = self;
         hash_sorted(expr_types, state);
@@ -199,12 +243,22 @@ impl Hash for TypedBody {
         error_details.hash(state);
         opaque_concrete_type.hash(state);
         hash_sorted(indirection_peels, state);
+        hash_sorted(arg_indirection_peels, state);
         hash_sorted(kind_coercions, state);
+        hash_sorted(field_callee_types, state);
         let mut direct: Vec<_> = direct_iterators.iter().map(|e| e.raw()).collect();
         direct.sort_unstable();
         direct.hash(state);
+        let mut lends: Vec<_> = mutating_lends.iter().map(|e| e.raw()).collect();
+        lends.sort_unstable();
+        lends.hash(state);
+        let mut decays: Vec<_> = optional_ref_decays.iter().map(|e| e.raw()).collect();
+        decays.sort_unstable();
+        decays.hash(state);
+        hash_sorted(ref_return_calls, state);
         hash_sorted(existential_conversions, state);
         hash_sorted(type_tests, state);
+        hash_sorted(literal_pat_types, state);
         hash_sorted(chain_modes, state);
     }
 }
@@ -292,10 +346,35 @@ pub enum ResolvedTy {
 pub struct ResolvedPromotion {
     pub method: Entity,
     pub target: ResolvedTy,
+    /// A `DecaysFrom` conversion of an argument to a borrowed param
+    /// (`see(x: String)` given a slice): the copy a `&View` param would
+    /// avoid. The `view_conversion` lint reports it.
+    pub borrowed_view: bool,
 }
 
 /// Resolve a TyVar into a fully concrete ResolvedTy.
 /// Unresolved TyVars default to Error (shouldn't happen after solving).
+/// Resolve each pending peel chain's pointee types for MIR.
+fn resolve_peels(
+    ctx: &InferCtx<'_>,
+    peels: &HashMap<HirExprId, Vec<crate::ctx::PendingPeel>>,
+) -> HashMap<HirExprId, Vec<IndirectionPeel>> {
+    peels
+        .iter()
+        .map(|(&expr, chain)| {
+            let resolved = chain
+                .iter()
+                .map(|p| IndirectionPeel {
+                    read_method: p.read_method,
+                    mut_method: p.mut_method,
+                    target: resolve_to_concrete(ctx, p.target_tv),
+                })
+                .collect();
+            (expr, resolved)
+        })
+        .collect()
+}
+
 fn resolve_to_concrete(ctx: &InferCtx<'_>, tv: TyVar) -> ResolvedTy {
     let resolved = ctx.resolve(tv);
     match &ctx.types[resolved.0 as usize] {
@@ -409,11 +488,27 @@ fn kind_to_resolved(ctx: &InferCtx<'_>, kind: &TyKind) -> ResolvedTy {
 
 /// Build the final TypedBody from the completed InferCtx.
 pub fn build_result(ctx: &InferCtx<'_>) -> TypedBody {
-    let expr_types = ctx
+    let mut expr_types: HashMap<HirExprId, ResolvedTy> = ctx
         .expr_types
         .iter()
         .map(|(&id, &tv)| (id, resolve_to_concrete(ctx, tv)))
         .collect();
+    // A converted view's expression whose type the conversion target pinned
+    // (`let s: String = t.trimmed()` links the call's result to `String`
+    // before its ref return is known) still yields the view's ref: the
+    // conversion is applied on top of it, like any promotion.
+    for (id, info) in &ctx.promotions {
+        let Some(view) = info.view else { continue };
+        let target = resolve_to_concrete(ctx, info.target_ty);
+        if let Some(ty) = expr_types.get_mut(id)
+            && *ty == target
+        {
+            *ty = ResolvedTy::Ref {
+                pointee: Box::new(resolve_to_concrete(ctx, view)),
+                mutating: false,
+            };
+        }
+    }
 
     let local_types = ctx
         .local_types
@@ -432,6 +527,7 @@ pub fn build_result(ctx: &InferCtx<'_>) -> TypedBody {
                 ResolvedPromotion {
                     method: info.method,
                     target: resolve_to_concrete(ctx, info.target_ty),
+                    borrowed_view: ctx.borrowed_decay_args.contains(&id),
                 },
             )
         })
@@ -459,28 +555,30 @@ pub fn build_result(ctx: &InferCtx<'_>) -> TypedBody {
         local_types,
         resolutions,
         field_subscripts: ctx.field_subscripts.clone(),
+        field_callee_types: ctx
+            .field_callee_types
+            .iter()
+            .map(|(&id, &tv)| (id, resolve_to_concrete(ctx, tv)))
+            .collect(),
         promotions,
         type_args,
         errors: ctx.errors.clone(),
         error_details: ctx.error_details.clone(),
         opaque_concrete_type,
-        indirection_peels: ctx
-            .indirection_peels
-            .iter()
-            .map(|(&expr, peels)| {
-                let resolved: Vec<IndirectionPeel> = peels
-                    .iter()
-                    .map(|p| IndirectionPeel {
-                        read_method: p.read_method,
-                        mut_method: p.mut_method,
-                        target: resolve_to_concrete(ctx, p.target_tv),
-                    })
-                    .collect();
-                (expr, resolved)
-            })
-            .collect(),
+        indirection_peels: resolve_peels(ctx, &ctx.indirection_peels),
+        arg_indirection_peels: resolve_peels(ctx, &ctx.arg_indirection_peels),
         kind_coercions: ctx.kind_coercions.clone(),
         direct_iterators: ctx.direct_iterators.clone(),
+        mutating_lends: ctx.mutating_lends.clone(),
+        optional_ref_decays: ctx.optional_ref_decays.clone(),
+        ref_return_calls: ctx
+            .call_return_tvs
+            .iter()
+            .filter_map(|(&expr, &tv)| match resolve_to_concrete(ctx, tv) {
+                ResolvedTy::Ref { mutating, .. } => Some((expr, mutating)),
+                _ => None,
+            })
+            .collect(),
         existential_conversions: ctx
             .existential_conversions
             .iter()
@@ -497,6 +595,11 @@ pub fn build_result(ctx: &InferCtx<'_>) -> TypedBody {
             .collect(),
         type_tests: ctx
             .type_tests
+            .iter()
+            .map(|(&pat, &tv)| (pat, resolve_to_concrete(ctx, tv)))
+            .collect(),
+        literal_pat_types: ctx
+            .literal_pats
             .iter()
             .map(|(&pat, &tv)| (pat, resolve_to_concrete(ctx, tv)))
             .collect(),
@@ -646,9 +749,7 @@ fn describe_existential(ctx: &InferCtx<'_>, kind: &TyKind) -> Option<String> {
     let TyKind::Struct { entity, args } = kind else {
         return None;
     };
-    let [payload] = args.as_slice() else {
-        return None;
-    };
+    let payload = args.first()?;
     let TySlot::Resolved(TyKind::RawExistential { bounds, bindings }) =
         &ctx.types[ctx.resolve(*payload).0 as usize]
     else {
@@ -737,7 +838,11 @@ pub(crate) fn describe_error(ctx: &InferCtx<'_>, err: &InferError) -> String {
             }
             // Static failures get a "because" detail — deep in generic
             // instantiation chains the bare `T !: Static` is miserable.
+            if let Some(hint) = describe_lossy_conversion(ctx, *ty, *protocol, protocol_args) {
+                return format!("{} !: {} ({})", ty_name, proto_name, hint);
+            }
             if let Some(why) = describe_static_failure(ctx, *ty, *protocol)
+                .or_else(|| describe_unsized_value(ctx, *ty, *protocol))
                 .or_else(|| describe_sized_failure(ctx, *ty, *protocol))
             {
                 return format!("{} !: {} ({})", ty_name, proto_name, why);
@@ -761,6 +866,7 @@ pub(crate) fn describe_error(ctx: &InferCtx<'_>, err: &InferError) -> String {
             receiver,
             name,
             is_call,
+            searched_pointee,
             ..
         } => {
             // Wording mirrors lib1: delegating-init misses say "no method
@@ -779,11 +885,15 @@ pub(crate) fn describe_error(ctx: &InferCtx<'_>, err: &InferError) -> String {
             } else {
                 "member"
             };
+            let pointee = searched_pointee
+                .map(|p| format!(" or its pointee '{}'", describe_tyvar(ctx, p)))
+                .unwrap_or_default();
             format!(
-                "no {} '{}' on type '{}'",
+                "no {} '{}' on type '{}'{}",
                 kind,
                 name,
-                describe_tyvar(ctx, *receiver)
+                describe_tyvar(ctx, *receiver),
+                pointee
             )
         },
         InferError::AmbiguousMember { receiver, name, .. } => match receiver {
@@ -795,6 +905,9 @@ pub(crate) fn describe_error(ctx: &InferCtx<'_>, err: &InferError) -> String {
         },
         InferError::MemberNotVisible { receiver, name, .. } => {
             format!("{}.{} not visible", describe_tyvar(ctx, *receiver), name)
+        },
+        InferError::SugarOnlyMember { receiver, name, .. } => {
+            format!("{}.{} is sugar-only", describe_tyvar(ctx, *receiver), name)
         },
         InferError::MemberIsStatic { receiver, name, .. } => {
             format!(
@@ -816,10 +929,11 @@ pub(crate) fn describe_error(ctx: &InferCtx<'_>, err: &InferError) -> String {
         InferError::ArgCountMismatch { expected, got, .. } => {
             format!("expected {} argument(s), got {}", expected, got)
         },
-        InferError::LabelMismatch { expected, got, .. } => {
-            let exp = expected.as_deref().unwrap_or("_");
-            let g = got.as_deref().unwrap_or("_");
-            format!("wrong label: expected '{}', got '{}'", exp, g)
+        InferError::LabelMismatch { expected, got, .. } => match (expected, got) {
+            (Some(e), Some(g)) => format!("expected label `{e}:`, got `{g}:`"),
+            (Some(e), None) => format!("missing label `{e}:`"),
+            (None, Some(g)) => format!("this argument takes no label; remove `{g}:`"),
+            (None, None) => "wrong argument label".into(),
         },
         InferError::AmbiguousTrailingClosure { candidates, .. } => {
             let names: Vec<&str> = candidates
@@ -881,6 +995,12 @@ pub(crate) fn describe_error(ctx: &InferCtx<'_>, err: &InferError) -> String {
                 struct_name, got_desc, expected
             )
         },
+        InferError::MemberwiseInitMissing {
+            struct_name, field, ..
+        } => format!("missing argument for field '{field}' of struct '{struct_name}'"),
+        InferError::MemberwiseInitUnexpected {
+            struct_name, label, ..
+        } => format!("unexpected argument {label:?} for struct '{struct_name}'"),
         InferError::ItWrongArity { expected, .. } => {
             format!(
                 "implicit 'it' parameter used in {}-parameter context",
@@ -895,9 +1015,12 @@ pub(crate) fn describe_error(ctx: &InferCtx<'_>, err: &InferError) -> String {
             )
         },
         InferError::UnresolvedTypeParam { param, .. } => {
+            let Some(param) = *param else {
+                return "cannot infer a type parameter of this call".into();
+            };
             let name = ctx
                 .query_ctx
-                .get::<kestrel_ast_builder::Name>(*param)
+                .get::<kestrel_ast_builder::Name>(param)
                 .map(|n| n.0.clone())
                 .unwrap_or_else(|| "_".into());
             format!("cannot infer type parameter '{}'", name)
@@ -937,6 +1060,7 @@ pub(crate) fn describe_error(ctx: &InferCtx<'_>, err: &InferError) -> String {
         InferError::RefInTypeArgument { .. } => {
             "a reference cannot be a generic type argument".into()
         },
+        InferError::UnsizedAssign { .. } => "a slice cannot be assigned as a whole".into(),
         InferError::ConventionMismatch { .. } => {
             "cannot pass a mutating closure where a non-mutating parameter is expected".into()
         },
@@ -948,6 +1072,30 @@ pub(crate) fn describe_error(ctx: &InferCtx<'_>, err: &InferError) -> String {
             crate::error::describe_fn_kind(*actual)
         ),
     }
+}
+
+/// "Because" detail for an unsized nominal (`StringSlice`, `Slice[T]`)
+/// failing a generic param's implicit `Copyable` / `Sized` bound: it can only
+/// be used in place, so point at the two ways to pass it.
+fn describe_unsized_value(ctx: &InferCtx<'_>, ty: TyVar, protocol: Entity) -> Option<String> {
+    let relevant = crate::solver::is_sized_builtin(ctx, protocol)
+        || crate::solver::copyable_builtin_kind(ctx, protocol).is_some();
+    if !relevant
+        || !matches!(
+            ctx.slot(ctx.resolve(ty)),
+            TySlot::Resolved(TyKind::Struct { .. })
+        )
+    {
+        return None;
+    }
+    if crate::solver::solver_ty_is_sized(ctx, ty, 0) {
+        return None;
+    }
+    Some(
+        "it is unsized, so a generic parameter takes it only when relaxed with 'not Sized' \
+         (`x: &T where T: not Sized`); otherwise convert it to its owned type"
+            .into(),
+    )
 }
 
 /// "Because" detail for a failed `Sized` bound (existentials).
@@ -970,6 +1118,86 @@ fn describe_sized_failure(ctx: &InferCtx<'_>, ty: TyVar, protocol: Entity) -> Op
         TyKind::Struct { .. } => Some("its last stored field is unsized".into()),
         _ => None,
     }
+}
+
+/// Hint for a failed `T: Convertible[S]`: `init(from:)` is lossless only,
+/// so when `T` instead narrows or rounds from `S`, name the spellings that
+/// exist (`Int8(exactly:)` …) rather than leaving a bare `!: Convertible`.
+fn describe_lossy_conversion(
+    ctx: &InferCtx<'_>,
+    ty: TyVar,
+    protocol: Entity,
+    protocol_args: &[TyVar],
+) -> Option<String> {
+    use kestrel_hir::builtin::Builtin;
+    if ctx.resolver.builtin(Builtin::ConvertibleProtocol) != Some(protocol) {
+        return None;
+    }
+    let [source] = protocol_args else { return None };
+    let target = nominal_entity(ctx, ty)?;
+    let source_entity = nominal_entity(ctx, *source)?;
+    let declares = |builtin: Builtin| {
+        ctx.resolver
+            .builtin(builtin)
+            .is_some_and(|p| declares_conformance_from(ctx, target, p, source_entity))
+    };
+    let (ty_name, source_name) = (describe_tyvar(ctx, ty), describe_tyvar(ctx, *source));
+    if declares(Builtin::NarrowsFromProtocol) {
+        return Some(format!(
+            "not every '{source_name}' fits in '{ty_name}': use '{ty_name}(exactly:)', \
+             '{ty_name}(truncating:)' or '{ty_name}(clamping:)'"
+        ));
+    }
+    if declares(Builtin::RoundsFromProtocol) {
+        return Some(format!(
+            "'{source_name}' doesn't always convert exactly to '{ty_name}': use \
+             '{ty_name}(rounding:)'"
+        ));
+    }
+    None
+}
+
+/// The struct/enum entity `ty` resolves to, if any.
+fn nominal_entity(ctx: &InferCtx<'_>, ty: TyVar) -> Option<Entity> {
+    match ctx.slot(ctx.resolve(ty)) {
+        TySlot::Resolved(TyKind::Struct { entity, .. } | TyKind::Enum { entity, .. }) => {
+            Some(*entity)
+        },
+        _ => None,
+    }
+}
+
+/// Whether `entity` declares `protocol[Source]` for the nominal `source`
+/// (non-generic conformances only — enough for the numeric families).
+fn declares_conformance_from(
+    ctx: &InferCtx<'_>,
+    entity: Entity,
+    protocol: Entity,
+    source: Entity,
+) -> bool {
+    use kestrel_hir::ty::HirTy;
+    let insts = ctx
+        .query_ctx
+        .query(kestrel_name_res::ConformingProtocolInstantiations {
+            entity,
+            root: ctx.root,
+        });
+    insts
+        .iter()
+        .filter(|(p, ..)| *p == protocol)
+        .any(|(_, decl, ast_args)| {
+            let args = kestrel_hir_lower::conformance_protocol_args(
+                ctx.query_ctx,
+                ctx.root,
+                protocol,
+                *decl,
+                ast_args,
+            );
+            matches!(
+                args.as_slice(),
+                [HirTy::Struct { entity, .. } | HirTy::Enum { entity, .. }] if *entity == source
+            )
+        })
 }
 
 /// "Because" detail for a failed `Static` bound (references 2a): names the
@@ -1062,10 +1290,16 @@ mod tests {
             error_details: Vec::new(),
             opaque_concrete_type: None,
             indirection_peels: HashMap::default(),
+            arg_indirection_peels: HashMap::default(),
             kind_coercions: HashMap::default(),
+            field_callee_types: HashMap::default(),
             direct_iterators: HashSet::default(),
+            mutating_lends: HashSet::default(),
+            optional_ref_decays: HashSet::default(),
+            ref_return_calls: HashMap::default(),
             existential_conversions: HashMap::default(),
             type_tests: HashMap::default(),
+            literal_pat_types: HashMap::default(),
             chain_modes: HashMap::default(),
         }
     }
@@ -1109,6 +1343,7 @@ mod tests {
                         ResolvedPromotion {
                             method: a,
                             target: ty(b),
+                            borrowed_view: false,
                         },
                     )]
                     .into_iter()
@@ -1150,6 +1385,13 @@ mod tests {
                     )]
                     .into_iter()
                     .collect(),
+                    ..base.clone()
+                },
+            ),
+            (
+                "ref_return_calls",
+                TypedBody {
+                    ref_return_calls: [(e, false)].into_iter().collect(),
                     ..base.clone()
                 },
             ),

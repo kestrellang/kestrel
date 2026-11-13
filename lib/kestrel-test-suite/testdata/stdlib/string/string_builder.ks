@@ -3,12 +3,12 @@
 
 module Test
 
-import std.text.(Formatter, Formattable, FormatOptions, Str, Char, StringBuilder, String)
+import std.text.(Formatter, Formattable, FormatOptions, StringSlice, Char, StringBuilder, String)
 
 struct RecordingFormatter: Formatter {
     var builder: StringBuilder
 
-    mutating func append(other: some Str) {
+    mutating func append(other: &StringSlice) {
         self.builder.append(other)
     }
 

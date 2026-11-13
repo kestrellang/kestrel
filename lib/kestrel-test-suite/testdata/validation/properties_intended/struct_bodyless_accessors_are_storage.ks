@@ -12,7 +12,7 @@
 // slot, leaving `c` uninitialized, with no diagnostic at any stage.
 
 module Main
-import std.io.stdio.println
+import std.streams.println
 
 struct S {
     var a: std.numeric.Int64;

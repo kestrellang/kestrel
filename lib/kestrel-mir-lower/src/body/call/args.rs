@@ -18,23 +18,14 @@ use kestrel_hir::res::LocalId as HirLocalId;
 use kestrel_type_infer::captures::CaptureKind;
 
 fn conventions_from_callable(callable: &Callable, is_extern: bool) -> Vec<ParamConvention> {
-    if is_extern {
-        let count = callable.receiver.as_ref().map_or(0, |_| 1) + callable.params.len();
-        return vec![ParamConvention::Consuming; count];
-    }
     let mut convs = Vec::new();
     if let Some(recv) = &callable.receiver {
         convs.push(receiver_convention(recv));
     }
     for param in &callable.params {
-        let conv = if param.is_consuming {
-            ParamConvention::Consuming
-        } else if param.is_mut {
-            ParamConvention::MutBorrow
-        } else {
-            ParamConvention::Borrow
-        };
-        convs.push(conv);
+        convs.push(crate::items::function_sig::param_convention(
+            param, is_extern,
+        ));
     }
     convs
 }
@@ -72,7 +63,7 @@ impl OssaBodyCtx<'_, '_> {
                     .get(offset + i)
                     .copied()
                     .unwrap_or(ParamConvention::Borrow);
-                self.prepare_call_arg_for_expr(arg.value, conv)
+                self.prepare_bound_call_arg(arg.value, conv)
             })
             .collect()
     }
@@ -96,6 +87,30 @@ impl OssaBodyCtx<'_, '_> {
         conventions: &[ParamConvention],
         conv_offset: usize,
         callee_type_args: &[TyId],
+    ) -> Vec<CallArg> {
+        self.lower_call_args_instantiated(
+            args,
+            callee_entity,
+            conventions,
+            conv_offset,
+            callee_type_args,
+            callee_type_args,
+        )
+    }
+
+    /// [`Self::lower_call_args_bound`] with the callee's full instantiation
+    /// (`instantiation`, aligned with its MIR type params) given apart from
+    /// the default-argument substitution args: an init's own default args
+    /// stay unsubstituted, but its owner's params still decide which
+    /// arguments are refs.
+    pub(crate) fn lower_call_args_instantiated(
+        &mut self,
+        args: &[HirCallArg],
+        callee_entity: Entity,
+        conventions: &[ParamConvention],
+        conv_offset: usize,
+        callee_type_args: &[TyId],
+        instantiation: &[TyId],
     ) -> Vec<CallArg> {
         // Snapshot the parameter shape (owned) so the world borrow is released
         // before we lower any argument expressions.
@@ -145,8 +160,13 @@ impl OssaBodyCtx<'_, '_> {
 
         // Lower explicit args in source order, each with its bound param's convention.
         let mut prepared = Vec::with_capacity(args.len());
-        for (arg, &conv) in args.iter().zip(&arg_convs) {
-            prepared.push(self.prepare_call_arg_for_expr(arg.value, conv));
+        for (ai, (arg, &conv)) in args.iter().zip(&arg_convs).enumerate() {
+            let slot = conv_offset + arg_slot[ai];
+            if self.param_instantiated_at_ref(callee_entity, slot, instantiation) {
+                prepared.push(self.prepare_ref_instantiated_arg(arg.value, conv));
+                continue;
+            }
+            prepared.push(self.prepare_bound_call_arg(arg.value, conv));
         }
 
         // Assemble in parameter order: explicit args via a source-order cursor,
@@ -164,18 +184,55 @@ impl OssaBodyCtx<'_, '_> {
                     let Some(default_entity) = shape[pi].default_entity else {
                         continue; // required-but-missing: impossible post-typecheck
                     };
-                    let param_ty = resolve_type_annotation(self.ctx, default_entity);
-                    let default_val =
-                        self.lower_default_arg_inline(default_entity, param_ty, callee_type_args);
                     let conv = conventions
                         .get(conv_offset + pi)
                         .copied()
                         .unwrap_or(ParamConvention::Borrow);
-                    result.push(self.prepare_call_arg(default_val, conv));
+                    result.push(self.lower_default_call_arg(
+                        default_entity,
+                        callee_type_args,
+                        conv,
+                    ));
                 },
             }
         }
         result
+    }
+
+    /// Whether the callee's param `slot` is one of its type params that this
+    /// call instantiates at a ref (`take[&mutating StringBuilder](r)`).
+    /// `type_args` must be the callee's whole instantiation, aligned with its
+    /// MIR type params (an init's include its owner's); any other list is
+    /// ignored rather than misread.
+    fn param_instantiated_at_ref(&self, callee: Entity, slot: usize, type_args: &[TyId]) -> bool {
+        let Some(f) = self.ctx.module.functions.get(&callee) else {
+            return false;
+        };
+        if type_args.is_empty() || type_args.len() != f.type_params.len() {
+            return false;
+        }
+        let Some(param_ty) = f.params.get(slot).map(|p| p.ty) else {
+            return false;
+        };
+        let MirTy::TypeParam(tp) = *self.ctx.module.ty_arena.get(param_ty) else {
+            return false;
+        };
+        let Some(index) = f.type_params.iter().position(|p| p.entity == tp) else {
+            return false;
+        };
+        matches!(self.ctx.module.ty_arena.get(type_args[index]), MirTy::Ref { .. })
+    }
+
+    /// An argument for a type param instantiated at a ref: the argument IS
+    /// the ref, so pass the binding's view of its pointee as-is, like a ref
+    /// struct slot (`prep_ref_slot_element`). The value path would copy the
+    /// POINTEE, and the callee would then write to the copy.
+    fn prepare_ref_instantiated_arg(&mut self, expr: HirExprId, conv: ParamConvention) -> CallArg {
+        let value = self.lower_expr_for_borrow(expr);
+        CallArg {
+            value,
+            convention: conv,
+        }
     }
 
     /// The convention each EXPLICIT argument binds to, in source order —
@@ -344,16 +401,34 @@ impl OssaBodyCtx<'_, '_> {
             .collect();
 
         for (di, default_entity) in defaults.into_iter().enumerate() {
-            let param_ty = resolve_type_annotation(self.ctx, default_entity);
-            let default_val =
-                self.lower_default_arg_inline(default_entity, param_ty, callee_type_args);
             let conv = conventions
                 .get(conv_offset + explicit_count + di)
                 .copied()
                 .unwrap_or(ParamConvention::Borrow);
-            let arg = self.prepare_call_arg(default_val, conv);
+            let arg = self.lower_default_call_arg(default_entity, callee_type_args, conv);
             call_args.push(arg);
         }
+    }
+
+    /// One defaulted argument, inline-lowered and prepared for `conv`. A
+    /// default that peeled through `Indirection` is already the borrowed
+    /// view; anything else is prepared like a written argument.
+    fn lower_default_call_arg(
+        &mut self,
+        default_entity: Entity,
+        callee_type_args: &[TyId],
+        conv: ParamConvention,
+    ) -> CallArg {
+        let param_ty = resolve_type_annotation(self.ctx, default_entity);
+        let (value, peeled) =
+            self.lower_default_arg_inline(default_entity, param_ty, callee_type_args, conv);
+        if peeled {
+            return CallArg {
+                value,
+                convention: conv,
+            };
+        }
+        self.prepare_call_arg(value, conv)
     }
 
     /// Build the type substitution (#148) mapping the callee's type params to a
@@ -387,7 +462,8 @@ impl OssaBodyCtx<'_, '_> {
         default_entity: Entity,
         _param_ty: TyId,
         callee_type_args: &[TyId],
-    ) -> ValueId {
+        conv: ParamConvention,
+    ) -> (ValueId, bool) {
         let Some(default_hir) = self.ctx.query.query(LowerBody {
             entity: default_entity,
             root: self.ctx.root,
@@ -410,7 +486,7 @@ impl OssaBodyCtx<'_, '_> {
                             .with_message("default value could not be lowered to MIR"),
                     ]),
             );
-            return self.emit_literal(Immediate::error());
+            return (self.emit_literal(Immediate::error()), false);
         };
         // A default whose expression calls its own function relying on that
         // same default (`func f(x: Int64 = f()) -> Int64`) would inline
@@ -433,7 +509,7 @@ impl OssaBodyCtx<'_, '_> {
                         "pass the argument explicitly in the recursive call".into(),
                     ]),
             );
-            return self.emit_literal(Immediate::error());
+            return (self.emit_literal(Immediate::error()), false);
         }
         INLINING_DEFAULTS.with(|s| s.borrow_mut().push(default_entity));
         let _inlining = kestrel_hecs::guard::OnDrop::new(|| {
@@ -476,10 +552,16 @@ impl OssaBodyCtx<'_, '_> {
                 .insert(*hir_id, crate::body::LocalBinding::Ssa(val));
         }
 
-        let result = if let Some(tail_id) = tail {
-            self.lower_expr(tail_id)
-        } else {
-            self.emit_literal(Immediate::unit())
+        // A borrowed param's default may peel through `Indirection`, like a
+        // written argument (`prepare_bound_call_arg`).
+        let peels = tail.and_then(|t| self.arg_indirection_peels_of(t).map(|p| (t, p)));
+        let result = match (tail, peels) {
+            (_, Some((tail_id, peels))) => (
+                self.lower_indirection_chain(tail_id, &peels, conv == ParamConvention::MutBorrow),
+                true,
+            ),
+            (Some(tail_id), None) => (self.lower_expr(tail_id), false),
+            (None, None) => (self.emit_literal(Immediate::unit()), false),
         };
 
         self.hir = saved_hir;
@@ -494,21 +576,14 @@ impl OssaBodyCtx<'_, '_> {
     pub(crate) fn collect_conventions(&self, callee_entity: Entity) -> Vec<ParamConvention> {
         // Try MIR FunctionDef first
         if let Some(callee) = self.ctx.module.functions.get(&callee_entity) {
-            if callee.extern_info.is_some() {
-                return callee
-                    .params
-                    .iter()
-                    .map(|_| ParamConvention::Consuming)
-                    .collect();
-            }
             return callee.params.iter().map(|p| p.convention).collect();
         }
         // ECS fallback
         let Some(callable) = self.ctx.world.get::<Callable>(callee_entity) else {
             return Vec::new();
         };
-        let is_extern = attrs_of(&self.ctx.query, callee_entity).is_extern();
-        conventions_from_callable(callable, is_extern)
+        let attrs = attrs_of(&self.ctx.query, callee_entity);
+        conventions_from_callable(callable, attrs.is_extern() || attrs.is_export())
     }
 
     /// Look up param conventions for a witness (protocol method) call.
@@ -526,21 +601,61 @@ impl OssaBodyCtx<'_, '_> {
         conventions_from_callable(callable, false)
     }
 
+    /// The witness key and requirement entity a `ProtocolCall` dispatches
+    /// through — the ONE derivation shared by call lowering and the move
+    /// checker. A desugaring that names its `requirement` is keyed by that
+    /// requirement; only an untagged call (no stdlib tag) falls back to its
+    /// written name and call-site labels.
+    /// The requirement entity of a `?.` bind's settled mode, if `expr` is one.
+    pub(crate) fn chain_requirement(&self, expr: HirExprId) -> Option<Entity> {
+        let builtin = self.typed.as_ref()?.chain_requirement(expr)?;
+        self.ctx.query.query(kestrel_name_res::ResolveBuiltin {
+            builtin,
+            root: self.ctx.root,
+        })
+    }
+
+    pub(crate) fn protocol_call_target(
+        &self,
+        requirement: Option<Entity>,
+        protocol: Entity,
+        method_name: &str,
+        args: &[HirCallArg],
+    ) -> (WitnessMethodKey, Option<Entity>) {
+        if let Some(requirement) = requirement {
+            return (self.ctx.witness_method_key(requirement), Some(requirement));
+        }
+        kestrel_debug::ktrace!(
+            "witness-bind",
+            "untagged protocol call `{method_name}`: keyed by written name + labels"
+        );
+        let labels = args.iter().map(|a| a.label.clone()).collect();
+        let key = WitnessMethodKey::new(method_name, labels);
+        let entity = self.find_protocol_method_entity(protocol, &key);
+        (key, entity)
+    }
+
     pub(crate) fn find_protocol_method_entity(
         &self,
         protocol: Entity,
         method: &WitnessMethodKey,
     ) -> Option<Entity> {
-        let members = self
-            .ctx
-            .query
-            .query(kestrel_name_res::ProtocolMembersByName {
-                protocol,
-                name: method.name.clone(),
-                context: self.ctx.root,
-                root: self.ctx.root,
-            });
-        for member in &members {
+        // A ref accessor slot (`value.ref`) names the requirement's
+        // RefAccessor child, which carries the ref return.
+        if let Some((member, mutating)) = crate::context::parse_ref_witness_name(&method.name) {
+            let key = WitnessMethodKey::new(member.to_string(), method.labels.clone());
+            let parent = self.find_protocol_method_entity(protocol, &key)?;
+            return self.ctx.find_ref_accessor_child(parent, mutating);
+        }
+        // Unfiltered: type inference already checked visibility, and a
+        // root-context filter hides `internal`/`fileprivate` extension
+        // methods, losing their conventions (a `mutating` receiver lowered
+        // as a borrow).
+        let map = self.ctx.query.query(kestrel_name_res::ProtocolMembers {
+            protocol,
+            root: self.ctx.root,
+        });
+        for member in map.named(&method.name) {
             if let Some(callable) = self.ctx.world.get::<Callable>(member.entity) {
                 let member_labels: Vec<Option<&str>> =
                     callable.params.iter().map(|p| p.label.as_deref()).collect();
@@ -554,6 +669,47 @@ impl OssaBodyCtx<'_, '_> {
             }
         }
         None
+    }
+
+    /// The member of a protocol EXTENSION that `method` names — an
+    /// extension-only place or method, which a witness table also carries
+    /// but [`Self::find_protocol_method_entity`] (requirements only) can't
+    /// see. A ref slot (`alias.ref`) answers with its RefAccessor child.
+    pub(crate) fn find_protocol_extension_member(
+        &self,
+        protocol: Entity,
+        method: &WitnessMethodKey,
+    ) -> Option<Entity> {
+        if let Some((member, mutating)) = crate::context::parse_ref_witness_name(&method.name) {
+            let key = WitnessMethodKey::new(member.to_string(), method.labels.clone());
+            let parent = self.find_protocol_extension_member(protocol, &key)?;
+            return self.ctx.find_ref_accessor_child(parent, mutating);
+        }
+        let extensions = self
+            .ctx
+            .query
+            .query(kestrel_name_res::extensions::ExtensionsFor {
+                target: protocol,
+                root: self.ctx.root,
+            });
+        extensions.iter().find_map(|&ext| {
+            self.ctx
+                .world
+                .children_of(ext)
+                .iter()
+                .copied()
+                .find(|&child| {
+                    kestrel_name_res::helpers::member_lookup_name(&self.ctx.query, child)
+                        == Some(method.name.as_str())
+                        && self
+                            .ctx
+                            .world
+                            .get::<Callable>(child)
+                            .map_or(method.labels.is_empty(), |c| {
+                                c.params.iter().map(|p| &p.label).eq(method.labels.iter())
+                            })
+                })
+        })
     }
 
     /// Unified type-arg resolution for calls.

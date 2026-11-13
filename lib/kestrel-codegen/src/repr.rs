@@ -127,14 +127,15 @@ impl<M: ScalarModel> TypeCache<M> {
 
             // Ref appears on ret_borrow signatures only (never a value type);
             // its ABI is a pointer to the pointee.
-            MirTy::Pointer(_) | MirTy::FuncThin { .. } | MirTy::Ref { .. } => {
-                TypeRepr::Scalar(ptr_scalar)
-            },
+            MirTy::Pointer(_)
+            | MirTy::FuncThin { .. }
+            | MirTy::FuncC { .. }
+            | MirTy::Ref { .. } => TypeRepr::Scalar(ptr_scalar),
 
             MirTy::Never => TypeRepr::Zst,
 
             // Always fat (handled above); kept for exhaustiveness.
-            MirTy::RawExistential { .. } => two_words,
+            MirTy::RawExistential { .. } | MirTy::Slice(_) => two_words,
 
             MirTy::Tuple(elems) => {
                 let elems = elems.clone();
@@ -284,4 +285,18 @@ fn entity_name(module: &MonoModule, entity: Entity) -> &str {
         .get(&entity)
         .map(|s| s.as_str())
         .unwrap_or("?")
+}
+
+/// A `@guaranteed` extract of a stored REF slot (a `&T` field, tuple element
+/// or payload) whose result is POINTEE-typed: does the backend load the
+/// stored address out of the slot? A thin ref slot holds the pointee's
+/// address, so yes. A fat ref slot (`&Slice[T]`, `&rawany P`) holds the two
+/// words a fat pointee value is represented by the address of, so the slot
+/// address IS the result. A REF-typed result (clone/drop shim projections)
+/// always keeps the slot address.
+pub fn ref_slot_loads_pointee(module: &MonoModule, slot_ty: TyId, result_ty: TyId) -> bool {
+    let arena = &module.ty_arena;
+    matches!(arena.get(slot_ty), MirTy::Ref { .. })
+        && !matches!(arena.get(result_ty), MirTy::Ref { .. })
+        && !module.is_fat(slot_ty)
 }

@@ -183,7 +183,8 @@ IDs follow the pattern `E<NNN>`:
 Current allocations:
 - E001: `missing_return` (exhaustive_return.rs)
 - E002: `unreachable_code` (dead_code.rs)
-- E121: `integer_literal_out_of_range` (body/integer_literal_range.rs) — post-inference range check on integer literals against their resolved fixed-width type; a unary-`negate` over a literal is checked as the negated value (so `Int8` accepts `-128` but rejects `-129`)
+- E120: `char_literal_not_ascii` (body/integer_literal_range.rs) — a character literal typed as an integer (`UInt8: ExpressibleByCharLiteral`) must be ASCII; checked in expressions and patterns
+- E121: `integer_literal_out_of_range` (body/integer_literal_range.rs) — post-inference range check on integer literals against their resolved fixed-width type; a unary-`negate` over a literal is checked as the negated value (so `Int8` accepts `-128` but rejects `-129`); pattern literals and range bounds are checked from `TypedBody::literal_pat_types`
 - E301: `refutable_for_loop_pattern` (for_loop_pattern.rs)
 - E302: `irrefutable_if_let` (exhaustiveness.rs)
 - E303: `irrefutable_match_arm` (exhaustiveness.rs) — reserved; currently not emitted (E306 subsumes)
@@ -223,9 +224,14 @@ Current allocations:
   — was double-allocated with conformance_completeness's receiver-kind
   check; resolved 2026-07 by moving that check to E477.
 - E469: `wrong_parameter_convention` (compilation/conformance_completeness.rs) — a witness parameter's `consuming`/`mutating`/plain convention must match the requirement's exactly (2026-10-28; receivers are E477).
-- E454–E458, E460, E462–E465: conformance completeness + indirect-enum
-  checks (compilation/conformance_completeness.rs, indirect_enum.rs) —
-  this list is stale for that range.
+- E406, E407, E409: indirect enums (decl/recursive_enum.rs, with E429) —
+  `indirect_enum_requires_stdlib`, `indirect_polymorphic_recursion`,
+  `indirect_without_recursion` (warning).
+- E408: `infinite_opaque_return` (decl/opaque_cycle.rs).
+- E454–E458, E460, E462–E464: conformance completeness checks
+  (compilation/conformance_completeness.rs) — this list is stale for that
+  range. E465 (indirect enums not yet supported) is retired; the ID stays
+  reserved.
 - E466: `some_in_field_type` (decl/field.rs) — `some P` rejected in field
   position (#168).
   E458 (`wrong_method_return_type`) carries the stage-2d ref-shape rule:
@@ -252,14 +258,15 @@ Current allocations:
     `any[...]` box) is emitted by `kestrel-hir-lower/src/ty.rs`; E402 (invalid
     box, `decl/existential_box.rs`, rules in `kestrel_semantics::ExistentialBoxDefect`)
     and E403 (unsized type parameter by value, `decl/unsized_param.rs`) are
-    analyzers. **Free E4xx gaps are now E405–E410 and E414.**
+    analyzers. **The only free E4xx gap is now E414.** E410 `associated_type_equality_not_satisfied` (compilation/conformance_completeness.rs, 2026-11): a conformer binds an associated type that its protocol pins with `where Self.P.Assoc = X` to something else. E405 `missing_property_ref_accessor` (compilation/conformance_completeness.rs): a computed property without the `ref` / `mutating ref` a protocol requirement needs.
+  - E406–E409: indirect enums and infinite opaque returns (see the list above).
   - E1xx E144–E155 are existentials too: E144, E150, E153 and E154 are
     emitted by hir-lower; E145–E148 and E151 by type inference (`InferError`
     variants, `kestrel-type-infer/src/existential.rs`); E149, E152 and the
     `consuming as?` E148 by `body/type_test.rs`. E155 (the pre-M5 stub) is
     retired — don't reuse it. E157 (`?.` on a non-`OptionalChain` type) is a
     type-inference `InferError`; E158 (consume through `?.` on a place) is
-    `body/optional_chain.rs`. Next free E1xx: **E156**, then **E159**.
+    `body/optional_chain.rs`. E156 (assigning to an unsized place, `xs(1..<3) = ys`) is a type-inference `InferError`. Next free E1xx: **E159**.
   - E479: `ambiguous_where_clause_associated_type` (decl/generics.rs) — G29,
     `6ef0782c`. It is reported at the clause when the associated type in a
     where-clause equality (`Item.Out = X`) is declared by two or more of the
@@ -366,15 +373,17 @@ Current allocations:
   - SCOPE-DEPTH (outlives) HALF: `FreezeInfo.captured_scope_depth` + `State.local_depth`; storing a view-CARRYING value into a shallower binding is E507 even though nothing is moved. That is the only rule that catches the silent scope-exit dangle (`g = { r.v }` inside a block).
   - CARRIERS: `State.carriers` propagates the frozen set through closure copies and aggregate construction only. A general call result is deliberately NOT a carrier (a view closure can never be returned — E494), which keeps `let n = sink(f)` from manufacturing a false outlives error.
   - SEPARATE REPORTED SET: `State.freeze_reported` is NOT `State.reported` — the latter is shared across E500/E501/E503/E506, so reusing it would let an unrelated move diagnostic swallow the freeze error. It threads through the loop back-edge re-analysis alongside `reported`, or the second pass double-emits.
-  - `record_move` consults it FIRST and pre-empts E506/E503; `HirStmt::Deinit` needs its OWN consult (it bypasses `record_move`), and `record_operand_move` needs a PLACE-aware one (`rhs_local` returns `None` for `sink(p.b)`). **Next free E5xx is E512 (E510 `consumed_while_lent_to_call`, E511 `field_move_out_of_deinit_type`, both in body/move_tracking.rs)** (E509 `reference_outlives_referent`, body/move_tracking.rs: a `&x`-carrying value stored into a binding that outlives `x`).
+  - `record_move` consults it FIRST and pre-empts E506/E503; `HirStmt::Deinit` needs its OWN consult (it bypasses `record_move`), and `record_operand_move` needs a PLACE-aware one (`rhs_local` returns `None` for `sink(p.b)`). **Next free E5xx is E513 (E510 `consumed_while_lent_to_call`, E511 `field_move_out_of_deinit_type`, both in body/move_tracking.rs; E512 `borrowed_param_copies_view`, body/view_conversion.rs)** (E509 `reference_outlives_referent`, body/move_tracking.rs: a `&x`-carrying value stored into a binding that outlives `x`).
 - E508: `observable_drop_unmarked` — NOT an analyzer: emitted after monomorphization by `kestrel-compiler` (`record_mono_warnings`, from `kestrel_mir::passes::copy_lifetime::unmarked_observable_drops`), where every call is resolved so the deinit call walk is exact (it sees `println → … → write`). WARNING: a `Cloneable` struct/enum not `@observabledrop` (and containing nothing that is) whose `deinit` reaches an `@extern` other than the C allocator / `mem*` functions. Only appears at build time; tested through execution tests' `// WARN:` annotations. Design: `docs/plans/observable_drop/observable_drop-design.md`
+- E512: `borrowed_param_copies_view` (body/view_conversion.rs) — WARNING (Performance): a borrowed parameter naming an owned type (`x: String`) was given a view (`&StringSlice`) and type-infer converted it through `DecaysFrom`, copying it. Reads `ResolvedPromotion::borrowed_view`, set by the solver from `view_args`; the analyzer never re-derives which args converted. The note suggests a `&View` parameter.
 - E615: `main_not_free_function` (compilation/entry_point.rs) — `@main` must be a free (module-level) function
 - E616: `invalid_main_return_type` (compilation/entry_point.rs) — `@main` must return `()` or a `lang` primitive integer (i8/i16/i32/i64), not a stdlib `IntN` struct
 - E617: `multiple_main` (compilation/entry_point.rs) — more than one `@main` in the build
 - E618: `missing_main` (compilation/entry_point.rs) — executable build with no `@main`; gated on `CompilationContext::is_executable` (set by the driver's `analyze_all(is_executable)`), so it fires only for `kestrel build` / execution tests, never for libraries / `kestrel check` / LSP / diagnostics tests
 - E619: `duplicate_read_provider` (decl/place_accessor.rs) — `get` + `ref` on one subscript/computed property (stage-1.5 place accessors)
 - E620: `duplicate_write_provider` (decl/place_accessor.rs) — `set` + `mutating ref` on one member
-- E621: `ref_accessor_in_protocol` (decl/place_accessor.rs) — ref accessors are concrete-inherent-only; rejected in protocols and protocol extensions
+- E621: `ref_accessor_in_protocol` (decl/place_accessor.rs) — a protocol may REQUIRE `ref` / `mutating ref` (bodyless clauses, witnessed through `value.ref` / `value.mutref` witness slots); a protocol EXTENSION may give their default bodies (bound as the witness when the conformer has none, `find_accessor_among` by labels); rejected are ref bodies in the protocol itself, bodyless clauses in an extension, and `modifying` accessors in either
+- E640: `bodyless_ref_accessor` (decl/place_accessor.rs) — a bodyless `ref` / `mutating ref` outside a protocol
 - E622: `accessor_missing_read_provider` (decl/place_accessor.rs) — write provider with no `get`/`ref` (set-only / mutating-ref-only accessor blocks)
 - E639: `invalid_lazy` (decl/lazy.rs) — `lazy` on anything but an instance `var` of a struct/enum with a type and `= expr` initializer and no accessors (the field then builds as plain stored); `LazyBodyAnalyzer` borrows it for a non-Copyable lazy type (the move checker skips that getter)
 - E638: `invalid_observer` (decl/observer.rs) — `willSet` / `didSet` anywhere but an instance stored `var` of a concrete type (mixed with get/set/ref, subscript, `let`, failable, protocol, static/global), or `return` in an observer body
@@ -383,7 +392,7 @@ Current allocations:
 - E636: `modifying_accessor_without_receiver` (decl/place_accessor.rs) — `modifying get` / `modifying ref` on a static member or a global (no `self` to modify). E619 now counts all four read providers (`get`, `modifying get`, `ref`, `modifying ref`) from the `DeclaredAccessors` component; E621 also rejects `modifying` accessors in protocols; E477 (compilation/conformance_completeness.rs) rejects a `modifying` read provider witnessing a `{ get }` requirement; reads of a `MutatingRead` member through an immutable base are E203/E204/E207 (body/access_mode.rs `check_modifying_read`)
 - E623: `function_missing_body` (decl/function_body.rs) — was E606, moved 2026-07 (E606 stays `cannot_infer_closure_type`, body/closure.rs). The dead `capturing_closure_escape` descriptor that shared E605 with extern_ffi_safe was deleted (check lives in MIR as E494); E605 is FFISafe-only.
 - E624: `closure_kind_mismatch` (`InferError::KindMismatch`, solver — reported from `solve_coerce`/`solve_equal`, rendered in kestrel-compiler `diagnostic.rs`) — the closure passing table of docs/design/closures.md. ONLY the table reports here: the signature-level kind/convention pairing is E625 and a non-exclusive `mutating` call is the E203 mutability family. E624 is SHARED with `body/closure.rs`'s `owning_capture_rejected` (plan D4): an `escaping`/`consuming` literal capturing a ref binding or other `not Static` value. Both are "this closure kind cannot be formed from this", so they deliberately share the code; the analyzer descriptor and the solver error must keep the same id
-- E625: `closure_kind_convention_pairing` (decl/closure_kind_convention.rs) — a `mutating`-kind function-type parameter must have the `mutating` access mode, a `consuming`-kind one the `consuming` mode. Signature-level (a bodiless decl never generates a `Coerce`, so it can never reach E624), exact pairing, top-level param type only. **Next free E6xx is E640** (E634/E635 were taken without updating this note) (E633 `circular_global_initializer` in compilation/global_init_cycles.rs, E632 `wrong_method_parameter_type` in compilation/conformance_completeness.rs, E626 `view_closure_field`, E627 `main_has_parameters` in compilation/entry_point.rs, E628 `extension_stored_field` in decl/field.rs, E629 `unresolved_import` in decl/import_target.rs, E630 `conformance_not_a_protocol` in decl/conformance_target.rs, E631 `recursive_default_argument` in kestrel-mir-lower body/call/args.rs).
+- E625: `closure_kind_convention_pairing` (decl/closure_kind_convention.rs) — a `mutating`-kind function-type parameter must have the `mutating` access mode, a `consuming`-kind one the `consuming` mode. Signature-level (a bodiless decl never generates a `Coerce`, so it can never reach E624), exact pairing, top-level param type only. **Next free E6xx is E648** (E647 `c_function_needs_c_entry` in body/c_function.rs; E640 is `bodyless_ref_accessor`; E641–E646 are `unsafe`: E641 `unsafe_use` / E642 `unused_unsafe` in body/unsafe_use.rs, E643 `unsafe_witness_for_safe_requirement` / E644 `missing_unsafe_conformance` / E645 `unnecessary_unsafe_conformance` in compilation/conformance_completeness.rs, E646 `unsafe_stored_field` in decl/unsafe_field.rs; E634/E635 were taken without updating this note) (E633 `circular_global_initializer` in compilation/global_init_cycles.rs, E632 `wrong_method_parameter_type` in compilation/conformance_completeness.rs, E626 `view_closure_field`, E627 `main_has_parameters` in compilation/entry_point.rs, E628 `extension_stored_field` in decl/field.rs, E629 `unresolved_import` in decl/import_target.rs, E630 `conformance_not_a_protocol` in decl/conformance_target.rs, E631 `recursive_default_argument` in kestrel-mir-lower body/call/args.rs).
 - E700: `invalid_escape_sequence` (body/string_escape.rs)
 - E701: `ascii_escape_out_of_range` (body/string_escape.rs)
 - E702: `invalid_unicode_escape` (body/string_escape.rs)
@@ -501,3 +510,22 @@ The pattern to follow is `builtin_marker_protocol.rs` and `conformance_rules.rs`
 query `EntityBuiltin`, pattern-match the flag you care about, and let the answer
 come from the table. A flag with no reader is not documentation — it is a lie
 that compiles.
+
+## Same-name, same-label callables: one rule, `util::same_label_witnesses_allowed`
+
+Overloads are keyed by **labels**. The only exception: same-label callables
+may coexist when each witnesses a different requirement slot — a different
+protocol, or a different instantiation of one parameterized protocol
+(`Int64: Convertible[Int8], Convertible[Int16]`), compared with protocol-arg
+defaults applied (`kestrel_hir_lower::conformance_protocol_args`). A
+same-label overload beside a single conformance's witness is a duplicate.
+
+E426 (one declaration), E411 (type vs extension) and E412 (extension vs
+extension) all ask `same_label_witnesses_allowed` with the declaration
+owning each callable. Any new duplicate/overload check must call it too —
+never a local "is some protocol requirement named this" test (that was
+E426's old loophole) or AST-string comparison of protocol args (E412's).
+
+Associated-type bindings for a conformance come from the name-res query
+`AssociatedTypeBinding` (pass `conformance_source` when judging one
+conformance) — never a local alias walk.

@@ -27,7 +27,7 @@ Compound assignments desugar to protocol method calls:
 | `a -= b` | `a.subtractAssign(b)` | `SubtractAssign` |
 | `a *= b` | `a.multiplyAssign(b)` | `MultiplyAssign` |
 | `a /= b` | `a.divideAssign(b)` | `DivideAssign` |
-| `a %= b` | `a.modAssign(b)` | `ModuloAssign` |
+| `a %= b` | `a.remainderAssign(b)` | `RemainderAssign` |
 | `a &= b` | `a.bitwiseAndAssign(b)` | `BitwiseAndAssign` |
 | `a \|= b` | `a.bitwiseOrAssign(b)` | `BitwiseOrAssign` |
 | `a ^= b` | `a.bitwiseXorAssign(b)` | `BitwiseXorAssign` |

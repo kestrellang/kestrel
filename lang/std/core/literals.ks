@@ -17,6 +17,8 @@ import std.core.(Bool)
 public protocol ExpressibleByBoolLiteral {
     /// @name Bool Literal
     /// Builds an instance from a boolean literal.
+    @sugarOnly
+    @builtin(.BoolLiteralInit)
     init(boolLiteral value: lang.i1)
 }
 
@@ -29,6 +31,8 @@ public protocol ExpressibleByBoolLiteral {
 public protocol ExpressibleByIntLiteral {
     /// @name Int Literal
     /// Builds an instance from an integer literal.
+    @sugarOnly
+    @builtin(.IntegerLiteralInit)
     init(intLiteral value: lang.i64)
 }
 
@@ -37,6 +41,8 @@ public protocol ExpressibleByIntLiteral {
 public protocol ExpressibleByFloatLiteral {
     /// @name Float Literal
     /// Builds an instance from a floating-point literal.
+    @sugarOnly
+    @builtin(.FloatLiteralInit)
     init(floatLiteral value: lang.f64)
 }
 
@@ -48,6 +54,8 @@ public protocol ExpressibleByFloatLiteral {
 public protocol ExpressibleByStringLiteral {
     /// @name String Literal
     /// Builds an instance from a string literal.
+    @sugarOnly
+    @builtin(.StringLiteralInit)
     init(stringLiteral ptr: lang.ptr[lang.i8], length: lang.i64)
 }
 
@@ -56,6 +64,8 @@ public protocol ExpressibleByStringLiteral {
 public protocol ExpressibleByCharLiteral {
     /// @name Char Literal
     /// Builds an instance from a character literal.
+    @sugarOnly
+    @builtin(.CharLiteralInit)
     init(charLiteral value: lang.i32)
 }
 
@@ -68,6 +78,7 @@ public protocol ExpressibleByCharLiteral {
 public protocol ExpressibleByNullLiteral {
     /// @name Null Literal
     /// Builds the absent/none instance.
+    @builtin(.NullLiteralInit)
     init()
 }
 
@@ -79,6 +90,7 @@ public protocol ExpressibleByNullLiteral {
 /// `ExpressibleByArrayLiteral` (which extends this with a friendlier API).
 @builtin(._ExpressibleByArrayLiteral)
 public protocol _ExpressibleByArrayLiteral {
+    @builtin(.ArrayLiteralElement)
     type Element
 
     /// @name Literal Bridge
@@ -86,9 +98,11 @@ public protocol _ExpressibleByArrayLiteral {
     ///
     /// Both params are `consuming`: the compiler hands ownership of the
     /// stack buffer's address (and the count) over to the implementation,
-    /// which stores them in its own storage. This convention is what the
-    /// MIR lowering's structural predicate looks for — implementations
-    /// that deviate will be silently skipped during literal lowering.
+    /// which stores them in its own storage. The compiler calls this
+    /// requirement through the conformance's witness, so the witness is
+    /// whatever init conformance checking matched to it.
+    @sugarOnly
+    @builtin(.ArrayLiteralInit)
     init(consuming _arrayLiteralPointer _arrayLiteralPointer: lang.ptr[Element], consuming _arrayLiteralCount _arrayLiteralCount: lang.i64)
 }
 
@@ -99,15 +113,17 @@ public protocol _ExpressibleByArrayLiteral {
 public protocol ExpressibleByArrayLiteral: _ExpressibleByArrayLiteral {
     /// @name Array Literal
     /// Builds an instance from a literal slice of elements.
+    @sugarOnly
     init(arrayLiteral elements: LiteralSlice[Element])
 }
 
-// Bridge: default implementation satisfies _ExpressibleByArrayLiteral
-//extend ExpressibleByArrayLiteral {
-//    public init(_arrayLiteralPointer: lang.ptr[Element], _arrayLiteralCount: lang.i64) {
-//        self.init(arrayLiteral: LiteralSlice(pointer: _arrayLiteralPointer, count: _arrayLiteralCount))
-//    }
-//}
+// Bridge: default implementation satisfies _ExpressibleByArrayLiteral, so a
+// type can adopt ExpressibleByArrayLiteral on its own.
+extend ExpressibleByArrayLiteral {
+    public init(consuming _arrayLiteralPointer _arrayLiteralPointer: lang.ptr[Element], consuming _arrayLiteralCount _arrayLiteralCount: lang.i64) {
+        self.init(arrayLiteral: LiteralSlice(pointer: _arrayLiteralPointer, count: _arrayLiteralCount))
+    }
+}
 
 /// Compiler-internal protocol for dictionary-literal lowering.
 ///
@@ -116,7 +132,9 @@ public protocol ExpressibleByArrayLiteral: _ExpressibleByArrayLiteral {
 /// prefer `ExpressibleByDictionaryLiteral`.
 @builtin(._ExpressibleByDictionaryLiteral)
 public protocol _ExpressibleByDictionaryLiteral {
+    @builtin(.DictionaryLiteralKey)
     type Key
+    @builtin(.DictionaryLiteralValue)
     type Value
 
     /// @name Literal Bridge
@@ -124,9 +142,10 @@ public protocol _ExpressibleByDictionaryLiteral {
     ///
     /// Both params are `consuming` for the same reason as the array
     /// bridge: the compiler hands ownership of the stack buffer to the
-    /// implementation. MIR lowering matches on the unwrapped param
-    /// shape, so an impl that deviates from this convention will be
-    /// skipped during literal lowering.
+    /// implementation. Like the array bridge, the compiler calls this
+    /// requirement through the conformance's witness.
+    @sugarOnly
+    @builtin(.DictionaryLiteralInit)
     init(consuming _dictionaryLiteralPointer: lang.ptr[(Key, Value)], consuming _dictionaryLiteralCount: lang.i64)
 }
 
@@ -135,6 +154,7 @@ public protocol _ExpressibleByDictionaryLiteral {
 public protocol ExpressibleByDictionaryLiteral: _ExpressibleByDictionaryLiteral {
     /// @name Dictionary Literal
     /// Builds an instance from a literal slice of key-value pairs.
+    @sugarOnly
     init(dictionaryLiteral elements: LiteralSlice[(Key, Value)])
 }
 

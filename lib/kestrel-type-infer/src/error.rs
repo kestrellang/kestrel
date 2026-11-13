@@ -43,6 +43,10 @@ pub enum InferError {
         name: String,
         is_call: bool,
         span: Span,
+        /// The pointee also searched when `receiver` is an `Indirection`
+        /// wrapper that peeled (`rc.missing` on an `RcBox[Account]`): the
+        /// message names the receiver as written, then this.
+        searched_pointee: Option<TyVar>,
     },
 
     /// Multiple candidates for a member — ambiguous.
@@ -63,6 +67,15 @@ pub enum InferError {
         receiver: TyVar,
         name: String,
         visibility: Vis,
+        span: Span,
+    },
+
+    /// The member is (or implements) a `@sugarOnly` requirement of
+    /// `protocol`, and is named outside that protocol's module.
+    SugarOnlyMember {
+        receiver: TyVar,
+        name: String,
+        protocol: String,
         span: Span,
     },
 
@@ -93,6 +106,11 @@ pub enum InferError {
     /// bind the value first (`let x = ...`) to store the decayed copy.
     RefInTypeArgument { span: Span },
 
+    /// E156: an assignment whose target is unsized (`xs(1..<3) = ys`, a
+    /// `Slice[T]` place). A slice can't be assigned as a whole; copy into it
+    /// (`assign(from:)`) or resize the owner (`replaceSubrange`).
+    UnsizedAssign { target: TyVar, span: Span },
+
     /// Error propagated from HIR (HirExpr::Error, HirPat::Error, etc.)
     FromHir { span: Span },
 
@@ -110,10 +128,13 @@ pub enum InferError {
         span: Span,
     },
 
-    /// Wrong argument label in a call.
+    /// Wrong argument label in a call. `got_is_param_name`: the label is the
+    /// internal name of a one-name (so unlabeled) parameter, e.g.
+    /// `joined(separator: ",")` against `func joined(separator: String)`.
     LabelMismatch {
         expected: Option<String>,
         got: Option<String>,
+        got_is_param_name: bool,
         span: Span,
     },
 
@@ -160,6 +181,22 @@ pub enum InferError {
         struct_name: String,
         expected: String,
         got: Option<String>,
+        span: Span,
+    },
+
+    /// Memberwise init call leaves out a field that has no default.
+    /// Emitted for `S(a: 1)` when `S` has fields `a`, `c` and `c` has none.
+    MemberwiseInitMissing {
+        struct_name: String,
+        field: String,
+        span: Span,
+    },
+
+    /// Memberwise init argument that no remaining field takes: an unknown
+    /// label, or one out of declaration order (`S(a: 1, c: 2, b: 3)`).
+    MemberwiseInitUnexpected {
+        struct_name: String,
+        label: Option<String>,
         span: Span,
     },
 
@@ -219,8 +256,9 @@ pub enum InferError {
     /// require the user to annotate — either at the call (`f[T, U](...)`)
     /// or at the binding (`let x: Result[T, U] = f(...)`).
     UnresolvedTypeParam {
-        /// The TypeParameter entity whose name is shown in the diagnostic.
-        param: Entity,
+        /// The TypeParameter entity whose name is shown in the diagnostic;
+        /// `None` for a slot with no nameable param.
+        param: Option<Entity>,
         /// The call site's span — used as the diagnostic's primary label.
         span: Span,
     },
@@ -313,6 +351,7 @@ pub fn describe_fn_kind(kind: kestrel_ast::FnTypeKind) -> String {
     match kind {
         kestrel_ast::FnTypeKind::Normal => "a normal closure".into(),
         kestrel_ast::FnTypeKind::Escaping => "an 'escaping' closure".into(),
+        kestrel_ast::FnTypeKind::C => "a C function".into(),
         // `keyword()` is the single source of truth for the spelling.
         other => format!("a '{}' closure", other.keyword().unwrap_or("")),
     }
@@ -363,6 +402,9 @@ fn kind_mismatch_note(
             "an 'escaping' closure is shared (aliases may exist), so its calls are not exclusive"
                 .into()
         },
+        // Only a named `@export(.C)` / `@extern(.C)` function has a C address.
+        (_, C) => "a closure has no C address; name an '@export(.C)' function instead".into(),
+        (C, _) => "a C function can't be used as a Kestrel closure yet".into(),
         _ => "see the closure passing table in the language reference".into(),
     }
 }
@@ -454,6 +496,11 @@ impl InferError {
                 vis_label(visibility)
             )),
 
+            Self::SugarOnlyMember { name, protocol, .. } => labeled(
+                format!("'{name}' can only be used through its syntax"),
+                format!("'{name}' is a sugar-only requirement of '{protocol}'"),
+            ),
+
             Self::MemberIsStatic { name, .. } => labeled(
                 format!("'{name}' is a static member and cannot be used on an instance"),
                 format!("use the type name to call '{name}'"),
@@ -482,6 +529,21 @@ impl InferError {
             Self::ArgCountMismatch { expected, got, .. } => detailed(format!(
                 "wrong number of arguments: expected {expected}, got {got}"
             )),
+
+            Self::LabelMismatch {
+                got: Some(name),
+                got_is_param_name: true,
+                ..
+            } => RenderedInferError {
+                code: self.code(),
+                message: format!("'{name}' is the parameter's name, not an argument label"),
+                label: Some(format!("remove `{name}:`")),
+                notes: vec![format!(
+                    "a parameter declared with one name takes no label; to give it one, \
+                     declare it with two names: `<label> {name}: T`"
+                )],
+                secondary: Vec::new(),
+            },
 
             Self::LabelMismatch { .. } => detailed("wrong argument label".into()),
 
@@ -553,6 +615,28 @@ impl InferError {
                         "argument for struct '{struct_name}' has {got_desc} label, but expected '{expected}'"
                     ),
                     format!("expected label '{expected}'"),
+                )
+            },
+
+            Self::MemberwiseInitMissing {
+                struct_name, field, ..
+            } => labeled(
+                format!("missing argument for field '{field}' of struct '{struct_name}'"),
+                format!("'{field}' has no default"),
+            ),
+
+            Self::MemberwiseInitUnexpected {
+                struct_name, label, ..
+            } => {
+                let desc = label
+                    .as_deref()
+                    .map(|s| format!("'{s}'"))
+                    .unwrap_or_else(|| "unlabeled".into());
+                labeled(
+                    format!(
+                        "no remaining field of struct '{struct_name}' takes the {desc} argument"
+                    ),
+                    "arguments must name fields, in declaration order".to_string(),
                 )
             },
 
@@ -726,6 +810,18 @@ impl InferError {
                 ],
                 secondary: Vec::new(),
             },
+
+            Self::UnsizedAssign { .. } => RenderedInferError {
+                code: self.code(),
+                message: "a slice cannot be assigned as a whole".into(),
+                label: Some("this place is unsized".into()),
+                notes: vec![
+                    "copy into it with `.assign(from: other)` (the lengths must match), or \
+                     resize the owner with `replaceSubrange`"
+                        .into(),
+                ],
+                secondary: Vec::new(),
+            },
         }
     }
 
@@ -770,10 +866,12 @@ impl InferError {
             | Self::AmbiguousTrailingClosure { .. }
             | Self::MemberwiseInitArity { .. }
             | Self::MemberwiseInitLabel { .. }
+            | Self::MemberwiseInitMissing { .. }
+            | Self::MemberwiseInitUnexpected { .. }
             | Self::NoMatchingOverload { .. }
             | Self::TypeArgCountMismatch { .. } => "E113",
             Self::LiteralNotAccepted { .. } => "E114",
-            Self::MemberNotVisible { .. } => "E115",
+            Self::MemberNotVisible { .. } | Self::SugarOnlyMember { .. } => "E115",
             Self::MemberIsStatic { .. }
             | Self::InstanceMethodAsStatic { .. }
             | Self::TypeParamAsValue { .. }
@@ -786,6 +884,7 @@ impl InferError {
             Self::KindMismatch { .. } => "E624",
             Self::RefFunctionAsValue { .. } => "E491",
             Self::RefInTypeArgument { .. } => "E492",
+            Self::UnsizedAssign { .. } => "E156",
             Self::FromHir { .. } => "E100",
         }
     }
@@ -799,6 +898,7 @@ impl InferError {
             },
             Self::NoMember { receiver, .. }
             | Self::MemberNotVisible { receiver, .. }
+            | Self::SugarOnlyMember { receiver, .. }
             | Self::MemberIsStatic { receiver, .. } => vec![*receiver],
             Self::AmbiguousMember { receiver, .. } => receiver.iter().copied().collect(),
             Self::NoAssociatedType { container, .. } => vec![*container],
@@ -814,6 +914,7 @@ impl InferError {
             | Self::NoMember { span, .. }
             | Self::AmbiguousMember { span, .. }
             | Self::MemberNotVisible { span, .. }
+            | Self::SugarOnlyMember { span, .. }
             | Self::MemberIsStatic { span, .. }
             | Self::NoAssociatedType { span, .. }
             | Self::InfiniteType { span }
@@ -829,6 +930,8 @@ impl InferError {
             | Self::NoMatchingOverload { span, .. }
             | Self::MemberwiseInitArity { span, .. }
             | Self::MemberwiseInitLabel { span, .. }
+            | Self::MemberwiseInitMissing { span, .. }
+            | Self::MemberwiseInitUnexpected { span, .. }
             | Self::ItWrongArity { span, .. }
             | Self::ExistentialBoxMismatch { span, .. }
             | Self::NotDispatchable { span, .. }
@@ -848,6 +951,7 @@ impl InferError {
             | Self::OpaqueUnderlierNotCopyable { span, .. }
             | Self::RefFunctionAsValue { span }
             | Self::RefInTypeArgument { span }
+            | Self::UnsizedAssign { span, .. }
             | Self::ConventionMismatch { span }
             | Self::KindMismatch { span, .. } => span,
         }
@@ -886,5 +990,39 @@ impl Reason {
         if !span.is_synthetic() {
             r.secondary.push((span.clone(), text.into()));
         }
+    }
+}
+
+/// The error for naming a `@sugarOnly` `requirement` (or a witness of it) as
+/// `name` outside its protocol's module.
+pub(crate) fn sugar_only_error(
+    qctx: &kestrel_hecs::QueryContext<'_>,
+    requirement: kestrel_hecs::Entity,
+    name: &str,
+    receiver: TyVar,
+    span: &Span,
+) -> InferError {
+    let protocol = qctx
+        .parent_of(requirement)
+        .and_then(|p| qctx.get::<kestrel_ast_builder::Name>(p))
+        .map(|n| n.0.clone())
+        .unwrap_or_default();
+    // A nameless init reads better with its labels: `init(intLiteral:)`.
+    let name = match qctx.get::<kestrel_ast_builder::Callable>(requirement) {
+        Some(c) if name == "init" => {
+            let labels: String = c
+                .params
+                .iter()
+                .map(|p| format!("{}:", p.label.as_deref().unwrap_or("_")))
+                .collect();
+            format!("init({labels})")
+        },
+        _ => name.to_string(),
+    };
+    InferError::SugarOnlyMember {
+        receiver,
+        name,
+        protocol,
+        span: span.clone(),
     }
 }

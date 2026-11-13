@@ -18,6 +18,21 @@ func overflows() {
     let g: UInt8 = 300;                  // ERROR: integer literal out of range for `UInt8`
 }
 
+// Patterns are checked against the type they match, including range bounds
+// and literals nested in a payload.
+func inPatterns(b: UInt8, o: Int8?) -> Int64 {
+    let x = match b {
+        300 => 1,                        // ERROR: integer literal out of range for `UInt8`
+        0..=256 => 2,                    // ERROR: integer literal out of range for `UInt8`
+        _ => 3,
+    };
+    match o {
+        .Some(-129) => 1,                // ERROR: integer literal out of range for `Int8`
+        .Some(-128) => 2,
+        _ => x,
+    }
+}
+
 // Boundary values are in range and must NOT be flagged.
 func boundaries() {
     let a: Int8 = -128;

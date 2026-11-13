@@ -14,8 +14,8 @@ import std.core.(Bool, Cloneable, Indirection, MutableIndirection)
 /// The contract a box type meets to hold an existential: `any[B] P` is
 /// `B[<raw existential>]` (docs/plans/existentials/existentials-design.md §3).
 ///
-/// Beyond conforming, `B` must have exactly one type parameter, declared
-/// `not Sized`, and store it only behind a pointer, so the compiler can widen
+/// Beyond conforming, `B` must have exactly one type parameter without a
+/// default (others, like an allocator, must have one), declared `not Sized`, and store it only behind a pointer, so the compiler can widen
 /// `B[T]` to `B[<raw existential>]` (E402 checks this).
 @builtin(.ExistentialBox)
 public protocol ExistentialBox: Indirection {
@@ -25,6 +25,7 @@ public protocol ExistentialBox: Indirection {
     ///
     /// `value` is a single-name parameter, so call sites are positional:
     /// `B(payload)`, never `B(value: payload)`.
+    @builtin(.ExistentialBoxInit)
     init(consuming value: Target)
 }
 
@@ -37,7 +38,7 @@ public protocol ExistentialBox: Indirection {
 /// storage; dropping the last handle destroys the payload exactly once.
 /// Most of the contract is inherited rather than invented — sharing is
 /// `Cloneable.clone()`, releasing is the conformer's own `deinit`, and reading
-/// the payload is `MutableIndirection.pointeeRef()` (which also supplies
+/// the payload is `MutableIndirection.value` (which also supplies
 /// transparent member access, so `box.field` reaches the payload's field).
 /// Only creation, shared mutation, identity and uniqueness are new.
 ///
@@ -56,7 +57,7 @@ public protocol ExistentialBox: Indirection {
 ///     let box: B = B(value);          // init(consuming value: Target)
 ///     let alias = box.clone();        // shares the managed storage
 ///     box.isIdentical(to: alias);     // true — one storage, two handles
-///     alias.pointeeRef()              // read the payload through the peel
+///     alias.value                     // read the payload in place
 /// }
 /// ```
 ///
@@ -87,7 +88,7 @@ public protocol SharedBox: ExistentialBox, Cloneable, MutableIndirection {
     /// This is the marked exception to value semantics, and the operation
     /// escaping closures and (later) classes are built on. Value-semantic
     /// clients — `any` payloads, `indirect enum`s — must not use it; they
-    /// check `isUnique()` and fork instead.
+    /// check `isUnique` and fork instead.
     ///
     /// # Safety
     ///
@@ -95,6 +96,7 @@ public protocol SharedBox: ExistentialBox, Cloneable, MutableIndirection {
     /// aliases storage that other handles can read at the same time. Writing
     /// through it while a copy-on-write client assumes value semantics breaks
     /// those semantics for every sharer.
+    @builtin(.SharedBoxSharedMutRef)
     func sharedMutRef() -> &mutating Target
 
     /// Do the two handles refer to the same managed storage? Backs class
@@ -114,5 +116,5 @@ public protocol SharedBox: ExistentialBox, Cloneable, MutableIndirection {
     /// treat `false` as "fork before mutating" rather than as proof of
     /// sharing. A box that always answers `false` degrades to fork-always —
     /// slower, still correct.
-    func isUnique() -> Bool
+    var isUnique: Bool { get }
 }

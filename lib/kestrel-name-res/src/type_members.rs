@@ -98,6 +98,15 @@ impl QueryFn for TypeMembers {
                 },
             },
         );
+        // An `@existentialOnly` default serves `any P` alone: a conformer
+        // neither inherits it nor counts it as implementing the requirement.
+        let members = members
+            .into_iter()
+            .filter(|m| {
+                !matches!(m.source, TypeMemberSource::ProtocolExtension { .. })
+                    || !kestrel_ast_builder::attrs::attrs_of(ctx, m.entity).is_existential_only()
+            })
+            .collect();
         Arc::new(TypeMemberMap::build(ctx, members, |m| m.entity))
     }
 }
@@ -309,6 +318,7 @@ mod tests {
                         b.finish()
                     }),
                 ),
+                false,
             )]),
         );
 

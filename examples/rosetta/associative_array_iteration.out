@@ -1,0 +1,5 @@
+alice -> 31
+bob -> 27
+carol -> 45
+keys:   [alice, bob, carol]
+values: [27, 31, 45]

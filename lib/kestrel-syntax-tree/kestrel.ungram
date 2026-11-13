@@ -51,13 +51,13 @@ ImportItem =
   'ident' ('as' alias:'ident')?
 
 ExtensionDeclaration =
-  AttributeList? 'extend' Ty ConformanceList? WhereClause? ExtensionBody
+  AttributeList? 'extend' TypeParameterList? Ty ConformanceList? WhereClause? ExtensionBody
 
 ExtensionBody =
   '{' Item* '}'
 
 ProtocolDeclaration =
-  AttributeList? Visibility 'protocol' Name TypeParameterList?
+  AttributeList? Visibility UnsafeModifier? 'protocol' Name TypeParameterList?
   ConformanceList? WhereClause? ProtocolBody
 
 ProtocolBody =
@@ -90,12 +90,12 @@ EnumCaseParameter =
   (Name ':')? Ty
 
 FunctionDeclaration =
-  AttributeList? Visibility StaticModifier? ('mutating' | 'consuming')?
+  AttributeList? Visibility UnsafeModifier? StaticModifier? UnsafeModifier? ('mutating' | 'consuming')?
   'func' Name TypeParameterList? ParameterList ReturnType? WhereClause?
   FunctionBody?
 
 InitializerDeclaration =
-  AttributeList? Visibility 'init' TypeParameterList? ParameterList
+  AttributeList? Visibility UnsafeModifier? 'init' TypeParameterList? ParameterList
   InitEffect? WhereClause? FunctionBody?
 
 InitEffect =
@@ -109,7 +109,7 @@ FunctionBody =
 | '=' Expression
 
 SubscriptDeclaration =
-  AttributeList? Visibility StaticModifier? 'subscript' TypeParameterList?
+  AttributeList? Visibility UnsafeModifier? StaticModifier? UnsafeModifier? 'subscript' TypeParameterList?
   ParameterList FailableMarker? ReturnType WhereClause? SubscriptBody
 
 // `?` after a subscript's parameters or a property's name: a failable
@@ -121,7 +121,7 @@ SubscriptBody =
   CodeBlock | PropertyAccessors
 
 FieldDeclaration =
-  AttributeList? Visibility StaticModifier? LazyModifier? ('let' | 'var') Name
+  AttributeList? Visibility LazyModifier? UnsafeModifier? StaticModifier? UnsafeModifier? LazyModifier? ('let' | 'var') Name
   FailableMarker? ':' Ty
   (PropertyAccessors ('=' Expression)? | '=' Expression PropertyAccessors?)? ';'?
 
@@ -147,12 +147,13 @@ GetterClause =
 SetterClause =
   'set' CodeBlock
 
-// `ref` is a contextual keyword: an identifier token.
+// `ref` is a contextual keyword: an identifier token. A bodyless clause
+// is a protocol requirement (`var value: T { ref mutating ref }`).
 RefClause =
-  'ident' CodeBlock
+  'ident' CodeBlock?
 
 MutatingRefClause =
-  'mutating' 'ident' CodeBlock
+  'mutating' 'ident' CodeBlock?
 
 // `modifying` (contextual) marks an accessor whose receiver is mutable:
 // `modifying get` yields a value, `modifying ref` a shared `&T`.
@@ -183,6 +184,10 @@ AliasedType =
 
 StaticModifier =
   'static'
+
+// `unsafe` on a declaration: using it needs an unsafe context.
+UnsafeModifier =
+  'unsafe'
 
 Visibility =
   ('public' | 'private' | 'internal' | 'fileprivate')?
@@ -234,7 +239,11 @@ ConformanceList =
   ':' ConformanceItem (',' ConformanceItem)* ','?
 
 ConformanceItem =
-  NegativeConformance | Ty
+  NegativeConformance | UnsafeConformance | Ty
+
+// `unsafe P`: the conformer vouches for an unsafe protocol's contract.
+UnsafeConformance =
+  'unsafe' Ty
 
 NegativeConformance =
   'not' (Ty | Path TypeArgumentList?)
@@ -312,7 +321,7 @@ TyParen =
 // A kind keyword (`mutating`/`consuming`, contextual `escaping`) then the
 // parameter list. `mutating` inside the list marks a by-reference parameter.
 TyFunction =
-  ('mutating' | 'consuming' | 'ident')? TyList '->' Ty
+  Attribute? ('mutating' | 'consuming' | 'ident')? TyList '->' Ty
 
 TyList =
   '(' ('mutating'? Ty (',' 'mutating'? Ty)* ','?)? ')'
@@ -331,7 +340,7 @@ TyResult =
   Ty 'throws' error:Ty
 
 TySome =
-  'some' Ty ('and' Ty)* ('and' NegativeConformance)?
+  'some' Ty ('and' Ty)* ('and' NegativeConformance)*
 
 // `any` is contextual (the leading 'ident'), so `any(where:)` stays a
 // method name. The optional list holds one unapplied box type.
@@ -372,7 +381,7 @@ ExpressionStatement =
   Expression ';'?
 
 GuardStatement =
-  'guard' Condition (',' Condition)* 'else' CodeBlock
+  'guard' Condition (',' Condition)* 'else' CodeBlock ';'?
 
 GuardCondition =
   'let' Pattern '=' Expression
@@ -422,6 +431,8 @@ Expr =
 | ExprReturn
 | ExprThrow
 | ExprTry
+| ExprUnsafe
+| ExprUnsafeBlock
 | ExprClosure
 | ExprMatch
 | ExprCast
@@ -558,6 +569,14 @@ ExprThrow =
 ExprTry =
   'try' Expression
 
+// `unsafe expr`: the operand is an unsafe context. Binds like `try`.
+ExprUnsafe =
+  'unsafe' Expression
+
+// `unsafe { ... }`: a block that is an unsafe context (not a closure).
+ExprUnsafeBlock =
+  'unsafe' CodeBlock
+
 // `consuming` is only accepted directly before a cast.
 ExprCast =
   'consuming'? Expression 'as?' Ty
@@ -583,14 +602,17 @@ ExprOptionalChain =
 ExprClosure =
   '{' (ClosureParams 'in')? BlockItem* '}'
 
+// `(a: T, b)`, or the shorthand `a, b` (names and `_` only).
 ClosureParams =
   '(' (ClosureParam (',' ClosureParam)* ','?)? ')'
+| ClosureParam (',' ClosureParam)*
 
 ClosureParam =
   'mutating'? Pattern (':' Ty)?
 
+// A `=> { … }` arm needs no comma before an arm on the next line.
 ExprMatch =
-  'match' Expression '{' (MatchArm (',' MatchArm)* ','?)? '}'
+  'match' Expression '{' (MatchArm (','? MatchArm)* ','?)? '}'
 
 MatchArm =
   Pattern MatchArmGuard? '=>' Expression

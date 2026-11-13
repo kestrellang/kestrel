@@ -6,6 +6,8 @@
 
 module flock.compiler
 
+import clutch.shell.(runShell, shellOutput)
+
 import flock.error.(FlockError)
 
 // ============================================================================
@@ -84,7 +86,7 @@ func invokeBuild(
         cmd.append(quoteArg(framework))
     }
 
-    let exitCode = spawn(cmd).unwrap(or: -1);
+    let exitCode = runShell(cmd);
     if exitCode != 0 {
         throw FlockError.CompilerFailed(exitCode)
     }
@@ -103,7 +105,7 @@ func invokeRun(
     release release: Bool
 ) -> () throws FlockError {
     // `mktemp -t flock-run` works on both macOS and Linux.
-    let tempPath = captureOutput("mktemp -t flock-run").unwrap(or: String());
+    let tempPath = shellOutput("mktemp -t flock-run");
     if tempPath.bytes.count == 0 {
         throw FlockError.IoError("failed to create temp file for run")
     }
@@ -116,7 +118,7 @@ func invokeRun(
         .Ok(_) => {}
     }
 
-    let exitCode = spawn(quoteArg(tempPath)).unwrap(or: -1);
+    let exitCode = runShell(quoteArg(tempPath));
     cleanupTemp(path: tempPath);
 
     if exitCode != 0 {
@@ -129,7 +131,7 @@ func cleanupTemp(path path: String) {
     var rm = String();
     rm.append("rm -f ");
     rm.append(quoteArg(path));
-     spawn(rm).unwrap(or: -1);
+     runShell(rm);
 }
 
 // ----------------------------------------------------------------------------
@@ -146,7 +148,7 @@ func invokeCheck(sources sources: Array[String]) -> () throws FlockError {
         cmd.append(quoteArg(source))
     }
 
-    let exitCode = spawn(cmd).unwrap(or: -1);
+    let exitCode = runShell(cmd);
     if exitCode != 0 {
         throw FlockError.CompilerFailed(exitCode)
     }
@@ -158,7 +160,7 @@ func invokeCheck(sources sources: Array[String]) -> () throws FlockError {
 // ----------------------------------------------------------------------------
 
 func compilerPath() -> String {
-    match getenv("KESTREL") {
+    match Environment.variable("KESTREL") {
         .Some(path) => path,
         .None => "kestrel"
     }

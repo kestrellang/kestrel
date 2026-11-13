@@ -127,13 +127,13 @@ public struct ArgumentMatches: Cloneable {
     /// matches.value(of: "missing"); // .None
     public func value(of name: String) -> String? {
         for i in 0..<self.names.count {
-            if self.names(unchecked: i) == name {
-                return .Some(self.values(unchecked: i))
+            if unsafe self.names(unchecked: i) == name {
+                return .Some(unsafe self.values(unchecked: i))
             }
         }
         for i in 0..<self.positionalNames.count {
-            if self.positionalNames(unchecked: i) == name {
-                return .Some(self.positionals(unchecked: i))
+            if unsafe self.positionalNames(unchecked: i) == name {
+                return .Some(unsafe self.positionals(unchecked: i))
             }
         }
         .None
@@ -190,8 +190,8 @@ public struct ArgumentMatches: Cloneable {
     public func allValues(of name: String) -> Array[String] {
         var result = [];
         for i in 0..<self.names.count {
-            if self.names(unchecked: i) == name {
-                result.append(self.values(unchecked: i));
+            if unsafe self.names(unchecked: i) == name {
+                result.append(unsafe self.values(unchecked: i));
             }
         }
         result

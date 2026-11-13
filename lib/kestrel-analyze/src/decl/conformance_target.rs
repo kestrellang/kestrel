@@ -65,7 +65,7 @@ impl DeclCheck for ConformanceTargetAnalyzer {
             .0
             .iter()
             .filter_map(|item| match item {
-                ConformanceItem::Positive(ty, _) => check_entry(cx, ty, context),
+                ConformanceItem::Positive(ty, ..) => check_entry(cx, ty, context),
                 ConformanceItem::Negative(..) => None,
             })
             .collect()

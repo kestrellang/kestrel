@@ -20,7 +20,7 @@ func SQLITE_TRANSIENT() -> RawPointer {
 
 // Helper: read the error message from a sqlite3 db handle
 func errorMessage(db: RawPointer) -> String {
-    let msgPtr = ffi.sqlite3_errmsg(db);
+    let msgPtr = unsafe ffi.sqlite3_errmsg(db);
     guard not msgPtr.isNull else { return "unknown error" }
     let cstr = CString(raw: msgPtr.cast[UInt8]());
     String(from: cstr)
@@ -30,18 +30,18 @@ func errorMessage(db: RawPointer) -> String {
 func bindParams(stmt: RawPointer, bindings: Array[SqliteValue]) -> () throws SqliteError {
     var i: Int64 = 0;
     while i < bindings.count {
-        let paramIndex = Int32(from: i + 1);
+        let paramIndex = Int32(truncating: i + 1);
         let bindResult = match bindings(i) {
-            .Integer(v) => ffi.sqlite3_bind_int64(stmt, paramIndex, v),
-            .Real(v) => ffi.sqlite3_bind_double(stmt, paramIndex, v.raw),
+            .Integer(v) => unsafe ffi.sqlite3_bind_int64(stmt, paramIndex, v),
+            .Real(v) => unsafe ffi.sqlite3_bind_double(stmt, paramIndex, v.raw),
             .Text(v) => {
                 let cstr = v.toCString();
-                let byteCount = Int32(from: v.bytes.count);
-                let r = ffi.sqlite3_bind_text(stmt, paramIndex, cstr.raw.asRaw(), byteCount, SQLITE_TRANSIENT());
+                let byteCount = Int32(truncating: v.bytes.count);
+                let r = unsafe ffi.sqlite3_bind_text(stmt, paramIndex, cstr.raw.asRaw(), byteCount, SQLITE_TRANSIENT());
                 cstr.free();
                 r
             },
-            .Null => ffi.sqlite3_bind_null(stmt, paramIndex)
+            .Null => unsafe ffi.sqlite3_bind_null(stmt, paramIndex)
         };
         if bindResult != ffi.SQLITE_OK() {
             throw SqliteError.Error("failed to bind parameter \(i + 1)");
@@ -55,10 +55,10 @@ func bindParams(stmt: RawPointer, bindings: Array[SqliteValue]) -> () throws Sql
 func executeOnDb(db: RawPointer, sql: SQL) -> () throws SqliteError {
     var stmtRaw = RawPointer.nullPointer();
     let ctemplate = sql.template.toCString();
-    let prepResult = ffi.sqlite3_prepare_v2(
+    let prepResult = unsafe ffi.sqlite3_prepare_v2(
         db,
         ctemplate.raw.asRaw(),
-        Int32(from: -1),
+        Int32(truncating: -1),
         Pointer(to: stmtRaw).asRaw(),
         RawPointer.nullPointer()
     );
@@ -70,8 +70,8 @@ func executeOnDb(db: RawPointer, sql: SQL) -> () throws SqliteError {
 
     try bindParams(stmtRaw, sql.bindings);
 
-    let stepResult = ffi.sqlite3_step(stmtRaw);
-     ffi.sqlite3_finalize(stmtRaw);
+    let stepResult = unsafe ffi.sqlite3_step(stmtRaw);
+     unsafe ffi.sqlite3_finalize(stmtRaw);
 
     if stepResult != ffi.SQLITE_OK() and stepResult != ffi.SQLITE_DONE() and stepResult != ffi.SQLITE_ROW() {
         throw SqliteError.Error(errorMessage(db));
@@ -83,10 +83,10 @@ func executeOnDb(db: RawPointer, sql: SQL) -> () throws SqliteError {
 func queryOnDb[R](db: RawPointer, sql: SQL) -> Array[R] throws SqliteError where R: FromRow {
     var stmtRaw = RawPointer.nullPointer();
     let ctemplate = sql.template.toCString();
-    let prepResult = ffi.sqlite3_prepare_v2(
+    let prepResult = unsafe ffi.sqlite3_prepare_v2(
         db,
         ctemplate.raw.asRaw(),
-        Int32(from: -1),
+        Int32(truncating: -1),
         Pointer(to: stmtRaw).asRaw(),
         RawPointer.nullPointer()
     );
@@ -100,7 +100,7 @@ func queryOnDb[R](db: RawPointer, sql: SQL) -> Array[R] throws SqliteError where
 
     var results = [];
     loop {
-        let stepResult = ffi.sqlite3_step(stmtRaw);
+        let stepResult = unsafe ffi.sqlite3_step(stmtRaw);
         if stepResult == ffi.SQLITE_ROW() {
             let row = readRow(stmtRaw);
             results.append(try R.fromRow(row));
@@ -108,11 +108,11 @@ func queryOnDb[R](db: RawPointer, sql: SQL) -> Array[R] throws SqliteError where
             break
         } else {
             let msg = errorMessage(db);
-             ffi.sqlite3_finalize(stmtRaw);
+             unsafe ffi.sqlite3_finalize(stmtRaw);
             throw SqliteError.Error(msg);
         }
     }
-     ffi.sqlite3_finalize(stmtRaw);
+     unsafe ffi.sqlite3_finalize(stmtRaw);
     results
 }
 
@@ -132,19 +132,19 @@ func getCachedStmt(
     cache: RcBox[Dictionary[String, RawPointer]],
     template: String
 ) -> RawPointer throws SqliteError {
-    let cached = cache.valuePtr().with { (d) in d(template) };
+    let cached = cache.value(template);
     match cached {
         .Some(stmt) => {
-             ffi.sqlite3_reset(stmt);
+             unsafe ffi.sqlite3_reset(stmt);
             .Ok(stmt)
         },
         .None => {
             var stmtRaw = RawPointer.nullPointer();
             let ctemplate = template.toCString();
-            let prepResult = ffi.sqlite3_prepare_v2(
+            let prepResult = unsafe ffi.sqlite3_prepare_v2(
                 db,
                 ctemplate.raw.asRaw(),
-                Int32(from: -1),
+                Int32(truncating: -1),
                 Pointer(to: stmtRaw).asRaw(),
                 RawPointer.nullPointer()
             );
@@ -152,7 +152,7 @@ func getCachedStmt(
             if prepResult != ffi.SQLITE_OK() {
                 throw SqliteError.Error(errorMessage(db));
             }
-            cache.modify { (mutating d) in let _ = d.insert(template, stmtRaw); };
+            let _ = cache.mutatingValue.insert(template, stmtRaw);
             .Ok(stmtRaw)
         }
     }
@@ -166,13 +166,13 @@ func executeCachedOnDb(
 ) -> () throws SqliteError {
     let stmt = try getCachedStmt(db, cache, sql.template);
     try bindParams(stmt, sql.bindings);
-    let stepResult = ffi.sqlite3_step(stmt);
+    let stepResult = unsafe ffi.sqlite3_step(stmt);
     if stepResult != ffi.SQLITE_OK() and stepResult != ffi.SQLITE_DONE() and stepResult != ffi.SQLITE_ROW() {
         let msg = errorMessage(db);
-         ffi.sqlite3_reset(stmt);
+         unsafe ffi.sqlite3_reset(stmt);
         throw SqliteError.Error(msg);
     }
-     ffi.sqlite3_reset(stmt);
+     unsafe ffi.sqlite3_reset(stmt);
     .Ok(())
 }
 
@@ -186,7 +186,7 @@ func queryCachedOnDb[R](
     try bindParams(stmt, sql.bindings);
     var results = [];
     loop {
-        let stepResult = ffi.sqlite3_step(stmt);
+        let stepResult = unsafe ffi.sqlite3_step(stmt);
         if stepResult == ffi.SQLITE_ROW() {
             let row = readRow(stmt);
             results.append(try R.fromRow(row));
@@ -194,28 +194,26 @@ func queryCachedOnDb[R](
             break
         } else {
             let msg = errorMessage(db);
-             ffi.sqlite3_reset(stmt);
+             unsafe ffi.sqlite3_reset(stmt);
             throw SqliteError.Error(msg);
         }
     };
-     ffi.sqlite3_reset(stmt);
+     unsafe ffi.sqlite3_reset(stmt);
     results
 }
 
 // Finalizes every cached statement. Call once, before `sqlite3_close` (open
 // statements make `sqlite3_close` fail and leak the handle).
 func finalizeCachedStmts(cache: RcBox[Dictionary[String, RawPointer]]) {
-    cache.valuePtr().with { (d) in
-        for entry in d.iter() {
-             ffi.sqlite3_finalize(entry.1);
-        }
-    };
+    for entry in cache.value.iter() {
+         unsafe ffi.sqlite3_finalize(entry.1);
+    }
 }
 
 // Helper: run a raw SQL string (for BEGIN/COMMIT/ROLLBACK)
 func execRawOnDb(db: RawPointer, sql: String) -> () throws SqliteError {
     let csql = sql.toCString();
-    let result = ffi.sqlite3_exec(
+    let result = unsafe ffi.sqlite3_exec(
         db,
         csql.raw.asRaw(),
         RawPointer.nullPointer(),
@@ -233,23 +231,23 @@ func execRawOnDb(db: RawPointer, sql: String) -> () throws SqliteError {
 // rowid of the last successful INSERT on this connection. No SQL — a single C
 // call, versus the prepare/step/finalize cost of `SELECT last_insert_rowid()`.
 func lastInsertRowIdOnDb(db: RawPointer) -> Int64 {
-    ffi.sqlite3_last_insert_rowid(db)
+    unsafe ffi.sqlite3_last_insert_rowid(db)
 }
 
 // Helper: read all columns from the current row into an owned Row
 func readRow(stmt: RawPointer) -> Row {
-    let colCount = Int64(from: ffi.sqlite3_column_count(stmt));
+    let colCount = Int64(from: unsafe ffi.sqlite3_column_count(stmt));
     var columns = [];
     var i: Int64 = 0;
     while i < colCount {
-        let col = Int32(from: i);
-        let colType = ffi.sqlite3_column_type(stmt, col);
+        let col = Int32(truncating: i);
+        let colType = unsafe ffi.sqlite3_column_type(stmt, col);
         if colType == ffi.SQLITE_INTEGER() {
-            columns.append(SqliteValue.Integer(ffi.sqlite3_column_int64(stmt, col)));
+            columns.append(SqliteValue.Integer(unsafe ffi.sqlite3_column_int64(stmt, col)));
         } else if colType == ffi.SQLITE_FLOAT() {
-            columns.append(SqliteValue.Real(Float64(raw: ffi.sqlite3_column_double(stmt, col))));
+            columns.append(SqliteValue.Real(Float64(raw: unsafe ffi.sqlite3_column_double(stmt, col))));
         } else if colType == ffi.SQLITE_TEXT() {
-            let textPtr = ffi.sqlite3_column_text(stmt, col);
+            let textPtr = unsafe ffi.sqlite3_column_text(stmt, col);
             if textPtr.isNull {
                 columns.append(SqliteValue.Text(""));
             } else {
@@ -271,12 +269,12 @@ struct Connection: not Copyable {
     static func open(path: String) -> Connection throws SqliteError {
         var dbRaw = RawPointer.nullPointer();
         let cpath = path.toCString();
-        let result = ffi.sqlite3_open(cpath.raw.asRaw(), Pointer(to: dbRaw).asRaw());
+        let result = unsafe ffi.sqlite3_open(cpath.raw.asRaw(), Pointer(to: dbRaw).asRaw());
         cpath.free();
 
         if result != ffi.SQLITE_OK() {
             if not dbRaw.isNull {
-                 ffi.sqlite3_close(dbRaw);
+                 unsafe ffi.sqlite3_close(dbRaw);
             }
             throw SqliteError.Error("failed to open database: " + path);
         }
@@ -297,7 +295,7 @@ struct Connection: not Copyable {
 
     deinit {
         if not self.db.isNull {
-             ffi.sqlite3_close(self.db);
+             unsafe ffi.sqlite3_close(self.db);
         }
     }
 }

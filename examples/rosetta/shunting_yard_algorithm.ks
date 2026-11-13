@@ -1,0 +1,51 @@
+// Rosetta Code: Parsing/Shunting-yard algorithm
+// https://rosettacode.org/wiki/Parsing/Shunting-yard_algorithm
+module Main
+
+func precedence(op: String) -> Int64 {
+    match op {
+        "^" => 4,
+        "*" or "/" => 3,
+        "+" or "-" => 2,
+        _ => 0,
+    }
+}
+
+func toRpn(infix: String) -> String {
+    var output = Array[String]();
+    var ops = Array[String]();
+    for piece in infix.split(by: " ") {
+        let token = piece.toOwned();
+        if token == "(" {
+            ops.append(token);
+        } else if token == ")" {
+            while let some top = ops.popLast() {
+                if top == "(" { break }
+                output.append(top);
+            }
+        } else if precedence(token) > 0 {
+            // Pop operators that bind tighter (or equal, for left-associative ones).
+            while let some top = ops.last {
+                let p = precedence(top);
+                let q = precedence(token);
+                if p > q or (p == q and token != "^") {
+                    output.append(ops.popLast() ?? "");
+                } else {
+                    break
+                }
+            }
+            ops.append(token);
+        } else {
+            output.append(token);
+        }
+    }
+    while let some op = ops.popLast() { output.append(op); }
+    output.joined(by: " ")
+}
+
+@main
+func main() {
+    let infix = "3 + 4 * 2 / ( 1 - 5 ) ^ 2 ^ 3";
+    println("infix: \(infix)");
+    println("RPN:   \(toRpn(infix))");
+}

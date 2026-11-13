@@ -42,6 +42,46 @@ Wraps a present value of `T`.
 
 _Defined in `lang/std/result/optional.ks`._
 
+#### function `andThen`
+
+```kestrel
+public consuming func andThen[U]((T) -> Optional[U]) -> Optional[U]
+```
+
+Monadic bind — apply a transform that itself returns an
+`Optional`, without nesting. Equivalent to `map(...).flatten()`.
+
+##### Examples
+
+```
+func parse(s: String) -> Int64? { ... }
+
+Some("42").andThen(parse);    // Some(42)
+Some("abc").andThen(parse);   // None  (parse failed)
+None.andThen(parse);          // None
+```
+
+_Defined in `lang/std/result/optional.ks`._
+
+#### function `andValue`
+
+```kestrel
+public consuming func andValue[U](consuming Optional[U]) -> Optional[U]
+```
+
+Returns `other` when `self` is `Some`, otherwise `None`. `other` is
+evaluated eagerly — use `andThen` for lazy chaining.
+
+##### Examples
+
+```
+Some(1).andValue(Some("a"));    // Some("a")
+Some(1).andValue(None);         // None
+None.andValue(Some("a"));       // None
+```
+
+_Defined in `lang/std/result/optional.ks`._
+
 #### function `asRef`
 
 ```kestrel
@@ -49,25 +89,6 @@ public func asRef() -> Optional[&T]
 ```
 
 Borrows the contained value without consuming this optional.
-
-_Defined in `lang/std/result/optional.ks`._
-
-#### function `clone`
-
-```kestrel
-public func clone() -> Optional[T]
-```
-
-Returns an independent copy. For value types this is a shallow
-copy of the payload; for COW types, the underlying buffer is
-shared until first mutation.
-
-##### Examples
-
-```
-let opt = Some([1, 2, 3]);
-let copy = opt.clone();   // independent copy
-```
 
 _Defined in `lang/std/result/optional.ks`._
 
@@ -132,27 +153,6 @@ None.filter(where: { it % 2 == 0 });      // None
 
 _Defined in `lang/std/result/optional.ks`._
 
-#### function `flatMap`
-
-```kestrel
-public consuming func flatMap[U]((T) -> Optional[U]) -> Optional[U]
-```
-
-Monadic bind — apply a transform that itself returns an
-`Optional`, without nesting. Equivalent to `map(...).flatten()`.
-
-##### Examples
-
-```
-func parse(s: String) -> Int64? { ... }
-
-Some("42").flatMap(parse);    // Some(42)
-Some("abc").flatMap(parse);   // None  (parse failed)
-None.flatMap(parse);          // None
-```
-
-_Defined in `lang/std/result/optional.ks`._
-
 #### function `flatten`
 
 ```kestrel
@@ -186,26 +186,26 @@ a chain.
 
 ```
 getUser(id)
-    .inspect { print("Found: \{it.name}") }
+    .inspect { print("Found: \(it.name)") }
     .map { it.email };
 ```
 
 _Defined in `lang/std/result/optional.ks`._
 
-#### function `isNone`
+#### field `isNone`
 
 ```kestrel
-public func isNone() -> Bool
+public var isNone: Bool { get }
 ```
 
 True when this is `.None`. The complement of `isSome`.
 
 _Defined in `lang/std/result/optional.ks`._
 
-#### function `isSome`
+#### field `isSome`
 
 ```kestrel
-public func isSome() -> Bool
+public var isSome: Bool { get }
 ```
 
 True when this is `.Some`. Cheap discriminator-only check.
@@ -213,8 +213,8 @@ True when this is `.Some`. Cheap discriminator-only check.
 ##### Examples
 
 ```
-Some(42).isSome();   // true
-None.isSome();       // false
+Some(42).isSome;   // true
+None.isSome;       // false
 ```
 
 _Defined in `lang/std/result/optional.ks`._
@@ -241,7 +241,7 @@ _Defined in `lang/std/result/optional.ks`._
 #### function `iter`
 
 ```kestrel
-public consuming func iter() -> OptionalIterator[T]
+public consuming func iter() -> OptionalIterator[T] where T: Copyable
 ```
 
 Returns an `OptionalIterator` that yields one element if `Some` or
@@ -277,24 +277,6 @@ Functor map — applies `transform` to the wrapped value, leaving
 Some(2).map { it * 2 };           // Some(4)
 None.map { it * 2 };              // None
 Some("hello").map { it.len };     // Some(5)
-```
-
-_Defined in `lang/std/result/optional.ks`._
-
-#### function `none`
-
-```kestrel
-public static func none() -> Optional[T]
-```
-
-Returns `.None`. Prefer the `null` literal — it works in any
-optional context without naming the type parameter.
-
-##### Examples
-
-```
-let a = Optional[Int64].none();   // None
-let b: Int64? = null;             // identical, preferred
 ```
 
 _Defined in `lang/std/result/optional.ks`._
@@ -357,10 +339,28 @@ let value = optionalInt ?? 0;
 
 _Defined in `lang/std/result/optional.ks`._
 
+#### function `orValue`
+
+```kestrel
+public consuming func orValue(consuming Optional[T]) -> Optional[T]
+```
+
+Returns `self` when `Some`, otherwise `other`. `other` is evaluated
+eagerly — use `orElse` for a lazy fallback.
+
+##### Examples
+
+```
+Some(1).orValue(Some(2));   // Some(1)
+None.orValue(Some(2));      // Some(2)
+```
+
+_Defined in `lang/std/result/optional.ks`._
+
 #### function `replace`
 
 ```kestrel
-public mutating func replace(T) -> Optional[T]
+public mutating func replace(consuming T) -> Optional[T]
 ```
 
 Stores `value` and returns whatever was there before. Mirror of
@@ -400,7 +400,7 @@ _Defined in `lang/std/result/optional.ks`._
 #### function `take`
 
 ```kestrel
-public mutating func take(where: (T) -> Bool) -> Optional[T]
+public mutating func take(where: (T) -> Bool) -> Optional[T] where T: Copyable
 ```
 
 Conditional `take` — empties `self` and returns the value only when
@@ -415,25 +415,6 @@ opt.take(where: { it > 0 });    // Some(42); opt is now None
 
 var opt2 = Some(42);
 opt2.take(where: { it < 0 });   // None;     opt2 is still Some(42)
-```
-
-_Defined in `lang/std/result/optional.ks`._
-
-#### function `then`
-
-```kestrel
-public consuming func then[U](consuming Optional[U]) -> Optional[U]
-```
-
-Returns `other` when `self` is `Some`, otherwise `None`. `other` is
-evaluated eagerly — use `flatMap` for lazy chaining.
-
-##### Examples
-
-```
-Some(1).then(Some("a"));    // Some("a")
-Some(1).then(None);         // None
-None.then(Some("a"));       // None
 ```
 
 _Defined in `lang/std/result/optional.ks`._
@@ -494,25 +475,6 @@ when the default is expensive to compute or has side effects.
 ```
 Some(42).unwrap(orElse: { expensiveDefault() });   // 42, no call
 None.unwrap(orElse: { expensiveDefault() });       // calls fn
-```
-
-_Defined in `lang/std/result/optional.ks`._
-
-#### function `wrap`
-
-```kestrel
-public static func wrap(T) -> Optional[T]
-```
-
-Wraps `value` in `.Some`. Rarely needed in practice — bare values
-are promoted via `FromValue`, and `let x: Int64? = 42` does the
-right thing.
-
-##### Examples
-
-```
-let opt = Optional.wrap(42);   // Some(42)
-let opt: Int64? = 42;                 // identical, preferred
 ```
 
 _Defined in `lang/std/result/optional.ks`._
@@ -621,6 +583,29 @@ hasher, then defers to `T.hash` for the payload.
 
 _Defined in `lang/std/result/optional.ks`._
 
+### Implements `Cloneable`
+
+_Conditional: `where T: Copyable`._
+
+#### function `clone`
+
+```kestrel
+public func clone() -> Optional[T] where T: Copyable
+```
+
+Returns an independent copy. For value types this is a shallow
+copy of the payload; for COW types, the underlying buffer is
+shared until first mutation.
+
+##### Examples
+
+```
+let opt = Some([1, 2, 3]);
+let copy = opt.clone();   // independent copy
+```
+
+_Defined in `lang/std/result/optional.ks`._
+
 ### Implements `Tryable`
 
 #### typealias `Output`
@@ -655,53 +640,11 @@ type Residual = ()
 
 _Defined in `lang/std/result/optional.ks`._
 
-#### function `tryExtract`
-
-```kestrel
-public consuming func tryExtract() -> ControlFlow[T, ()]
-```
-
-Drives `try` — `Continue(value)` for `Some`, `Break(())` for `None`.
-
-_Defined in `lang/std/result/optional.ks`._
-
 ### Implements `ForceUnwrap`
-
-#### function `forceUnwrap`
-
-```kestrel
-public consuming func forceUnwrap() -> T
-```
-
-Returns the wrapped value, trapping on `.None`. Backs `value!`.
-
-_Defined in `lang/std/result/optional.ks`._
 
 ### Implements `FromResidual`
 
-#### function `fromResidual`
-
-```kestrel
-public static func fromResidual(consuming ()) -> Optional[T]
-```
-
-Builds `.None` from the residual produced by a `try` short-circuit.
-
-_Defined in `lang/std/result/optional.ks`._
-
 ### Implements `FromValue`
-
-#### function `from`
-
-```kestrel
-public static func from(consuming T) -> Optional[T]
-```
-
-Wraps `value` in `.Some`. Called by the compiler at the promotion
-site, not usually by user code. `consuming` so `value` is moved into
-`.Some` (no clone-and-leak of a borrowed original).
-
-_Defined in `lang/std/result/optional.ks`._
 
 ### Implements `Formattable`
 
@@ -722,15 +665,13 @@ _Defined in `lang/std/result/optional.ks`._
 
 ### Implements `Coalesce`
 
-#### function `coalesce`
+### Implements `OptionalChain`
+
+#### typealias `Wrapped`
 
 ```kestrel
-public consuming func coalesce(() -> T) -> T
+type Wrapped = T
 ```
-
-Returns the wrapped value or evaluates `default()`. The default is
-only invoked on `None`, which is what makes `??` cheap on the
-happy path.
 
 _Defined in `lang/std/result/optional.ks`._
 
@@ -832,8 +773,8 @@ _Defined in `lang/std/result/result.ks`._
 public consuming func andThen[U]((T) -> Result[U, E]) -> Result[U, E]
 ```
 
-Alias for `flatMap` — chains a fallible step onto an `Ok` branch.
-Reads more naturally in long pipelines (`parseInput().andThen(validate).andThen(persist)`).
+Chains a fallible step onto an `Ok` branch, without nesting:
+`parseInput().andThen(validate).andThen(persist)`.
 
 _Defined in `lang/std/result/result.ks`._
 
@@ -846,17 +787,6 @@ public consuming func andValue[U](consuming Result[U, E]) -> Result[U, E]
 Returns `other` when `self` is `Ok`, otherwise propagates the
 existing `Err`. Named `andValue` (not `and`) because `and` is a
 reserved keyword.
-
-_Defined in `lang/std/result/result.ks`._
-
-#### function `err`
-
-```kestrel
-public static func err(E) -> Result[T, E]
-```
-
-Wraps `error` in `.Err`. Useful when constructing a `Result` from
-a known error in non-promotion contexts.
 
 _Defined in `lang/std/result/result.ks`._
 
@@ -903,25 +833,18 @@ let cfg = loadConfig().expect("Config file required");
 
 _Defined in `lang/std/result/result.ks`._
 
-#### function `flatMap`
+#### function `expectErr`
 
 ```kestrel
-public consuming func flatMap[U]((T) -> Result[U, E]) -> Result[U, E]
+public consuming func expectErr(String) -> E
 ```
 
-Monadic bind on the success branch — apply a transform that itself
-returns a `Result`, without nesting.
+Returns the error value, panicking with `message` if `Ok`. Mirror
+of `expect(_:)` for asserting that a call failed.
 
-_Defined in `lang/std/result/result.ks`._
+##### Errors
 
-#### function `flatMapErr`
-
-```kestrel
-public consuming func flatMapErr[F]((E) -> Result[T, F]) -> Result[T, F]
-```
-
-Monadic bind on the error branch — apply a recovery function that
-itself returns a `Result`, without nesting. Mirror of `flatMap`.
+Panics with `message` on `.Ok` via `fatalError`.
 
 _Defined in `lang/std/result/result.ks`._
 
@@ -959,7 +882,7 @@ assertions inside a chain. Mirror of `Optional.inspect(fn:)`.
 
 ```
 parsePort(input)
-    .inspect { print("port = \{it}") }
+    .inspect { print("port = \(it)") }
     .map { it + 1 };
 ```
 
@@ -979,16 +902,16 @@ for the failure path.
 
 ```
 parsePort(input)
-    .inspectErr { print("failed: \{it}") }
+    .inspectErr { print("failed: \(it)") }
     .mapErr { AppError.Parse(it) };
 ```
 
 _Defined in `lang/std/result/result.ks`._
 
-#### function `isErr`
+#### field `isErr`
 
 ```kestrel
-public func isErr() -> Bool
+public var isErr: Bool { get }
 ```
 
 True when this is `.Err`. Complement of `isOk`.
@@ -1015,10 +938,10 @@ Ok(1).isErrAnd(where: { it == 404 });      // false
 
 _Defined in `lang/std/result/result.ks`._
 
-#### function `isOk`
+#### field `isOk`
 
 ```kestrel
-public func isOk() -> Bool
+public var isOk: Bool { get }
 ```
 
 True when this is `.Ok`. Cheap discriminator-only check.
@@ -1026,8 +949,8 @@ True when this is `.Ok`. Cheap discriminator-only check.
 ##### Examples
 
 ```
-Ok(42).isOk();          // true
-Err("oops").isOk();     // false
+Ok(42).isOk;          // true
+Err("oops").isOk;     // false
 ```
 
 _Defined in `lang/std/result/result.ks`._
@@ -1055,7 +978,7 @@ _Defined in `lang/std/result/result.ks`._
 #### function `iter`
 
 ```kestrel
-public consuming func iter() -> ResultIterator[T, E]
+public consuming func iter() -> ResultIterator[T, E] where T: Copyable, E: Copyable
 ```
 
 Returns a `ResultIterator` yielding the success value (one element
@@ -1095,17 +1018,6 @@ specific error type into a more general one.
 ```
 parse(s).mapErr { AppError.Parse(it) };
 ```
-
-_Defined in `lang/std/result/result.ks`._
-
-#### function `ok`
-
-```kestrel
-public static func ok(T) -> Result[T, E]
-```
-
-Wraps `value` in `.Ok`. Rarely needed in practice — `FromValue`
-promotes bare values where the context expects a `Result`.
 
 _Defined in `lang/std/result/result.ks`._
 
@@ -1234,70 +1146,23 @@ type Residual = E
 
 _Defined in `lang/std/result/result.ks`._
 
-#### function `tryExtract`
-
-```kestrel
-public consuming func tryExtract() -> ControlFlow[T, E]
-```
-
-Drives `try` — `Continue(value)` for `.Ok`, `Break(error)` for
-`.Err`.
-
-_Defined in `lang/std/result/result.ks`._
-
-### Implements `Exitable`
-
-_Conditional: `where T: Exitable, E: Formattable`._
-
-#### function `report`
-
-```kestrel
-consuming func report() -> ExitCode where T: Exitable, E: Formattable
-```
-
-_Defined in `lang/std/os/exitable.ks`._
-
 ### Implements `Copyable`
 
 _Conditional: `where T: Copyable, E: Copyable`._
 
 ### Implements `FromResidual`
 
-#### function `fromResidual`
-
-```kestrel
-public static func fromResidual(consuming E) -> Result[T, E]
-```
-
-Builds `.Err(residual)` from the residual produced by a `try`
-short-circuit.
-
-_Defined in `lang/std/result/result.ks`._
-
 ### Implements `FromValue`
-
-#### function `from`
-
-```kestrel
-public static func from(consuming T) -> Result[T, E]
-```
-
-Wraps `value` in `.Ok`. Called by the compiler at the promotion
-site, not usually by user code. `consuming` so `value` is moved into
-`.Ok` (no clone-and-leak of a borrowed original).
-
-_Defined in `lang/std/result/result.ks`._
 
 ### Implements `Coalesce`
 
-#### function `coalesce`
+### Implements `OptionalChain`
+
+#### typealias `Wrapped`
 
 ```kestrel
-public consuming func coalesce(() -> T) -> T
+type Wrapped = T
 ```
-
-Returns the `.Ok` value or evaluates `default()`. The default is
-only invoked on `.Err`; the error value is dropped.
 
 _Defined in `lang/std/result/result.ks`._
 
@@ -1338,6 +1203,18 @@ Renders `Ok(...)` or `Err(...)`, forwarding `options` to the inner
 `format` for the payload.
 
 _Defined in `lang/std/result/result.ks`._
+
+### Implements `Exitable`
+
+_Conditional: `where T: Exitable, E: Formattable, E: Copyable`._
+
+#### function `report`
+
+```kestrel
+consuming func report() -> ExitCode where T: Exitable, E: Formattable, E: Copyable
+```
+
+_Defined in `lang/std/system/exitable.ks`._
 
 ## struct `ResultIterator`
 

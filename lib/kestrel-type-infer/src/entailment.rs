@@ -52,11 +52,22 @@ pub fn constraint_entailed_by(
         // same subject, and an RHS that is the same type as written
         // (`HirTy::same_type`, span-insensitive). No rewriting, no
         // transitivity — deliberately the narrowest sound answer (G25 step 4).
-        // A negative bound is entailed only by the same negative bound.
-        WhereClause::NotBound { subject, protocol } => context.iter().any(|c| {
-            matches!(c, WhereClause::NotBound { subject: s, protocol: p }
-                if s == subject && p == protocol)
-        }),
+        // A negative bound is entailed only by the same negative bound, stated
+        // in the context or — the same tier-2 rule `bound_entailed` applies —
+        // on the param's own enclosing decl (`extend[V] P: Q[V] where V: not
+        // Static` keeps its own `V: not Static`).
+        WhereClause::NotBound { subject, protocol } => {
+            let same = |c: &WhereClause| {
+                matches!(c, WhereClause::NotBound { subject: s, protocol: p }
+                    if s == subject && p == protocol)
+            };
+            context.iter().any(same)
+                || subject.as_param().is_some_and(|param| {
+                    param_owner_where_clauses(qctx, param, root)
+                        .iter()
+                        .any(same)
+                })
+        },
         WhereClause::Equality { subject, rhs } => context.iter().any(|c| {
             matches!(c, WhereClause::Equality { subject: s, rhs: r }
                 if s == subject && r.same_type(rhs))
@@ -227,7 +238,11 @@ mod tests {
         world.set(ext, ExtensionTarget(named("P")));
         world.set(
             ext,
-            Conformances(vec![ConformanceItem::Positive(named("Q"), fake_syntax())]),
+            Conformances(vec![ConformanceItem::Positive(
+                named("Q"),
+                fake_syntax(),
+                false,
+            )]),
         );
         world.set_parent(ext, root);
 

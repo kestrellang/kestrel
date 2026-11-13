@@ -54,6 +54,19 @@ let add: (Int64, Int64) -> Int64 = { (x, y) in x + y };          // inferred
 let f:   (Int64, String) -> Int64 = { (x: Int64, y) in x };      // mixed
 ```
 
+### Shorthand Parameters
+
+Untyped parameters can drop the parentheses. `_` ignores a parameter:
+
+```kestrel
+xs.map { c in c * 10 }
+xs.iter().fold(from: 0) { acc, x in acc + x }
+apply { _ in 7 }                       // the argument is unused
+```
+
+To give a parameter a type, or to destructure it, use the parenthesized
+form: `{ (x: Int64) in … }`, `{ ((a, b)) in … }`.
+
 ## Implicit `it` Parameter
 
 When a closure has exactly one parameter and the expected type is known, use the implicit `it` parameter instead of declaring one:
@@ -148,14 +161,26 @@ var total: Int64 = 0;
 [1, 2, 3, 4].iter().forEach { total = total + it };   // total == 10
 ```
 
+In the head of an `if`, `while`, `for` or `match`, a `{` usually starts the
+body. It is a trailing closure only when the body's own `{` still follows
+on the same line:
+
+```kestrel
+match xs.find { it > 1 } {                 // `{ it > 1 }` is the closure
+    .Some(v) => println("\(v)"),
+    .None => {},
+}
+if xs.any { it == 3 } and ready { go() }
+```
+
 ## Closures Over References
 
-A closure can take a reference. Adapters over `refs()` and `mutableRefs()`
+A closure can take a reference. Adapters over `refs()` and `mutatingRefs()`
 hand each `&T` / `&mutating T` item straight to the closure, with no copy:
 
 ```kestrel
 let total = people.refs().fold(from: 0, by: { (acc, p) in acc + p.age });
-people.mutableRefs().forEach { (p) in p.age += 1; };
+people.mutatingRefs().forEach { (p) in p.age += 1; };
 ```
 
 The parameter's reference type is inferred from the iterator; an explicit
@@ -1023,7 +1048,7 @@ func applyTwice(f: (Int64) -> Int64, x: Int64) -> Int64 {
 applyTwice({ (x) in x + 10 }, 22)  // 42
 ```
 
-That split is the stdlib's rule of thumb too: eager operations (`fold`, `sorted(by:)`, `any(where:)`, `first(where:)`) take normal closures; lazy builders that store the callback (`Iterator.map`, `filter`, `filterMap`, `scan`, `Str.split(where:)`) take `escaping` ones.
+That split is the stdlib's rule of thumb too: eager operations (`fold`, `sorted(by:)`, `any(where:)`, `find(where:)`) take normal closures; lazy builders that store the callback (`Iterator.map`, `filter`, `filterMap`, `scan`, `Str.split(where:)`) take `escaping` ones.
 
 ## Common Patterns
 

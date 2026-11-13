@@ -18,7 +18,7 @@ public struct BLAKE2b512: Digest {
         self.core = BLAKE2b(validLength: 64);
     }
 
-    public mutating func update[S](bytes: S) where S: Slice[UInt8], S: not Static {
+    public mutating func update(bytes: &Slice[UInt8]) {
         self.core.update(bytes);
     }
 
@@ -40,7 +40,7 @@ public struct BLAKE2b256: Digest {
         self.core = BLAKE2b(validLength: 32);
     }
 
-    public mutating func update[S](bytes: S) where S: Slice[UInt8], S: not Static {
+    public mutating func update(bytes: &Slice[UInt8]) {
         self.core.update(bytes);
     }
 
@@ -87,7 +87,7 @@ public struct BLAKE2b {
 
     /// One-shot hash with a chosen output length, or null unless
     /// `outputLength` is between 1 and 64.
-    public static func hash(bytes: some Slice[UInt8] and not Static, outputLength outputLength: Int64) -> DigestOutput? {
+    public static func hash(bytes: &Slice[UInt8], outputLength outputLength: Int64) -> DigestOutput? {
         guard let some hasher = BLAKE2b(outputLength: outputLength) else { return null; }
         var h = hasher;
         h.update(bytes);
@@ -107,11 +107,11 @@ public struct BLAKE2b {
     /// length, no key, fanout 1, depth 1 (RFC 7693 §2.5).
     static func initialState(outputLength: Int64) -> Array[UInt64] {
         var h = BLAKE2b.IV;
-        h(0) = h(0) ^ 0x01010000 ^ UInt64(from: outputLength);
+        h(0) = h(0) ^ 0x01010000 ^ UInt64(truncating: outputLength);
         h
     }
 
-    public mutating func update[S](bytes: S) where S: Slice[UInt8], S: not Static {
+    public mutating func update(bytes: &Slice[UInt8]) {
         let sl = bytes.asUnsafeSlice();
         var offset: Int64 = 0;
 
@@ -131,7 +131,7 @@ public struct BLAKE2b {
 
         while offset + 128 < sl.count {
             self.incrementCounter(128);
-            BLAKE2b.compress(sl.drop(first: offset).prefix(128), self.state, self.t0, self.t1, false);
+            BLAKE2b.compress(sl.drop(first: offset).prefix(128).asUnsafeSlice(), self.state, self.t0, self.t1, false);
             offset = offset + 128;
         }
 
@@ -148,12 +148,12 @@ public struct BLAKE2b {
         // Pad the remaining buffer with zeros
         var buf: [UInt8] = [];
         buf.append(contentsOf: self.buffer.asUnsafeSlice());
-        let remaining = UInt64(from: buf.count);
+        let remaining = UInt64(truncating: buf.count);
 
         // Increment counter by remaining bytes
-        ct0 = ct0 + remaining;
+        ct0 = ct0.addWrapping(remaining);
         if ct0 < remaining {
-            ct1 = ct1 + 1;
+            ct1 = ct1.addWrapping(1);
         }
 
         while buf.count < 128 {
@@ -193,10 +193,10 @@ public struct BLAKE2b {
     }
 
     mutating func incrementCounter(n: Int64) {
-        let add = UInt64(from: n);
-        self.t0 = self.t0 + add;
+        let add = UInt64(truncating: n);
+        self.t0 = self.t0.addWrapping(add);
         if self.t0 < add {
-            self.t1 = self.t1 + 1;
+            self.t1 = self.t1.addWrapping(1);
         }
     }
 
@@ -281,13 +281,13 @@ public struct BLAKE2b {
         a: Int64, b: Int64, c: Int64, d: Int64,
         x: UInt64, y: UInt64
     ) {
-        v(a) = v(a) + v(b) + x;
+        v(a) = v(a).addWrapping(v(b)).addWrapping(x);
         v(d) = (v(d) ^ v(a)).rotateRight(by: 32);
-        v(c) = v(c) + v(d);
+        v(c) = v(c).addWrapping(v(d));
         v(b) = (v(b) ^ v(c)).rotateRight(by: 24);
-        v(a) = v(a) + v(b) + y;
+        v(a) = v(a).addWrapping(v(b)).addWrapping(y);
         v(d) = (v(d) ^ v(a)).rotateRight(by: 16);
-        v(c) = v(c) + v(d);
+        v(c) = v(c).addWrapping(v(d));
         v(b) = (v(b) ^ v(c)).rotateRight(by: 63);
     }
 }

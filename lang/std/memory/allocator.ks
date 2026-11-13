@@ -4,14 +4,15 @@ module std.memory
 
 import std.result.(Optional)
 import std.memory.(Layout, RawPointer, Pointer)
-import std.ffi.(malloc, free, realloc, posixMemalign, memcpy)
+import std.ffi.(malloc, calloc, free, realloc, posixMemalign, memcpy, memset)
 import std.numeric.(Int64)
+import std.core.(Defaultable)
 
 /// Protocol for raw-memory allocators.
 ///
 /// `Allocator` is the indirection collections use so they can be parameterised
 /// over allocation strategy (e.g. `Array[T, A]`, `Buffer[T, A]`, custom
-/// arenas). All three methods are `mutating` so stateful allocators (arenas,
+/// arenas). Every method is `mutating` so stateful allocators (arenas,
 /// pools) can update their bookkeeping; stateless wrappers around `malloc`
 /// don't need to.
 ///
@@ -29,6 +30,11 @@ public protocol Allocator {
     /// when allocation fails. Returned memory is uninitialised.
     mutating func allocate(layout: Layout) -> RawPointer?
 
+    /// Like `allocate`, but every byte of the returned region is zero.
+    /// The default allocates and then zeroes; an allocator that can get
+    /// zeroed memory more cheaply (`calloc`) overrides it.
+    mutating func allocateZeroed(layout: Layout) -> RawPointer?
+
     /// Releases memory previously returned by `allocate` / `reallocate`.
     /// `layout` must match the layout used to obtain the pointer.
     ///
@@ -37,13 +43,13 @@ public protocol Allocator {
     /// `ptr` must have been produced by this allocator (or a clone of it)
     /// for `layout`. Mismatching the layout, double-freeing, or freeing a
     /// pointer from another allocator is undefined behavior.
-    mutating func deallocate(ptr: RawPointer, layout: Layout)
+    unsafe mutating func deallocate(ptr: RawPointer, layout: Layout)
 
     /// Resizes the allocation at `ptr` from `oldLayout` to `newLayout`.
     /// On failure the original allocation is left intact and `.None` is
     /// returned. On success the old pointer must not be reused — use the
     /// returned pointer instead.
-    mutating func reallocate(ptr: RawPointer, oldLayout: Layout, newLayout: Layout) -> RawPointer?
+    unsafe mutating func reallocate(ptr: RawPointer, oldLayout: Layout, newLayout: Layout) -> RawPointer?
 }
 
 /// `Allocator` backed by libc `malloc`/`free`/`realloc`. Used as the
@@ -54,7 +60,7 @@ public protocol Allocator {
 ///
 /// Stateless: the struct holds no fields. All bookkeeping lives in libc's
 /// heap. Cloning or copying the allocator has no effect on the heap state.
-public struct SystemAllocator: Allocator {
+public struct SystemAllocator: Allocator, Defaultable {
     /// @name Default
     /// Builds a stateless system allocator. No heap interaction occurs here.
     public init() {}
@@ -68,7 +74,7 @@ public struct SystemAllocator: Allocator {
 
         let naturalAlignment = Layout.of[RawPointer]().alignment;
         if layout.alignment <= naturalAlignment {
-            let ptr = malloc(layout.size);
+            let ptr = unsafe malloc(layout.size);
             if ptr.isNull {
                 .None
             } else {
@@ -76,7 +82,7 @@ public struct SystemAllocator: Allocator {
             }
         } else {
             var ptr = RawPointer.nullPointer();
-            let status = posixMemalign(
+            let status = unsafe posixMemalign(
                 Pointer(to: ptr).asRaw(),
                 layout.alignment,
                 layout.size
@@ -89,16 +95,34 @@ public struct SystemAllocator: Allocator {
         }
     }
 
+    /// Zeroed storage from `calloc` when the alignment is natural, so a large
+    /// block's pages stay untouched until written. Over-aligned layouts
+    /// allocate and zero.
+    public mutating func allocateZeroed(layout: Layout) -> RawPointer? {
+        if layout.size < 0 or not layout.alignment.isPowerOfTwo {
+            return .None
+        };
+        if layout.alignment > Layout.of[RawPointer]().alignment {
+            let result = self.allocate(layout);
+            if let .Some(ptr) = result {
+                if layout.size > 0 { let _ = unsafe memset(ptr, 0, layout.size); }
+            }
+            return result
+        }
+        let ptr = unsafe calloc(1, layout.size);
+        if ptr.isNull { .None } else { .Some(ptr) }
+    }
+
     /// Calls `free(ptr)`. The `layout` argument is ignored — kept for
     /// protocol conformance; allocators that need it (arenas) use it.
-    public mutating func deallocate(ptr: RawPointer, layout: Layout) {
-        free(ptr)
+    public unsafe mutating func deallocate(ptr: RawPointer, layout: Layout) {
+        unsafe free(ptr)
     }
 
     /// Resizes while preserving the requested alignment. When either layout
     /// is over-aligned, this allocates a new block, copies the common prefix,
     /// and frees the old block only after allocation succeeds.
-    public mutating func reallocate(ptr: RawPointer, oldLayout: Layout, newLayout: Layout) -> RawPointer? {
+    public unsafe mutating func reallocate(ptr: RawPointer, oldLayout: Layout, newLayout: Layout) -> RawPointer? {
         if oldLayout.size < 0 or not oldLayout.alignment.isPowerOfTwo or
             newLayout.size < 0 or not newLayout.alignment.isPowerOfTwo {
             return .None
@@ -106,7 +130,7 @@ public struct SystemAllocator: Allocator {
 
         let naturalAlignment = Layout.of[RawPointer]().alignment;
         if oldLayout.alignment <= naturalAlignment and newLayout.alignment <= naturalAlignment {
-            let newPtr = realloc(ptr, newLayout.size);
+            let newPtr = unsafe realloc(ptr, newLayout.size);
             if newPtr.isNull {
                 .None
             } else {
@@ -121,9 +145,9 @@ public struct SystemAllocator: Allocator {
                         newLayout.size
                     };
                     if copySize > 0 {
-                        memcpy(newPtr, ptr, copySize);
+                        unsafe memcpy(newPtr, ptr, copySize);
                     };
-                    free(ptr);
+                    unsafe free(ptr);
                     .Some(newPtr)
                 },
                 .None => .None
@@ -132,9 +156,19 @@ public struct SystemAllocator: Allocator {
     }
 }
 
+extend Allocator {
+    /// Default `allocateZeroed`: `allocate`, then zero the bytes.
+    public mutating func allocateZeroed(layout: Layout) -> RawPointer? {
+        let result = self.allocate(layout);
+        if let .Some(ptr) = result {
+            if layout.size > 0 { let _ = unsafe memset(ptr, 0, layout.size); }
+        }
+        result
+    }
+}
+
 /// Project-wide default allocator, aliased to `SystemAllocator`. Override
 /// at the project level if a global custom allocator is needed.
 public type GlobalAllocator = SystemAllocator
 
-// Note: ArenaAllocator and PoolAllocator require Buffer (Phase 14)
-// They will be added after Buffer is implemented
+// `ArenaAllocator` lives in arena.ks.

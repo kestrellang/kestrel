@@ -1,8 +1,8 @@
 // test: diagnostics
 // stdlib: false
 
-// Regression: `extend ConcreteType: Proto[T]` introduces `T` as a free type
-// param on the protocol RHS. When a generic function returns `I.Output`
+// Regression: `extend[T] ConcreteType: Proto[T]` declares `T`, a param
+// only the protocol args use. When a generic function returns `I.Output`
 // through a `where I: Proto[T]` bound, the *call-site* projection must
 // resolve `Output` through the witness — substituting the extension's free
 // `T` with the caller's concrete protocol arg.
@@ -32,7 +32,7 @@ protocol Indexable[T] {
 
 struct Slot { public init() {} }
 
-extend Slot: Indexable[T] {
+extend[T] Slot: Indexable[T] {
     type Indexable[T].Output = T
     public func compute(witness witness: Holder[T]) -> T { witness.read() }
 }

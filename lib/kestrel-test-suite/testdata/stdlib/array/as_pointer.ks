@@ -12,13 +12,13 @@ module Test
             let ptr = arr.asPointer();
 
             // Read through the pointer to verify it points to the array data
-            let val0 = ptr.read();
+            let val0 = unsafe ptr.read();
             if val0 != 10 { return 1 }
 
-            let val1 = ptr.offset(by: 1).read();
+            let val1 = unsafe ptr.offset(by: 1).read();
             if val1 != 20 { return 2 }
 
-            let val2 = ptr.offset(by: 2).read();
+            let val2 = unsafe ptr.offset(by: 2).read();
             if val2 != 30 { return 3 }
 
             0

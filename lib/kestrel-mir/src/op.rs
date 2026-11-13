@@ -62,7 +62,7 @@ pub enum Signedness {
 /// Whether a signed `Div`/`Rem` carries its safety guards (divide-by-zero trap
 /// and the `Int.MIN / -1` overflow guard). `Unchecked` skips both, emitting the
 /// bare hardware divide — undefined behaviour on those edges, like C. Backs the
-/// `divideUnchecked`/`moduloUnchecked` stdlib methods for hot loops where the
+/// `divideUnchecked`/`remainderUnchecked` stdlib methods for hot loops where the
 /// caller guarantees a valid divisor.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum DivGuard {
@@ -101,6 +101,14 @@ pub enum Op {
     AddOverflows(IntBits, Signedness),
     SubOverflows(IntBits, Signedness),
     MulOverflows(IntBits, Signedness),
+    /// The high half of the double-width product `a * b` (operands extended
+    /// by the signedness). With the wrapping `Mul` it gives the full product.
+    MulHigh(IntBits, Signedness),
+    /// `true` when this build checks integer overflow (`+ - *` trap instead
+    /// of wrapping). Takes a unit arg. Codegen resolves it to a constant from
+    /// `CodegenOptions::overflow_checks()`, so MIR (and its cache) stays the
+    /// same across `-O` levels.
+    OverflowChecks,
 
     FAdd(FloatBits),
     FSub(FloatBits),
@@ -201,6 +209,11 @@ pub enum Op {
     /// unsized `ty`, else the clone thunk at `ty`
     /// (`MirModule::existential_clone_thunk`).
     CloneIntoVal(TyId),
+    /// `lang.is_bitwise[T]()`: `true` when copying a `T` is a plain byte copy
+    /// (no clone call, no move-only restriction). Takes a unit arg. Folded to
+    /// a constant at mono (`mono::fat`), once `T` and its copy behavior are
+    /// concrete; codegen never sees it.
+    IsBitwise(TyId),
 
     StrPtr,
     StrLen,
@@ -250,6 +263,7 @@ macro_rules! op_ty_variants {
             AlignOfVal,
             PtrWithMeta,
             CloneIntoVal,
+            IsBitwise,
         }
     };
 }

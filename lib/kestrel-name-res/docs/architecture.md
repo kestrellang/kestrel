@@ -40,7 +40,7 @@ The first four modules have dedicated docs; the conformance, member-discovery, a
 
 `ConformingProtocolInstantiations { entity, root }` is the witness-generation variant: it preserves each conformance's AST type args so distinct instantiations stay separate — `Int64: Convertible[Int8], Convertible[Int16]` yields two entries. Each entry is `(protocol, source, type_args)` where `source` is the entity that declared the conformance (the type itself, or an extension), the correct scope for resolving type-arg names. The dedup key also includes the source's implementing-type args, so overlapping specializations (`extend Box[T]: P` vs `extend Box[lang.i64]: P`) are kept distinct for witness lowering.
 
-`conformances.rs` also exposes non-query helpers: `expand_protocol_closure` / `expand_protocol_closure_in_place` (complete a seed set of protocols — e.g. where-clause bounds — into its transitive closure; used by `kestrel-type-infer`), `find_protocol_witness_init` (conformance-scoped init lookup for literal protocols), and `extract_ast_type_args`.
+`conformances.rs` also exposes non-query helpers: `expand_protocol_closure` / `expand_protocol_closure_in_place` (complete a seed set of protocols — e.g. where-clause bounds — into its transitive closure; used by `kestrel-type-infer`), and `extract_ast_type_args`.
 
 ## Member Discovery
 

@@ -15,25 +15,25 @@ import std.collections.(Deque)
 func main() -> Int64 {
     var d = Deque[String]();
     let x = "x-\(1)";
-    d.pushBack(x);
-    d.pushFront("y-\(2)");
-    d.pushBack("z-\(3)");
+    d.append(x);
+    d.prepend("y-\(2)");
+    d.append("z-\(3)");
     if x != "x-1" { return 1 }
 
     var joined = "";
     for s in d { joined = joined + s + ","; }
     if joined != "y-2,x-1,z-3," { return 2 }
 
-    if (d.popFront() ?? "") != "y-2" { return 3 }
-    if (d.popBack() ?? "") != "z-3" { return 4 }
-    if (d.popFront() ?? "") != "x-1" { return 5 }
+    if (d.popFirst() ?? "") != "y-2" { return 3 }
+    if (d.popLast() ?? "") != "z-3" { return 4 }
+    if (d.popFirst() ?? "") != "x-1" { return 5 }
     if d.count != 0 { return 6 }
-    if let .Some(_) = d.popBack() { return 7 }
+    if let .Some(_) = d.popLast() { return 7 }
 
     // Many pushes through growth, then drain.
-    for i in 0..<100 { d.pushBack("n-\(i)"); }
+    for i in 0..<100 { d.append("n-\(i)"); }
     var total = 0;
-    while let .Some(s) = d.popFront() { total = total + s.bytes.count; }
+    while let .Some(s) = d.popFirst() { total = total + s.bytes.count; }
     if total != 390 { return 8 }  // 10 × "n-D" (3 bytes) + 90 × "n-DD" (4 bytes)
     0
 }

@@ -15,7 +15,7 @@ struct Tracked: Cloneable {
     var payload: String
     var clones: Pointer[Int64]
     func clone() -> Tracked {
-        self.clones.write(self.clones.read() + 1);
+        unsafe self.clones.write(self.clones.read() + 1);
         Tracked(payload: self.payload.clone(), clones: self.clones)
     }
 }
@@ -28,15 +28,15 @@ struct Holder {
 @main
 func main() -> lang.i64 {
     let clones = SystemAllocator().allocate(Layout.of[Int64]()).unwrap().cast[Int64]();
-    clones.write(0);
+    unsafe clones.write(0);
     let h = Holder(t: Tracked(payload: "alpha", clones: clones));
 
     let r = &h.peek();
-    let c0 = clones.read();
+    let c0 = unsafe clones.read();
     let s = r;
-    let c1 = clones.read();
+    let c1 = unsafe clones.read();
     let t = r;
-    let c2 = clones.read();
+    let c2 = unsafe clones.read();
 
     if c0 != 0 { return 1; }
     if c1 != 1 { return 2; }
