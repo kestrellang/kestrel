@@ -93,25 +93,21 @@ impl<'a> MonoLayer<'a> {
         witness
             .constraints
             .iter()
-            .map(|c| match c {
+            .filter_map(|c| match c {
                 WhereConstraint::Implements {
                     type_param,
                     protocol,
                     ..
-                } => Goal::Conforms {
+                } => Some(Goal::Conforms {
                     ty: self.param_ety(*type_param, bindings),
                     protocol: *protocol,
-                },
-                WhereConstraint::NotImplements {
-                    type_param,
-                    protocol,
-                } => Goal::NotConforms {
-                    ty: self.param_ety(*type_param, bindings),
-                    protocol: *protocol,
-                },
-                WhereConstraint::Equal { subject, rhs } => {
-                    Goal::Equal(self.ety(*subject, bindings), self.ety(*rhs, bindings))
-                },
+                }),
+                // A relaxation, not a requirement (see `is_requirement`).
+                WhereConstraint::NotImplements { .. } => None,
+                WhereConstraint::Equal { subject, rhs } => Some(Goal::Equal(
+                    self.ety(*subject, bindings),
+                    self.ety(*rhs, bindings),
+                )),
             })
             .collect()
     }

@@ -220,6 +220,13 @@ impl WhereConstraint {
             protocol,
         }
     }
+
+    /// Does this constraint restrict which types satisfy it? `T: not P`
+    /// only relaxes an implicit marker bound ("T may lack P"), so it never
+    /// excludes a type and doesn't count toward witness specificity.
+    pub fn is_requirement(&self) -> bool {
+        !matches!(self, Self::NotImplements { .. })
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]

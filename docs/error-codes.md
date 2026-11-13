@@ -201,6 +201,7 @@ func unwrap(opt: Int64?) -> Int64 {
 | E411 | duplicate method '{name}': defined on both the type and an extension | An extension redefines a method the type already declares. |
 | E412 | duplicate method '{name}' in extensions of '{type}' | Two extensions of the same type instantiation define the same method. |
 | E413 | computed properties must use 'var' | A computed property (with `get`/`set`) can't be declared `let`. |
+| E414 | this file has no `module` declaration | A file that declares anything must start with a `module` line; without one its names leak into every other module. |
 | E415 | enums cannot have stored fields | Enums carry data in case payloads, not stored fields. |
 | E416 | static stored properties not supported in generic types | A stored static has one storage cell, so it cannot belong to a generic type (`Box[Int64].count` and `Box[String].count` would have to be one cell or many). This also applies in any `extend` of a generic type, `extend Box[Int64]` included, and in protocol extensions, whose `Self` is generic. Use a computed static instead (Swift's rule). |
 | E417 | protocol method '{method}' in '{protocol}' cannot have a body | Protocol requirements are signatures only; put default bodies in a protocol extension. |

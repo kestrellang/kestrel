@@ -131,6 +131,7 @@ pub fn default_analyzers() -> AnalyzerRegistry {
     );
     r.add_compilation_check(compilation::attribute_validation::AttributeValidationAnalyzer);
     r.add_compilation_check(compilation::entry_point::EntryPointAnalyzer);
+    r.add_compilation_check(compilation::module_declaration::ModuleDeclarationAnalyzer);
 
     r
 }

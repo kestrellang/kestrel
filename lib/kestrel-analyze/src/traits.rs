@@ -99,6 +99,7 @@ pub enum AnalyzerId {
     TypeAnnotationResolution,
     AttributeValidation,
     EntryPoint,
+    ModuleDeclaration,
 }
 
 impl AnalyzerId {
@@ -184,6 +185,7 @@ impl AnalyzerId {
             AnalyzerId::TypeAnnotationResolution => "type_annotation_resolution",
             AnalyzerId::AttributeValidation => "attribute_validation",
             AnalyzerId::EntryPoint => "entry_point",
+            AnalyzerId::ModuleDeclaration => "module_declaration",
         }
     }
 }

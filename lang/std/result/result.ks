@@ -252,7 +252,7 @@ public enum Result[T, E]: Tryable, not Copyable where T: not Static {
     /// Ok(2).map { it * 2 };          // Ok(4)
     /// Err("oops").map { it * 2 };    // Err("oops")
     /// ```
-    public consuming func map[U](transform: (T) -> U) -> Result[U, E] {
+    public consuming func map[U](transform: (T) -> U) -> Result[U, E] where U: not Static {
         match self {
             .Ok(value) => .Ok(transform(value)),
             .Err(error) => .Err(error)
@@ -270,7 +270,7 @@ public enum Result[T, E]: Tryable, not Copyable where T: not Static {
     /// Ok(Err("inner")).flatten();  // Err("inner")
     /// Err("outer").flatten();      // Err("outer")
     /// ```
-    public consuming func flatten[U]() -> Result[U, E] where T = Result[U, E] {
+    public consuming func flatten[U]() -> Result[U, E] where T = Result[U, E], U: not Static {
         match self {
             .Ok(inner) => inner,
             .Err(error) => .Err(error)
@@ -367,7 +367,7 @@ public enum Result[T, E]: Tryable, not Copyable where T: not Static {
     /// Returns `other` when `self` is `Ok`, otherwise propagates the
     /// existing `Err`. Named `andValue` (not `and`) because `and` is a
     /// reserved keyword.
-    public consuming func andValue[U](consuming other: Result[U, E]) -> Result[U, E] {
+    public consuming func andValue[U](consuming other: Result[U, E]) -> Result[U, E] where U: not Static {
         match self {
             .Ok(_) => other,
             .Err(error) => .Err(error)
@@ -376,7 +376,7 @@ public enum Result[T, E]: Tryable, not Copyable where T: not Static {
 
     /// Chains a fallible step onto an `Ok` branch, without nesting:
     /// `parseInput().andThen(validate).andThen(persist)`.
-    public consuming func andThen[U](transform: (T) -> Result[U, E]) -> Result[U, E] {
+    public consuming func andThen[U](transform: (T) -> Result[U, E]) -> Result[U, E] where U: not Static {
         match self {
             .Ok(value) => transform(value),
             .Err(error) => .Err(error)

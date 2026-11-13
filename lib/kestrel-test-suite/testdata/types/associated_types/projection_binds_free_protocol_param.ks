@@ -17,7 +17,7 @@ protocol VIdx[W] {
     static func read(consuming index: Self, view: W) -> Output
 }
 
-extend Range[Int64]: VIdx[W] {
+extend[W] Range[Int64]: VIdx[W] {
     type Output = Box[W]
     static func read(consuming index: Range[Int64], view: W) -> Box[W] { Box(w: view) }
 }

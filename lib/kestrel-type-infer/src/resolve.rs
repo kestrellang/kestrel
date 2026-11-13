@@ -285,8 +285,10 @@ pub enum WhereClause {
     /// name string (D7's deferred fold, G25 step 3). `WhereClausesOf` produces
     /// exactly two shapes, read through [`WhereSubject::equality_lhs`].
     Equality { subject: WhereSubject, rhs: HirTy },
-    /// `T: not P` — a negative bound. Decided by the entailment kernel
-    /// (`Goal::NotConforms`) and lowered to MIR's `NotImplements`.
+    /// `T: not P` — a relaxation of an implicit marker bound (Copyable,
+    /// Static, Sized): `T` *may* lack `P`. Never a requirement, so the
+    /// entailment kernel has no goal for it; lowered to MIR's
+    /// `NotImplements` so copy and drop behavior know `T` may lack `P`.
     NotBound {
         subject: WhereSubject,
         protocol: Entity,
@@ -1759,8 +1761,8 @@ impl WorldResolver<'_> {
         };
 
         // Get type parameters. When the member sits inside an extension
-        // that introduces its own free type params from the conformance RHS
-        // (e.g., `extend Int64: ArrayIndex[T]`), append those so the
+        // that declares its own type params (e.g., `extend[T] Int64:
+        // ArrayIndex[T]`), append those so the
         // call-site gets fresh inferable TyVars for them — they can't be
         // substituted from the receiver (concrete target like `Int64` carries
         // no args).

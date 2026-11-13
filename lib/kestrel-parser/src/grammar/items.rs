@@ -24,7 +24,7 @@ use super::exprs::expr;
 use super::generics::{opt_conformance_list, opt_type_parameter_list, opt_where_clause};
 use super::patterns::{at_param_pattern_start, param_pattern};
 use super::types::{at_type_start, ty, type_argument_list};
-use super::{delimited, is_label_keyword, name};
+use super::{delimited, is_label_keyword, matching_close, name};
 use crate::core::Parser;
 use crate::syntax_error::SyntaxError;
 
@@ -410,16 +410,37 @@ fn import_decl(p: &mut Parser<'_>) {
     m.complete(p, K::ImportDeclaration);
 }
 
-/// `extend Ty (: conformances)? (where …)? { members }`
+/// `extend ([T, …])? Ty (: conformances)? (where …)? { members }`. The
+/// optional list declares params the target doesn't bind, such as `W` in
+/// `extend[W] Int64: Reads[W]`.
 fn extension_decl(p: &mut Parser<'_>) {
     let m = p.start();
     attribute_list(p);
     p.bump(K::Extend);
+    if at_extension_param_list(p) {
+        opt_type_parameter_list(p);
+    }
     ty(p);
     opt_conformance_list(p);
     opt_where_clause(p);
     member_list(p, Ctx::Extension, K::ExtensionBody);
     m.complete(p, K::ExtensionDeclaration);
+}
+
+/// Is the `[` after `extend` a param list rather than array sugar for the
+/// target (`extend [T]: P`)? A param list is followed by the target type;
+/// a sugar target by `:`, `where`, `{` or nothing.
+fn at_extension_param_list(p: &Parser<'_>) -> bool {
+    if !p.at(K::LBracket) {
+        return false;
+    }
+    let Some(close) = matching_close(p, p.token_pos()) else {
+        return true;
+    };
+    !matches!(
+        p.kind_at(close + 1),
+        None | Some(K::Colon | K::Where | K::LBrace)
+    )
 }
 
 /// `struct`/`enum`/`protocol` declarations.

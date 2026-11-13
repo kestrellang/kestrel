@@ -10,6 +10,7 @@ pub mod cycle_util;
 pub mod entry_point;
 pub mod extension_conflict;
 pub mod global_init_cycles;
+pub mod module_declaration;
 pub mod protocol_cycles;
 pub mod struct_cycles;
 pub mod type_alias_cycles;

@@ -7,7 +7,7 @@
 // conformance's args), which mono then miscompiled as a wrong-layout
 // read. Fixed in solve_conforms/unify_bound_protocol_args — a definite
 // arg conflict is now a clean conformance error, while blanket free
-// params (`extend T64: Blank[U]` below) still unify freely.
+// params (`extend[U] T64: Blank[U]` below) still unify freely.
 
 module Test
 
@@ -36,7 +36,7 @@ struct T64 {
     var x: lang.i64;
 }
 
-extend T64: Blank[U] {
+extend[U] T64: Blank[U] {
     public func ignore() {}
 }
 

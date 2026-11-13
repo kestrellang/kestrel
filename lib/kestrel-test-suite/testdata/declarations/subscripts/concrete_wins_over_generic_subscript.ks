@@ -23,7 +23,7 @@ struct Holder[T] {
 struct IntKey { public init() {} }
 struct WrapKey { public init() {} }
 
-extend IntKey: IndexLike[T] {
+extend[T] IntKey: IndexLike[T] {
     type IndexLike[T].Output = T
     public func resolveIn(holder holder: Holder[T]) -> T { holder.read() }
 }
@@ -34,7 +34,7 @@ struct Pair[T] {
     public init(a a: T, b b: T) { self.a = a; self.b = b }
 }
 
-extend WrapKey: IndexLike[T] {
+extend[T] WrapKey: IndexLike[T] {
     type IndexLike[T].Output = Pair[T]
     public func resolveIn(holder holder: Holder[T]) -> Pair[T] {
         Pair[T](a: holder.read(), b: holder.read())

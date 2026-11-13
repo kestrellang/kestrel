@@ -51,6 +51,7 @@ pub(super) static RULES: &[(K, R)] = &[
         R::Seq(&[
             R::Opt(&R::Kind(K::AttributeList)),
             R::Kind(K::Extend),
+            R::Opt(&R::Kind(K::TypeParameterList)),
             R::Kind(K::Ty),
             R::Opt(&R::Kind(K::ConformanceList)),
             R::Opt(&R::Kind(K::WhereClause)),
@@ -223,6 +224,18 @@ pub(super) static RULES: &[(K, R)] = &[
     ),
     (K::AttributeList, R::Rep(&R::Kind(K::Attribute))),
     (
+        K::TypeParameterList,
+        R::Seq(&[
+            R::Kind(K::LBracket),
+            R::Opt(&R::Seq(&[
+                R::Kind(K::TypeParameter),
+                R::Rep(&R::Seq(&[R::Kind(K::Comma), R::Kind(K::TypeParameter)])),
+                R::Opt(&R::Kind(K::Comma)),
+            ])),
+            R::Kind(K::RBracket),
+        ]),
+    ),
+    (
         K::Ty,
         R::Any(&[
             K::TyPath,
@@ -295,18 +308,6 @@ pub(super) static RULES: &[(K, R)] = &[
     ),
     (K::UnsafeModifier, R::Kind(K::Unsafe)),
     (K::Name, R::Kind(K::Identifier)),
-    (
-        K::TypeParameterList,
-        R::Seq(&[
-            R::Kind(K::LBracket),
-            R::Opt(&R::Seq(&[
-                R::Kind(K::TypeParameter),
-                R::Rep(&R::Seq(&[R::Kind(K::Comma), R::Kind(K::TypeParameter)])),
-                R::Opt(&R::Kind(K::Comma)),
-            ])),
-            R::Kind(K::RBracket),
-        ]),
-    ),
     (
         K::ProtocolBody,
         R::Seq(&[
@@ -866,6 +867,7 @@ pub(super) static RULES: &[(K, R)] = &[
             ])),
             R::Kind(K::Else),
             R::Kind(K::CodeBlock),
+            R::Opt(&R::Kind(K::Semicolon)),
         ]),
     ),
     (

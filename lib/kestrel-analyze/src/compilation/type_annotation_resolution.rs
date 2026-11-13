@@ -7,7 +7,9 @@
 //!
 //! This is a uniform check across all entity kinds (fields, type aliases,
 //! function return types, parameters, etc.) — anywhere a `TypeAnnotation`
-//! component exists.
+//! component exists — and over every declaration's conformance list, where
+//! an unresolved protocol or protocol arg (`extend Slot: Holds[T]` with no
+//! `extend[T]`) was otherwise silently dropped.
 //!
 //! ## Diagnostics
 //!
@@ -18,7 +20,7 @@ use crate::context::CompilationContext;
 use crate::diagnostic::*;
 use crate::traits::{AnalyzerId, CompilationCheck, Describe};
 use kestrel_ast::AstType;
-use kestrel_ast_builder::{NodeKind, TypeAnnotation};
+use kestrel_ast_builder::{ConformanceItem, Conformances, NodeKind, TypeAnnotation};
 use kestrel_hecs::Entity;
 use kestrel_name_res::{ResolveTypePath, TypeResolution};
 
@@ -92,6 +94,16 @@ fn walk_entity(
         }
     }
 
+    // The entity is the context, so an extension's declared params resolve.
+    // `not P` names only a language marker (Copyable, Static, Sized), which
+    // its own check validates and which resolves without std.
+    if let Some(conformances) = cx.query.get::<Conformances>(entity) {
+        for item in &conformances.0 {
+            if let ConformanceItem::Positive(ty, ..) = item {
+                check_ast_type(cx, ty, entity, diags);
+            }
+        }
+    }
     for &child in cx.query.children_of(entity) {
         walk_entity(cx, child, in_protocol || is_protocol, diags);
     }

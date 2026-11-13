@@ -213,7 +213,7 @@ public enum Optional[T]: not Copyable where T: not Static {
     /// None.map { it * 2 };              // None
     /// Some("hello").map { it.len };     // Some(5)
     /// ```
-    public consuming func map[U](transform: (T) -> U) -> Optional[U] {
+    public consuming func map[U](transform: (T) -> U) -> Optional[U] where U: not Static {
         match self {
             .Some(value) => .Some(transform(value)),
             .None => .None
@@ -232,7 +232,7 @@ public enum Optional[T]: not Copyable where T: not Static {
     /// Some("abc").andThen(parse);   // None  (parse failed)
     /// None.andThen(parse);          // None
     /// ```
-    public consuming func andThen[U](transform: (T) -> Optional[U]) -> Optional[U] {
+    public consuming func andThen[U](transform: (T) -> Optional[U]) -> Optional[U] where U: not Static {
         match self {
             .Some(value) => transform(value),
             .None => .None
@@ -249,7 +249,7 @@ public enum Optional[T]: not Copyable where T: not Static {
     /// Some(None).flatten();       // None
     /// None.flatten();             // None
     /// ```
-    public consuming func flatten[U]() -> Optional[U] where T = Optional[U] {
+    public consuming func flatten[U]() -> Optional[U] where T = Optional[U], U: not Static {
         match self {
             .Some(inner) => inner,
             .None => Optional[U].None
@@ -314,7 +314,7 @@ public enum Optional[T]: not Copyable where T: not Static {
     /// Some(1).andValue(None);         // None
     /// None.andValue(Some("a"));       // None
     /// ```
-    public consuming func andValue[U](consuming other: Optional[U]) -> Optional[U] {
+    public consuming func andValue[U](consuming other: Optional[U]) -> Optional[U] where U: not Static {
         match self {
             .Some(_) => other,
             .None => .None
@@ -387,7 +387,7 @@ public enum Optional[T]: not Copyable where T: not Static {
     /// Some(1).zip(with: None);        // None
     /// None.zip(with: Some("a"));      // None
     /// ```
-    public consuming func zip[U](consuming with other: Optional[U]) -> Optional[(T, U)] {
+    public consuming func zip[U](consuming with other: Optional[U]) -> Optional[(T, U)] where U: not Static {
         match (self, other) {
             (.Some(a), .Some(b)) => .Some((a, b)),
             _ => .None

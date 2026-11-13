@@ -398,9 +398,15 @@ fn witness_more_specific(arena: &TyArena, a: &WitnessDef, b: &WitnessDef) -> boo
     kestrel_entail::more_specific_rule(
         a_is_instance_of_b,
         b_is_instance_of_a,
-        a.constraints.len(),
-        b.constraints.len(),
+        requirement_count(a),
+        requirement_count(b),
     )
+}
+
+/// The where clauses that restrict a witness: relaxations (`T: not P`)
+/// apply to every type, so they don't make a witness more specific.
+fn requirement_count(w: &WitnessDef) -> usize {
+    w.constraints.iter().filter(|c| c.is_requirement()).count()
 }
 
 /// Check whether a witness's protocol type args match the expected concrete
