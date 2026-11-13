@@ -14,9 +14,9 @@ import std.core.(
     Less, LessOrEqual, Greater, GreaterOrEqual,
     Addable, Subtractable, Multipliable, Divisible, Negatable,
     AddAssign, SubtractAssign, MultiplyAssign, DivideAssign,
-    ExpressibleByFloatLiteral, ExpressibleByIntLiteral, Convertible, Defaultable
+    ExpressibleByFloatLiteral, ExpressibleByIntLiteral, Convertible, RoundsFrom, Defaultable
 )
-import std.text.(String, Str, StringBuilder, Formatter, Formattable, FormatOptions, _writePadded)
+import std.text.(String, StringSlice, StringBuilder, Formatter, Formattable, FormatOptions)
 import std.numeric.(Int64, {{UINT_TYPE}}, {{OTHER_FLOAT}})
 import std.collections.Array
 
@@ -75,9 +75,7 @@ public struct {{TYPE_NAME}}:
     ExpressibleByFloatLiteral,
     ExpressibleByIntLiteral,
     Defaultable,
-    Convertible[Int64],
-    Convertible[{{OTHER_FLOAT}}],
-    FFISafe
+{{FLOAT_CONFORMANCES}}    FFISafe
 {
     /// The underlying primitive `lang.{{LANG_TYPE}}` value (IEEE 754 bit
     /// pattern). Exposed for FFI and intrinsic use; reach for the typed
@@ -218,34 +216,7 @@ public struct {{TYPE_NAME}}:
         self.raw = value
     }
 
-    /// @name From Int
-    /// Converts an `Int64` to a float. Values with magnitude greater than
-    /// 2^53 lose low-order bits.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// let n: Int64 = 42;
-    /// let f = Float64(from: n);  // 42.0
-    /// ```
-    public init(from value: Int64) {
-        self.raw = lang.cast_i64_{{LANG_TYPE}}(value.raw)
-    }
-
-    /// @name From Float
-    /// Converts between `Float32` and `Float64`. The 32→64 direction is
-    /// exact; the 64→32 direction rounds and may overflow to ±infinity.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// let f32: Float32 = 3.14;
-    /// let f64 = Float64(from: f32);
-    /// ```
-    public init(from value: {{OTHER_FLOAT}}) {
-        self.raw = lang.cast_{{OTHER_LANG_TYPE}}_{{LANG_TYPE}}(value.raw)
-    }
-
+{{FLOAT_CONVERSIONS}}
     // ========================================================================
     // CLASSIFICATION (Properties)
     // ========================================================================
@@ -879,41 +850,6 @@ public struct {{TYPE_NAME}}:
     /// ```
     public func lerp(to other: {{TYPE_NAME}}, t: {{TYPE_NAME}}) -> {{TYPE_NAME}} {
         self.add(other.subtract(self).multiply(t))
-    }
-
-    // ========================================================================
-    // CONVERSION
-    // ========================================================================
-
-    /// Truncates toward zero into an `Int64`. Returns `None` for NaN,
-    /// infinity, or values that fall outside the `Int64` range.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// (3.7).toInt64();              // Some(3)
-    /// (-3.7).toInt64();             // Some(-3)
-    /// Float64.nan.toInt64();        // None
-    /// Float64.infinity.toInt64();   // None
-    /// ```
-    public func toInt64() -> Int64? {
-        if self.isNaN or self.isInfinite {
-            return .None
-        };
-        let truncated = self.trunc();
-        if truncated >= 9223372036854775808.0 {
-            return .None
-        };
-        if truncated < -9223372036854775808.0 {
-            return .None
-        };
-        .Some(Int64(raw: lang.cast_{{LANG_TYPE}}_i64(truncated.raw)))
-    }
-
-    /// Converts to the sibling float type. Widening (32→64) is exact;
-    /// narrowing (64→32) rounds and may overflow to ±infinity.
-    public func to{{OTHER_FLOAT}}() -> {{OTHER_FLOAT}} {
-        {{TO_OTHER_FLOAT}}
     }
 
     // ========================================================================

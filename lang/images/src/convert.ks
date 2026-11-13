@@ -283,7 +283,7 @@ public struct ColorConverter {
         var m: [Float32] = [];
         if self.useMatrix {
             let full = multiply3(invert3(rgbToXyz(target.primaries)), rgbToXyz(source.primaries));
-            for v in full { m.append(Float32(from: v)); }
+            for v in full { m.append(Float32(rounding: v)); }
         }
         self.matrix = m;
         self.toneMapping = toneMapping;

@@ -344,6 +344,7 @@ mod tests {
         let std = world.spawn();
         world.set(std, NodeKind::Module);
         world.set(std, Name("std".into()));
+        world.set(std, kestrel_ast_builder::StdRootModule);
         world.set_parent(std, root);
 
         let core = world.spawn();

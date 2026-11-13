@@ -249,6 +249,16 @@ pub enum Builtin {
     // ===== Value promotion =====
     FromValueProtocol,
     FromValueMethod,
+    /// `DecaysFrom[Source]`: a borrowed unsized view converts to its owned
+    /// type where that type is named (`let s: String = t.trimmed()`).
+    DecaysFromProtocol,
+    DecaysFromMethod,
+    /// `Convertible[From]` (lossless `init(from:)`), `NarrowsFrom[From]`
+    /// and `RoundsFrom[From]`: named so a failed lossless conversion can
+    /// point at the spelling that does exist.
+    ConvertibleProtocol,
+    NarrowsFromProtocol,
+    RoundsFromProtocol,
 
     // ===== Iterator / Iterable =====
     IteratorProtocol,
@@ -260,6 +270,14 @@ pub enum Builtin {
     OptionalEnum,
     OptionalSomeCase,
     OptionalNoneCase,
+
+    // ===== Result =====
+    ResultOkCase,
+    ResultErrCase,
+    /// `ControlFlow.Continue` — the case a `try` operand's value comes out of.
+    ControlFlowContinueCase,
+    /// `ControlFlow.Break` — the case a `try` operand's residual comes out of.
+    ControlFlowBreakCase,
 
     // ===== Type operators (type aliases) =====
     OptionalTypeOperator,
@@ -288,6 +306,8 @@ pub enum Builtin {
     /// `Interpolatable.appendLiteral` — appends one static segment.
     InterpolatableAppendLiteral,
     FormatOptions,
+    /// `_formatSpecOptions` — builds the `FormatOptions` a `{value:spec}` format specifier spells.
+    FormatSpecOptions,
 
     // ===== References =====
     /// `@builtin(.DecayOptionalRef) func decayOptionalRef[T](_: Optional[&T])
@@ -373,6 +393,10 @@ pub enum Builtin {
     UniqueBoxInit,
     /// `UniqueBox.takeValue()` — moves the payload out (once).
     UniqueBoxTakeValue,
+    /// `OwnedBox.takeValue()` — moves an indirect enum payload out of its box.
+    OwnedBoxTakeValue,
+    /// `Pointer.init(to:)` — a pointer to a value, tracked for dangling-reference checks.
+    PointerToInit,
     /// `UniqueBox.destroy()` — the box's single reclamation point.
     UniqueBoxDestroy,
     /// `Indirection.pointeeRef()` — the member peel's read accessor.
@@ -391,6 +415,8 @@ pub enum Builtin {
     DictionaryLiteralValue,
     /// `ArrayMatchable.Element` — an array pattern's element type.
     ArrayMatchableElement,
+    /// `ArrayMatchable.Rest` — an array pattern's rest-binding type.
+    ArrayMatchableRest,
 }
 
 /// The place `Indirection` requires (`var value: Target { ref }`, refined to
@@ -572,6 +598,11 @@ impl Builtin {
             // Value promotion
             Self::FromValueProtocol => "FromValue",
             Self::FromValueMethod => "FromValueMethod",
+            Self::DecaysFromProtocol => "DecaysFrom",
+            Self::DecaysFromMethod => "DecaysFromMethod",
+            Self::ConvertibleProtocol => "Convertible",
+            Self::NarrowsFromProtocol => "NarrowsFrom",
+            Self::RoundsFromProtocol => "RoundsFrom",
 
             // Iterator / Iterable
             Self::IteratorProtocol => "IteratorProtocol",
@@ -583,6 +614,10 @@ impl Builtin {
             Self::OptionalEnum => "OptionalEnum",
             Self::OptionalSomeCase => "OptionalSomeCase",
             Self::OptionalNoneCase => "OptionalNoneCase",
+            Self::ResultOkCase => "ResultOkCase",
+            Self::ResultErrCase => "ResultErrCase",
+            Self::ControlFlowContinueCase => "ControlFlowContinueCase",
+            Self::ControlFlowBreakCase => "ControlFlowBreakCase",
 
             // Type operators
             Self::OptionalTypeOperator => "OptionalTypeOperator",
@@ -603,6 +638,7 @@ impl Builtin {
             Self::InterpolatableAppendLiteral => "InterpolatableAppendLiteral",
             Self::DecayOptionalRef => "DecayOptionalRef",
             Self::FormatOptions => "FormatOptions",
+            Self::FormatSpecOptions => "FormatSpecOptions",
             Self::FormattableProtocol => "FormattableProtocol",
             Self::FormattableFormatIntoMethod => "FormattableFormatInto",
 
@@ -622,6 +658,8 @@ impl Builtin {
             Self::SharedBoxSharedMutRef => "SharedBoxSharedMutRef",
             Self::UniqueBoxInit => "UniqueBoxInit",
             Self::UniqueBoxTakeValue => "UniqueBoxTakeValue",
+            Self::OwnedBoxTakeValue => "OwnedBoxTakeValue",
+            Self::PointerToInit => "PointerToInit",
             Self::UniqueBoxDestroy => "UniqueBoxDestroy",
             Self::IndirectionPointeeRef => "IndirectionPointeeRef",
             Self::MutableIndirectionPointeeMutRef => "MutableIndirectionPointeeMutRef",
@@ -630,6 +668,7 @@ impl Builtin {
             Self::DictionaryLiteralKey => "DictionaryLiteralKey",
             Self::DictionaryLiteralValue => "DictionaryLiteralValue",
             Self::ArrayMatchableElement => "ArrayMatchableElement",
+            Self::ArrayMatchableRest => "ArrayMatchableRest",
             Self::ExitCode => "ExitCode",
 
             // Indirection — resolves by source name (auto-imported from std.core).
@@ -838,6 +877,11 @@ impl Builtin {
             // Value promotion
             "FromValueProtocol" => Some(Self::FromValueProtocol),
             "FromValueMethod" => Some(Self::FromValueMethod),
+            "DecaysFromProtocol" => Some(Self::DecaysFromProtocol),
+            "DecaysFromMethod" => Some(Self::DecaysFromMethod),
+            "ConvertibleProtocol" => Some(Self::ConvertibleProtocol),
+            "NarrowsFromProtocol" => Some(Self::NarrowsFromProtocol),
+            "RoundsFromProtocol" => Some(Self::RoundsFromProtocol),
 
             // Iterator / Iterable
             "IteratorProtocol" => Some(Self::IteratorProtocol),
@@ -849,6 +893,10 @@ impl Builtin {
             "OptionalEnum" => Some(Self::OptionalEnum),
             "OptionalSomeCase" => Some(Self::OptionalSomeCase),
             "OptionalNoneCase" => Some(Self::OptionalNoneCase),
+            "ResultOkCase" => Some(Self::ResultOkCase),
+            "ResultErrCase" => Some(Self::ResultErrCase),
+            "ControlFlowContinueCase" => Some(Self::ControlFlowContinueCase),
+            "ControlFlowBreakCase" => Some(Self::ControlFlowBreakCase),
 
             // Type operators
             "OptionalTypeOperator" => Some(Self::OptionalTypeOperator),
@@ -869,6 +917,7 @@ impl Builtin {
             "InterpolatableAppendLiteral" => Some(Self::InterpolatableAppendLiteral),
             "DecayOptionalRef" => Some(Self::DecayOptionalRef),
             "FormatOptions" => Some(Self::FormatOptions),
+            "FormatSpecOptions" => Some(Self::FormatSpecOptions),
             "FormattableProtocol" => Some(Self::FormattableProtocol),
             "FormattableFormatInto" => Some(Self::FormattableFormatIntoMethod),
 
@@ -887,6 +936,8 @@ impl Builtin {
             "SharedBoxSharedMutRef" => Some(Self::SharedBoxSharedMutRef),
             "UniqueBoxInit" => Some(Self::UniqueBoxInit),
             "UniqueBoxTakeValue" => Some(Self::UniqueBoxTakeValue),
+            "OwnedBoxTakeValue" => Some(Self::OwnedBoxTakeValue),
+            "PointerToInit" => Some(Self::PointerToInit),
             "UniqueBoxDestroy" => Some(Self::UniqueBoxDestroy),
             "IndirectionPointeeRef" => Some(Self::IndirectionPointeeRef),
             "MutableIndirectionPointeeMutRef" => Some(Self::MutableIndirectionPointeeMutRef),
@@ -895,6 +946,7 @@ impl Builtin {
             "DictionaryLiteralKey" => Some(Self::DictionaryLiteralKey),
             "DictionaryLiteralValue" => Some(Self::DictionaryLiteralValue),
             "ArrayMatchableElement" => Some(Self::ArrayMatchableElement),
+            "ArrayMatchableRest" => Some(Self::ArrayMatchableRest),
             "ExitCode" => Some(Self::ExitCode),
 
             // Indirection / smart-pointer member peel
@@ -942,6 +994,12 @@ impl Builtin {
     /// Metadata about what symbol kind this builtin expects.
     pub fn kind(self) -> BuiltinKind {
         match self {
+            Self::FormatSpecOptions => BuiltinKind::Function,
+            Self::ControlFlowBreakCase => BuiltinKind::EnumCase,
+            Self::ControlFlowContinueCase => BuiltinKind::EnumCase,
+            Self::PointerToInit => BuiltinKind::Function,
+            Self::ArrayMatchableRest => BuiltinKind::TypeAlias,
+            Self::OwnedBoxTakeValue => BuiltinKind::Function,
             // Copy/Clone
             Self::Copyable => BuiltinKind::Protocol {
                 implicit_conformance: true,
@@ -1111,6 +1169,11 @@ impl Builtin {
             // Value promotion
             Self::FromValueProtocol => BuiltinKind::protocol(),
             Self::FromValueMethod => BuiltinKind::ProtocolMethod,
+            Self::DecaysFromProtocol => BuiltinKind::protocol(),
+            Self::DecaysFromMethod => BuiltinKind::ProtocolMethod,
+            Self::ConvertibleProtocol | Self::NarrowsFromProtocol | Self::RoundsFromProtocol => {
+                BuiltinKind::protocol()
+            },
 
             // Iterator / Iterable
             Self::IteratorProtocol | Self::IterableProtocol => BuiltinKind::protocol(),
@@ -1119,6 +1182,7 @@ impl Builtin {
             // Optional
             Self::OptionalEnum => BuiltinKind::Enum,
             Self::OptionalSomeCase | Self::OptionalNoneCase => BuiltinKind::EnumCase,
+            Self::ResultOkCase | Self::ResultErrCase => BuiltinKind::EnumCase,
 
             // Type operators
             Self::OptionalTypeOperator

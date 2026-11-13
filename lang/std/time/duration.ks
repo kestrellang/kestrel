@@ -85,9 +85,9 @@ public struct Duration: Equatable, Comparable, Hashable, Formattable, Cloneable 
     // From a fractional number of seconds, rounded to the nearest nanosecond.
     // Fails with `nil` for NaN, infinity, or values outside Int64 seconds.
     public init(fractionalSeconds seconds: Float64)? {
-        guard let .Some(whole) = seconds.toInt64() else { return null; }
-        let fraction = (seconds - Float64(from: whole)) * 1_000_000_000.0;
-        guard let .Some(nanos) = fraction.round().toInt64() else { return null; }
+        guard let .Some(whole) = Int64(exactly: seconds.trunc()) else { return null; }
+        let fraction = (seconds - Float64(rounding: whole)) * 1_000_000_000.0;
+        guard let .Some(nanos) = Int64(exactly: fraction.round()) else { return null; }
         let d = Duration.normalized(secs: whole, nanos: nanos);
         self.secs = d.secs;
         self.nanos = d.nanos;
@@ -120,7 +120,7 @@ public struct Duration: Equatable, Comparable, Hashable, Formattable, Cloneable 
 
     // Seconds as a Float64 (loses precision beyond ~104 days at ns resolution).
     public var fractionalSeconds: Float64 {
-        Float64(from: self.secs) + Float64(from: self.nanos) / 1_000_000_000.0
+        Float64(rounding: self.secs) + Float64(rounding: self.nanos) / 1_000_000_000.0
     }
 
     public var isNegative: Bool { self.secs < 0 or (self.secs == 0 and self.nanos < 0) }

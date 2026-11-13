@@ -73,7 +73,9 @@ def generate_integer_conversion(
     """`init(from:)` from another integer type, plus `truncating:`,
     `clamping:` and (same width) `bitPattern:` when the conversion is lossy.
 
-    `init(from:)` is lossless or traps; the lossy spellings say what they do.
+    `init(from:)` exists only when lossless (`Convertible`); a lossy source
+    gets `exactly:` (failable) and the spellings that say what they do
+    (`NarrowsFrom`).
     """
     cast = f"self.raw = {get_cast(other_bits, bits, other_signed)}"
     if is_lossless(other_bits, other_signed, bits, signed):
@@ -104,17 +106,14 @@ def generate_integer_conversion(
         chain.append(f"if {above} {{\n            self.raw = {type_name}.maxValue.raw\n        }}")
     chain.append(f"{{\n            {cast}\n        }}")
     clamp = " else ".join(chain)
-    out = f"""    /// @name From Integer
-    /// Converts from `{other_name}`, trapping when the value doesn't fit in
-    /// `{type_name}`. Use `init(truncating:)` or `init(clamping:)` when
-    /// out-of-range values are expected.
-    ///
-    /// # Errors
-    ///
-    /// Panics when `other` is outside `{type_name}.minValue...{type_name}.maxValue`.
-    public init(from other: {other_name}) {{
+    out = f"""    /// @name Exactly
+    /// Converts from `{other_name}` when the value fits in `{type_name}`, and
+    /// is `nil` when it doesn't. `{other_name}` doesn't always fit, so there is
+    /// no `init(from:)`: use `init(truncating:)` or `init(clamping:)` to say
+    /// what an out-of-range value should become.
+    public init(exactly other: {other_name})? {{
         if {fits} {{
-            fatalError("integer conversion overflow: value doesn't fit in {type_name}")
+            return null
         }}
         {cast}
     }}
@@ -135,6 +134,64 @@ def generate_integer_conversion(
     public init(bitPattern other: {other_name}) {{ {cast} }}"""
     return out
 
+
+
+def generate_float_to_int_conversion(type_name: str, bits: int, signed: bool, float_name: str) -> str:
+    """`NarrowsFrom[Float*]` for an integer: `exactly:` (nil for a fraction,
+    NaN or out of range), and `truncating:` / `clamping:`, which both drop
+    the fraction toward zero, saturate out of range, and send NaN to 0 —
+    the same answer as Rust's `as`.
+    """
+    f = "f64" if float_name == "Float64" else "f32"
+    # Bounds are powers of two, so they're exact in either float type.
+    lo = f"-{2 ** (bits - 1)}.0" if signed else "0.0"
+    hi = f"{2 ** (bits - 1) if signed else 2 ** bits}.0"
+    if signed:
+        # `cast_f*_i*` is LLVM's `fptosi.sat`: already saturating, NaN -> 0.
+        clamp = f"self.raw = lang.cast_{f}_i{bits}(other.raw)"
+    elif bits < 64:
+        # Saturate to Int64 first, then clamp the integer into range.
+        clamp = f"self.raw = {type_name}(clamping: Int64(raw: lang.cast_{f}_i64(other.raw))).raw"
+    else:
+        # Int64 can't hold the upper half: shift it down by 2^63, convert,
+        # and set the top bit back. Past 2^64 the shifted cast saturates to
+        # 2^63 - 1, so the result saturates to `maxValue`.
+        top = "9223372036854775808.0"
+        clamp = (
+            f"if other >= {top} {{\n"
+            f"            let low = Int64(raw: lang.cast_{f}_i64(other.subtract({top}).raw));\n"
+            f"            self.raw = UInt64(bitPattern: low).bitwiseOr(UInt64(intLiteral: 1).shiftLeft(by: 63)).raw\n"
+            f"        }} else {{\n"
+            f"            self.raw = UInt64(clamping: Int64(raw: lang.cast_{f}_i64(other.raw))).raw\n"
+            f"        }}"
+        )
+    return f"""    /// @name Exactly
+    /// Converts from `{float_name}` when the value is a whole number in
+    /// `{type_name}`'s range, and is `nil` otherwise (a fraction, NaN, an
+    /// infinity, or out of range).
+    public init(exactly other: {float_name})? {{
+        // Written so a NaN fails the range test too.
+        if not (other >= {lo} and other < {hi}) {{
+            return null
+        }}
+        if other.trunc() != other {{
+            return null
+        }}
+        {clamp}
+    }}
+    /// @name Truncating
+    /// Converts from `{float_name}`, dropping any fraction toward zero.
+    /// Out-of-range values saturate to `{type_name}.minValue` /
+    /// `{type_name}.maxValue` and NaN becomes 0. Never traps.
+    public init(truncating other: {float_name}) {{
+        {clamp}
+    }}
+    /// @name Clamping
+    /// Same as `init(truncating:)`: drops the fraction, saturates out of
+    /// range, and NaN becomes 0. Never traps.
+    public init(clamping other: {float_name}) {{
+        {clamp}
+    }}"""
 
 # `{{IF_SIGNED}}` ... [`{{ELSE}}` ...] `{{END_IF}}`, each marker on its own
 # line: keeps the signed or the unsigned text. Not nestable.
@@ -295,11 +352,11 @@ def generate_step_distance(type_name: str, bits: int, signed: bool, lang_type: s
         return "other.subtract(self)"
     if type_name == "UInt64":
         return """if other >= self {
-            return Int64(from: other.subtract(self))
+            return Int64(exactly: other.subtract(self))!
         }
         let back = self.subtract(other);
         // 2^63 back is exactly Int64.minValue; anything larger traps.
-        if back == UInt64(bitPattern: Int64.minValue) { Int64.minValue } else { Int64(from: back).negate() }"""
+        if back == UInt64(bitPattern: Int64.minValue) { Int64.minValue } else { Int64(exactly: back)!.negate() }"""
     prefix = "i" if signed else "u"
     return (
         f"Int64(raw: lang.i64_sub("
@@ -358,14 +415,6 @@ def generate_integer_format_method(type_name: str, bits: int, signed: bool) -> s
         digit_to_i64 = "Int64(truncating: digit)" if bits == 64 else "Int64(from: digit)"
         sign_handling = f'''
         let isNegative = n < 0;'''
-        sign_prefix = '''
-        if isNegative {
-            result.append(char: '-')
-        } else if options.sign == .Always {
-            result.append(char: '+')
-        } else if options.sign == .Space {
-            result.append(char: ' ')
-        }'''
         digit_body = f'''
         // Convert to unsigned magnitude so minValue formats correctly.
         // negate() overflows on minValue; unsigned subtraction from zero does not.
@@ -394,12 +443,6 @@ def generate_integer_format_method(type_name: str, bits: int, signed: bool) -> s
         uint_name = type_name
         sign_handling = '''
         let isNegative = false;'''
-        sign_prefix = '''
-        if options.sign == .Always {
-            result.append(char: '+')
-        } else if options.sign == .Space {
-            result.append(char: ' ')
-        }'''
         if bits == 64:
             radix_as_type = "UInt64(truncating: radix)"
             digit_as_i64 = "Int64(truncating: digit)"
@@ -453,27 +496,27 @@ def generate_integer_format_method(type_name: str, bits: int, signed: bool) -> s
         }} else {{{digit_body}
         }}
 
-        // Build content: sign + prefix + reversed digits
-        var result = String();
-{sign_prefix}
-
+        // The radix prefix shows only under `alternate` (`0xff`).
+        var prefix = "";
         if options.alternate {{
             if radix == 2 {{
-                result.append("0b")
+                prefix = "0b"
             }} else if radix == 8 {{
-                result.append("0o")
+                prefix = "0o"
             }} else if radix == 16 {{
-                result.append("0x")
+                prefix = "0x"
             }}
         }}
 
+        // The digits were built least significant first.
+        var result = String();
         var i = digits.bytes.count - 1;
         while i >= 0 {{
             result.appendByte(unsafe digits.bytes(unchecked: i));
             i = i - 1
         }}
 
-        _writePadded(into: writer, result, options)
+        writer.padIntegral(nonNegative: isNegative == false, prefix: prefix, digits: result, options)
     }}'''
 
 
@@ -527,8 +570,8 @@ def generate_integer_parse_method(type_name: str, bits: int, signed: bool) -> st
     /// {type_name}(parsing: "-7");    // Some(-7)
     /// {type_name}(parsing: "abc");   // None
     /// ```
-    public init[S](parsing text: S)? where S: Str, S: not Static {{
-        // One view for the whole parse; works on String and StringSlice alike.
+    public init(parsing text: &StringSlice)? {{
+        // One view for the whole parse; a String argument lends its slice.
         let bytes = text.bytes;
         let len = bytes.count;
         if len == 0 {{
@@ -599,8 +642,8 @@ def generate_integer_parse_method(type_name: str, bits: int, signed: bool) -> st
     /// {type_name}(parsing: "101010", radix: 2);  // Some(42)
     /// {type_name}(parsing: "z", radix: 36);      // Some(35)
     /// ```
-    public init[S](parsing text: S, radix radix: Int64)? where S: Str, S: not Static {{
-        // One view for the whole parse; works on String and StringSlice alike.
+    public init(parsing text: &StringSlice, radix radix: Int64)? {{
+        // One view for the whole parse; a String argument lends its slice.
         let bytes = text.bytes;
         if radix < 2 or radix > 36 {{
             return null
@@ -686,8 +729,8 @@ def generate_integer_parse_method(type_name: str, bits: int, signed: bool) -> st
     /// let n = {type_name}(parsing: "42");   // Some(42)
     /// let bad = {type_name}(parsing: "-1"); // null (no sign for unsigned)
     /// ```
-    public init[S](parsing text: S)? where S: Str, S: not Static {{
-        // One view for the whole parse; works on String and StringSlice alike.
+    public init(parsing text: &StringSlice)? {{
+        // One view for the whole parse; a String argument lends its slice.
         let bytes = text.bytes;
         let len = bytes.count;
         if len == 0 {{
@@ -760,8 +803,8 @@ def generate_integer_parse_method(type_name: str, bits: int, signed: bool) -> st
     /// let n = {type_name}(parsing: "ff", radix: 16);      // Some(255 if it fits, else None)
     /// let m = {type_name}(parsing: "101010", radix: 2);   // Some(42)
     /// ```
-    public init[S](parsing text: S, radix radix: Int64)? where S: Str, S: not Static {{
-        // One view for the whole parse; works on String and StringSlice alike.
+    public init(parsing text: &StringSlice, radix radix: Int64)? {{
+        // One view for the whole parse; a String argument lends its slice.
         let bytes = text.bytes;
         if radix < 2 or radix > 36 {{
             return null
@@ -901,7 +944,7 @@ def generate_integer_byte_conversion_method(type_name: str, bits: int, signed: b
     /// @name From Bytes
     /// Reassembles a `{type_name}` from {byte_count} bytes in native byte order.
     /// Returns `null` if the input is not exactly {byte_count} bytes long.
-    public init[S](fromBytes fromBytes: &S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized {{
+    public init(fromBytes fromBytes: &Slice[UInt8])? {{
         let bytes = fromBytes.asUnsafeSlice();
         if bytes.count != {bc} {{
             return null
@@ -919,7 +962,7 @@ def generate_integer_byte_conversion_method(type_name: str, bits: int, signed: b
     /// @name From Bytes Big Endian
     /// Reassembles a `{type_name}` from {byte_count} bytes in big-endian order.
     /// Returns `null` if the input is not exactly {byte_count} bytes long.
-    public init[S](fromBytesBigEndian fromBytesBigEndian: &S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized {{
+    public init(fromBytesBigEndian fromBytesBigEndian: &Slice[UInt8])? {{
         let bytes = fromBytesBigEndian.asUnsafeSlice();
         if bytes.count != {bc} {{
             return null
@@ -937,7 +980,7 @@ def generate_integer_byte_conversion_method(type_name: str, bits: int, signed: b
     /// @name From Bytes Little Endian
     /// Reassembles a `{type_name}` from {byte_count} bytes in little-endian order.
     /// Returns `null` if the input is not exactly {byte_count} bytes long.
-    public init[S](fromBytesLittleEndian fromBytesLittleEndian: &S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized {{
+    public init(fromBytesLittleEndian fromBytesLittleEndian: &Slice[UInt8])? {{
         let bytes = fromBytesLittleEndian.asUnsafeSlice();
         if bytes.count != {bc} {{
             return null
@@ -962,12 +1005,33 @@ def generate_integer(type_name: str, bits: int, signed: bool, is_default: bool) 
     # Generate Convertible conformances and inits for all other integer types
     other_types = [(name, b, s) for name, b, s, _ in INTEGERS if name != type_name]
 
-    conformances = [f"    Convertible[{name}]" for name, _, _ in other_types]
-    lossy = [(n, b, sg) for n, b, sg in other_types if not is_lossless(b, sg, bits, signed)]
-    conformances += [f"    LossyConvertible[{name}]" for name, _, _ in lossy]
-    inits = [
+    # `Convertible` is lossless: the identity and every source that always
+    # fits. Every other source is `NarrowsFrom` only.
+    lossless = [n for n, b, sg in other_types if is_lossless(b, sg, bits, signed)]
+    lossy = [n for n, b, sg in other_types if not is_lossless(b, sg, bits, signed)]
+    conformances = [f"    Convertible[{name}]" for name in [type_name] + lossless]
+    conformances += [f"    NarrowsFrom[{name}]" for name in lossy]
+    conformances += [f"    NarrowsFrom[{name}]" for name, _, _ in FLOATS]
+    identity = (
+        f"    /// @name Identity\n"
+        f"    /// `{type_name}` from itself, so a `Convertible[T]` bound accepts `{type_name}`.\n"
+        f"    public init(from other: {type_name}) {{ self.raw = other.raw }}"
+    )
+    if type_name == "Int64":
+        # Every other number gets `Numeric.init(exactly: Int64)?` from
+        # `NarrowsFrom[Int64]` (or, for floats, its own); Int64 always fits.
+        identity += (
+            "\n    /// @name Exactly\n"
+            "    /// Always succeeds: satisfies `Numeric.init(exactly:)`, which other\n"
+            "    /// numbers fail when the value doesn't fit.\n"
+            "    public init(exactly other: Int64)? { self.raw = other.raw }"
+        )
+    inits = [identity] + [
         generate_integer_conversion(type_name, bits, signed, other_name, other_bits, other_signed)
         for other_name, other_bits, other_signed in other_types
+    ] + [
+        generate_float_to_int_conversion(type_name, bits, signed, float_name)
+        for float_name, _, _ in FLOATS
     ]
 
     # Join with comma+newline, no trailing comma
@@ -1150,8 +1214,8 @@ def generate_float_parse_method(type_name: str, bits: int) -> str:
     /// __TYPE_NAME__(parsing: "abc");       // None
     /// __TYPE_NAME__(parsing: "");          // None
     /// ```
-    public init[S](parsing text: S)? where S: Str, S: not Static {
-        // One view for the whole parse; works on String and StringSlice alike.
+    public init(parsing text: &StringSlice)? {
+        // One view for the whole parse; a String argument lends its slice.
         let bytes = text.bytes;
         let len = bytes.count;
         if len == 0 {
@@ -1445,6 +1509,7 @@ def generate_float_format_method(type_name: str, bits: int) -> str:
         }
 
         var number = String();
+        var prefix = "";
         var isNegative = false;
         var allowSign = true;
         var suffixPercent = false;
@@ -1494,6 +1559,7 @@ def generate_float_format_method(type_name: str, bits: int) -> str:
 
             if options.radix == 16 {
                 // `:x` / `:X`: exact hexadecimal floating point (C's `%a`).
+                prefix = if options.uppercase { "0X" } else { "0x" };
                 number = floatHexString(rawExp, rawMant, __PSHIFT__, __BIAS__, options.uppercase)
             } else if precisionProvided == false and suffixPercent == false {
                 // No explicit precision: print the SHORTEST decimal that round-
@@ -1535,16 +1601,6 @@ def generate_float_format_method(type_name: str, bits: int) -> str:
             }
         }
 
-        var result = String();
-        if allowSign {
-            if isNegative {
-                result.append(char: '-')
-            } else if options.sign == .Always {
-                result.append(char: '+')
-            } else if options.sign == .Space {
-                result.append(char: ' ')
-            }
-        }
         if trimTrailingZeros {
             let len = number.bytes.count;
             var dotIndex: Int64 = -1;
@@ -1589,12 +1645,16 @@ def generate_float_format_method(type_name: str, bits: int) -> str:
             }
         }
 
-        result.append(number);
         if suffixPercent {
-            result.append(char: '%')
+            number.append(char: '%')
         }
 
-        _writePadded(into: writer, result, options)
+        // NaN carries no sign, even under `sign: .Always`.
+        var numberOptions = options;
+        if allowSign == false {
+            numberOptions.sign = .Negative
+        }
+        writer.padIntegral(nonNegative: isNegative == false, prefix: prefix, digits: number, numberOptions)
     }'''
 
     return (
@@ -1609,6 +1669,108 @@ def generate_float_format_method(type_name: str, bits: int) -> str:
         .replace("__TYPE_NAME__", type_name)
         .replace("__LANG_TYPE__", lang_type)
     )
+
+
+# Mantissa bits (including the implicit one): an integer of at most this
+# many magnitude bits converts exactly.
+FLOAT_MANTISSA = {64: 53, 32: 24}
+
+
+def float_conversions(type_name: str, bits: int) -> tuple[str, str]:
+    """`Convertible` conformances and inits for a float: the identity, the
+    other float when it widens, and every integer whose values all fit the
+    mantissa. Everything else converts with `init(rounding:)`, which says it
+    may lose low-order bits."""
+    lang_type = f"f{bits}"
+    other_float, other_bits = ("Float32", 32) if bits == 64 else ("Float64", 64)
+    mantissa = FLOAT_MANTISSA[bits]
+    exact, rounded = [], []
+    for name, ibits, signed, _ in INTEGERS:
+        magnitude = ibits - 1 if signed else ibits
+        if magnitude <= mantissa:
+            exact.append((name, ibits, signed))
+        else:
+            rounded.append((name, ibits, signed))
+
+    def int_cast(name: str, ibits: int, signed: bool) -> str:
+        # Signed sources up to 64 bits have a direct cast; unsigned ones
+        # widen to `Int64` first (lossless below 64 bits).
+        if signed:
+            return f"lang.cast_i{ibits}_{lang_type}(value.raw)"
+        return f"lang.cast_i64_{lang_type}(Int64(from: value).raw)"
+
+    # There is no unsigned cast. Below 2^63 the signed one is exact; above,
+    # halve (keeping the shifted-out bit as a sticky bit, so the halved value
+    # rounds the same way the full one would), convert, and double — exact.
+    uint64_rounding = f"""if value <= UInt64(truncating: Int64.maxValue) {{
+            self.raw = lang.cast_i64_{lang_type}(Int64(truncating: value).raw)
+        }} else {{
+            let half = (value >> 1) | (value & 1);
+            let h = {type_name}(raw: lang.cast_i64_{lang_type}(Int64(truncating: half).raw));
+            self.raw = h.add(h).raw
+        }}"""
+
+    conformances = [type_name] + [n for n, _, _ in exact]
+    out = [
+        f"""    /// @name Identity
+    /// `{type_name}` from itself, so a `Convertible[T]` bound accepts `{type_name}`.
+    public init(from value: {type_name}) {{
+        self.raw = value.raw
+    }}"""
+    ]
+    for name, ibits, signed in exact:
+        out.append(f"""    /// @name From Integer
+    /// Converts from `{name}`. Exact: every `{name}` fits `{type_name}`'s mantissa.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let n: {name} = 42;
+    /// let f = {type_name}(from: n);  // 42.0
+    /// ```
+    public init(from value: {name}) {{
+        self.raw = {int_cast(name, ibits, signed)}
+    }}""")
+    for name, ibits, signed in rounded:
+        out.append(f"""    /// @name Rounding Integer
+    /// Converts from `{name}`, rounding to the nearest `{type_name}`: values
+    /// with magnitude above 2^{mantissa} lose low-order bits. Not `init(from:)`,
+    /// which is reserved for exact conversions.
+    public init(rounding value: {name}) {{
+        {uint64_rounding if name == "UInt64" else "self.raw = " + int_cast(name, ibits, signed)}
+    }}""")
+    if other_bits < bits:
+        conformances.append(other_float)
+        out.append(f"""    /// @name From Float
+    /// Converts from `{other_float}`. Exact: every `{other_float}` is a `{type_name}`.
+    public init(from value: {other_float}) {{
+        self.raw = lang.cast_f{other_bits}_{lang_type}(value.raw)
+    }}""")
+    else:
+        out.append(f"""    /// @name Rounding Float
+    /// Converts from `{other_float}`, rounding to the nearest `{type_name}`;
+    /// values beyond `{type_name}.maxValue` become ±infinity.
+    public init(rounding value: {other_float}) {{
+        self.raw = lang.cast_f{other_bits}_{lang_type}(value.raw)
+    }}""")
+    # `Numeric.init(exactly: Int64)?`: generic code's count-to-`T`. Strict,
+    # like the integers' `exactly:` — `nil` when the value doesn't round-trip.
+    out.append(f"""    /// @name Exactly
+    /// Converts from `Int64` when `{type_name}` holds the value exactly, and
+    /// is `nil` when it would round (magnitudes above 2^{mantissa} that aren't
+    /// representable). Satisfies `Numeric`, so generic code can write
+    /// `T(exactly: xs.count)!`.
+    public init(exactly value: Int64)? {{
+        let rounded = {type_name}(rounding: value);
+        if Int64(exactly: rounded) != value {{
+            return null
+        }}
+        self.raw = rounded.raw
+    }}""")
+    conf = "".join(f"    Convertible[{n}],\n" for n in conformances)
+    rounding = [n for n, _, _ in rounded] + ([] if other_bits < bits else [other_float])
+    conf += "".join(f"    RoundsFrom[{n}],\n" for n in rounding)
+    return conf, "\n\n".join(out) + "\n"
 
 
 def generate_float(type_name: str, bits: int, is_default: bool) -> str:
@@ -1673,13 +1835,7 @@ public type Float = {type_name}"""
     default_float = "Float64"
     type_name_upper = type_name.upper()
 
-    # Conversion to other float type
-    if bits == 64:
-        to_other_float = f"Float32(raw: lang.cast_f64_f32(self.raw))"
-        libm_suffix = ""  # f64 functions: sin, cos, etc.
-    else:
-        to_other_float = f"Float64(raw: lang.cast_f32_f64(self.raw))"
-        libm_suffix = "f"  # f32 functions: sinf, cosf, etc.
+    libm_suffix = "" if bits == 64 else "f"  # sin/cos vs sinf/cosf
 
     result = template
     result = result.replace("{{TYPE_NAME}}", type_name)
@@ -1702,9 +1858,11 @@ public type Float = {type_name}"""
     result = result.replace("{{RANGE_APPROX}}", range_approx)
     result = result.replace("{{SIG_DIGITS}}", sig_digits)
     result = result.replace("{{DEFAULT_FLOAT}}", default_float)
-    result = result.replace("{{TO_OTHER_FLOAT}}", to_other_float)
     result = result.replace("{{LIBM_SUFFIX}}", libm_suffix)
     result = result.replace("{{PARSE_METHOD}}", parse_method)
+    float_conformances, float_inits = float_conversions(type_name, bits)
+    result = result.replace("{{FLOAT_CONFORMANCES}}", float_conformances)
+    result = result.replace("{{FLOAT_CONVERSIONS}}", float_inits)
 
     return result
 

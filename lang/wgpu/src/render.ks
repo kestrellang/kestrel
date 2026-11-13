@@ -334,14 +334,14 @@ public struct Texture: not Copyable {
                 .Some(d) => d.cValue,
                 .None => raw.WGPUTextureViewDimension_Undefined
             },
-            baseMipLevel: UInt32(from: range.baseMipLevel),
+            baseMipLevel: UInt32(exactly: range.baseMipLevel)!,
             mipLevelCount: match range.mipLevels {
-                .Some(n) => UInt32(from: n),
+                .Some(n) => UInt32(exactly: n)!,
                 .None => raw.WGPU_U32_UNDEFINED
             },
-            baseArrayLayer: UInt32(from: range.baseLayer),
+            baseArrayLayer: UInt32(exactly: range.baseLayer)!,
             arrayLayerCount: match range.layers {
-                .Some(n) => UInt32(from: n),
+                .Some(n) => UInt32(exactly: n)!,
                 .None => raw.WGPU_U32_UNDEFINED
             },
             aspect: range.aspect.cValue,
@@ -355,15 +355,15 @@ public struct Texture: not Copyable {
     func copyInfo(level: Int64, layer: Int64) -> raw.WGPUTexelCopyTextureInfo {
         raw.WGPUTexelCopyTextureInfo(
             texture: self.handle,
-            mipLevel: UInt32(from: level),
-            origin: raw.WGPUOrigin3D(x: 0, y: 0, z: UInt32(from: layer)),
+            mipLevel: UInt32(exactly: level)!,
+            origin: raw.WGPUOrigin3D(x: 0, y: 0, z: UInt32(exactly: layer)!),
             aspect: raw.WGPUTextureAspect_All
         )
     }
 
     /// The size of one layer of mip level `level`.
     func levelExtent(level: Int64) -> raw.WGPUExtent3D {
-        raw.WGPUExtent3D(width: UInt32(from: self.levelWidth(level)), height: UInt32(from: self.levelHeight(level)), depthOrArrayLayers: 1)
+        raw.WGPUExtent3D(width: UInt32(exactly: self.levelWidth(level))!, height: UInt32(exactly: self.levelHeight(level))!, depthOrArrayLayers: 1)
     }
 
     deinit {
@@ -393,7 +393,7 @@ public struct TextureView: not Copyable {
     public func binding(index: Int64) -> Binding {
         Binding(entry: raw.WGPUBindGroupEntry(
             nextInChain: Pointer.nullPointer(),
-            binding: UInt32(from: index),
+            binding: UInt32(exactly: index)!,
             buffer: RawPointer.nullPointer(),
             offset: 0,
             size: 0,
@@ -448,7 +448,7 @@ public struct TextureView: not Copyable {
             depthReadOnly: if readOnly and self.format.hasDepth { 1 } else { 0 },
             stencilLoadOp: if stencilOps { load } else { raw.WGPULoadOp_Undefined },
             stencilStoreOp: if stencilOps { raw.WGPUStoreOp_Store } else { raw.WGPUStoreOp_Undefined },
-            stencilClearValue: UInt32(from: stencilClear),
+            stencilClearValue: UInt32(exactly: stencilClear)!,
             stencilReadOnly: if readOnly and self.format.hasStencil { 1 } else { 0 }
         ))
     }
@@ -503,7 +503,7 @@ public struct Sampler: not Copyable {
     public func binding(index: Int64) -> Binding {
         Binding(entry: raw.WGPUBindGroupEntry(
             nextInChain: Pointer.nullPointer(),
-            binding: UInt32(from: index),
+            binding: UInt32(exactly: index)!,
             buffer: RawPointer.nullPointer(),
             offset: 0,
             size: 0,
@@ -919,9 +919,9 @@ public struct DepthTest {
             depthCompare: self.compare.cValue,
             stencilFront: face,
             stencilBack: back,
-            stencilReadMask: UInt32(from: self.stencil.map { (s) in s.readMask } ?? 0),
-            stencilWriteMask: UInt32(from: self.stencil.map { (s) in s.writeMask } ?? 0),
-            depthBias: Int32(from: self.depthBias),
+            stencilReadMask: UInt32(exactly: self.stencil.map { (s) in s.readMask } ?? 0)!,
+            stencilWriteMask: UInt32(exactly: self.stencil.map { (s) in s.writeMask } ?? 0)!,
+            depthBias: Int32(exactly: self.depthBias)!,
             depthBiasSlopeScale: self.depthBiasSlopeScale,
             depthBiasClamp: self.depthBiasClamp
         )
@@ -936,7 +936,7 @@ public struct RenderPipeline: not Copyable {
     /// The layout of bind group `group`, from the pipeline's layout or
     /// inferred from the shaders.
     public func bindGroupLayout(group: Int64) -> BindGroupLayout {
-        BindGroupLayout(handle: unsafe raw.wgpuRenderPipelineGetBindGroupLayout(self.handle, UInt32(from: group)))
+        BindGroupLayout(handle: unsafe raw.wgpuRenderPipelineGetBindGroupLayout(self.handle, UInt32(exactly: group)!))
     }
 
     deinit {
@@ -968,10 +968,10 @@ extend Device {
             label: view(label),
             usage: bits,
             dimension: dimension.cValue,
-            size: raw.WGPUExtent3D(width: UInt32(from: width), height: UInt32(from: height), depthOrArrayLayers: UInt32(from: layers)),
+            size: raw.WGPUExtent3D(width: UInt32(exactly: width)!, height: UInt32(exactly: height)!, depthOrArrayLayers: UInt32(exactly: layers)!),
             format: format.cValue,
-            mipLevelCount: UInt32(from: mipLevels),
-            sampleCount: UInt32(from: sampleCount),
+            mipLevelCount: UInt32(exactly: mipLevels)!,
+            sampleCount: UInt32(exactly: sampleCount)!,
             viewFormatCount: 0,
             viewFormats: Pointer.nullPointer()
         );
@@ -984,12 +984,12 @@ extend Device {
         let destination = texture.copyInfo(mipLevel, layer);
         let layout = raw.WGPUTexelCopyBufferLayout(
             offset: 0,
-            bytesPerRow: UInt32(from: texture.levelWidth(mipLevel) * texture.format.bytesPerTexel),
-            rowsPerImage: UInt32(from: texture.levelHeight(mipLevel))
+            bytesPerRow: UInt32(exactly: texture.levelWidth(mipLevel) * texture.format.bytesPerTexel)!,
+            rowsPerImage: UInt32(exactly: texture.levelHeight(mipLevel))!
         );
         let size = texture.levelExtent(mipLevel);
         let bytes = Layout.array[T](data.count).size;
-        unsafe raw.wgpuQueueWriteTexture(self.queue, destination, data.asPointer().asRaw(), UInt64(from: bytes), layout, size);
+        unsafe raw.wgpuQueueWriteTexture(self.queue, destination, data.asPointer().asRaw(), UInt64(exactly: bytes)!, layout, size);
     }
 
     /// Create a sampler. `filter` applies between texels and, unless
@@ -1022,7 +1022,7 @@ extend Device {
                 .Some(c) => c.cValue,
                 .None => raw.WGPUCompareFunction_Undefined
             },
-            maxAnisotropy: UInt16(from: anisotropy)
+            maxAnisotropy: UInt16(exactly: anisotropy)!
         );
         Sampler(handle: unsafe raw.wgpuDeviceCreateSampler(self.handle, descriptor))
     }
@@ -1053,7 +1053,7 @@ extend Device {
         for b in buffers {
             var list: [raw.WGPUVertexAttribute] = [];
             for a in b.attributes {
-                list.append(raw.WGPUVertexAttribute(format: a.format.cValue, offset: UInt64(from: a.offset), shaderLocation: UInt32(from: a.location)));
+                list.append(raw.WGPUVertexAttribute(format: a.format.cValue, offset: UInt64(exactly: a.offset)!, shaderLocation: UInt32(exactly: a.location)!));
             }
             attributes.append(list);
         }
@@ -1066,8 +1066,8 @@ extend Device {
                     .Vertex => raw.WGPUVertexStepMode_Vertex,
                     .Instance => raw.WGPUVertexStepMode_Instance
                 },
-                arrayStride: UInt64(from: b.stride),
-                attributeCount: UInt64(from: attributes(i).count),
+                arrayStride: UInt64(exactly: b.stride)!,
+                attributeCount: UInt64(exactly: attributes(i).count)!,
                 attributes: attributes(i).asPointer()
             ));
             i = i + 1;
@@ -1101,7 +1101,7 @@ extend Device {
             entryPoint: view(fragmentEntry),
             constantCount: 0,
             constants: RawPointer.nullPointer(),
-            targetCount: UInt64(from: colorTargets.count),
+            targetCount: UInt64(exactly: colorTargets.count)!,
             targets: colorTargets.asPointer()
         );
         var depthState = (depth ?? DepthTest()).cValue;
@@ -1118,7 +1118,7 @@ extend Device {
                 entryPoint: view(vertexEntry),
                 constantCount: 0,
                 constants: RawPointer.nullPointer(),
-                bufferCount: UInt64(from: layouts.count),
+                bufferCount: UInt64(exactly: layouts.count)!,
                 buffers: layouts.asPointer()
             ),
             primitive: raw.WGPUPrimitiveState(
@@ -1139,7 +1139,7 @@ extend Device {
             depthStencil: if depth.isSome { Pointer(to: depthState) } else { Pointer.nullPointer() },
             multisample: raw.WGPUMultisampleState(
                 nextInChain: Pointer.nullPointer(),
-                count: UInt32(from: sampleCount),
+                count: UInt32(exactly: sampleCount)!,
                 mask: 4294967295,
                 alphaToCoverageEnabled: if alphaToCoverage { 1 } else { 0 }
             ),
@@ -1281,7 +1281,7 @@ extend CommandEncoder {
         let cDescriptor = raw.WGPURenderPassDescriptor(
             nextInChain: Pointer.nullPointer(),
             label: view(descriptor.label),
-            colorAttachmentCount: UInt64(from: attachments.count),
+            colorAttachmentCount: UInt64(exactly: attachments.count)!,
             colorAttachments: attachments.asPointer(),
             depthStencilAttachment: if descriptor.depth.isSome { Pointer(to: depthRaw) } else { Pointer.nullPointer() },
             occlusionQuerySet: match descriptor.occlusionQueries {
@@ -1303,8 +1303,8 @@ extend CommandEncoder {
         let destination = raw.WGPUTexelCopyBufferInfo(
             layout: raw.WGPUTexelCopyBufferLayout(
                 offset: 0,
-                bytesPerRow: UInt32(from: texture.paddedRowBytes(mipLevel)),
-                rowsPerImage: UInt32(from: texture.levelHeight(mipLevel))
+                bytesPerRow: UInt32(exactly: texture.paddedRowBytes(mipLevel))!,
+                rowsPerImage: UInt32(exactly: texture.levelHeight(mipLevel))!
             ),
             buffer: buffer.handle
         );
@@ -1317,8 +1317,8 @@ extend CommandEncoder {
         let source = raw.WGPUTexelCopyBufferInfo(
             layout: raw.WGPUTexelCopyBufferLayout(
                 offset: 0,
-                bytesPerRow: UInt32(from: bytesPerRow),
-                rowsPerImage: UInt32(from: texture.levelHeight(mipLevel))
+                bytesPerRow: UInt32(exactly: bytesPerRow)!,
+                rowsPerImage: UInt32(exactly: texture.levelHeight(mipLevel))!
             ),
             buffer: buffer.handle
         );
@@ -1347,10 +1347,10 @@ public struct DrawIndirectArgs: FFISafe {
     var firstInstance: UInt32
 
     public init(vertices vertices: Int64, instances instances: Int64 = 1, firstVertex firstVertex: Int64 = 0, firstInstance firstInstance: Int64 = 0) {
-        self.vertexCount = UInt32(from: vertices);
-        self.instanceCount = UInt32(from: instances);
-        self.firstVertex = UInt32(from: firstVertex);
-        self.firstInstance = UInt32(from: firstInstance);
+        self.vertexCount = UInt32(exactly: vertices)!;
+        self.instanceCount = UInt32(exactly: instances)!;
+        self.firstVertex = UInt32(exactly: firstVertex)!;
+        self.firstInstance = UInt32(exactly: firstInstance)!;
     }
 }
 
@@ -1363,11 +1363,11 @@ public struct DrawIndexedIndirectArgs: FFISafe {
     var firstInstance: UInt32
 
     public init(indices indices: Int64, instances instances: Int64 = 1, firstIndex firstIndex: Int64 = 0, baseVertex baseVertex: Int64 = 0, firstInstance firstInstance: Int64 = 0) {
-        self.indexCount = UInt32(from: indices);
-        self.instanceCount = UInt32(from: instances);
-        self.firstIndex = UInt32(from: firstIndex);
-        self.baseVertex = Int32(from: baseVertex);
-        self.firstInstance = UInt32(from: firstInstance);
+        self.indexCount = UInt32(exactly: indices)!;
+        self.instanceCount = UInt32(exactly: instances)!;
+        self.firstIndex = UInt32(exactly: firstIndex)!;
+        self.baseVertex = Int32(exactly: baseVertex)!;
+        self.firstInstance = UInt32(exactly: firstInstance)!;
     }
 }
 
@@ -1375,7 +1375,7 @@ public struct DrawIndexedIndirectArgs: FFISafe {
 func dynamicOffsetArray(offsets: [Int64]) -> [UInt32] {
     var out: [UInt32] = [];
     for o in offsets {
-        out.append(UInt32(from: o));
+        out.append(UInt32(exactly: o)!);
     }
     out
 }
@@ -1383,7 +1383,7 @@ func dynamicOffsetArray(offsets: [Int64]) -> [UInt32] {
 /// The byte count of vertex or index buffer data from `offset`: `size`, or
 /// the rest of `buffer`.
 func rangeSize(buffer: Buffer, offset: Int64, size: Int64?) -> UInt64 {
-    UInt64(from: size ?? (buffer.size - offset))
+    UInt64(exactly: size ?? (buffer.size - offset))!
 }
 
 /// A render pass being recorded.
@@ -1399,18 +1399,18 @@ public struct RenderPass: not Copyable {
     /// byte offset per dynamic binding, in binding order.
     public func setBindGroup(index: Int64, bindGroup: BindGroup, dynamicOffsets dynamicOffsets: [Int64] = []) {
         let offsets = dynamicOffsetArray(dynamicOffsets);
-        unsafe raw.wgpuRenderPassEncoderSetBindGroup(self.handle, UInt32(from: index), bindGroup.handle, UInt64(from: offsets.count), offsets.asPointer().asRaw());
+        unsafe raw.wgpuRenderPassEncoderSetBindGroup(self.handle, UInt32(exactly: index)!, bindGroup.handle, UInt64(exactly: offsets.count)!, offsets.asPointer().asRaw());
     }
 
     /// Read vertex buffer `slot` from `buffer`, starting `offset` bytes in,
     /// for `size` bytes or the rest of the buffer.
     public func setVertexBuffer(slot: Int64, buffer: Buffer, offset offset: Int64 = 0, size size: Int64? = .None) {
-        unsafe raw.wgpuRenderPassEncoderSetVertexBuffer(self.handle, UInt32(from: slot), buffer.handle, UInt64(from: offset), rangeSize(buffer, offset, size));
+        unsafe raw.wgpuRenderPassEncoderSetVertexBuffer(self.handle, UInt32(exactly: slot)!, buffer.handle, UInt64(exactly: offset)!, rangeSize(buffer, offset, size));
     }
 
     /// Read indices from `buffer`, starting `offset` bytes in.
     public func setIndexBuffer(buffer: Buffer, format format: IndexFormat = .Uint32, offset offset: Int64 = 0, size size: Int64? = .None) {
-        unsafe raw.wgpuRenderPassEncoderSetIndexBuffer(self.handle, buffer.handle, format.cValue, UInt64(from: offset), rangeSize(buffer, offset, size));
+        unsafe raw.wgpuRenderPassEncoderSetIndexBuffer(self.handle, buffer.handle, format.cValue, UInt64(exactly: offset)!, rangeSize(buffer, offset, size));
     }
 
     /// Map clip space onto the given rectangle, in pixels, and depth onto
@@ -1421,12 +1421,12 @@ public struct RenderPass: not Copyable {
 
     /// Discard fragments outside the given rectangle, in pixels.
     public func setScissor(x: Int64, y: Int64, width: Int64, height: Int64) {
-        unsafe raw.wgpuRenderPassEncoderSetScissorRect(self.handle, UInt32(from: x), UInt32(from: y), UInt32(from: width), UInt32(from: height));
+        unsafe raw.wgpuRenderPassEncoderSetScissorRect(self.handle, UInt32(exactly: x)!, UInt32(exactly: y)!, UInt32(exactly: width)!, UInt32(exactly: height)!);
     }
 
     /// The value stencil tests compare against and `.Replace` writes.
     public func setStencilReference(reference: Int64) {
-        unsafe raw.wgpuRenderPassEncoderSetStencilReference(self.handle, UInt32(from: reference));
+        unsafe raw.wgpuRenderPassEncoderSetStencilReference(self.handle, UInt32(exactly: reference)!);
     }
 
     /// The color `BlendFactor.Constant` uses.
@@ -1438,35 +1438,35 @@ public struct RenderPass: not Copyable {
     /// `value`, starting `offset` bytes in.
     public func setPushConstants[T](stages stages: [ShaderStage], value value: T, offset offset: Int64 = 0) where T: FFISafe {
         let size = Layout.of[T]().size;
-        unsafe raw.wgpuRenderPassEncoderSetPushConstants(self.handle, stageBits(stages), UInt32(from: offset), UInt32(from: size), Pointer(to: value).asRaw());
+        unsafe raw.wgpuRenderPassEncoderSetPushConstants(self.handle, stageBits(stages), UInt32(exactly: offset)!, UInt32(exactly: size)!, Pointer(to: value).asRaw());
     }
 
     /// Draw `vertices` vertices, `instances` times.
     public func draw(vertices vertices: Int64, instances instances: Int64 = 1, firstVertex firstVertex: Int64 = 0, firstInstance firstInstance: Int64 = 0) {
-        unsafe raw.wgpuRenderPassEncoderDraw(self.handle, UInt32(from: vertices), UInt32(from: instances), UInt32(from: firstVertex), UInt32(from: firstInstance));
+        unsafe raw.wgpuRenderPassEncoderDraw(self.handle, UInt32(exactly: vertices)!, UInt32(exactly: instances)!, UInt32(exactly: firstVertex)!, UInt32(exactly: firstInstance)!);
     }
 
     /// Draw `indices` indices from the index buffer, `instances` times,
     /// adding `baseVertex` to each index.
     public func drawIndexed(indices indices: Int64, instances instances: Int64 = 1, firstIndex firstIndex: Int64 = 0, baseVertex baseVertex: Int64 = 0, firstInstance firstInstance: Int64 = 0) {
-        unsafe raw.wgpuRenderPassEncoderDrawIndexed(self.handle, UInt32(from: indices), UInt32(from: instances), UInt32(from: firstIndex), Int32(from: baseVertex), UInt32(from: firstInstance));
+        unsafe raw.wgpuRenderPassEncoderDrawIndexed(self.handle, UInt32(exactly: indices)!, UInt32(exactly: instances)!, UInt32(exactly: firstIndex)!, Int32(exactly: baseVertex)!, UInt32(exactly: firstInstance)!);
     }
 
     /// Draw with a `DrawIndirectArgs` read from `buffer` (made with
     /// `.Indirect`) at `offset`, so the GPU can decide what to draw.
     public func drawIndirect(buffer: Buffer, offset offset: Int64 = 0) {
-        unsafe raw.wgpuRenderPassEncoderDrawIndirect(self.handle, buffer.handle, UInt64(from: offset));
+        unsafe raw.wgpuRenderPassEncoderDrawIndirect(self.handle, buffer.handle, UInt64(exactly: offset)!);
     }
 
     /// Draw with a `DrawIndexedIndirectArgs` read from `buffer` at `offset`.
     public func drawIndexedIndirect(buffer: Buffer, offset offset: Int64 = 0) {
-        unsafe raw.wgpuRenderPassEncoderDrawIndexedIndirect(self.handle, buffer.handle, UInt64(from: offset));
+        unsafe raw.wgpuRenderPassEncoderDrawIndexedIndirect(self.handle, buffer.handle, UInt64(exactly: offset)!);
     }
 
     /// Count the samples the draws until `endOcclusionQuery` pass, into
     /// query `index` of the pass's occlusion query set.
     public func beginOcclusionQuery(index: Int64) {
-        unsafe raw.wgpuRenderPassEncoderBeginOcclusionQuery(self.handle, UInt32(from: index));
+        unsafe raw.wgpuRenderPassEncoderBeginOcclusionQuery(self.handle, UInt32(exactly: index)!);
     }
 
     public func endOcclusionQuery() {

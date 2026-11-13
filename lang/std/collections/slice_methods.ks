@@ -1,4 +1,9 @@
-// Sliceable[T] - shared read-only protocol for contiguous collections
+// Slice[T] methods - the shared read-only surface of contiguous collections.
+//
+// `Array`, `UnsafeSlice` and other contiguous owners conform to
+// `MutableIndirection` with `Target = Slice[T]`, so every method here is
+// theirs too (member access peels to the slice), and a borrowed `&Slice[T]`
+// param accepts any of them.
 
 module std.collections
 
@@ -8,56 +13,55 @@ import std.result.(Optional)
 import std.memory.(UnsafeSlice, UnsafeSliceIterator, Pointer)
 import std.iter.(Iterable)
 import std.text.(Formattable, Formatter, FormatOptions, StringBuilder, String)
-import std.collections.(Array, Set, Slice, SliceIndex, SliceClampable)
+import std.collections.(Array, Set, Slice, SliceIndex)
 
-// ============================================================================
-// SLICE PROTOCOL
-// ============================================================================
+/// One end of a range: a position it includes, a position it stops
+/// before, or no limit (Rust's `Bound`).
+public enum RangeBound {
+    /// The range includes this position.
+    case Included(Int64)
+    /// The range stops just before this position.
+    case Excluded(Int64)
+    /// The range runs to the collection's edge.
+    case Unbounded
+}
 
-/// Shared read-only protocol for contiguous collections.
+/// Any range-like `Int64` type: `Range`, `ClosedRange`, `RangeFrom`,
+/// `RangeUpTo` and `RangeThrough`, through one generic parameter.
 ///
-/// `Sliceable[T]` is the contiguous-collection counterpart to `Str` in
-/// `std.text`: one kernel method (`asSlice`), and the index places and all
-/// read-only logic in a protocol extension.
-/// `Array[T]`, `Slice[T]` and `UnsafeSlice[T]` conform, so generic code
-/// constrained to `S: Sliceable[T]` accepts any of them without
-/// overloading, and `s(i)` borrows the element rather than copying it.
+/// A conformer states its two ends; `resolve(count:)` turns them into a
+/// half-open `Range[Int64]` against a collection's length. Text views read
+/// the ends directly, so they can slice without counting first.
 ///
 /// # Examples
 ///
 /// ```
-/// func sum[S](s: &S) -> Int64 where S: Sliceable[Int64], S: not Static, S: not Copyable, S: not Sized {
-///     var total: Int64 = 0;
-///     for elem in s { total = total + elem }
-///     total
-/// }
-/// sum([1, 2, 3]);              // works with Array
-/// sum([1, 2, 3](1..<3));       // works with Slice
+/// (2..).resolve(5);    // 2..<5
+/// (..=3).resolve(5);   // 0..<4
 /// ```
-public protocol Sliceable[T]: Iterable {
-    /// The elements as a `Slice`, in place. Every shared algorithm reads
-    /// through it.
-    func asSlice() -> &Slice[T]
-
-    // The index places, lent: generic code over `Sliceable` borrows
-    // elements through these instead of copying. The extension below
-    // gives defaults that forward to `asSlice()`.
-    subscript[I](index: I) -> I.SliceOutput where I: SliceIndex[T] { ref }
-    subscript[I](checked index: I)? -> I.SliceOutput where I: SliceIndex[T] { ref }
-    // Unsafe: `index` must be in range.
-    unsafe subscript[I](unchecked index: I) -> I.SliceOutput where I: SliceIndex[T] { ref }
-    subscript(clamped index: Int64)? -> T { ref }
-    subscript[R](within range: R) -> Slice[T] where R: SliceClampable[T] { ref }
-    subscript(wrapped index: Int64)? -> T { ref }
+public protocol SeqRange {
+    /// The lower end.
+    var startBound: RangeBound { get }
+    /// The upper end.
+    var endBound: RangeBound { get }
 }
 
-
-/// Resolves any range-like type to a half-open `Range[Int64]` given a
-/// collection length. Used by `removeSubrange` and `replaceSubrange` so
-/// they accept `Range`, `ClosedRange`, `RangeFrom`, `RangeUpTo`, and
-/// `RangeThrough` through a single generic parameter.
-public protocol SeqRange {
-    func resolve(count: Int64) -> Range[Int64]
+extend SeqRange {
+    /// The range as half-open `[start, end)` positions in a collection of
+    /// `count` elements. Unbounded ends become `0` and `count`.
+    public func resolve(count: Int64) -> Range[Int64] {
+        let start = match self.startBound {
+            .Included(i) => i,
+            .Excluded(i) => i + 1,
+            .Unbounded => 0
+        };
+        let end = match self.endBound {
+            .Included(i) => i + 1,
+            .Excluded(i) => i,
+            .Unbounded => count
+        };
+        Range[Int64](start, end)
+    }
 }
 
 // ============================================================================
@@ -65,71 +69,33 @@ public protocol SeqRange {
 // ============================================================================
 
 extend Range[Int64]: SeqRange {
-    public func resolve(count: Int64) -> Range[Int64] { self }
+    public var startBound: RangeBound { .Included(self.start) }
+    public var endBound: RangeBound { .Excluded(self.end) }
 }
 
 extend ClosedRange[Int64]: SeqRange {
-    public func resolve(count: Int64) -> Range[Int64] {
-        Range[Int64](self.start, self.end + 1)
-    }
+    public var startBound: RangeBound { .Included(self.start) }
+    public var endBound: RangeBound { .Included(self.end) }
 }
 
 extend RangeFrom[Int64]: SeqRange {
-    public func resolve(count: Int64) -> Range[Int64] {
-        Range[Int64](self.start, count)
-    }
+    public var startBound: RangeBound { .Included(self.start) }
+    public var endBound: RangeBound { .Unbounded }
 }
 
 extend RangeUpTo[Int64]: SeqRange {
-    public func resolve(count: Int64) -> Range[Int64] {
-        Range[Int64](0, self.end)
-    }
+    public var startBound: RangeBound { .Unbounded }
+    public var endBound: RangeBound { .Excluded(self.end) }
 }
 
 extend RangeThrough[Int64]: SeqRange {
-    public func resolve(count: Int64) -> Range[Int64] {
-        Range[Int64](0, self.end + 1)
-    }
+    public var startBound: RangeBound { .Unbounded }
+    public var endBound: RangeBound { .Included(self.end) }
 }
 
 // ============================================================================
 // UNIFIED SUBSCRIPTS
 // ============================================================================
-
-// Default index places: each lends through `asSlice()`. `Array`, `Slice`
-// and `UnsafeSlice` declare their own, which also write in place.
-extend Sliceable[T] {
-    public subscript[I](index: I) -> I.SliceOutput where I: SliceIndex[T] {
-        ref { I.lend(index, self.asSlice()) }
-    }
-
-    public subscript[I](checked index: I)? -> I.SliceOutput where I: SliceIndex[T] {
-        ref { I.lendChecked(index, self.asSlice()) }
-    }
-
-    public unsafe subscript[I](unchecked index: I) -> I.SliceOutput where I: SliceIndex[T] {
-        ref { unsafe I.lendUnchecked(index, self.asSlice()) }
-    }
-
-    public subscript(clamped index: Int64)? -> T {
-        ref { self.asSlice().lendClamped(index) }
-    }
-
-    public subscript[R](within range: R) -> Slice[T] where R: SliceClampable[T] {
-        ref { R.lendWithin(range, self.asSlice()) }
-    }
-
-    public subscript(wrapped index: Int64)? -> T {
-        ref { self.asSlice().lendWrapped(index) }
-    }
-
-    /// The elements as a raw `(pointer, count)` view, for algorithms that
-    /// walk the buffer directly. Only valid until the collection next
-    /// changes, so never hand it out.
-    public func asUnsafeSlice() -> UnsafeSlice[T] {
-        self.asSlice().asUnsafeSlice()
-    }
-}
 
 // Raw slices write straight through the pointer.
 extend UnsafeSlice[T] {
@@ -163,9 +129,9 @@ extend UnsafeSlice[T] {
         mutating ref { self.asMutableSlice().lendMutatingClamped(index) }
     }
 
-    public subscript[R](within range: R) -> Slice[T] where R: SliceClampable[T] {
-        ref { R.lendWithin(range, self.asSlice()) }
-        mutating ref { R.lendMutatingWithin(range, self.asMutableSlice()) }
+    public subscript[R](within range: R) -> Slice[T] where R: SeqRange {
+        ref { self.asSlice().lendWithin(range.resolve(self.count)) }
+        mutating ref { self.asMutableSlice().lendMutatingWithin(range.resolve(self.count)) }
     }
 
     public subscript(wrapped index: Int64)? -> T {
@@ -178,29 +144,9 @@ extend UnsafeSlice[T] {
 // EXTEND SLICE — Read-Only Methods
 // ============================================================================
 
-extend Sliceable[T] {
+extend Slice[T] where T: Copyable {
 
     // -- Size ----------------------------------------------------------------
-
-    /// Element count. O(1).
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// [1, 2, 3].count;  // 3
-    /// [].count;          // 0
-    /// ```
-    public var count: Int64 { self.asUnsafeSlice().count }
-
-    /// `true` when `count == 0`.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// [].isEmpty;   // true
-    /// [1].isEmpty;  // false
-    /// ```
-    public var isEmpty: Bool { self.asUnsafeSlice().count == 0 }
 
     /// Half-open range `0..<count`.
     ///
@@ -286,18 +232,6 @@ extend Sliceable[T] {
 
     // -- Iteration -----------------------------------------------------------
 
-    /// Forward iterator over the elements.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// for item in [1, 2, 3] { ... }
-    /// ```
-    public func iter() -> UnsafeSliceIterator[T] {
-        let s = self.asUnsafeSlice();
-        UnsafeSliceIterator(ptr: s.pointer, remaining: s.count)
-    }
-
     // -- Pointer access (FFI) ------------------------------------------------
 
     /// Pointer to the first element. The pointer aliases the collection's
@@ -324,87 +258,6 @@ extend Sliceable[T] {
     }
 
     // -- Slicing -------------------------------------------------------------
-
-    /// Returns a slice over the first `count` elements. O(1).
-    ///
-    /// # Errors
-    ///
-    /// Panics if `count > self.count`.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// [1, 2, 3, 4, 5].prefix(3);  // [1, 2, 3]
-    /// [1, 2].prefix(0);            // empty slice
-    /// ```
-    public func prefix(count: Int64) -> &Slice[T] {
-        let s = self.asUnsafeSlice();
-        if count > s.count {
-            fatalError("prefix: count exceeds length")
-        }
-        unsafe Slice.lend(start: s.pointer, count: count)
-    }
-
-    /// Returns a slice over the last `count` elements. O(1).
-    ///
-    /// # Errors
-    ///
-    /// Panics if `count > self.count`.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// [1, 2, 3, 4, 5].suffix(2);  // [4, 5]
-    /// ```
-    public func suffix(count: Int64) -> &Slice[T] {
-        let s = self.asUnsafeSlice();
-        if count > s.count {
-            fatalError("suffix: count exceeds length")
-        }
-        unsafe Slice.lend(start: s.pointer.offset(by: s.count - count), count: count)
-    }
-
-    /// Returns a slice with the first `count` elements skipped. O(1).
-    ///
-    /// Complement of `prefix`.
-    ///
-    /// # Errors
-    ///
-    /// Panics if `count > self.count`.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// [1, 2, 3, 4, 5].drop(first: 2);  // [3, 4, 5]
-    /// ```
-    public func drop(first count: Int64) -> &Slice[T] {
-        let s = self.asUnsafeSlice();
-        if count > s.count {
-            fatalError("drop(first:): count exceeds length")
-        }
-        unsafe Slice.lend(start: s.pointer.offset(by: count), count: s.count - count)
-    }
-
-    /// Returns a slice with the last `count` elements skipped. O(1).
-    ///
-    /// Complement of `suffix`.
-    ///
-    /// # Errors
-    ///
-    /// Panics if `count > self.count`.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// [1, 2, 3, 4, 5].drop(last: 2);  // [1, 2, 3]
-    /// ```
-    public func drop(last count: Int64) -> &Slice[T] {
-        let s = self.asUnsafeSlice();
-        if count > s.count {
-            fatalError("drop(last:): count exceeds length")
-        }
-        unsafe Slice.lend(start: s.pointer, count: s.count - count)
-    }
 
     // -- Searching (predicate) -----------------------------------------------
 
@@ -648,7 +501,7 @@ extend Sliceable[T] {
 // EXTEND SLICE WHERE T: Equatable
 // ============================================================================
 
-extend Sliceable[T] where T: Equatable {
+extend Slice[T] where T: Equatable, T: Copyable {
     /// Element-wise equality. O(n).
     ///
     /// Short-circuits on the first mismatch. Order matters.
@@ -719,7 +572,7 @@ extend Sliceable[T] where T: Equatable {
     }
 
     /// `true` if the leading elements match `prefix`. O(k) where k is
-    /// the prefix length. Accepts any `Sliceable[T]` conformer.
+    /// the prefix length. Accepts anything that lends a `Slice[T]`.
     ///
     /// # Examples
     ///
@@ -728,7 +581,7 @@ extend Sliceable[T] where T: Equatable {
     /// [1, 2, 3].starts(with: [2, 3]);     // false
     /// [1, 2, 3].starts(with: []);          // true (vacuous)
     /// ```
-    public func starts(with prefix: &some Sliceable[T] and not Static and not Copyable and not Sized) -> Bool {
+    public func starts(with prefix: &Slice[T]) -> Bool {
         let a = self.asUnsafeSlice();
         let b = prefix.asUnsafeSlice();
         if b.count > a.count {
@@ -743,7 +596,7 @@ extend Sliceable[T] where T: Equatable {
     }
 
     /// `true` if the trailing elements match `suffix`. O(k) where k is
-    /// the suffix length. Accepts any `Sliceable[T]` conformer.
+    /// the suffix length. Accepts anything that lends a `Slice[T]`.
     ///
     /// # Examples
     ///
@@ -752,7 +605,7 @@ extend Sliceable[T] where T: Equatable {
     /// [1, 2, 3].ends(with: [1, 2]);  // false
     /// [1, 2, 3].ends(with: []);       // true (vacuous)
     /// ```
-    public func ends(with suffix: &some Sliceable[T] and not Static and not Copyable and not Sized) -> Bool {
+    public func ends(with suffix: &Slice[T]) -> Bool {
         let a = self.asUnsafeSlice();
         let b = suffix.asUnsafeSlice();
         if b.count > a.count {
@@ -772,7 +625,7 @@ extend Sliceable[T] where T: Equatable {
 // EXTEND SLICE WHERE T: Comparable
 // ============================================================================
 
-extend Sliceable[T] where T: Comparable {
+extend Slice[T] where T: Comparable, T: Copyable {
     /// Lends the smallest element, or `None` if empty. O(n).
     ///
     /// Ties go to the first occurrence.
@@ -898,7 +751,7 @@ extend Sliceable[T] where T: Comparable {
 // EXTEND SLICE WHERE T: Hashable
 // ============================================================================
 
-extend Sliceable[T] where T: Hashable {
+extend Slice[T] where T: Hashable, T: Copyable {
     /// Returns a new array with duplicates removed, preserving
     /// first-occurrence order. O(n) expected: seen elements go in a `Set`.
     ///
@@ -929,7 +782,7 @@ extend Sliceable[T] where T: Hashable {
 // EXTEND SLICE WHERE T: Formattable
 // ============================================================================
 
-extend Sliceable[T] where T: Formattable {
+extend Slice[T] where T: Formattable, T: Copyable {
     /// Renders as `"[e1, e2, ...]"`. Empty collections render as `"[]"`.
     ///
     /// # Examples

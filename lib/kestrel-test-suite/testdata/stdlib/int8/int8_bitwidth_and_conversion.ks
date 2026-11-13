@@ -50,13 +50,13 @@ module Test
 
             // init(from:) — from Int64
             let i64val: std.numeric.Int64 = 100;
-            let fromI64 = std.numeric.Int8(from: i64val);
+            let fromI64 = std.numeric.Int8(exactly: i64val)!;
             let expectedHundred: std.numeric.Int8 = 100;
             if fromI64 != expectedHundred { return 15 }
 
             // init(from:) — from Int64 negative
             let negI64: std.numeric.Int64 = -50;
-            let fromNegI64 = std.numeric.Int8(from: negI64);
+            let fromNegI64 = std.numeric.Int8(exactly: negI64)!;
             let expectedNegFifty: std.numeric.Int8 = -50;
             if fromNegI64 != expectedNegFifty { return 16 }
 

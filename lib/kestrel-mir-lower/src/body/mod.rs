@@ -471,6 +471,9 @@ pub(crate) struct OssaBodyCtx<'a, 'w> {
     /// terminator with remaining > 0 is the E497 binding error (bindings
     /// never cross blocks); remaining == 0 ends silently.
     pub(crate) ref_binding_remaining: HashMap<HirLocalId, usize>,
+    /// Scope depth each ref binding was declared at: a shared-ref `var` may
+    /// only be rebound there (a nested rebind would cross a merge, E497).
+    pub(crate) ref_binding_depth: HashMap<HirLocalId, usize>,
     /// Read exprs already counted against `ref_binding_remaining` — a
     /// re-lowered expr (desugar duplication) must not double-decrement.
     ref_binding_reads: std::collections::HashSet<kestrel_hir::body::HirExprId>,
@@ -490,6 +493,18 @@ pub(crate) struct OssaBodyCtx<'a, 'w> {
     /// returned borrow still chains to it is a verify consume-while-borrowed
     /// ICE (and E498 would blame the temp instead of the real storage).
     pub(crate) addr_anchors: HashMap<ValueId, ValueId>,
+    /// Borrowed arguments that peeled through `Indirection`: the final view
+    /// → the wrapper receiver it was lent from, its type, and the read
+    /// chain. `snapshot_overlapping_borrows` re-peels from a copy of the
+    /// wrapper when it overlaps a `mutating` argument.
+    pub(crate) peeled_arg_views: HashMap<
+        ValueId,
+        (
+            ValueId,
+            TyId,
+            Vec<kestrel_type_infer::result::IndirectionPeel>,
+        ),
+    >,
     /// Active while inline-lowering a default-argument expression (#148): maps
     /// the callee's type params to the call site's concrete type args. The
     /// default body was inferred against the callee's *generic* params, so every
@@ -593,9 +608,11 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
             ref_arg_borrows: HashMap::new(),
             ref_binding_vals: HashMap::new(),
             ref_binding_remaining: HashMap::new(),
+            ref_binding_depth: HashMap::new(),
             ref_binding_reads: std::collections::HashSet::new(),
             pending_writebacks: Vec::new(),
             addr_anchors: HashMap::new(),
+            peeled_arg_views: HashMap::new(),
             default_arg_subst: None,
         }
     }
@@ -694,8 +711,35 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
             // All params stamp Param(i) — Consuming included, so a borrow of
             // a consuming param carries it to the escape check (E496 there).
             let root = RootProvenance::Param(i as u32);
-            let val = match convention {
-                ParamConvention::MutBorrow => {
+            // A REF-typed signature param, borrowed or `mutating` (an
+            // `extend &T` / `extend &mutating T` method's self): the ABI
+            // value is the ref SLOT either way. A ref is never rebound, so
+            // a `mutating` one reads like a borrowed one: peel the slot into
+            // the let-ref view below, and calls on `self` reach the pointee
+            // instead of the slot holding the address.
+            let sig_ref = matches!(
+                convention,
+                ParamConvention::Borrow | ParamConvention::MutBorrow
+            )
+            .then(|| param_sig_tys.get(i))
+            .flatten()
+            .and_then(|&t| match self.ctx.module.ty_arena.get(t) {
+                MirTy::Ref { pointee, .. } => Some((t, *pointee)),
+                _ => None,
+            });
+            let val = match (convention, sig_ref) {
+                (_, Some((ref_ty, pointee))) => {
+                    let val = self.body.alloc_value(ValueDef {
+                        ty: ref_ty,
+                        ownership: Ownership::Guaranteed,
+                        borrow_source: None,
+                        root,
+                        span: None,
+                    });
+                    pending_ref_param_views.push((val, pointee, *hir_id));
+                    val
+                },
+                (ParamConvention::MutBorrow, None) => {
                     let val = self.body.alloc_value(ValueDef {
                         ty,
                         ownership: Ownership::Guaranteed,
@@ -726,44 +770,23 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
                     }
                     val
                 },
-                ParamConvention::Borrow => {
-                    // A REF-typed SIGNATURE param (`extend &T` methods'
-                    // self/`other: Self`): the ABI value is the ref SLOT
-                    // (resolve_local_type peels to the pointee — the expr
-                    // seam — so it can't type this). Allocate the param at
-                    // its signature type; the entry peel into the let-ref
-                    // VIEW representation is deferred below the loop — the
-                    // first `params_len` ValueIds must be exactly the params.
-                    let sig_ref =
-                        param_sig_tys
-                            .get(i)
-                            .and_then(|&t| match self.ctx.module.ty_arena.get(t) {
-                                MirTy::Ref { pointee, .. } => Some((t, *pointee)),
-                                _ => None,
-                            });
-                    if let Some((ref_ty, pointee)) = sig_ref {
-                        let val = self.body.alloc_value(ValueDef {
-                            ty: ref_ty,
-                            ownership: Ownership::Guaranteed,
-                            borrow_source: None,
-                            root,
-                            span: None,
-                        });
-                        pending_ref_param_views.push((val, pointee, *hir_id));
-                        val
-                    } else {
-                        let val = self.body.alloc_value(ValueDef {
-                            ty,
-                            ownership: Ownership::Guaranteed,
-                            borrow_source: None,
-                            root,
-                            span: None,
-                        });
-                        self.local_map.insert(*hir_id, LocalBinding::Ssa(val));
-                        val
-                    }
+                (ParamConvention::Borrow, None) => {
+                    // (Ref-typed signature params took the arm above:
+                    // resolve_local_type peels to the pointee — the expr
+                    // seam — so it can't type them. The entry peel into the
+                    // let-ref VIEW is deferred below the loop — the first
+                    // `params_len` ValueIds must be exactly the params.)
+                    let val = self.body.alloc_value(ValueDef {
+                        ty,
+                        ownership: Ownership::Guaranteed,
+                        borrow_source: None,
+                        root,
+                        span: None,
+                    });
+                    self.local_map.insert(*hir_id, LocalBinding::Ssa(val));
+                    val
                 },
-                ParamConvention::Consuming => {
+                (ParamConvention::Consuming, None) => {
                     let ownership = self.ownership_for(ty);
                     let val = self.alloc_value(ty, ownership);
                     self.body.values[val.index()].root = root;
@@ -1257,6 +1280,9 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
     /// scope-tracked, threads through control flow). The pattern-binding
     /// analog of `lower_borrow_init`'s registration.
     pub(crate) fn register_ref_binding(&mut self, v: ValueId, local: HirLocalId) {
+        self.ref_binding_depth
+            .entry(local)
+            .or_insert(self.scope_stack.len());
         self.ref_binding_vals.insert(v, local);
         let uses = self.local_use_count(local);
         self.ref_binding_remaining.insert(local, uses);
@@ -1643,7 +1669,14 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
             .into_iter()
             .filter_map(|(field, idx)| {
                 let ty = *field_tys.get(idx.index())?;
-                Some((idx, self.lower_default_arg_inline(field, ty, &type_args)))
+                // A field default is stored, never a borrowed view.
+                let (value, _) = self.lower_default_arg_inline(
+                    field,
+                    ty,
+                    &type_args,
+                    ParamConvention::Consuming,
+                );
+                Some((idx, value))
             })
             .collect()
     }
@@ -1676,10 +1709,13 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
             let Some(&opt_ty) = field_tys.get(idx.index()) else {
                 continue;
             };
-            let MirTy::Named { entity: opt, .. } = self.ctx.module.ty_arena.get(opt_ty) else {
+            let MirTy::Named { .. } = self.ctx.module.ty_arena.get(opt_ty) else {
                 continue;
             };
-            let Some(none) = self.ctx.resolve_variant_idx(*opt, "None") else {
+            let Some(none) = self
+                .ctx
+                .builtin_variant_idx(kestrel_hir::Builtin::OptionalNoneCase)
+            else {
                 continue;
             };
             out.push((idx, self.emit_enum_variant(opt_ty, none, Vec::new())));
@@ -1821,14 +1857,22 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
     /// (`ImplicitMember`); failure is anything else (`return null`, `throw` →
     /// `.Err`, `try` → `fromResidual`). A void return (`None`) is not a failure.
     pub fn is_init_failure_return(&self, value: &Option<HirExprId>) -> bool {
-        match value {
-            Some(v) => !matches!(
-                &self.hir.exprs[*v],
-                HirExpr::ImplicitMember { name, .. }
-                    if matches!(name.as_str_or_empty(), "Some" | "Ok")
-            ),
-            None => false,
+        let Some(v) = value else {
+            return false;
+        };
+        if !matches!(&self.hir.exprs[*v], HirExpr::ImplicitMember { .. }) {
+            return true;
         }
+        // The success case, by the tag on the case it resolved to.
+        let resolved = self.typed.as_ref().and_then(|t| t.resolutions.get(v));
+        let is_case = |b| {
+            self.ctx.query.query(kestrel_name_res::ResolveBuiltin {
+                builtin: b,
+                root: self.ctx.root,
+            }) == resolved.copied()
+        };
+        !(is_case(kestrel_hir::Builtin::OptionalSomeCase)
+            || is_case(kestrel_hir::Builtin::ResultOkCase))
     }
 
     /// At a failure `return` in a failable init, flag-guard-drop each
@@ -2443,8 +2487,21 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
             return None;
         }
         // A merge param can't carry a borrow — materialize an @owned result.
-        let result = if self.body.value(result).ownership == Ownership::Guaranteed {
-            let owned = self.emit_copy_value(result);
+        // An unsized one (`if c { s.trimmed() } else { … }`, a `StringSlice`)
+        // has no value to copy out: it is a ref crossing the merge (E497).
+        // Moving the borrow keeps the IR well-formed; the error aborts.
+        let guaranteed = self.body.value(result).ownership == Ownership::Guaranteed;
+        let ty = self.body.value(result).ty;
+        let unsized_ref = guaranteed && self.ctx.module.is_unsized(ty);
+        if unsized_ref {
+            self.emit_ref_across_merge_error(result);
+        }
+        let result = if guaranteed {
+            let owned = if unsized_ref {
+                self.emit_move_value(result)
+            } else {
+                self.emit_copy_value(result)
+            };
             // Arm-value decay: when the arm value is a tracked ref (ret_borrow
             // call result), the copy-out above was its single use — end its
             // borrow before the jump to the merge, or `set_terminator`'s sweep
@@ -3404,11 +3461,25 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
             let Some(root) = self.storage_root(a.value) else {
                 continue;
             };
+            if !mut_roots.contains(&root) {
+                continue;
+            }
+            // A peeled view (`xs.append(contentsOf: xs)` lends `xs.value`)
+            // snapshots its wrapper and peels again from the copy.
+            if let Some((base, base_ty, peels)) = self.peeled_arg_views.get(&a.value).cloned() {
+                if self.is_non_copyable(base_ty) || self.copy_behavior_is_mono_dependent(base_ty) {
+                    continue;
+                }
+                let snapshot = self.emit_copy_value(base);
+                let recv = CallArg {
+                    value: self.emit_begin_borrow(snapshot),
+                    convention: ParamConvention::Borrow,
+                };
+                a.value = self.apply_indirection_chain(recv, base_ty, &peels, false);
+                continue;
+            }
             let ty = self.body.value(a.value).ty;
-            if !mut_roots.contains(&root)
-                || self.is_non_copyable(ty)
-                || self.copy_behavior_is_mono_dependent(ty)
-            {
+            if self.is_non_copyable(ty) || self.copy_behavior_is_mono_dependent(ty) {
                 continue;
             }
             let snapshot = self.emit_copy_value(a.value);
@@ -4296,7 +4367,7 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
             .collect()
     }
 
-    fn is_borrow_tracked(&self, v: ValueId) -> bool {
+    pub(crate) fn is_borrow_tracked(&self, v: ValueId) -> bool {
         self.scope_stack.iter().any(|s| {
             s.entries
                 .iter()
@@ -4328,8 +4399,18 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
             }
             if self.ref_results.contains(&a) {
                 self.end_ref(a);
-            } else {
-                self.emit_end_borrow(a);
+                continue;
+            }
+            self.emit_end_borrow(a);
+            // A sub-borrow of an unnamed ref (`xs(i).toOwned()` peeling
+            // through `xs(i)`'s `Indirection`) was that ref's single use:
+            // end it too, as `emit_call_inner` does for a plain call, or it
+            // reaches the next terminator as a false E497.
+            if let Some(src) = self.body.value(a).borrow_source
+                && self.ref_results.contains(&src)
+                && self.is_borrow_tracked(src)
+            {
+                self.end_ref_if_single_use(src);
             }
         }
     }
@@ -4497,6 +4578,33 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
     /// E497, binding wording: a named ref binding still has uses after an
     /// inside-fn terminator — bindings never cross blocks (no @guaranteed
     /// block params in this version).
+    /// Is `local` being rebound in the scope that declared it?
+    pub(crate) fn in_ref_binding_scope(&self, local: HirLocalId) -> bool {
+        self.ref_binding_depth.get(&local) == Some(&self.scope_stack.len())
+    }
+
+    /// E497 for rebinding a shared-ref `var` inside a nested scope.
+    pub(crate) fn emit_rebind_across_merge_error(&mut self, local: HirLocalId, value: HirExprId) {
+        let name = self.hir.locals[local].name.clone();
+        let span = expr_span(&self.hir, value);
+        self.ctx.query.accumulate(
+            Diagnostic::error()
+                .with_code("E497")
+                .with_message(format!(
+                    "ref binding '{name}' cannot be rebound inside a branch or loop in this version"
+                ))
+                .with_labels(vec![
+                    Label::primary(span.file_id, span.range())
+                        .with_message("the new reference would cross the merge"),
+                ])
+                .with_notes(vec![
+                    "rebind it in the scope that declared it, or bind the branch's \
+                     result (`let x = ...;`) instead"
+                        .into(),
+                ]),
+        );
+    }
+
     fn emit_binding_across_merge_error(&mut self, v: ValueId, local: HirLocalId) {
         let name = self.hir.locals[local].name.clone();
         let span = self
@@ -4678,7 +4786,12 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
                 let self_type = self.type_from_type_ref(receiver_expr);
                 self.place_accessor_callee(accessor, self_type, vec![])
             } else {
-                let (recv_arg, receiver_ty) = self.accessor_receiver_mut_arg(&receiver)?;
+                let (recv_arg, receiver_ty) = match &receiver {
+                    AccessorReceiver::Expr(e) => {
+                        self.member_receiver_arg(expr_id, *e, ParamConvention::MutBorrow)
+                    },
+                    _ => self.accessor_receiver_mut_arg(&receiver)?,
+                };
                 let ta = self.resolve_type_args(expr_id);
                 call_args.push(recv_arg);
                 self.place_accessor_callee(accessor, receiver_ty, ta)

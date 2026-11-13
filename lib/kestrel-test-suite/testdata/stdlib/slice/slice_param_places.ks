@@ -2,17 +2,18 @@
 // stdlib: true
 // expect-stdout: 1212 1212 1212 | 7 12 2\n
 
-// Generic code over `Sliceable` lends through the required index places
-// (`s(i)`, ranges, `checked:`, `clamped:`, `within:`) on every conformer,
-// and an `UnsafeSlice` writes through its own places.
+// A borrowed `&Slice[T]` param lends through every index place (`s(i)`,
+// ranges, `checked:`, `clamped:`, `within:`), whether the argument is an
+// `Array`, a `Slice` or an `UnsafeSlice` (the last two peel to it), and an
+// `UnsafeSlice` writes through its own places.
 module Test
 
-import std.collections.(Array, Slice, Sliceable)
+import std.collections.(Array, Slice)
 import std.memory.(UnsafeSlice)
 
 struct P { var x: Int64 }
 
-func probe[S](s: &S) -> Int64 where S: Sliceable[P], S: not Static, S: not Copyable, S: not Sized {
+func probe(s: &Slice[P]) -> Int64 {
     let a = s(0).x;
     let r = s(1..<3);
     let c = match s(checked: 9) { .Some(p) => p.x, .None => -1 };

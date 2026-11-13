@@ -171,11 +171,10 @@ fn verify_against_fresh(
     let mut all_paths: Vec<&String> = stdlib_sources.keys().chain(user_sources.keys()).collect();
     all_paths.sort();
     for path in all_paths {
-        let text = stdlib_sources
-            .get(path)
-            .or_else(|| user_sources.get(path))
-            .expect("path in one of the source maps");
-        let entity = fresh.set_source(path, text.clone());
+        let entity = match stdlib_sources.get(path) {
+            Some(text) => fresh.set_std_source(path, text.clone()),
+            None => fresh.set_source(path, user_sources[path].clone()),
+        };
         fresh.build(entity);
     }
     let driver = CompilerDriver::new(&fresh);
@@ -241,7 +240,7 @@ fn sync_stdlib(state: &mut WorkerState, stdlib_sources: &HashMap<String, String>
     paths.sort();
     for path in paths {
         let text = &stdlib_sources[path];
-        let entity = state.compiler.set_source(path, text.clone());
+        let entity = state.compiler.set_std_source(path, text.clone());
         state.compiler.build(entity);
         state.by_path.insert(path.clone(), entity);
         state.stdlib_text.insert(path.clone(), text.clone());
@@ -528,7 +527,7 @@ mod tests {
         // CLI-style: single revision.
         let cli_diags = {
             let mut c = Compiler::new();
-            c.load_dir(std_dir);
+            c.load_std_dir(std_dir);
             let e = c.set_source(user_path, user_src.into());
             c.build(e);
             let d = CompilerDriver::new(&c);
@@ -543,7 +542,7 @@ mod tests {
         // LSP-style: extra begin_revision() between stdlib and user.
         let lsp_diags = {
             let mut c = Compiler::new();
-            c.load_dir(std_dir);
+            c.load_std_dir(std_dir);
             c.begin_revision();
             let e = c.set_source(user_path, user_src.into());
             c.build(e);
@@ -600,7 +599,7 @@ mod tests {
         // CLI-style baseline.
         let cli_diags = {
             let mut c = Compiler::new();
-            c.load_dir(std_dir);
+            c.load_std_dir(std_dir);
             let e = c.set_source(user_path, user_text.clone());
             c.build(e);
             let d = CompilerDriver::new(&c);
@@ -903,7 +902,7 @@ mod tests {
 
         // Fresh CLI build of v2.
         let mut fresh = Compiler::new();
-        fresh.load_dir(std_dir);
+        fresh.load_std_dir(std_dir);
         let e = fresh.set_source(&user_path, v2.into());
         fresh.build(e);
         let driver = CompilerDriver::new(&fresh);

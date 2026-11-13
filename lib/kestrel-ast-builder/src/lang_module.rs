@@ -25,35 +25,36 @@ pub fn seed_lang_module(world: &mut World, root: Entity) -> Entity {
     let lang = world.spawn();
     world.set(lang, NodeKind::Module);
     world.set(lang, Name("lang".into()));
+    world.set(lang, LangModule);
     world.set_parent(lang, root);
 
     // Primitive types
-    seed_scalar(world, lang, "i1");
-    seed_scalar(world, lang, "i8");
-    seed_scalar(world, lang, "i16");
-    seed_scalar(world, lang, "i32");
-    seed_scalar(world, lang, "i64");
+    seed_scalar(world, lang, LangType::I1);
+    seed_scalar(world, lang, LangType::I8);
+    seed_scalar(world, lang, LangType::I16);
+    seed_scalar(world, lang, LangType::I32);
+    seed_scalar(world, lang, LangType::I64);
     // No uN types — signedness is determined by the operation, not the type.
     // Both signed and unsigned integers use iN representation.
-    seed_scalar(world, lang, "f16");
-    seed_scalar(world, lang, "f32");
-    seed_scalar(world, lang, "f64");
-    seed_scalar(world, lang, "str");
+    seed_scalar(world, lang, LangType::F16);
+    seed_scalar(world, lang, LangType::F32);
+    seed_scalar(world, lang, LangType::F64);
+    seed_scalar(world, lang, LangType::Str);
     seed_ptr(world, lang);
     seed_slice(world, lang);
     // Structural singletons. `()` and `!` have no nominal entity of their own,
     // so seed synthetic ones (named "()" / "!") to make them extension targets.
     // MIR lowering maps these entities back to `MirTy::Tuple([])` / `MirTy::Never`
     // (see `try_lang_primitive`), so witnesses/uses agree on the structural repr.
-    seed_scalar(world, lang, "()");
-    seed_scalar(world, lang, "!");
+    seed_scalar(world, lang, LangType::Unit);
+    seed_scalar(world, lang, LangType::Never);
     // Reference types `&T` / `&mutating T` are likewise structural — these
     // generic synthetic entities (seed_ptr pattern) make them extension
     // targets (`extend &T: Equatable where T: Equatable`). The type layer
     // never uses the entities: every chokepoint maps them back to
     // `HirTy::Ref` / `TyKind::Ref` / `MirTy::Ref` (see `try_lang_primitive`).
-    seed_ref(world, lang, "&");
-    seed_ref(world, lang, "&mutating");
+    seed_ref(world, lang, false);
+    seed_ref(world, lang, true);
     // Tuples `(A, B, …)` likewise: one generic synthetic entity per arity
     // (args = the elements) makes `extend (X, Y): P where …` a target. The
     // type layer maps them back to `HirTy::Tuple` / `TyKind::Tuple` /
@@ -115,10 +116,11 @@ fn mark_unsafe_intrinsics(world: &mut World, lang: Entity) {
 // ===== Type seeding =====
 
 /// Create a scalar type entity (no type parameters).
-fn seed_scalar(world: &mut World, lang: Entity, name: &str) {
+fn seed_scalar(world: &mut World, lang: Entity, ty: LangType) {
     let e = world.spawn();
     world.set(e, NodeKind::Struct);
-    world.set(e, Name(name.into()));
+    world.set(e, Name(ty.name()));
+    world.set(e, ty);
     world.set(e, Vis::Public);
     world.set(e, Typed);
     world.set(e, Intrinsic);
@@ -129,7 +131,8 @@ fn seed_scalar(world: &mut World, lang: Entity, name: &str) {
 fn seed_ptr(world: &mut World, lang: Entity) {
     let ptr = world.spawn();
     world.set(ptr, NodeKind::Struct);
-    world.set(ptr, Name("ptr".into()));
+    world.set(ptr, Name(LangType::Ptr.name()));
+    world.set(ptr, LangType::Ptr);
     world.set(ptr, Vis::Public);
     world.set(ptr, Typed);
     world.set(ptr, Intrinsic);
@@ -149,7 +152,8 @@ fn seed_ptr(world: &mut World, lang: Entity) {
 fn seed_slice(world: &mut World, lang: Entity) {
     let slice = world.spawn();
     world.set(slice, NodeKind::Struct);
-    world.set(slice, Name("slice".into()));
+    world.set(slice, Name(LangType::Slice.name()));
+    world.set(slice, LangType::Slice);
     world.set(slice, Vis::Public);
     world.set(slice, Typed);
     world.set(slice, Intrinsic);
@@ -183,6 +187,7 @@ fn seed_tuple(world: &mut World, lang: Entity, arity: usize) {
     let tuple = world.spawn();
     world.set(tuple, NodeKind::Struct);
     world.set(tuple, Name(lang_tuple_name(arity)));
+    world.set(tuple, LangType::Tuple(arity));
     world.set(tuple, Vis::Public);
     world.set(tuple, Typed);
     world.set(tuple, Intrinsic);
@@ -200,10 +205,12 @@ fn seed_tuple(world: &mut World, lang: Entity, arity: usize) {
     world.set(tuple, TypeParams(params));
 }
 
-fn seed_ref(world: &mut World, lang: Entity, name: &str) {
+fn seed_ref(world: &mut World, lang: Entity, mutating: bool) {
+    let ty = LangType::Ref { mutating };
     let r = world.spawn();
     world.set(r, NodeKind::Struct);
-    world.set(r, Name(name.into()));
+    world.set(r, Name(ty.name()));
+    world.set(r, ty);
     world.set(r, Vis::Public);
     world.set(r, Typed);
     world.set(r, Intrinsic);

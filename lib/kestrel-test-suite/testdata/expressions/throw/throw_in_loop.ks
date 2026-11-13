@@ -1,10 +1,13 @@
 // test: diagnostics
 // stdlib: false
+// include: ../try_operator/try_prelude.ks
 
 module Test
 struct Error {}
 enum Result[T, E] {
+    @builtin(.ResultOkCase)
     case Ok(T)
+    @builtin(.ResultErrCase)
     case Err(E)
 }
 extend Result[T, E]: Prelude.FromResidual[E] {

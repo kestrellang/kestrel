@@ -9,6 +9,9 @@
 // expressions/closures/use_after_capture_noncopyable.ks).
 module Test
 
+@builtin(.Copyable)
+protocol Copyable {}
+
 struct Res: not Copyable {
     var v: lang.i64
 }

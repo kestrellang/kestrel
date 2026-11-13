@@ -245,10 +245,7 @@ pub fn last_stored_field_type(
 
 /// `lang.slice` — the one intrinsic nominal that is never Sized.
 fn is_lang_slice(ctx: &QueryContext<'_>, entity: Entity) -> bool {
-    ctx.get::<Intrinsic>(entity).is_some()
-        && ctx
-            .get::<kestrel_ast_builder::Name>(entity)
-            .is_some_and(|n| n.0 == "slice")
+    ctx.get::<kestrel_ast_builder::LangType>(entity) == Some(&kestrel_ast_builder::LangType::Slice)
 }
 
 /// Is a tail type unsized whatever the owner's args are: an always-unsized

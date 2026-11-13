@@ -146,6 +146,19 @@ pub struct FileId(pub Entity);
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct FilePath(pub String);
 
+/// Marker on a source file entity: the file is part of the standard library.
+/// Set by the loader (`Compiler::set_std_source` / `load_std_dir`), never
+/// inferred from a path or module name.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct StdlibSource;
+
+/// Marker: the top-level module the standard library's files declare
+/// (`std`). Set by `build_declarations` for [`StdlibSource`] files — THE way
+/// to find the stdlib root, so a user module named `std` is never taken
+/// for it.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct StdRootModule;
+
 /// Visibility modifier.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Vis {
@@ -592,6 +605,13 @@ pub struct ExtensionTarget(pub AstType);
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct ExtensionLhsParamNames(pub Vec<String>);
 
+/// On an extension written on one of its own params, `extend[T, R] R: P[T]
+/// where R: Q`: the param's name, `R`. The builder retargets such an
+/// extension at `Q` (it is the blanket conformance `extend[T] Q: P[T]`), and
+/// `R` names that extension's `Self` (`kestrel_name_res::is_self_name`).
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct ExtensionSelfAlias(pub String);
+
 /// Candidate type parameters a NESTED position of an extension's target
 /// introduces: `X` in `extend Box[W[X]]`, `A`/`B` in `extend Box[(A, B)]`.
 /// A pattern parameter binds by matching the receiver's arg against the
@@ -651,6 +671,64 @@ pub struct IsIndirect;
 /// be written `unsafe P` (see [`crate::unsafety::is_unsafe_protocol`]).
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct IsUnsafe;
+
+/// Marker: the seeded `lang` module. THE way to find it — never by its name,
+/// which a user module could share.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct LangModule;
+
+/// Which compiler-known type a seeded `lang` entity is. Set once by
+/// `seed_lang_module`; every site that maps a `lang` entity to its structural
+/// or primitive type reads this instead of the entity's spelling.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum LangType {
+    I1,
+    I8,
+    I16,
+    I32,
+    I64,
+    F16,
+    F32,
+    F64,
+    Str,
+    Ptr,
+    Slice,
+    /// Synthetic `()` extension target.
+    Unit,
+    /// Synthetic `!` extension target.
+    Never,
+    /// Synthetic `&T` / `&mutating T` extension target.
+    Ref {
+        mutating: bool,
+    },
+    /// Synthetic `(A, B, …)` extension target of this arity (≥ 2).
+    Tuple(usize),
+}
+
+impl LangType {
+    /// The entity's name in the `lang` module (`lang.i64`, `lang.&`, …).
+    pub fn name(self) -> String {
+        let fixed = match self {
+            LangType::I1 => "i1",
+            LangType::I8 => "i8",
+            LangType::I16 => "i16",
+            LangType::I32 => "i32",
+            LangType::I64 => "i64",
+            LangType::F16 => "f16",
+            LangType::F32 => "f32",
+            LangType::F64 => "f64",
+            LangType::Str => "str",
+            LangType::Ptr => "ptr",
+            LangType::Slice => "slice",
+            LangType::Unit => "()",
+            LangType::Never => "!",
+            LangType::Ref { mutating: false } => "&",
+            LangType::Ref { mutating: true } => "&mutating",
+            LangType::Tuple(arity) => return crate::lang_module::lang_tuple_name(arity),
+        };
+        fixed.to_string()
+    }
+}
 
 /// Marker: this is a compiler-intrinsic entity (lang module type or function).
 /// Codegen handles these specially — they don't have real bodies or layouts.

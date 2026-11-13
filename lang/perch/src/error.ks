@@ -104,7 +104,7 @@ public protocol IntoHttpError {
 }
 
 /// `try` on an `IntoHttpError` error inside a `throws HttpError` handler.
-extend Result[T, HttpError]: FromResidual[E] where E: IntoHttpError {
+extend[E] Result[T, HttpError]: FromResidual[E] where E: IntoHttpError {
     public static func fromResidual(consuming residual: E) -> Result[T, HttpError] {
         .Err(residual.intoHttpError())
     }

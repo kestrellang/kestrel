@@ -179,20 +179,29 @@ impl LowerCtx<'_> {
                 self.lower_enum_pat(case_name, &args, &span, force_mut)
             },
 
-            // `null` is `Optional.None`; type checking enforces the scrutinee
-            // is an optional through ordinary case resolution.
-            SyntaxKind::NullPattern => {
-                self.lower_enum_pat(Some("None".to_string()), &[], &span, force_mut)
-            },
+            // `null` is `Optional.None` — the tagged case itself, so a user
+            // case named `None` in scope can't capture it.
+            SyntaxKind::NullPattern => self.lang_case_pat(
+                kestrel_hir::Builtin::OptionalNoneCase,
+                Vec::new(),
+                "`null` pattern",
+                &span,
+            ),
 
             // `some PAT` is `.Some(PAT)`; nested sugar (`some some x`,
             // `some null`) flows through.
             SyntaxKind::SomePattern => {
-                let args = [EnumArg {
-                    label: None,
-                    pat: PatSrc::or_error(first_pat(node), &span),
-                }];
-                self.lower_enum_pat(Some("Some".to_string()), &args, &span, force_mut)
+                let inner = PatSrc::or_error(first_pat(node), &span);
+                let pattern = self.lower_pat_inner(&inner, force_mut);
+                self.lang_case_pat(
+                    kestrel_hir::Builtin::OptionalSomeCase,
+                    vec![HirPatArg {
+                        label: None,
+                        pattern,
+                    }],
+                    "`some` pattern",
+                    &span,
+                )
             },
 
             SyntaxKind::StructPattern => {

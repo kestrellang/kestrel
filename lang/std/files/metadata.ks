@@ -5,7 +5,7 @@ module std.files
 import std.numeric.(Int32, Int64, UInt32, UInt64)
 import std.core.(Bool, Equatable)
 import std.result.(Result)
-import std.text.(String, Formatter, Formattable, FormatOptions, _writePadded)
+import std.text.(String, Formatter, Formattable, FormatOptions)
 import std.streams.(IoError)
 import std.ffi.(malloc, free)
 import std.memory.(RawPointer)
@@ -34,7 +34,7 @@ public enum FileKind: Equatable, Formattable {
             .SymbolicLink => "symbolic link",
             .Other => "other"
         };
-        _writePadded(into: writer, text, options)
+        writer.pad(text, options)
     }
 
     func code() -> Int64 {
@@ -124,7 +124,7 @@ internal func metadataFrom(out: RawPointer) -> Metadata {
     Metadata(
         kind: FileKind.of(unsafe cells.offset(by: 0).read()),
         size: unsafe cells.offset(by: 1).read(),
-        permissions: Permissions(UInt32(from: unsafe cells.offset(by: 2).read())),
+        permissions: Permissions(UInt32(truncating: unsafe cells.offset(by: 2).read())),
         modified: unsafe cells.offset(by: 3).read(),
         accessed: unsafe cells.offset(by: 4).read(),
         device: UInt64(truncating: unsafe cells.offset(by: 5).read()),

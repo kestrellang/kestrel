@@ -101,7 +101,9 @@ pub fn resolve_type_path_chain(
     context: Entity,
     root: Entity,
 ) -> TypePathChain {
-    let self_rooted = segments.first().is_some_and(|s| s == "Self");
+    let self_rooted = segments
+        .first()
+        .is_some_and(|s| crate::helpers::is_self_name(ctx, s, context));
     let mut steps = Vec::with_capacity(segments.len());
     let resolution = resolve_path_steps(ctx, segments, context, root, &mut steps);
     // Only a fully resolved path has a meaningful chain; a partial walk that
@@ -129,8 +131,8 @@ fn resolve_path_steps(
         return TypeResolution::NotFound("<empty>".into());
     }
 
-    // Handle "Self" keyword
-    if segments[0] == "Self" {
+    // Handle "Self" keyword (or an extension's alias for it)
+    if crate::helpers::is_self_name(ctx, &segments[0], context) {
         // Multi-segment Self.Item — try resolving through synthetic type param
         if segments.len() > 1 {
             if let Some(result) =
@@ -780,6 +782,7 @@ mod tests {
         let std = world.spawn();
         world.set(std, NodeKind::Module);
         world.set(std, Name("std".into()));
+        world.set(std, kestrel_ast_builder::StdRootModule);
         world.set_parent(std, root);
 
         let core = world.spawn();

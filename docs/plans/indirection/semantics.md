@@ -102,6 +102,20 @@ Nested wrappers peel once per level. Generic params never peel (`T` binds the
 wrapper). The type checker records the chain per argument
 (`TypedBody.arg_indirection_peels`) and MIR passes the last pointee view.
 
+Every way an argument reaches a borrowed param peels the same way: function,
+method and init calls, a defaulted param's value (`aad: &Slice[UInt8] =
+Array()`), and an overload that only fits through the peel (exact nominal
+matches win first; the peel fallback checks the wrapper's `Target`). An
+argument whose own type is still pending (a method call's result) waits for
+it until the body's first flush, before literal defaults. An array literal
+the param can't take (`total([1, 2])` with `&Slice[Int64]`) waits for its
+default, `Array`, and peels from that.
+
+The std uses this in place of a `Sliceable` protocol: `Array` and
+`UnsafeSlice` are `MutableIndirection`s with `Target = Slice[T]`, so a
+`&Slice[T]` param takes any of them, and `Slice`'s methods are theirs through
+the member peel.
+
 ## R7 — Operators and conformances do NOT ride the peel
 
 Binary operators (`==`, `<`, `+`, …), hashing, `Formattable`, and every other

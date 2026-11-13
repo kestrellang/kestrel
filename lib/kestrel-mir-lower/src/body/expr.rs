@@ -37,6 +37,15 @@ impl OssaBodyCtx<'_, '_> {
         self.apply_promotion(expr_id, value)
     }
 
+    /// Is the promotion at `expr_id` a `DecaysFrom.decaying(from:)`
+    /// conversion (a view converted to its owned type)?
+    fn is_decays_from(&self, method: Entity) -> bool {
+        self.ctx.query.query(kestrel_name_res::ResolveBuiltin {
+            builtin: kestrel_hir::Builtin::DecaysFromMethod,
+            root: self.ctx.root,
+        }) == Some(method)
+    }
+
     /// Lower `expr_id` while `held` values, lowered earlier, stay in use
     /// after it. An expression that branches (`if`, `match`, `try`) threads
     /// every scope-tracked value through block params and renames it in the
@@ -169,7 +178,21 @@ impl OssaBodyCtx<'_, '_> {
             return value;
         };
         self.ctx.register_name(protocol);
+        let decays = self.is_decays_from(requirement);
+        // A `DecaysFrom` source is an unsized view, held by reference: the
+        // protocol arg is the view type, not the ref.
         let source_ty = self.body.value(value).ty;
+        let source_ty = if decays {
+            self.ctx.module.ty_arena.peel_ref(source_ty)
+        } else {
+            source_ty
+        };
+        kestrel_debug::ktrace!(
+            "decays-from",
+            "promotion at {expr_id:?}: decays={decays} source {:?} target {:?}",
+            self.ctx.module.ty_arena.get(source_ty),
+            self.ctx.module.ty_arena.get(target_ty)
+        );
         let callee = Callee::Witness {
             protocol,
             method: self.ctx.witness_method_key(requirement),
@@ -183,7 +206,13 @@ impl OssaBodyCtx<'_, '_> {
         // result (a heap `Array`/`String` var tail promoted at a `throws`/
         // optional return). Scalars masked it via a bitwise register copy.
         // Consume the value so ownership transfers into the wrapped enum.
-        let arg = self.prepare_call_arg(value, ParamConvention::Consuming);
+        // `DecaysFrom.decaying(from: &View)` borrows the view it copies.
+        let convention = if decays {
+            ParamConvention::Borrow
+        } else {
+            ParamConvention::Consuming
+        };
+        let arg = self.prepare_call_arg(value, convention);
         self.emit_call_returning(callee, vec![arg], target_ty)
     }
 
@@ -668,8 +697,15 @@ impl OssaBodyCtx<'_, '_> {
         let Some(peels) = self.arg_indirection_peels_of(expr_id) else {
             return self.prepare_call_arg_for_expr(expr_id, conv);
         };
-        let view =
-            self.lower_indirection_chain(expr_id, &peels, conv == ParamConvention::MutBorrow);
+        let mutating = conv == ParamConvention::MutBorrow;
+        let base_ty = self.resolve_expr_type(expr_id);
+        let base = self.prepare_call_arg_for_expr(expr_id, conv);
+        let base_value = base.value;
+        let view = self.apply_indirection_chain(base, base_ty, &peels, mutating);
+        if !mutating {
+            self.peeled_arg_views
+                .insert(view, (base_value, base_ty, peels));
+        }
         CallArg {
             value: view,
             convention: conv,
@@ -693,10 +729,27 @@ impl OssaBodyCtx<'_, '_> {
         } else {
             ParamConvention::Borrow
         };
-        // Level 0 receiver is the wrapper expression; later levels receive the
-        // previous level's pointee view.
-        let mut recv_ty = self.resolve_expr_type(base);
-        let mut recv_arg = self.prepare_call_arg_for_expr(base, conv);
+        // Level 0 receiver is the wrapper expression.
+        let recv_ty = self.resolve_expr_type(base);
+        let recv_arg = self.prepare_call_arg_for_expr(base, conv);
+        self.apply_indirection_chain(recv_arg, recv_ty, peels, mutating)
+    }
+
+    /// The accessor calls of an `Indirection` peel on an already-lowered
+    /// wrapper receiver `recv_arg` of type `recv_ty`: each level's result
+    /// is the next level's receiver; returns the last pointee view.
+    pub(crate) fn apply_indirection_chain(
+        &mut self,
+        mut recv_arg: CallArg,
+        mut recv_ty: TyId,
+        peels: &[IndirectionPeel],
+        mutating: bool,
+    ) -> ValueId {
+        let conv = if mutating {
+            ParamConvention::MutBorrow
+        } else {
+            ParamConvention::Borrow
+        };
         let mut last: Option<ValueId> = None;
         for peel in peels {
             // `mut_method` is guaranteed Some at a write site (D2 rejects the
@@ -776,6 +829,46 @@ impl OssaBodyCtx<'_, '_> {
         self.emit_literal(Immediate::unit())
     }
 
+    /// The receiver argument of member `member_expr` on `receiver`, and the
+    /// type its callee's type args come from. When the member was reached
+    /// through an `Indirection` peel (`v(1)`, `b(0) = 9` where only the
+    /// target declares the subscript), that is the pointee view and type.
+    pub(crate) fn member_receiver_arg(
+        &mut self,
+        member_expr: HirExprId,
+        receiver: HirExprId,
+        conv: ParamConvention,
+    ) -> (CallArg, TyId) {
+        let Some(peels) = self.indirection_peels_of(member_expr) else {
+            let ty = self.resolve_expr_type(receiver);
+            return (self.prepare_call_arg_for_expr(receiver, conv), ty);
+        };
+        let ty = lower_resolved_ty(self.ctx, &peels.last().unwrap().target);
+        let view =
+            self.lower_indirection_chain(receiver, &peels, conv == ParamConvention::MutBorrow);
+        (
+            CallArg {
+                value: view,
+                convention: conv,
+            },
+            ty,
+        )
+    }
+
+    /// The read accessor of the concrete computed property `expr_id`
+    /// resolves to, if it is one (its `ref` provider when it has one).
+    fn peeled_property_getter(&self, expr_id: HirExprId) -> Option<kestrel_hecs::Entity> {
+        let resolved = self.typed.as_ref()?.resolutions.get(&expr_id).copied()?;
+        self.ctx.world.get::<Callable>(resolved)?;
+        if self.ctx.world.has::<kestrel_ast_builder::Static>(resolved) {
+            return None;
+        }
+        Some(
+            self.read_place_provider(resolved, expr_id)
+                .unwrap_or(resolved),
+        )
+    }
+
     /// The protocol property requirement `expr_id` resolves to (a field
     /// declared in a protocol), if any.
     fn protocol_property_requirement(&self, expr_id: HirExprId) -> Option<kestrel_hecs::Entity> {
@@ -823,6 +916,19 @@ impl OssaBodyCtx<'_, '_> {
                 {
                     return result;
                 }
+            }
+            // A computed property on the pointee (`xs.first` on an `Array`
+            // peeled to `Slice`) calls its getter with the view as receiver.
+            if let Some(getter) = self.peeled_property_getter(expr_id) {
+                self.ctx.register_name(getter);
+                let method_type_args = self.resolve_type_args(expr_id);
+                let convention = self.ctx.read_receiver_convention(getter);
+                let arg = CallArg {
+                    value: view,
+                    convention,
+                };
+                let callee = self.place_accessor_callee(getter, pointee_ty, method_type_args);
+                return self.emit_call_returning(callee, vec![arg], result_ty);
             }
             let field_idx = match self.ctx.module.ty_arena.get(pointee_ty) {
                 MirTy::Named { entity, .. } => self.ctx.resolve_field_idx(*entity, field_name),
@@ -1239,6 +1345,50 @@ impl OssaBodyCtx<'_, '_> {
     // Assign
     // ================================================================
 
+    /// Does assigning to `local` rebind it — a `var` holding a shared ref?
+    fn rebinds_shared_ref(&self, local: super::HirLocalId) -> bool {
+        self.hir.locals[local].is_mut
+            && self.typed.as_ref().is_some_and(|t| {
+                matches!(
+                    t.local_types.get(&local),
+                    Some(kestrel_type_infer::result::ResolvedTy::Ref {
+                        mutating: false,
+                        ..
+                    })
+                )
+            })
+    }
+
+    /// `a = s.trimmedStart()` on a shared-ref `var`: end the old borrow and
+    /// bind the local to the new ref. The binding keeps its remaining read
+    /// budget, less the assignment target's own occurrence.
+    fn rebind_ref_local(&mut self, local: super::HirLocalId, value: HirExprId) -> ValueId {
+        // A rebind inside a branch or loop would have to carry the new ref
+        // across the merge, which v1 can't (E497): only the binding's own
+        // scope may rebind it.
+        let rhs = self.lower_expr(value);
+        if !self.in_ref_binding_scope(local) {
+            self.emit_rebind_across_merge_error(local, value);
+            self.end_ref_if_single_use(rhs);
+            return self.emit_literal(Immediate::unit());
+        }
+        let remaining = self
+            .ref_binding_remaining
+            .get(&local)
+            .copied()
+            .unwrap_or(0)
+            .saturating_sub(1);
+        if let Some(old) = self.local_map.get(&local).map(|b| b.value()) {
+            self.ref_binding_vals.remove(&old);
+            if self.is_borrow_tracked(old) {
+                self.end_ref(old);
+            }
+        }
+        self.register_ref_binding(rhs, local);
+        self.ref_binding_remaining.insert(local, remaining);
+        self.emit_literal(Immediate::unit())
+    }
+
     fn lower_assign(
         &mut self,
         _expr_id: HirExprId,
@@ -1265,6 +1415,12 @@ impl OssaBodyCtx<'_, '_> {
             // drain, which would silently drop the write.
             self.drain_writebacks(wb_mark);
             return result;
+        }
+
+        if let HirExpr::Local(local, _) = self.hir.exprs[target]
+            && self.rebinds_shared_ref(local)
+        {
+            return self.rebind_ref_local(local, value);
         }
 
         // Simple stored assignment
@@ -1811,10 +1967,10 @@ impl OssaBodyCtx<'_, '_> {
                 let self_type = self.type_from_type_ref(callee_expr);
                 self.place_accessor_callee(accessor, self_type, vec![])
             } else {
-                let receiver_ty = self.resolve_expr_type(callee_expr);
+                let (recv_arg, receiver_ty) =
+                    self.member_receiver_arg(target_id, callee_expr, ParamConvention::MutBorrow);
                 let ta = self.resolve_type_args(target_id);
-                call_args
-                    .push(self.prepare_call_arg_for_expr(callee_expr, ParamConvention::MutBorrow));
+                call_args.push(recv_arg);
                 self.place_accessor_callee(accessor, receiver_ty, ta)
             };
             for a in args {
@@ -1857,14 +2013,14 @@ impl OssaBodyCtx<'_, '_> {
             let callee = Callee::direct_with_args(setter, type_args, None);
             self.emit_call_void(callee, call_args);
         } else {
-            let receiver_ty = self.resolve_expr_type(callee_expr);
             let type_args = self.resolve_type_args(target_id);
 
             // Use prepare_call_arg_for_expr to get the var address directly
             // (via the place resolver) instead of lower_expr which emits CopyAddr —
             // a shallow copy that breaks COW refcounting.
-            let mut call_args =
-                vec![self.prepare_call_arg_for_expr(callee_expr, ParamConvention::MutBorrow)];
+            let (recv_arg, receiver_ty) =
+                self.member_receiver_arg(target_id, callee_expr, ParamConvention::MutBorrow);
+            let mut call_args = vec![recv_arg];
             for v in subscript_args {
                 call_args.push(self.prepare_call_arg(v, ParamConvention::Borrow));
             }

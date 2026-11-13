@@ -4,7 +4,7 @@ module std.files
 
 import std.numeric.(Int64, UInt8)
 import std.collections.(Array, Slice)
-import std.text.(String, Formatter, Formattable, FormatOptions, _writePadded)
+import std.text.(String, Formatter, Formattable, FormatOptions)
 import std.core.(Bool, Equatable, Hashable, Hasher, Cloneable, ExpressibleByStringLiteral, Divisible)
 import std.result.(Optional, Result)
 import std.streams.(IoError)
@@ -261,7 +261,7 @@ public struct Path: Equatable, Hashable, Cloneable, Formattable, ExpressibleBySt
 
     /// Writes the path as text (non-UTF-8 bytes as U+FFFD).
     public func format(mutating into writer: some Formatter, options: FormatOptions = FormatOptions.default()) {
-        _writePadded(into: writer, self.string, options)
+        writer.pad(self.string, options)
     }
 
     // ========================================================================

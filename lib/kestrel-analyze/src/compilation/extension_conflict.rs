@@ -20,7 +20,7 @@ use crate::context::CompilationContext;
 use crate::diagnostic::*;
 use crate::traits::{AnalyzerId, CompilationCheck, Describe};
 use crate::util;
-use kestrel_ast_builder::{Callable, Name, NodeKind, WhereClause};
+use kestrel_ast_builder::{Callable, Name, NodeKind, WhereClause, WhereConstraint};
 use kestrel_hecs::Entity;
 use kestrel_name_res::ExtensionTargetEntity;
 
@@ -111,8 +111,9 @@ impl CompilationCheck for ExtensionConflictAnalyzer {
             } // is_concrete_type
 
             // Check E412: extension vs extension method (same specificity)
-            // Only for concrete types. Skip if either extension has where clauses
-            // (where clauses may differentiate the extensions, preventing real overlap).
+            // Only for concrete types. Skip if either extension has a requiring
+            // where clause (it may differentiate the extensions, preventing real
+            // overlap); a `T: not P` relaxation never does.
             if !is_concrete_type {
                 continue;
             }
@@ -126,8 +127,8 @@ impl CompilationCheck for ExtensionConflictAnalyzer {
                         continue;
                     }
 
-                    // Skip if either extension has where clauses (may not overlap)
-                    if has_where_clause(cx, *ext_i) || has_where_clause(cx, *ext_j) {
+                    // Skip if either extension's clauses may narrow it (may not overlap)
+                    if has_requirement_clause(cx, *ext_i) || has_requirement_clause(cx, *ext_j) {
                         continue;
                     }
 
@@ -244,11 +245,14 @@ fn same_labels(cx: &CompilationContext<'_>, a: Entity, b: Entity) -> bool {
     labels_a == labels_b
 }
 
-/// Check if an extension has any where clause constraints.
-fn has_where_clause(cx: &CompilationContext<'_>, extension: Entity) -> bool {
-    cx.query
-        .get::<WhereClause>(extension)
-        .is_some_and(|wc| !wc.0.is_empty())
+/// Does an extension have a where clause that narrows which types it applies
+/// to? `T: not P` only relaxes an implicit marker bound ("T may lack P"), so
+/// an extension whose clauses are all relaxations covers every `T`.
+fn has_requirement_clause(cx: &CompilationContext<'_>, extension: Entity) -> bool {
+    cx.query.get::<WhereClause>(extension).is_some_and(|wc| {
+        wc.0.iter()
+            .any(|c| !matches!(c, WhereConstraint::NegativeBound { .. }))
+    })
 }
 
 /// Count concrete (non-type-parameter) type args on an extension target.

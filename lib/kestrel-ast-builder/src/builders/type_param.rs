@@ -17,6 +17,19 @@ pub fn build_type_parameters(
     file_entity: Entity,
     file_id: usize,
 ) {
+    build_type_parameters_except(world, parent, node, file_entity, file_id, &[]);
+}
+
+/// [`build_type_parameters`], skipping the params named in `skip` — an
+/// extension's declared params that its target already binds.
+pub fn build_type_parameters_except(
+    world: &mut World,
+    parent: Entity,
+    node: &impl HasGenerics,
+    file_entity: Entity,
+    file_id: usize,
+    skip: &[String],
+) {
     let Some(list) = node.type_parameter_list() else {
         return;
     };
@@ -26,6 +39,9 @@ pub fn build_type_parameters(
         let Some(name) = param.name_text() else {
             continue;
         };
+        if skip.contains(&name) {
+            continue;
+        }
         let entity = world.spawn();
         world.set(entity, NodeKind::TypeParameter);
         world.set(entity, Name(name));

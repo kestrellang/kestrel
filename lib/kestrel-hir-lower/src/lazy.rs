@@ -16,10 +16,10 @@
 //! ```
 
 use kestrel_ast_builder::{Lazy, Name};
+use kestrel_hir::Builtin;
 use kestrel_hir::LocalId;
 use kestrel_hir::body::{
-    HirBlock, HirCallArg, HirExpr, HirExprId, HirMatchArm, HirName, HirPat, HirPatArg, HirStmt,
-    MatchSource,
+    HirBlock, HirExpr, HirExprId, HirMatchArm, HirName, HirPat, HirPatArg, HirStmt, MatchSource,
 };
 use kestrel_span::Span;
 use kestrel_syntax_tree::SyntaxNode;
@@ -59,17 +59,7 @@ impl LowerCtx<'_> {
         span: &Span,
     ) -> kestrel_hir::body::HirStmtId {
         let target = self.cache_place(self_local, cache, span);
-        let some = self.alloc_expr(HirExpr::ImplicitMember {
-            owner: None,
-            name: HirName::name("Some"),
-            args: Some(vec![HirCallArg {
-                trailing_closure: false,
-                label: None,
-                value,
-            }]),
-            requirement: None,
-            span: span.clone(),
-        });
+        let some = self.lang_case_value(Builtin::OptionalSomeCase, Some(value), "`lazy`", span);
         let assign = self.alloc_expr(HirExpr::Assign {
             target,
             value: some,
@@ -102,23 +92,20 @@ impl LowerCtx<'_> {
             by_ref: None,
             span: span.clone(),
         });
-        let some_pat = self.alloc_pat(HirPat::ImplicitVariant {
-            name: HirName::name("Some"),
-            args: vec![HirPatArg {
+        let some_pat = self.lang_case_pat(
+            Builtin::OptionalSomeCase,
+            vec![HirPatArg {
                 label: None,
                 pattern: hit_pat,
             }],
-            span: span.clone(),
-        });
+            "`lazy`",
+            &span,
+        );
         let hit_body = self.alloc_expr(HirExpr::Local(hit, span.clone()));
         self.pop_scope();
 
         // `.None => { let v = init; self.$x = .Some(v); v }`
-        let none_pat = self.alloc_pat(HirPat::ImplicitVariant {
-            name: HirName::name("None"),
-            args: Vec::new(),
-            span: span.clone(),
-        });
+        let none_pat = self.lang_case_pat(Builtin::OptionalNoneCase, Vec::new(), "`lazy`", &span);
         self.push_scope();
         let computed = self.lower_block_stmts(&[], Some(&ExprSrc::Node(init.clone())));
         let mut stmts = computed.stmts;

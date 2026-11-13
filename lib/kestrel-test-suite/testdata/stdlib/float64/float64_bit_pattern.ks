@@ -16,13 +16,13 @@ func f(v: Float64) -> Float64 { v }
 @main
 func main() -> lang.i32 {
     // 1.0 = 0x3FF0000000000000
-    if f(1.0).bitPattern != UInt64(from: 4607182418800017408) { return 1 };
+    if f(1.0).bitPattern != UInt64(exactly: 4607182418800017408)! { return 1 };
     // 0.5 = 0x3FE0000000000000
-    if f(0.5).bitPattern != UInt64(from: 4602678819172646912) { return 2 };
+    if f(0.5).bitPattern != UInt64(exactly: 4602678819172646912)! { return 2 };
     // +0.0 has all-zero bits
     if f(0.0).bitPattern != UInt64.zero { return 3 };
     // round-trip bits -> float -> bits
-    let back = Float64(bitPattern: UInt64(from: 4607182418800017408));
+    let back = Float64(bitPattern: UInt64(exactly: 4607182418800017408)!);
     if back != f(1.0) { return 4 };
     // value -> bits -> value round-trips for an arbitrary value
     let pi = f(3.14159);

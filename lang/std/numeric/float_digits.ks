@@ -349,12 +349,12 @@ func floatRoundDecimal(D: Array[UInt32], k: Int64, sigBits: Int64, minE: Int64, 
 
     // Cheap magnitude estimate (no big-integer work yet) to short-circuit clear
     // over/underflow — otherwise an absurd exponent would build a giant 5^k.
-    let log2val = Float64(from: bnBitLen(D) - 1)
-        .add(Float64(from: k).multiply(Float64(floatLiteral: 3.321928094887362)));
-    if log2val > Float64(from: maxE + sigBits + 3) {
+    let log2val = Float64(rounding: bnBitLen(D) - 1)
+        .add(Float64(rounding: k).multiply(Float64(floatLiteral: 3.321928094887362)));
+    if log2val > Float64(rounding: maxE + sigBits + 3) {
         return FloatParts(m: UInt64.zero, e: 0, overflow: true)
     };
-    if log2val < Float64(from: minE - 3) {
+    if log2val < Float64(rounding: minE - 3) {
         return FloatParts(m: UInt64.zero, e: 0, overflow: false)
     };
 
@@ -441,7 +441,7 @@ func floatSigDigits(m: UInt64, e: Int64, sig: Int64) -> FloatSig {
         while i < sig { zeros.append(0); i = i + 1 };
         return FloatSig(digits: zeros, decExp: 0)
     };
-    let approx = Float64(from: e + bitLen64(m) - 1)
+    let approx = Float64(rounding: e + bitLen64(m) - 1)
         .multiply(Float64(floatLiteral: 0.30102999566398114));
     var decExp = Int64(raw: lang.cast_f64_i64(approx.floor().raw));
 
@@ -657,17 +657,15 @@ func floatSciString(m: UInt64, e: Int64, precision: Int64, upper: Bool) -> Strin
     appendExponent(out, sr.decExp, upper)
 }
 
-/// Hexadecimal floating-point string (C's `%a`) of a non-negative finite
-/// value from its raw IEEE-754 fields: `0x1.ffp+7` for 255.5, `0x0p+0` for
-/// zero, `0x0.8p-1022` for a subnormal. Exact: every binary digit shows.
+/// Hexadecimal floating-point digits (C's `%a` without its `0x` prefix) of
+/// a non-negative finite value from its raw IEEE-754 fields: `1.ffp+7` for
+/// 255.5, `0p+0` for zero, `0.8p-1022` for a subnormal. Exact: every binary
+/// digit shows.
 /// `mantBits` is the stored fraction width (52 or 23) and `bias` the exponent
-/// bias (1023 or 127). The caller applies sign and padding.
+/// bias (1023 or 127). The caller applies sign, prefix and padding.
 func floatHexString(rawExp: Int64, rawMant: UInt64, mantBits: Int64, bias: Int64, upper: Bool) -> String {
-    let xChar: Int64 = if upper { 88 } else { 120 };   // 'X' / 'x'
     let pChar: Int64 = if upper { 80 } else { 112 };   // 'P' / 'p'
     var out = String();
-    out.appendByte(UInt8(truncating: 48));   // '0'
-    out.appendByte(UInt8(truncating: xChar));
     let isZero = rawExp == 0 and rawMant == UInt64.zero;
     // A subnormal (and zero) has a leading 0 and the minimum exponent.
     let lead: Int64 = if rawExp == 0 { 0 } else { 1 };

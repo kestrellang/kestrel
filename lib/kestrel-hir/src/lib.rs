@@ -7,7 +7,7 @@
 //! - Types are resolved to entities
 
 pub mod body;
-pub mod builtin;
+pub use kestrel_ast::builtin;
 pub mod res;
 pub mod ty;
 

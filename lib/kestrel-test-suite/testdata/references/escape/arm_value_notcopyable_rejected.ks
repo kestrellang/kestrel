@@ -8,6 +8,9 @@
 // (copy_out_notcopyable_rejected.ks).
 module Test
 
+@builtin(.Copyable)
+protocol Copyable {}
+
 struct Res: not Copyable {
     var v: lang.i64
 }

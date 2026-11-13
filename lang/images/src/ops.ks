@@ -103,27 +103,27 @@ struct ResampleTable {
     var span: Int64;
 
     init(source source: Int64, target target: Int64, filter filter: ResizeFilter) {
-        let scale = Float32(from: source) / Float32(from: target);
+        let scale = Float32(rounding: source) / Float32(rounding: target);
         // Downscaling widens the filter so every source pixel contributes.
         var filterScale: Float32 = 1.0;
         if scale > 1.0 { filterScale = scale; }
         let radius = filter.support * filterScale;
-        self.span = (radius * 2.0).ceil().toInt64() ?? 1;
+        self.span = Int64(exactly: (radius * 2.0).ceil()) ?? 1;
         self.span = self.span + 1;
         self.starts = [];
         self.counts = [];
         self.weights = Array[Float32](repeating: 0.0, count: target * self.span);
         for i in 0..<target {
             // Pixel centers sit at +0.5.
-            let center = (Float32(from: i) + 0.5) * scale;
-            var first = (center - radius).floor().toInt64() ?? 0;
-            var last = (center + radius).ceil().toInt64() ?? 0;
+            let center = (Float32(rounding: i) + 0.5) * scale;
+            var first = Int64(exactly: (center - radius).floor()) ?? 0;
+            var last = Int64(exactly: (center + radius).ceil()) ?? 0;
             if first < 0 { first = 0; }
             if last > source { last = source; }
             if last - first > self.span { last = first + self.span; }
             var total: Float32 = 0.0;
             for j in first..<last {
-                let w = filter.weight((Float32(from: j) + 0.5 - center) / filterScale);
+                let w = filter.weight((Float32(rounding: j) + 0.5 - center) / filterScale);
                 self.weights(i * self.span + j - first) = w;
                 total = total + w;
             }

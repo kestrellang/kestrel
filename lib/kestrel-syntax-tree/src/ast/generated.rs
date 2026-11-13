@@ -119,6 +119,9 @@ impl ExtensionDeclaration {
     pub fn extend_token(&self) -> Option<SyntaxToken> {
         support::token(&self.syntax, SyntaxKind::Extend)
     }
+    pub fn type_parameter_list(&self) -> Option<TypeParameterList> {
+        support::child(&self.syntax)
+    }
     pub fn ty(&self) -> Option<Ty> {
         support::child(&self.syntax)
     }
@@ -712,6 +715,39 @@ impl AstNode for AttributeList {
     }
 }
 
+/// `TypeParameterList` node.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct TypeParameterList {
+    pub(crate) syntax: SyntaxNode,
+}
+
+impl TypeParameterList {
+    pub fn l_bracket_token(&self) -> Option<SyntaxToken> {
+        support::token(&self.syntax, SyntaxKind::LBracket)
+    }
+    pub fn type_parameters(&self) -> AstChildren<TypeParameter> {
+        support::children(&self.syntax)
+    }
+    pub fn comma_token(&self) -> Option<SyntaxToken> {
+        support::token(&self.syntax, SyntaxKind::Comma)
+    }
+    pub fn r_bracket_token(&self) -> Option<SyntaxToken> {
+        support::token(&self.syntax, SyntaxKind::RBracket)
+    }
+}
+
+impl AstNode for TypeParameterList {
+    fn can_cast(kind: SyntaxKind) -> bool {
+        kind == SyntaxKind::TypeParameterList
+    }
+    fn cast(syntax: SyntaxNode) -> Option<Self> {
+        Self::can_cast(syntax.kind()).then_some(Self { syntax })
+    }
+    fn syntax(&self) -> &SyntaxNode {
+        &self.syntax
+    }
+}
+
 /// `Ty` node.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Ty {
@@ -898,39 +934,6 @@ impl Name {
 impl AstNode for Name {
     fn can_cast(kind: SyntaxKind) -> bool {
         kind == SyntaxKind::Name
-    }
-    fn cast(syntax: SyntaxNode) -> Option<Self> {
-        Self::can_cast(syntax.kind()).then_some(Self { syntax })
-    }
-    fn syntax(&self) -> &SyntaxNode {
-        &self.syntax
-    }
-}
-
-/// `TypeParameterList` node.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct TypeParameterList {
-    pub(crate) syntax: SyntaxNode,
-}
-
-impl TypeParameterList {
-    pub fn l_bracket_token(&self) -> Option<SyntaxToken> {
-        support::token(&self.syntax, SyntaxKind::LBracket)
-    }
-    pub fn type_parameters(&self) -> AstChildren<TypeParameter> {
-        support::children(&self.syntax)
-    }
-    pub fn comma_token(&self) -> Option<SyntaxToken> {
-        support::token(&self.syntax, SyntaxKind::Comma)
-    }
-    pub fn r_bracket_token(&self) -> Option<SyntaxToken> {
-        support::token(&self.syntax, SyntaxKind::RBracket)
-    }
-}
-
-impl AstNode for TypeParameterList {
-    fn can_cast(kind: SyntaxKind) -> bool {
-        kind == SyntaxKind::TypeParameterList
     }
     fn cast(syntax: SyntaxNode) -> Option<Self> {
         Self::can_cast(syntax.kind()).then_some(Self { syntax })
@@ -2848,6 +2851,9 @@ impl GuardStatement {
     }
     pub fn code_block(&self) -> Option<CodeBlock> {
         support::child(&self.syntax)
+    }
+    pub fn semicolon_token(&self) -> Option<SyntaxToken> {
+        support::token(&self.syntax, SyntaxKind::Semicolon)
     }
 }
 

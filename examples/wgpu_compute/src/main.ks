@@ -26,7 +26,7 @@ func run() -> () throws WgpuError {
     var input: [Float32] = [];
     var i = 0;
     while i < 8 {
-        input.append(Float32(from: i));
+        input.append(Float32(rounding: i));
         i = i + 1;
     }
     let size: Int64 = 8 * 4;

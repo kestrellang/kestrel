@@ -4,7 +4,7 @@ module std.system
 
 import std.numeric.(Int64)
 import std.core.(Bool, Equatable)
-import std.text.(String, Formatter, Formattable, FormatOptions, _writePadded)
+import std.text.(String, Formatter, Formattable, FormatOptions)
 
 /// An operating system Kestrel can target. Case names match the
 /// `@platform(.Darwin)` / `@platform(.Linux)` attribute.
@@ -35,7 +35,7 @@ public enum OperatingSystem: Equatable, Formattable {
     }
 
     public func format(mutating into writer: some Formatter, options: FormatOptions = FormatOptions.default()) {
-        _writePadded(into: writer, self.name, options)
+        writer.pad(self.name, options)
     }
 }
 
@@ -72,7 +72,7 @@ public enum Architecture: Equatable, Formattable {
     }
 
     public func format(mutating into writer: some Formatter, options: FormatOptions = FormatOptions.default()) {
-        _writePadded(into: writer, self.name, options)
+        writer.pad(self.name, options)
     }
 }
 
@@ -128,7 +128,7 @@ public struct Platform: Equatable, Formattable {
 
     /// Prints `<architecture>-<os>`, for example `arm64-darwin`.
     public func format(mutating into writer: some Formatter, options: FormatOptions = FormatOptions.default()) {
-        _writePadded(into: writer, "\(self.architecture.name)-\(self.operatingSystem.name)", options)
+        writer.pad("\(self.architecture.name)-\(self.operatingSystem.name)", options)
     }
 }
 

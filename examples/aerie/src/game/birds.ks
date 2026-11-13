@@ -245,7 +245,7 @@ struct Flock {
         let distance = self.dice.between(reach * 0.2, reach * 0.75);
         let x = center.x + turn.cos() * distance;
         let z = center.z + turn.sin() * distance;
-        let column = generator.column(x.floor().toInt64() ?? 0, z.floor().toInt64() ?? 0);
+        let column = generator.column(Int64(exactly: x.floor()) ?? 0, Int64(exactly: z.floor()) ?? 0);
         guard column.isLand else {
             return;
         }

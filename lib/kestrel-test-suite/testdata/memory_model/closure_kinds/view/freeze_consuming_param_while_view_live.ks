@@ -7,6 +7,9 @@
 // is the design's own `consume(file)` example, and it is the new E507.
 module Test
 
+@builtin(.Copyable)
+protocol Copyable {}
+
 struct Res: not Copyable {
     var v: lang.i64
 }

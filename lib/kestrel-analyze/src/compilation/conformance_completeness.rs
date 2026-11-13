@@ -1596,14 +1596,10 @@ fn self_type_for_compare(cx: &CompilationContext<'_>, type_entity: Entity) -> Re
     // ResolvedTy (`Tuple([])` / `Never`) — a witness spelling `()`/`!` directly
     // lowers to that, so a `Named(lang.())` self would never compare equal and a
     // `-> Self` requirement false-fires E458 (#215).
-    if kestrel_name_res::extensions::resolve_lang_child(cx.query, cx.root, "()")
-        == Some(type_entity)
-    {
-        return ResolvedTy::Tuple(Vec::new());
-    }
-    if kestrel_name_res::extensions::resolve_lang_child(cx.query, cx.root, "!") == Some(type_entity)
-    {
-        return ResolvedTy::Never;
+    match cx.query.get::<kestrel_ast_builder::LangType>(type_entity) {
+        Some(kestrel_ast_builder::LangType::Unit) => return ResolvedTy::Tuple(Vec::new()),
+        Some(kestrel_ast_builder::LangType::Never) => return ResolvedTy::Never,
+        _ => {},
     }
     // `extend &T: P` / `extend &mutating T: P`: `Self` is the reference
     // `&T` itself, structurally, like `()` and `!` above.

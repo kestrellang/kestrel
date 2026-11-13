@@ -360,38 +360,83 @@ Creates the zero value, satisfying `Defaultable`.
 
 _Defined in `lang/std/numeric/float32.ks`._
 
-#### initializer `From Float`
+#### initializer `Exactly`
 
 ```kestrel
-public init(from: Float64)
+public init(exactly: Int64)?
 ```
 
-Converts between `Float32` and `Float64`. The 32→64 direction is
-exact; the 64→32 direction rounds and may overflow to ±infinity.
+Converts from `Int64` when `Float32` holds the value exactly, and
+is `nil` when it would round (magnitudes above 2^24 that aren't
+representable). Satisfies `Numeric`, so generic code can write
+`T(exactly: xs.count)!`.
+
+_Defined in `lang/std/numeric/float32.ks`._
+
+#### initializer `From Integer`
+
+```kestrel
+public init(from: Int8)
+```
+
+Converts from `Int8`. Exact: every `Int8` fits `Float32`'s mantissa.
 
 ##### Examples
 
 ```
-let f32: Float32 = 3.14;
-let f64 = Float64(from: f32);
+let n: Int8 = 42;
+let f = Float32(from: n);  // 42.0
 ```
 
 _Defined in `lang/std/numeric/float32.ks`._
 
-#### initializer `From Int`
+#### initializer `From Integer`
 
 ```kestrel
-public init(from: Int64)
+public init(from: Int16)
 ```
 
-Converts an `Int64` to a float. Values with magnitude greater than
-2^53 lose low-order bits.
+Converts from `Int16`. Exact: every `Int16` fits `Float32`'s mantissa.
 
 ##### Examples
 
 ```
-let n: Int64 = 42;
-let f = Float64(from: n);  // 42.0
+let n: Int16 = 42;
+let f = Float32(from: n);  // 42.0
+```
+
+_Defined in `lang/std/numeric/float32.ks`._
+
+#### initializer `From Integer`
+
+```kestrel
+public init(from: UInt8)
+```
+
+Converts from `UInt8`. Exact: every `UInt8` fits `Float32`'s mantissa.
+
+##### Examples
+
+```
+let n: UInt8 = 42;
+let f = Float32(from: n);  // 42.0
+```
+
+_Defined in `lang/std/numeric/float32.ks`._
+
+#### initializer `From Integer`
+
+```kestrel
+public init(from: UInt16)
+```
+
+Converts from `UInt16`. Exact: every `UInt16` fits `Float32`'s mantissa.
+
+##### Examples
+
+```
+let n: UInt16 = 42;
+let f = Float32(from: n);  // 42.0
 ```
 
 _Defined in `lang/std/numeric/float32.ks`._
@@ -407,10 +452,20 @@ Wraps an existing `lang.f32` value. The FFI counterpart of
 
 _Defined in `lang/std/numeric/float32.ks`._
 
+#### initializer `Identity`
+
+```kestrel
+public init(from: Float32)
+```
+
+`Float32` from itself, so a `Convertible[T]` bound accepts `Float32`.
+
+_Defined in `lang/std/numeric/float32.ks`._
+
 #### initializer `Parsing`
 
 ```kestrel
-public init[S](parsing: S)? where S: Str, S: not Static
+public init(parsing: &StringSlice)?
 ```
 
 Parses a `Float32` from a string. Recognises decimal
@@ -428,6 +483,65 @@ Float32(parsing: "nan");       // Some(nan)
 Float32(parsing: "abc");       // None
 Float32(parsing: "");          // None
 ```
+
+_Defined in `lang/std/numeric/float32.ks`._
+
+#### initializer `Rounding Float`
+
+```kestrel
+public init(rounding: Float64)
+```
+
+Converts from `Float64`, rounding to the nearest `Float32`;
+values beyond `Float32.maxValue` become ±infinity.
+
+_Defined in `lang/std/numeric/float32.ks`._
+
+#### initializer `Rounding Integer`
+
+```kestrel
+public init(rounding: Int32)
+```
+
+Converts from `Int32`, rounding to the nearest `Float32`: values
+with magnitude above 2^24 lose low-order bits. Not `init(from:)`,
+which is reserved for exact conversions.
+
+_Defined in `lang/std/numeric/float32.ks`._
+
+#### initializer `Rounding Integer`
+
+```kestrel
+public init(rounding: Int64)
+```
+
+Converts from `Int64`, rounding to the nearest `Float32`: values
+with magnitude above 2^24 lose low-order bits. Not `init(from:)`,
+which is reserved for exact conversions.
+
+_Defined in `lang/std/numeric/float32.ks`._
+
+#### initializer `Rounding Integer`
+
+```kestrel
+public init(rounding: UInt32)
+```
+
+Converts from `UInt32`, rounding to the nearest `Float32`: values
+with magnitude above 2^24 lose low-order bits. Not `init(from:)`,
+which is reserved for exact conversions.
+
+_Defined in `lang/std/numeric/float32.ks`._
+
+#### initializer `Rounding Integer`
+
+```kestrel
+public init(rounding: UInt64)
+```
+
+Converts from `UInt64`, rounding to the nearest `Float32`: values
+with magnitude above 2^24 lose low-order bits. Not `init(from:)`,
+which is reserved for exact conversions.
 
 _Defined in `lang/std/numeric/float32.ks`._
 
@@ -1162,37 +1276,6 @@ Tau ≈ 6.28318530717958… — equal to `2π`, often more natural for
 
 _Defined in `lang/std/numeric/float32.ks`._
 
-#### function `toFloat64`
-
-```kestrel
-public func toFloat64() -> Float64
-```
-
-Converts to the sibling float type. Widening (32→64) is exact;
-narrowing (64→32) rounds and may overflow to ±infinity.
-
-_Defined in `lang/std/numeric/float32.ks`._
-
-#### function `toInt64`
-
-```kestrel
-public func toInt64() -> Int64?
-```
-
-Truncates toward zero into an `Int64`. Returns `None` for NaN,
-infinity, or values that fall outside the `Int64` range.
-
-##### Examples
-
-```
-(3.7).toInt64();              // Some(3)
-(-3.7).toInt64();             // Some(-3)
-Float64.nan.toInt64();        // None
-Float64.infinity.toInt64();   // None
-```
-
-_Defined in `lang/std/numeric/float32.ks`._
-
 ### Implements `FloatingPoint`
 
 #### function `ceil`
@@ -1669,6 +1752,8 @@ _Defined in `lang/std/numeric/float32.ks`._
 
 ### Implements `Convertible`
 
+### Implements `RoundsFrom`
+
 ### Implements `FFISafe`
 
 ## struct `Float64`
@@ -1726,37 +1811,126 @@ Creates the zero value, satisfying `Defaultable`.
 
 _Defined in `lang/std/numeric/float64.ks`._
 
+#### initializer `Exactly`
+
+```kestrel
+public init(exactly: Int64)?
+```
+
+Converts from `Int64` when `Float64` holds the value exactly, and
+is `nil` when it would round (magnitudes above 2^53 that aren't
+representable). Satisfies `Numeric`, so generic code can write
+`T(exactly: xs.count)!`.
+
+_Defined in `lang/std/numeric/float64.ks`._
+
 #### initializer `From Float`
 
 ```kestrel
 public init(from: Float32)
 ```
 
-Converts between `Float32` and `Float64`. The 32→64 direction is
-exact; the 64→32 direction rounds and may overflow to ±infinity.
+Converts from `Float32`. Exact: every `Float32` is a `Float64`.
+
+_Defined in `lang/std/numeric/float64.ks`._
+
+#### initializer `From Integer`
+
+```kestrel
+public init(from: Int8)
+```
+
+Converts from `Int8`. Exact: every `Int8` fits `Float64`'s mantissa.
 
 ##### Examples
 
 ```
-let f32: Float32 = 3.14;
-let f64 = Float64(from: f32);
+let n: Int8 = 42;
+let f = Float64(from: n);  // 42.0
 ```
 
 _Defined in `lang/std/numeric/float64.ks`._
 
-#### initializer `From Int`
+#### initializer `From Integer`
 
 ```kestrel
-public init(from: Int64)
+public init(from: Int16)
 ```
 
-Converts an `Int64` to a float. Values with magnitude greater than
-2^53 lose low-order bits.
+Converts from `Int16`. Exact: every `Int16` fits `Float64`'s mantissa.
 
 ##### Examples
 
 ```
-let n: Int64 = 42;
+let n: Int16 = 42;
+let f = Float64(from: n);  // 42.0
+```
+
+_Defined in `lang/std/numeric/float64.ks`._
+
+#### initializer `From Integer`
+
+```kestrel
+public init(from: Int32)
+```
+
+Converts from `Int32`. Exact: every `Int32` fits `Float64`'s mantissa.
+
+##### Examples
+
+```
+let n: Int32 = 42;
+let f = Float64(from: n);  // 42.0
+```
+
+_Defined in `lang/std/numeric/float64.ks`._
+
+#### initializer `From Integer`
+
+```kestrel
+public init(from: UInt8)
+```
+
+Converts from `UInt8`. Exact: every `UInt8` fits `Float64`'s mantissa.
+
+##### Examples
+
+```
+let n: UInt8 = 42;
+let f = Float64(from: n);  // 42.0
+```
+
+_Defined in `lang/std/numeric/float64.ks`._
+
+#### initializer `From Integer`
+
+```kestrel
+public init(from: UInt16)
+```
+
+Converts from `UInt16`. Exact: every `UInt16` fits `Float64`'s mantissa.
+
+##### Examples
+
+```
+let n: UInt16 = 42;
+let f = Float64(from: n);  // 42.0
+```
+
+_Defined in `lang/std/numeric/float64.ks`._
+
+#### initializer `From Integer`
+
+```kestrel
+public init(from: UInt32)
+```
+
+Converts from `UInt32`. Exact: every `UInt32` fits `Float64`'s mantissa.
+
+##### Examples
+
+```
+let n: UInt32 = 42;
 let f = Float64(from: n);  // 42.0
 ```
 
@@ -1773,10 +1947,20 @@ Wraps an existing `lang.f64` value. The FFI counterpart of
 
 _Defined in `lang/std/numeric/float64.ks`._
 
+#### initializer `Identity`
+
+```kestrel
+public init(from: Float64)
+```
+
+`Float64` from itself, so a `Convertible[T]` bound accepts `Float64`.
+
+_Defined in `lang/std/numeric/float64.ks`._
+
 #### initializer `Parsing`
 
 ```kestrel
-public init[S](parsing: S)? where S: Str, S: not Static
+public init(parsing: &StringSlice)?
 ```
 
 Parses a `Float64` from a string. Recognises decimal
@@ -1794,6 +1978,30 @@ Float64(parsing: "nan");       // Some(nan)
 Float64(parsing: "abc");       // None
 Float64(parsing: "");          // None
 ```
+
+_Defined in `lang/std/numeric/float64.ks`._
+
+#### initializer `Rounding Integer`
+
+```kestrel
+public init(rounding: Int64)
+```
+
+Converts from `Int64`, rounding to the nearest `Float64`: values
+with magnitude above 2^53 lose low-order bits. Not `init(from:)`,
+which is reserved for exact conversions.
+
+_Defined in `lang/std/numeric/float64.ks`._
+
+#### initializer `Rounding Integer`
+
+```kestrel
+public init(rounding: UInt64)
+```
+
+Converts from `UInt64`, rounding to the nearest `Float64`: values
+with magnitude above 2^53 lose low-order bits. Not `init(from:)`,
+which is reserved for exact conversions.
 
 _Defined in `lang/std/numeric/float64.ks`._
 
@@ -2561,37 +2769,6 @@ Tau ≈ 6.28318530717958… — equal to `2π`, often more natural for
 
 _Defined in `lang/std/numeric/float64.ks`._
 
-#### function `toFloat32`
-
-```kestrel
-public func toFloat32() -> Float32
-```
-
-Converts to the sibling float type. Widening (32→64) is exact;
-narrowing (64→32) rounds and may overflow to ±infinity.
-
-_Defined in `lang/std/numeric/float64.ks`._
-
-#### function `toInt64`
-
-```kestrel
-public func toInt64() -> Int64?
-```
-
-Truncates toward zero into an `Int64`. Returns `None` for NaN,
-infinity, or values that fall outside the `Int64` range.
-
-##### Examples
-
-```
-(3.7).toInt64();              // Some(3)
-(-3.7).toInt64();             // Some(-3)
-Float64.nan.toInt64();        // None
-Float64.infinity.toInt64();   // None
-```
-
-_Defined in `lang/std/numeric/float64.ks`._
-
 ### Implements `FloatingPoint`
 
 #### function `ceil`
@@ -3068,6 +3245,8 @@ _Defined in `lang/std/numeric/float64.ks`._
 
 ### Implements `Convertible`
 
+### Implements `RoundsFrom`
+
 ### Implements `FFISafe`
 
 ## protocol `FloatingPoint`
@@ -3325,6 +3504,28 @@ when the value doesn't fit.
 
 _Defined in `lang/std/numeric/int16.ks`._
 
+#### initializer `Clamping`
+
+```kestrel
+public init(clamping: Float32)
+```
+
+Same as `init(truncating:)`: drops the fraction, saturates out of
+range, and NaN becomes 0. Never traps.
+
+_Defined in `lang/std/numeric/int16.ks`._
+
+#### initializer `Clamping`
+
+```kestrel
+public init(clamping: Float64)
+```
+
+Same as `init(truncating:)`: drops the fraction, saturates out of
+range, and NaN becomes 0. Never traps.
+
+_Defined in `lang/std/numeric/int16.ks`._
+
 #### initializer `Default`
 
 ```kestrel
@@ -3341,10 +3542,99 @@ let n = Int64();   // 0
 
 _Defined in `lang/std/numeric/int16.ks`._
 
+#### initializer `Exactly`
+
+```kestrel
+public init(exactly: Int32)?
+```
+
+Converts from `Int32` when the value fits in `Int16`, and
+is `nil` when it doesn't. `Int32` doesn't always fit, so there is
+no `init(from:)`: use `init(truncating:)` or `init(clamping:)` to say
+what an out-of-range value should become.
+
+_Defined in `lang/std/numeric/int16.ks`._
+
+#### initializer `Exactly`
+
+```kestrel
+public init(exactly: Int64)?
+```
+
+Converts from `Int64` when the value fits in `Int16`, and
+is `nil` when it doesn't. `Int64` doesn't always fit, so there is
+no `init(from:)`: use `init(truncating:)` or `init(clamping:)` to say
+what an out-of-range value should become.
+
+_Defined in `lang/std/numeric/int16.ks`._
+
+#### initializer `Exactly`
+
+```kestrel
+public init(exactly: UInt16)?
+```
+
+Converts from `UInt16` when the value fits in `Int16`, and
+is `nil` when it doesn't. `UInt16` doesn't always fit, so there is
+no `init(from:)`: use `init(truncating:)` or `init(clamping:)` to say
+what an out-of-range value should become.
+
+_Defined in `lang/std/numeric/int16.ks`._
+
+#### initializer `Exactly`
+
+```kestrel
+public init(exactly: UInt32)?
+```
+
+Converts from `UInt32` when the value fits in `Int16`, and
+is `nil` when it doesn't. `UInt32` doesn't always fit, so there is
+no `init(from:)`: use `init(truncating:)` or `init(clamping:)` to say
+what an out-of-range value should become.
+
+_Defined in `lang/std/numeric/int16.ks`._
+
+#### initializer `Exactly`
+
+```kestrel
+public init(exactly: UInt64)?
+```
+
+Converts from `UInt64` when the value fits in `Int16`, and
+is `nil` when it doesn't. `UInt64` doesn't always fit, so there is
+no `init(from:)`: use `init(truncating:)` or `init(clamping:)` to say
+what an out-of-range value should become.
+
+_Defined in `lang/std/numeric/int16.ks`._
+
+#### initializer `Exactly`
+
+```kestrel
+public init(exactly: Float32)?
+```
+
+Converts from `Float32` when the value is a whole number in
+`Int16`'s range, and is `nil` otherwise (a fraction, NaN, an
+infinity, or out of range).
+
+_Defined in `lang/std/numeric/int16.ks`._
+
+#### initializer `Exactly`
+
+```kestrel
+public init(exactly: Float64)?
+```
+
+Converts from `Float64` when the value is a whole number in
+`Int16`'s range, and is `nil` otherwise (a fraction, NaN, an
+infinity, or out of range).
+
+_Defined in `lang/std/numeric/int16.ks`._
+
 #### initializer `From Bytes`
 
 ```kestrel
-public init[S](fromBytes: &S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
+public init(fromBytes: &Slice[UInt8])?
 ```
 
 Reassembles a `Int16` from 2 bytes in native byte order.
@@ -3355,7 +3645,7 @@ _Defined in `lang/std/numeric/int16.ks`._
 #### initializer `From Bytes Big Endian`
 
 ```kestrel
-public init[S](fromBytesBigEndian: &S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
+public init(fromBytesBigEndian: &Slice[UInt8])?
 ```
 
 Reassembles a `Int16` from 2 bytes in big-endian order.
@@ -3366,7 +3656,7 @@ _Defined in `lang/std/numeric/int16.ks`._
 #### initializer `From Bytes Little Endian`
 
 ```kestrel
-public init[S](fromBytesLittleEndian: &S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
+public init(fromBytesLittleEndian: &Slice[UInt8])?
 ```
 
 Reassembles a `Int16` from 2 bytes in little-endian order.
@@ -3387,90 +3677,10 @@ _Defined in `lang/std/numeric/int16.ks`._
 #### initializer `From Integer`
 
 ```kestrel
-public init(from: Int32)
-```
-
-Converts from `Int32`, trapping when the value doesn't fit in
-`Int16`. Use `init(truncating:)` or `init(clamping:)` when
-out-of-range values are expected.
-
-##### Errors
-
-Panics when `other` is outside `Int16.minValue...Int16.maxValue`.
-
-_Defined in `lang/std/numeric/int16.ks`._
-
-#### initializer `From Integer`
-
-```kestrel
-public init(from: Int64)
-```
-
-Converts from `Int64`, trapping when the value doesn't fit in
-`Int16`. Use `init(truncating:)` or `init(clamping:)` when
-out-of-range values are expected.
-
-##### Errors
-
-Panics when `other` is outside `Int16.minValue...Int16.maxValue`.
-
-_Defined in `lang/std/numeric/int16.ks`._
-
-#### initializer `From Integer`
-
-```kestrel
 public init(from: UInt8)
 ```
 
 Converts from `UInt8`. Lossless: every `UInt8` fits in `Int16`.
-
-_Defined in `lang/std/numeric/int16.ks`._
-
-#### initializer `From Integer`
-
-```kestrel
-public init(from: UInt16)
-```
-
-Converts from `UInt16`, trapping when the value doesn't fit in
-`Int16`. Use `init(truncating:)` or `init(clamping:)` when
-out-of-range values are expected.
-
-##### Errors
-
-Panics when `other` is outside `Int16.minValue...Int16.maxValue`.
-
-_Defined in `lang/std/numeric/int16.ks`._
-
-#### initializer `From Integer`
-
-```kestrel
-public init(from: UInt32)
-```
-
-Converts from `UInt32`, trapping when the value doesn't fit in
-`Int16`. Use `init(truncating:)` or `init(clamping:)` when
-out-of-range values are expected.
-
-##### Errors
-
-Panics when `other` is outside `Int16.minValue...Int16.maxValue`.
-
-_Defined in `lang/std/numeric/int16.ks`._
-
-#### initializer `From Integer`
-
-```kestrel
-public init(from: UInt64)
-```
-
-Converts from `UInt64`, trapping when the value doesn't fit in
-`Int16`. Use `init(truncating:)` or `init(clamping:)` when
-out-of-range values are expected.
-
-##### Errors
-
-Panics when `other` is outside `Int16.minValue...Int16.maxValue`.
 
 _Defined in `lang/std/numeric/int16.ks`._
 
@@ -3485,10 +3695,20 @@ counterpart of `raw`, for values coming back from intrinsics or C.
 
 _Defined in `lang/std/numeric/int16.ks`._
 
+#### initializer `Identity`
+
+```kestrel
+public init(from: Int16)
+```
+
+`Int16` from itself, so a `Convertible[T]` bound accepts `Int16`.
+
+_Defined in `lang/std/numeric/int16.ks`._
+
 #### initializer `Parsing`
 
 ```kestrel
-public init[S](parsing: S)? where S: Str, S: not Static
+public init(parsing: &StringSlice)?
 ```
 
 Parses a base-10 integer literal, optionally prefixed with `+` or `-`.
@@ -3508,7 +3728,7 @@ _Defined in `lang/std/numeric/int16.ks`._
 #### initializer `Parsing with Radix`
 
 ```kestrel
-public init[S](parsing: S, radix: Int64)? where S: Str, S: not Static
+public init(parsing: &StringSlice, radix: Int64)?
 ```
 
 Parses an integer in `radix` (base 2-36 inclusive). Letters a-z are
@@ -3576,6 +3796,30 @@ public init(truncating: UInt64)
 
 Converts from `UInt64` keeping only the low bits, reinterpreted as
 `Int16`. Never traps.
+
+_Defined in `lang/std/numeric/int16.ks`._
+
+#### initializer `Truncating`
+
+```kestrel
+public init(truncating: Float32)
+```
+
+Converts from `Float32`, dropping any fraction toward zero.
+Out-of-range values saturate to `Int16.minValue` /
+`Int16.maxValue` and NaN becomes 0. Never traps.
+
+_Defined in `lang/std/numeric/int16.ks`._
+
+#### initializer `Truncating`
+
+```kestrel
+public init(truncating: Float64)
+```
+
+Converts from `Float64`, dropping any fraction toward zero.
+Out-of-range values saturate to `Int16.minValue` /
+`Int16.maxValue` and NaN becomes 0. Never traps.
 
 _Defined in `lang/std/numeric/int16.ks`._
 
@@ -4698,7 +4942,7 @@ _Defined in `lang/std/numeric/int16.ks`._
 
 ### Implements `Convertible`
 
-### Implements `LossyConvertible`
+### Implements `NarrowsFrom`
 
 ### Implements `Exitable`
 
@@ -4794,6 +5038,28 @@ when the value doesn't fit.
 
 _Defined in `lang/std/numeric/int32.ks`._
 
+#### initializer `Clamping`
+
+```kestrel
+public init(clamping: Float32)
+```
+
+Same as `init(truncating:)`: drops the fraction, saturates out of
+range, and NaN becomes 0. Never traps.
+
+_Defined in `lang/std/numeric/int32.ks`._
+
+#### initializer `Clamping`
+
+```kestrel
+public init(clamping: Float64)
+```
+
+Same as `init(truncating:)`: drops the fraction, saturates out of
+range, and NaN becomes 0. Never traps.
+
+_Defined in `lang/std/numeric/int32.ks`._
+
 #### initializer `Default`
 
 ```kestrel
@@ -4810,10 +5076,73 @@ let n = Int64();   // 0
 
 _Defined in `lang/std/numeric/int32.ks`._
 
+#### initializer `Exactly`
+
+```kestrel
+public init(exactly: Int64)?
+```
+
+Converts from `Int64` when the value fits in `Int32`, and
+is `nil` when it doesn't. `Int64` doesn't always fit, so there is
+no `init(from:)`: use `init(truncating:)` or `init(clamping:)` to say
+what an out-of-range value should become.
+
+_Defined in `lang/std/numeric/int32.ks`._
+
+#### initializer `Exactly`
+
+```kestrel
+public init(exactly: UInt32)?
+```
+
+Converts from `UInt32` when the value fits in `Int32`, and
+is `nil` when it doesn't. `UInt32` doesn't always fit, so there is
+no `init(from:)`: use `init(truncating:)` or `init(clamping:)` to say
+what an out-of-range value should become.
+
+_Defined in `lang/std/numeric/int32.ks`._
+
+#### initializer `Exactly`
+
+```kestrel
+public init(exactly: UInt64)?
+```
+
+Converts from `UInt64` when the value fits in `Int32`, and
+is `nil` when it doesn't. `UInt64` doesn't always fit, so there is
+no `init(from:)`: use `init(truncating:)` or `init(clamping:)` to say
+what an out-of-range value should become.
+
+_Defined in `lang/std/numeric/int32.ks`._
+
+#### initializer `Exactly`
+
+```kestrel
+public init(exactly: Float32)?
+```
+
+Converts from `Float32` when the value is a whole number in
+`Int32`'s range, and is `nil` otherwise (a fraction, NaN, an
+infinity, or out of range).
+
+_Defined in `lang/std/numeric/int32.ks`._
+
+#### initializer `Exactly`
+
+```kestrel
+public init(exactly: Float64)?
+```
+
+Converts from `Float64` when the value is a whole number in
+`Int32`'s range, and is `nil` otherwise (a fraction, NaN, an
+infinity, or out of range).
+
+_Defined in `lang/std/numeric/int32.ks`._
+
 #### initializer `From Bytes`
 
 ```kestrel
-public init[S](fromBytes: &S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
+public init(fromBytes: &Slice[UInt8])?
 ```
 
 Reassembles a `Int32` from 4 bytes in native byte order.
@@ -4824,7 +5153,7 @@ _Defined in `lang/std/numeric/int32.ks`._
 #### initializer `From Bytes Big Endian`
 
 ```kestrel
-public init[S](fromBytesBigEndian: &S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
+public init(fromBytesBigEndian: &Slice[UInt8])?
 ```
 
 Reassembles a `Int32` from 4 bytes in big-endian order.
@@ -4835,7 +5164,7 @@ _Defined in `lang/std/numeric/int32.ks`._
 #### initializer `From Bytes Little Endian`
 
 ```kestrel
-public init[S](fromBytesLittleEndian: &S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
+public init(fromBytesLittleEndian: &Slice[UInt8])?
 ```
 
 Reassembles a `Int32` from 4 bytes in little-endian order.
@@ -4866,22 +5195,6 @@ _Defined in `lang/std/numeric/int32.ks`._
 #### initializer `From Integer`
 
 ```kestrel
-public init(from: Int64)
-```
-
-Converts from `Int64`, trapping when the value doesn't fit in
-`Int32`. Use `init(truncating:)` or `init(clamping:)` when
-out-of-range values are expected.
-
-##### Errors
-
-Panics when `other` is outside `Int32.minValue...Int32.maxValue`.
-
-_Defined in `lang/std/numeric/int32.ks`._
-
-#### initializer `From Integer`
-
-```kestrel
 public init(from: UInt8)
 ```
 
@@ -4899,38 +5212,6 @@ Converts from `UInt16`. Lossless: every `UInt16` fits in `Int32`.
 
 _Defined in `lang/std/numeric/int32.ks`._
 
-#### initializer `From Integer`
-
-```kestrel
-public init(from: UInt32)
-```
-
-Converts from `UInt32`, trapping when the value doesn't fit in
-`Int32`. Use `init(truncating:)` or `init(clamping:)` when
-out-of-range values are expected.
-
-##### Errors
-
-Panics when `other` is outside `Int32.minValue...Int32.maxValue`.
-
-_Defined in `lang/std/numeric/int32.ks`._
-
-#### initializer `From Integer`
-
-```kestrel
-public init(from: UInt64)
-```
-
-Converts from `UInt64`, trapping when the value doesn't fit in
-`Int32`. Use `init(truncating:)` or `init(clamping:)` when
-out-of-range values are expected.
-
-##### Errors
-
-Panics when `other` is outside `Int32.minValue...Int32.maxValue`.
-
-_Defined in `lang/std/numeric/int32.ks`._
-
 #### initializer `From Raw`
 
 ```kestrel
@@ -4942,10 +5223,20 @@ counterpart of `raw`, for values coming back from intrinsics or C.
 
 _Defined in `lang/std/numeric/int32.ks`._
 
+#### initializer `Identity`
+
+```kestrel
+public init(from: Int32)
+```
+
+`Int32` from itself, so a `Convertible[T]` bound accepts `Int32`.
+
+_Defined in `lang/std/numeric/int32.ks`._
+
 #### initializer `Parsing`
 
 ```kestrel
-public init[S](parsing: S)? where S: Str, S: not Static
+public init(parsing: &StringSlice)?
 ```
 
 Parses a base-10 integer literal, optionally prefixed with `+` or `-`.
@@ -4965,7 +5256,7 @@ _Defined in `lang/std/numeric/int32.ks`._
 #### initializer `Parsing with Radix`
 
 ```kestrel
-public init[S](parsing: S, radix: Int64)? where S: Str, S: not Static
+public init(parsing: &StringSlice, radix: Int64)?
 ```
 
 Parses an integer in `radix` (base 2-36 inclusive). Letters a-z are
@@ -5011,6 +5302,30 @@ public init(truncating: UInt64)
 
 Converts from `UInt64` keeping only the low bits, reinterpreted as
 `Int32`. Never traps.
+
+_Defined in `lang/std/numeric/int32.ks`._
+
+#### initializer `Truncating`
+
+```kestrel
+public init(truncating: Float32)
+```
+
+Converts from `Float32`, dropping any fraction toward zero.
+Out-of-range values saturate to `Int32.minValue` /
+`Int32.maxValue` and NaN becomes 0. Never traps.
+
+_Defined in `lang/std/numeric/int32.ks`._
+
+#### initializer `Truncating`
+
+```kestrel
+public init(truncating: Float64)
+```
+
+Converts from `Float64`, dropping any fraction toward zero.
+Out-of-range values saturate to `Int32.minValue` /
+`Int32.maxValue` and NaN becomes 0. Never traps.
 
 _Defined in `lang/std/numeric/int32.ks`._
 
@@ -6133,7 +6448,7 @@ _Defined in `lang/std/numeric/int32.ks`._
 
 ### Implements `Convertible`
 
-### Implements `LossyConvertible`
+### Implements `NarrowsFrom`
 
 ### Implements `Exitable`
 
@@ -6207,6 +6522,28 @@ when the value doesn't fit.
 
 _Defined in `lang/std/numeric/int64.ks`._
 
+#### initializer `Clamping`
+
+```kestrel
+public init(clamping: Float32)
+```
+
+Same as `init(truncating:)`: drops the fraction, saturates out of
+range, and NaN becomes 0. Never traps.
+
+_Defined in `lang/std/numeric/int64.ks`._
+
+#### initializer `Clamping`
+
+```kestrel
+public init(clamping: Float64)
+```
+
+Same as `init(truncating:)`: drops the fraction, saturates out of
+range, and NaN becomes 0. Never traps.
+
+_Defined in `lang/std/numeric/int64.ks`._
+
 #### initializer `Default`
 
 ```kestrel
@@ -6223,10 +6560,58 @@ let n = Int64();   // 0
 
 _Defined in `lang/std/numeric/int64.ks`._
 
+#### initializer `Exactly`
+
+```kestrel
+public init(exactly: Int64)?
+```
+
+Always succeeds: satisfies `Numeric.init(exactly:)`, which other
+numbers fail when the value doesn't fit.
+
+_Defined in `lang/std/numeric/int64.ks`._
+
+#### initializer `Exactly`
+
+```kestrel
+public init(exactly: UInt64)?
+```
+
+Converts from `UInt64` when the value fits in `Int64`, and
+is `nil` when it doesn't. `UInt64` doesn't always fit, so there is
+no `init(from:)`: use `init(truncating:)` or `init(clamping:)` to say
+what an out-of-range value should become.
+
+_Defined in `lang/std/numeric/int64.ks`._
+
+#### initializer `Exactly`
+
+```kestrel
+public init(exactly: Float32)?
+```
+
+Converts from `Float32` when the value is a whole number in
+`Int64`'s range, and is `nil` otherwise (a fraction, NaN, an
+infinity, or out of range).
+
+_Defined in `lang/std/numeric/int64.ks`._
+
+#### initializer `Exactly`
+
+```kestrel
+public init(exactly: Float64)?
+```
+
+Converts from `Float64` when the value is a whole number in
+`Int64`'s range, and is `nil` otherwise (a fraction, NaN, an
+infinity, or out of range).
+
+_Defined in `lang/std/numeric/int64.ks`._
+
 #### initializer `From Bytes`
 
 ```kestrel
-public init[S](fromBytes: &S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
+public init(fromBytes: &Slice[UInt8])?
 ```
 
 Reassembles a `Int64` from 8 bytes in native byte order.
@@ -6237,7 +6622,7 @@ _Defined in `lang/std/numeric/int64.ks`._
 #### initializer `From Bytes Big Endian`
 
 ```kestrel
-public init[S](fromBytesBigEndian: &S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
+public init(fromBytesBigEndian: &Slice[UInt8])?
 ```
 
 Reassembles a `Int64` from 8 bytes in big-endian order.
@@ -6248,7 +6633,7 @@ _Defined in `lang/std/numeric/int64.ks`._
 #### initializer `From Bytes Little Endian`
 
 ```kestrel
-public init[S](fromBytesLittleEndian: &S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
+public init(fromBytesLittleEndian: &Slice[UInt8])?
 ```
 
 Reassembles a `Int64` from 8 bytes in little-endian order.
@@ -6316,22 +6701,6 @@ Converts from `UInt32`. Lossless: every `UInt32` fits in `Int64`.
 
 _Defined in `lang/std/numeric/int64.ks`._
 
-#### initializer `From Integer`
-
-```kestrel
-public init(from: UInt64)
-```
-
-Converts from `UInt64`, trapping when the value doesn't fit in
-`Int64`. Use `init(truncating:)` or `init(clamping:)` when
-out-of-range values are expected.
-
-##### Errors
-
-Panics when `other` is outside `Int64.minValue...Int64.maxValue`.
-
-_Defined in `lang/std/numeric/int64.ks`._
-
 #### initializer `From Raw`
 
 ```kestrel
@@ -6343,10 +6712,20 @@ counterpart of `raw`, for values coming back from intrinsics or C.
 
 _Defined in `lang/std/numeric/int64.ks`._
 
+#### initializer `Identity`
+
+```kestrel
+public init(from: Int64)
+```
+
+`Int64` from itself, so a `Convertible[T]` bound accepts `Int64`.
+
+_Defined in `lang/std/numeric/int64.ks`._
+
 #### initializer `Parsing`
 
 ```kestrel
-public init[S](parsing: S)? where S: Str, S: not Static
+public init(parsing: &StringSlice)?
 ```
 
 Parses a base-10 integer literal, optionally prefixed with `+` or `-`.
@@ -6366,7 +6745,7 @@ _Defined in `lang/std/numeric/int64.ks`._
 #### initializer `Parsing with Radix`
 
 ```kestrel
-public init[S](parsing: S, radix: Int64)? where S: Str, S: not Static
+public init(parsing: &StringSlice, radix: Int64)?
 ```
 
 Parses an integer in `radix` (base 2-36 inclusive). Letters a-z are
@@ -6390,6 +6769,30 @@ public init(truncating: UInt64)
 
 Converts from `UInt64` keeping only the low bits, reinterpreted as
 `Int64`. Never traps.
+
+_Defined in `lang/std/numeric/int64.ks`._
+
+#### initializer `Truncating`
+
+```kestrel
+public init(truncating: Float32)
+```
+
+Converts from `Float32`, dropping any fraction toward zero.
+Out-of-range values saturate to `Int64.minValue` /
+`Int64.maxValue` and NaN becomes 0. Never traps.
+
+_Defined in `lang/std/numeric/int64.ks`._
+
+#### initializer `Truncating`
+
+```kestrel
+public init(truncating: Float64)
+```
+
+Converts from `Float64`, dropping any fraction toward zero.
+Out-of-range values saturate to `Int64.minValue` /
+`Int64.maxValue` and NaN becomes 0. Never traps.
 
 _Defined in `lang/std/numeric/int64.ks`._
 
@@ -7358,6 +7761,14 @@ type Output = RangeThrough[Int64]
 
 _Defined in `lang/std/numeric/int64.ks`._
 
+#### typealias `Output`
+
+```kestrel
+type Output = V.Element where V: TextView
+```
+
+_Defined in `lang/std/text/views.ks`._
+
 #### function `add`
 
 ```kestrel
@@ -7530,7 +7941,7 @@ _Defined in `lang/std/numeric/int64.ks`._
 
 ### Implements `Convertible`
 
-### Implements `LossyConvertible`
+### Implements `NarrowsFrom`
 
 ### Implements `SliceIndex`
 
@@ -7552,82 +7963,18 @@ consuming func report() -> ExitCode
 
 _Defined in `lang/std/system/exitable.ks`._
 
-### Implements `BytesIndex`
+### Implements `ViewIndex`
 
-#### typealias `BytesYield`
+_Conditional: `where V: TextView`._
 
-```kestrel
-type BytesYield = UInt8
-```
+### Implements `ViewWrappable`
 
-_Defined in `lang/std/text/views.ks`._
+_Conditional: `where V: TextView`._
 
-### Implements `BytesWrappable`
-
-#### typealias `BytesWrappedYield`
+#### typealias `WrappedOutput`
 
 ```kestrel
-type BytesWrappedYield = UInt8?
-```
-
-_Defined in `lang/std/text/views.ks`._
-
-### Implements `CharsIndex`
-
-#### typealias `CharsYield`
-
-```kestrel
-type CharsYield = Char
-```
-
-_Defined in `lang/std/text/views.ks`._
-
-### Implements `CharsWrappable`
-
-#### typealias `CharsWrappedYield`
-
-```kestrel
-type CharsWrappedYield = Char?
-```
-
-_Defined in `lang/std/text/views.ks`._
-
-### Implements `GraphemesIndex`
-
-#### typealias `GraphemesYield`
-
-```kestrel
-type GraphemesYield = Grapheme
-```
-
-_Defined in `lang/std/text/views.ks`._
-
-### Implements `GraphemesWrappable`
-
-#### typealias `GraphemesWrappedYield`
-
-```kestrel
-type GraphemesWrappedYield = Grapheme?
-```
-
-_Defined in `lang/std/text/views.ks`._
-
-### Implements `LinesIndex`
-
-#### typealias `LinesYield`
-
-```kestrel
-type LinesYield = String
-```
-
-_Defined in `lang/std/text/views.ks`._
-
-### Implements `LinesWrappable`
-
-#### typealias `LinesWrappedYield`
-
-```kestrel
-type LinesWrappedYield = String?
+type WrappedOutput = V.Element? where V: TextView
 ```
 
 _Defined in `lang/std/text/views.ks`._
@@ -7760,6 +8107,28 @@ when the value doesn't fit.
 
 _Defined in `lang/std/numeric/int8.ks`._
 
+#### initializer `Clamping`
+
+```kestrel
+public init(clamping: Float32)
+```
+
+Same as `init(truncating:)`: drops the fraction, saturates out of
+range, and NaN becomes 0. Never traps.
+
+_Defined in `lang/std/numeric/int8.ks`._
+
+#### initializer `Clamping`
+
+```kestrel
+public init(clamping: Float64)
+```
+
+Same as `init(truncating:)`: drops the fraction, saturates out of
+range, and NaN becomes 0. Never traps.
+
+_Defined in `lang/std/numeric/int8.ks`._
+
 #### initializer `Default`
 
 ```kestrel
@@ -7776,10 +8145,125 @@ let n = Int64();   // 0
 
 _Defined in `lang/std/numeric/int8.ks`._
 
+#### initializer `Exactly`
+
+```kestrel
+public init(exactly: Int16)?
+```
+
+Converts from `Int16` when the value fits in `Int8`, and
+is `nil` when it doesn't. `Int16` doesn't always fit, so there is
+no `init(from:)`: use `init(truncating:)` or `init(clamping:)` to say
+what an out-of-range value should become.
+
+_Defined in `lang/std/numeric/int8.ks`._
+
+#### initializer `Exactly`
+
+```kestrel
+public init(exactly: Int32)?
+```
+
+Converts from `Int32` when the value fits in `Int8`, and
+is `nil` when it doesn't. `Int32` doesn't always fit, so there is
+no `init(from:)`: use `init(truncating:)` or `init(clamping:)` to say
+what an out-of-range value should become.
+
+_Defined in `lang/std/numeric/int8.ks`._
+
+#### initializer `Exactly`
+
+```kestrel
+public init(exactly: Int64)?
+```
+
+Converts from `Int64` when the value fits in `Int8`, and
+is `nil` when it doesn't. `Int64` doesn't always fit, so there is
+no `init(from:)`: use `init(truncating:)` or `init(clamping:)` to say
+what an out-of-range value should become.
+
+_Defined in `lang/std/numeric/int8.ks`._
+
+#### initializer `Exactly`
+
+```kestrel
+public init(exactly: UInt8)?
+```
+
+Converts from `UInt8` when the value fits in `Int8`, and
+is `nil` when it doesn't. `UInt8` doesn't always fit, so there is
+no `init(from:)`: use `init(truncating:)` or `init(clamping:)` to say
+what an out-of-range value should become.
+
+_Defined in `lang/std/numeric/int8.ks`._
+
+#### initializer `Exactly`
+
+```kestrel
+public init(exactly: UInt16)?
+```
+
+Converts from `UInt16` when the value fits in `Int8`, and
+is `nil` when it doesn't. `UInt16` doesn't always fit, so there is
+no `init(from:)`: use `init(truncating:)` or `init(clamping:)` to say
+what an out-of-range value should become.
+
+_Defined in `lang/std/numeric/int8.ks`._
+
+#### initializer `Exactly`
+
+```kestrel
+public init(exactly: UInt32)?
+```
+
+Converts from `UInt32` when the value fits in `Int8`, and
+is `nil` when it doesn't. `UInt32` doesn't always fit, so there is
+no `init(from:)`: use `init(truncating:)` or `init(clamping:)` to say
+what an out-of-range value should become.
+
+_Defined in `lang/std/numeric/int8.ks`._
+
+#### initializer `Exactly`
+
+```kestrel
+public init(exactly: UInt64)?
+```
+
+Converts from `UInt64` when the value fits in `Int8`, and
+is `nil` when it doesn't. `UInt64` doesn't always fit, so there is
+no `init(from:)`: use `init(truncating:)` or `init(clamping:)` to say
+what an out-of-range value should become.
+
+_Defined in `lang/std/numeric/int8.ks`._
+
+#### initializer `Exactly`
+
+```kestrel
+public init(exactly: Float32)?
+```
+
+Converts from `Float32` when the value is a whole number in
+`Int8`'s range, and is `nil` otherwise (a fraction, NaN, an
+infinity, or out of range).
+
+_Defined in `lang/std/numeric/int8.ks`._
+
+#### initializer `Exactly`
+
+```kestrel
+public init(exactly: Float64)?
+```
+
+Converts from `Float64` when the value is a whole number in
+`Int8`'s range, and is `nil` otherwise (a fraction, NaN, an
+infinity, or out of range).
+
+_Defined in `lang/std/numeric/int8.ks`._
+
 #### initializer `From Bytes`
 
 ```kestrel
-public init[S](fromBytes: &S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
+public init(fromBytes: &Slice[UInt8])?
 ```
 
 Reassembles a `Int8` from 1 bytes in native byte order.
@@ -7790,7 +8274,7 @@ _Defined in `lang/std/numeric/int8.ks`._
 #### initializer `From Bytes Big Endian`
 
 ```kestrel
-public init[S](fromBytesBigEndian: &S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
+public init(fromBytesBigEndian: &Slice[UInt8])?
 ```
 
 Reassembles a `Int8` from 1 bytes in big-endian order.
@@ -7801,123 +8285,11 @@ _Defined in `lang/std/numeric/int8.ks`._
 #### initializer `From Bytes Little Endian`
 
 ```kestrel
-public init[S](fromBytesLittleEndian: &S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
+public init(fromBytesLittleEndian: &Slice[UInt8])?
 ```
 
 Reassembles a `Int8` from 1 bytes in little-endian order.
 Returns `null` if the input is not exactly 1 bytes long.
-
-_Defined in `lang/std/numeric/int8.ks`._
-
-#### initializer `From Integer`
-
-```kestrel
-public init(from: Int16)
-```
-
-Converts from `Int16`, trapping when the value doesn't fit in
-`Int8`. Use `init(truncating:)` or `init(clamping:)` when
-out-of-range values are expected.
-
-##### Errors
-
-Panics when `other` is outside `Int8.minValue...Int8.maxValue`.
-
-_Defined in `lang/std/numeric/int8.ks`._
-
-#### initializer `From Integer`
-
-```kestrel
-public init(from: Int32)
-```
-
-Converts from `Int32`, trapping when the value doesn't fit in
-`Int8`. Use `init(truncating:)` or `init(clamping:)` when
-out-of-range values are expected.
-
-##### Errors
-
-Panics when `other` is outside `Int8.minValue...Int8.maxValue`.
-
-_Defined in `lang/std/numeric/int8.ks`._
-
-#### initializer `From Integer`
-
-```kestrel
-public init(from: Int64)
-```
-
-Converts from `Int64`, trapping when the value doesn't fit in
-`Int8`. Use `init(truncating:)` or `init(clamping:)` when
-out-of-range values are expected.
-
-##### Errors
-
-Panics when `other` is outside `Int8.minValue...Int8.maxValue`.
-
-_Defined in `lang/std/numeric/int8.ks`._
-
-#### initializer `From Integer`
-
-```kestrel
-public init(from: UInt8)
-```
-
-Converts from `UInt8`, trapping when the value doesn't fit in
-`Int8`. Use `init(truncating:)` or `init(clamping:)` when
-out-of-range values are expected.
-
-##### Errors
-
-Panics when `other` is outside `Int8.minValue...Int8.maxValue`.
-
-_Defined in `lang/std/numeric/int8.ks`._
-
-#### initializer `From Integer`
-
-```kestrel
-public init(from: UInt16)
-```
-
-Converts from `UInt16`, trapping when the value doesn't fit in
-`Int8`. Use `init(truncating:)` or `init(clamping:)` when
-out-of-range values are expected.
-
-##### Errors
-
-Panics when `other` is outside `Int8.minValue...Int8.maxValue`.
-
-_Defined in `lang/std/numeric/int8.ks`._
-
-#### initializer `From Integer`
-
-```kestrel
-public init(from: UInt32)
-```
-
-Converts from `UInt32`, trapping when the value doesn't fit in
-`Int8`. Use `init(truncating:)` or `init(clamping:)` when
-out-of-range values are expected.
-
-##### Errors
-
-Panics when `other` is outside `Int8.minValue...Int8.maxValue`.
-
-_Defined in `lang/std/numeric/int8.ks`._
-
-#### initializer `From Integer`
-
-```kestrel
-public init(from: UInt64)
-```
-
-Converts from `UInt64`, trapping when the value doesn't fit in
-`Int8`. Use `init(truncating:)` or `init(clamping:)` when
-out-of-range values are expected.
-
-##### Errors
-
-Panics when `other` is outside `Int8.minValue...Int8.maxValue`.
 
 _Defined in `lang/std/numeric/int8.ks`._
 
@@ -7932,10 +8304,20 @@ counterpart of `raw`, for values coming back from intrinsics or C.
 
 _Defined in `lang/std/numeric/int8.ks`._
 
+#### initializer `Identity`
+
+```kestrel
+public init(from: Int8)
+```
+
+`Int8` from itself, so a `Convertible[T]` bound accepts `Int8`.
+
+_Defined in `lang/std/numeric/int8.ks`._
+
 #### initializer `Parsing`
 
 ```kestrel
-public init[S](parsing: S)? where S: Str, S: not Static
+public init(parsing: &StringSlice)?
 ```
 
 Parses a base-10 integer literal, optionally prefixed with `+` or `-`.
@@ -7955,7 +8337,7 @@ _Defined in `lang/std/numeric/int8.ks`._
 #### initializer `Parsing with Radix`
 
 ```kestrel
-public init[S](parsing: S, radix: Int64)? where S: Str, S: not Static
+public init(parsing: &StringSlice, radix: Int64)?
 ```
 
 Parses an integer in `radix` (base 2-36 inclusive). Letters a-z are
@@ -8045,6 +8427,30 @@ public init(truncating: UInt64)
 
 Converts from `UInt64` keeping only the low bits, reinterpreted as
 `Int8`. Never traps.
+
+_Defined in `lang/std/numeric/int8.ks`._
+
+#### initializer `Truncating`
+
+```kestrel
+public init(truncating: Float32)
+```
+
+Converts from `Float32`, dropping any fraction toward zero.
+Out-of-range values saturate to `Int8.minValue` /
+`Int8.maxValue` and NaN becomes 0. Never traps.
+
+_Defined in `lang/std/numeric/int8.ks`._
+
+#### initializer `Truncating`
+
+```kestrel
+public init(truncating: Float64)
+```
+
+Converts from `Float64`, dropping any fraction toward zero.
+Out-of-range values saturate to `Int8.minValue` /
+`Int8.maxValue` and NaN becomes 0. Never traps.
 
 _Defined in `lang/std/numeric/int8.ks`._
 
@@ -9167,7 +9573,7 @@ _Defined in `lang/std/numeric/int8.ks`._
 
 ### Implements `Convertible`
 
-### Implements `LossyConvertible`
+### Implements `NarrowsFrom`
 
 ### Implements `Exitable`
 
@@ -9329,7 +9735,8 @@ _Defined in `lang/std/numeric/random.ks`._
 public protocol Numeric where Self.Addable.Output == Self, Self.Subtractable.Output == Self, Self.Multipliable.Output == Self, Self.Divisible.Output == Self
 ```
 
-A number: arithmetic that stays in `Self`, ordering, and integer literals.
+A number: arithmetic that stays in `Self`, ordering, integer literals,
+and an exact conversion from `Int64`.
 
 Every integer and float type conforms. Generic code bound by `Numeric`
 can add, subtract, multiply and divide values and get `Self` back, so a
@@ -9339,12 +9746,26 @@ each operator protocol means, since all four declare one.
 ### Examples
 
 ```
-func sum[T](xs: &Slice[T]) -> T where T: Numeric {
+func mean[T](xs: &Slice[T]) -> T where T: Numeric {
     var total = T.zero;
     for x in xs { total = total + x; }
-    total
+    total / T(exactly: xs.count)!
 }
 ```
+
+_Defined in `lang/std/numeric/numeric.ks`._
+
+### Members
+
+#### initializer `Exactly`
+
+```kestrel
+init(exactly: Int64)?
+```
+
+Converts `value` when `Self` holds it exactly, and is `nil` when it
+doesn't fit (or, for a float, would round). Generic code turns a
+count into `Self` with it: `T(exactly: xs.count)!`.
 
 _Defined in `lang/std/numeric/numeric.ks`._
 
@@ -9791,6 +10212,28 @@ when the value doesn't fit.
 
 _Defined in `lang/std/numeric/uint16.ks`._
 
+#### initializer `Clamping`
+
+```kestrel
+public init(clamping: Float32)
+```
+
+Same as `init(truncating:)`: drops the fraction, saturates out of
+range, and NaN becomes 0. Never traps.
+
+_Defined in `lang/std/numeric/uint16.ks`._
+
+#### initializer `Clamping`
+
+```kestrel
+public init(clamping: Float64)
+```
+
+Same as `init(truncating:)`: drops the fraction, saturates out of
+range, and NaN becomes 0. Never traps.
+
+_Defined in `lang/std/numeric/uint16.ks`._
+
 #### initializer `Default`
 
 ```kestrel
@@ -9807,10 +10250,112 @@ let n = Int64();   // 0
 
 _Defined in `lang/std/numeric/uint16.ks`._
 
+#### initializer `Exactly`
+
+```kestrel
+public init(exactly: Int8)?
+```
+
+Converts from `Int8` when the value fits in `UInt16`, and
+is `nil` when it doesn't. `Int8` doesn't always fit, so there is
+no `init(from:)`: use `init(truncating:)` or `init(clamping:)` to say
+what an out-of-range value should become.
+
+_Defined in `lang/std/numeric/uint16.ks`._
+
+#### initializer `Exactly`
+
+```kestrel
+public init(exactly: Int16)?
+```
+
+Converts from `Int16` when the value fits in `UInt16`, and
+is `nil` when it doesn't. `Int16` doesn't always fit, so there is
+no `init(from:)`: use `init(truncating:)` or `init(clamping:)` to say
+what an out-of-range value should become.
+
+_Defined in `lang/std/numeric/uint16.ks`._
+
+#### initializer `Exactly`
+
+```kestrel
+public init(exactly: Int32)?
+```
+
+Converts from `Int32` when the value fits in `UInt16`, and
+is `nil` when it doesn't. `Int32` doesn't always fit, so there is
+no `init(from:)`: use `init(truncating:)` or `init(clamping:)` to say
+what an out-of-range value should become.
+
+_Defined in `lang/std/numeric/uint16.ks`._
+
+#### initializer `Exactly`
+
+```kestrel
+public init(exactly: Int64)?
+```
+
+Converts from `Int64` when the value fits in `UInt16`, and
+is `nil` when it doesn't. `Int64` doesn't always fit, so there is
+no `init(from:)`: use `init(truncating:)` or `init(clamping:)` to say
+what an out-of-range value should become.
+
+_Defined in `lang/std/numeric/uint16.ks`._
+
+#### initializer `Exactly`
+
+```kestrel
+public init(exactly: UInt32)?
+```
+
+Converts from `UInt32` when the value fits in `UInt16`, and
+is `nil` when it doesn't. `UInt32` doesn't always fit, so there is
+no `init(from:)`: use `init(truncating:)` or `init(clamping:)` to say
+what an out-of-range value should become.
+
+_Defined in `lang/std/numeric/uint16.ks`._
+
+#### initializer `Exactly`
+
+```kestrel
+public init(exactly: UInt64)?
+```
+
+Converts from `UInt64` when the value fits in `UInt16`, and
+is `nil` when it doesn't. `UInt64` doesn't always fit, so there is
+no `init(from:)`: use `init(truncating:)` or `init(clamping:)` to say
+what an out-of-range value should become.
+
+_Defined in `lang/std/numeric/uint16.ks`._
+
+#### initializer `Exactly`
+
+```kestrel
+public init(exactly: Float32)?
+```
+
+Converts from `Float32` when the value is a whole number in
+`UInt16`'s range, and is `nil` otherwise (a fraction, NaN, an
+infinity, or out of range).
+
+_Defined in `lang/std/numeric/uint16.ks`._
+
+#### initializer `Exactly`
+
+```kestrel
+public init(exactly: Float64)?
+```
+
+Converts from `Float64` when the value is a whole number in
+`UInt16`'s range, and is `nil` otherwise (a fraction, NaN, an
+infinity, or out of range).
+
+_Defined in `lang/std/numeric/uint16.ks`._
+
 #### initializer `From Bytes`
 
 ```kestrel
-public init[S](fromBytes: &S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
+public init(fromBytes: &Slice[UInt8])?
 ```
 
 Reassembles a `UInt16` from 2 bytes in native byte order.
@@ -9821,7 +10366,7 @@ _Defined in `lang/std/numeric/uint16.ks`._
 #### initializer `From Bytes Big Endian`
 
 ```kestrel
-public init[S](fromBytesBigEndian: &S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
+public init(fromBytesBigEndian: &Slice[UInt8])?
 ```
 
 Reassembles a `UInt16` from 2 bytes in big-endian order.
@@ -9832,7 +10377,7 @@ _Defined in `lang/std/numeric/uint16.ks`._
 #### initializer `From Bytes Little Endian`
 
 ```kestrel
-public init[S](fromBytesLittleEndian: &S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
+public init(fromBytesLittleEndian: &Slice[UInt8])?
 ```
 
 Reassembles a `UInt16` from 2 bytes in little-endian order.
@@ -9843,106 +10388,10 @@ _Defined in `lang/std/numeric/uint16.ks`._
 #### initializer `From Integer`
 
 ```kestrel
-public init(from: Int8)
-```
-
-Converts from `Int8`, trapping when the value doesn't fit in
-`UInt16`. Use `init(truncating:)` or `init(clamping:)` when
-out-of-range values are expected.
-
-##### Errors
-
-Panics when `other` is outside `UInt16.minValue...UInt16.maxValue`.
-
-_Defined in `lang/std/numeric/uint16.ks`._
-
-#### initializer `From Integer`
-
-```kestrel
-public init(from: Int16)
-```
-
-Converts from `Int16`, trapping when the value doesn't fit in
-`UInt16`. Use `init(truncating:)` or `init(clamping:)` when
-out-of-range values are expected.
-
-##### Errors
-
-Panics when `other` is outside `UInt16.minValue...UInt16.maxValue`.
-
-_Defined in `lang/std/numeric/uint16.ks`._
-
-#### initializer `From Integer`
-
-```kestrel
-public init(from: Int32)
-```
-
-Converts from `Int32`, trapping when the value doesn't fit in
-`UInt16`. Use `init(truncating:)` or `init(clamping:)` when
-out-of-range values are expected.
-
-##### Errors
-
-Panics when `other` is outside `UInt16.minValue...UInt16.maxValue`.
-
-_Defined in `lang/std/numeric/uint16.ks`._
-
-#### initializer `From Integer`
-
-```kestrel
-public init(from: Int64)
-```
-
-Converts from `Int64`, trapping when the value doesn't fit in
-`UInt16`. Use `init(truncating:)` or `init(clamping:)` when
-out-of-range values are expected.
-
-##### Errors
-
-Panics when `other` is outside `UInt16.minValue...UInt16.maxValue`.
-
-_Defined in `lang/std/numeric/uint16.ks`._
-
-#### initializer `From Integer`
-
-```kestrel
 public init(from: UInt8)
 ```
 
 Converts from `UInt8`. Lossless: every `UInt8` fits in `UInt16`.
-
-_Defined in `lang/std/numeric/uint16.ks`._
-
-#### initializer `From Integer`
-
-```kestrel
-public init(from: UInt32)
-```
-
-Converts from `UInt32`, trapping when the value doesn't fit in
-`UInt16`. Use `init(truncating:)` or `init(clamping:)` when
-out-of-range values are expected.
-
-##### Errors
-
-Panics when `other` is outside `UInt16.minValue...UInt16.maxValue`.
-
-_Defined in `lang/std/numeric/uint16.ks`._
-
-#### initializer `From Integer`
-
-```kestrel
-public init(from: UInt64)
-```
-
-Converts from `UInt64`, trapping when the value doesn't fit in
-`UInt16`. Use `init(truncating:)` or `init(clamping:)` when
-out-of-range values are expected.
-
-##### Errors
-
-Panics when `other` is outside `UInt16.minValue...UInt16.maxValue`.
 
 _Defined in `lang/std/numeric/uint16.ks`._
 
@@ -9957,10 +10406,20 @@ counterpart of `raw`, for values coming back from intrinsics or C.
 
 _Defined in `lang/std/numeric/uint16.ks`._
 
+#### initializer `Identity`
+
+```kestrel
+public init(from: UInt16)
+```
+
+`UInt16` from itself, so a `Convertible[T]` bound accepts `UInt16`.
+
+_Defined in `lang/std/numeric/uint16.ks`._
+
 #### initializer `Parse`
 
 ```kestrel
-public init[S](parsing: S)? where S: Str, S: not Static
+public init(parsing: &StringSlice)?
 ```
 
 Parses a base-10 unsigned integer literal, optionally prefixed
@@ -9980,7 +10439,7 @@ _Defined in `lang/std/numeric/uint16.ks`._
 #### initializer `Parse Radix`
 
 ```kestrel
-public init[S](parsing: S, radix: Int64)? where S: Str, S: not Static
+public init(parsing: &StringSlice, radix: Int64)?
 ```
 
 Parses an unsigned integer in `radix` (base 2-36 inclusive). Letters
@@ -10061,6 +10520,30 @@ public init(truncating: UInt64)
 
 Converts from `UInt64` keeping only the low bits, reinterpreted as
 `UInt16`. Never traps.
+
+_Defined in `lang/std/numeric/uint16.ks`._
+
+#### initializer `Truncating`
+
+```kestrel
+public init(truncating: Float32)
+```
+
+Converts from `Float32`, dropping any fraction toward zero.
+Out-of-range values saturate to `UInt16.minValue` /
+`UInt16.maxValue` and NaN becomes 0. Never traps.
+
+_Defined in `lang/std/numeric/uint16.ks`._
+
+#### initializer `Truncating`
+
+```kestrel
+public init(truncating: Float64)
+```
+
+Converts from `Float64`, dropping any fraction toward zero.
+Out-of-range values saturate to `UInt16.minValue` /
+`UInt16.maxValue` and NaN becomes 0. Never traps.
 
 _Defined in `lang/std/numeric/uint16.ks`._
 
@@ -11068,7 +11551,7 @@ _Defined in `lang/std/numeric/uint16.ks`._
 
 ### Implements `Convertible`
 
-### Implements `LossyConvertible`
+### Implements `NarrowsFrom`
 
 ### Implements `Exitable`
 
@@ -11186,6 +11669,28 @@ when the value doesn't fit.
 
 _Defined in `lang/std/numeric/uint32.ks`._
 
+#### initializer `Clamping`
+
+```kestrel
+public init(clamping: Float32)
+```
+
+Same as `init(truncating:)`: drops the fraction, saturates out of
+range, and NaN becomes 0. Never traps.
+
+_Defined in `lang/std/numeric/uint32.ks`._
+
+#### initializer `Clamping`
+
+```kestrel
+public init(clamping: Float64)
+```
+
+Same as `init(truncating:)`: drops the fraction, saturates out of
+range, and NaN becomes 0. Never traps.
+
+_Defined in `lang/std/numeric/uint32.ks`._
+
 #### initializer `Default`
 
 ```kestrel
@@ -11202,10 +11707,99 @@ let n = Int64();   // 0
 
 _Defined in `lang/std/numeric/uint32.ks`._
 
+#### initializer `Exactly`
+
+```kestrel
+public init(exactly: Int8)?
+```
+
+Converts from `Int8` when the value fits in `UInt32`, and
+is `nil` when it doesn't. `Int8` doesn't always fit, so there is
+no `init(from:)`: use `init(truncating:)` or `init(clamping:)` to say
+what an out-of-range value should become.
+
+_Defined in `lang/std/numeric/uint32.ks`._
+
+#### initializer `Exactly`
+
+```kestrel
+public init(exactly: Int16)?
+```
+
+Converts from `Int16` when the value fits in `UInt32`, and
+is `nil` when it doesn't. `Int16` doesn't always fit, so there is
+no `init(from:)`: use `init(truncating:)` or `init(clamping:)` to say
+what an out-of-range value should become.
+
+_Defined in `lang/std/numeric/uint32.ks`._
+
+#### initializer `Exactly`
+
+```kestrel
+public init(exactly: Int32)?
+```
+
+Converts from `Int32` when the value fits in `UInt32`, and
+is `nil` when it doesn't. `Int32` doesn't always fit, so there is
+no `init(from:)`: use `init(truncating:)` or `init(clamping:)` to say
+what an out-of-range value should become.
+
+_Defined in `lang/std/numeric/uint32.ks`._
+
+#### initializer `Exactly`
+
+```kestrel
+public init(exactly: Int64)?
+```
+
+Converts from `Int64` when the value fits in `UInt32`, and
+is `nil` when it doesn't. `Int64` doesn't always fit, so there is
+no `init(from:)`: use `init(truncating:)` or `init(clamping:)` to say
+what an out-of-range value should become.
+
+_Defined in `lang/std/numeric/uint32.ks`._
+
+#### initializer `Exactly`
+
+```kestrel
+public init(exactly: UInt64)?
+```
+
+Converts from `UInt64` when the value fits in `UInt32`, and
+is `nil` when it doesn't. `UInt64` doesn't always fit, so there is
+no `init(from:)`: use `init(truncating:)` or `init(clamping:)` to say
+what an out-of-range value should become.
+
+_Defined in `lang/std/numeric/uint32.ks`._
+
+#### initializer `Exactly`
+
+```kestrel
+public init(exactly: Float32)?
+```
+
+Converts from `Float32` when the value is a whole number in
+`UInt32`'s range, and is `nil` otherwise (a fraction, NaN, an
+infinity, or out of range).
+
+_Defined in `lang/std/numeric/uint32.ks`._
+
+#### initializer `Exactly`
+
+```kestrel
+public init(exactly: Float64)?
+```
+
+Converts from `Float64` when the value is a whole number in
+`UInt32`'s range, and is `nil` otherwise (a fraction, NaN, an
+infinity, or out of range).
+
+_Defined in `lang/std/numeric/uint32.ks`._
+
 #### initializer `From Bytes`
 
 ```kestrel
-public init[S](fromBytes: &S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
+public init(fromBytes: &Slice[UInt8])?
 ```
 
 Reassembles a `UInt32` from 4 bytes in native byte order.
@@ -11216,7 +11810,7 @@ _Defined in `lang/std/numeric/uint32.ks`._
 #### initializer `From Bytes Big Endian`
 
 ```kestrel
-public init[S](fromBytesBigEndian: &S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
+public init(fromBytesBigEndian: &Slice[UInt8])?
 ```
 
 Reassembles a `UInt32` from 4 bytes in big-endian order.
@@ -11227,75 +11821,11 @@ _Defined in `lang/std/numeric/uint32.ks`._
 #### initializer `From Bytes Little Endian`
 
 ```kestrel
-public init[S](fromBytesLittleEndian: &S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
+public init(fromBytesLittleEndian: &Slice[UInt8])?
 ```
 
 Reassembles a `UInt32` from 4 bytes in little-endian order.
 Returns `null` if the input is not exactly 4 bytes long.
-
-_Defined in `lang/std/numeric/uint32.ks`._
-
-#### initializer `From Integer`
-
-```kestrel
-public init(from: Int8)
-```
-
-Converts from `Int8`, trapping when the value doesn't fit in
-`UInt32`. Use `init(truncating:)` or `init(clamping:)` when
-out-of-range values are expected.
-
-##### Errors
-
-Panics when `other` is outside `UInt32.minValue...UInt32.maxValue`.
-
-_Defined in `lang/std/numeric/uint32.ks`._
-
-#### initializer `From Integer`
-
-```kestrel
-public init(from: Int16)
-```
-
-Converts from `Int16`, trapping when the value doesn't fit in
-`UInt32`. Use `init(truncating:)` or `init(clamping:)` when
-out-of-range values are expected.
-
-##### Errors
-
-Panics when `other` is outside `UInt32.minValue...UInt32.maxValue`.
-
-_Defined in `lang/std/numeric/uint32.ks`._
-
-#### initializer `From Integer`
-
-```kestrel
-public init(from: Int32)
-```
-
-Converts from `Int32`, trapping when the value doesn't fit in
-`UInt32`. Use `init(truncating:)` or `init(clamping:)` when
-out-of-range values are expected.
-
-##### Errors
-
-Panics when `other` is outside `UInt32.minValue...UInt32.maxValue`.
-
-_Defined in `lang/std/numeric/uint32.ks`._
-
-#### initializer `From Integer`
-
-```kestrel
-public init(from: Int64)
-```
-
-Converts from `Int64`, trapping when the value doesn't fit in
-`UInt32`. Use `init(truncating:)` or `init(clamping:)` when
-out-of-range values are expected.
-
-##### Errors
-
-Panics when `other` is outside `UInt32.minValue...UInt32.maxValue`.
 
 _Defined in `lang/std/numeric/uint32.ks`._
 
@@ -11319,22 +11849,6 @@ Converts from `UInt16`. Lossless: every `UInt16` fits in `UInt32`.
 
 _Defined in `lang/std/numeric/uint32.ks`._
 
-#### initializer `From Integer`
-
-```kestrel
-public init(from: UInt64)
-```
-
-Converts from `UInt64`, trapping when the value doesn't fit in
-`UInt32`. Use `init(truncating:)` or `init(clamping:)` when
-out-of-range values are expected.
-
-##### Errors
-
-Panics when `other` is outside `UInt32.minValue...UInt32.maxValue`.
-
-_Defined in `lang/std/numeric/uint32.ks`._
-
 #### initializer `From Raw`
 
 ```kestrel
@@ -11346,10 +11860,20 @@ counterpart of `raw`, for values coming back from intrinsics or C.
 
 _Defined in `lang/std/numeric/uint32.ks`._
 
+#### initializer `Identity`
+
+```kestrel
+public init(from: UInt32)
+```
+
+`UInt32` from itself, so a `Convertible[T]` bound accepts `UInt32`.
+
+_Defined in `lang/std/numeric/uint32.ks`._
+
 #### initializer `Parse`
 
 ```kestrel
-public init[S](parsing: S)? where S: Str, S: not Static
+public init(parsing: &StringSlice)?
 ```
 
 Parses a base-10 unsigned integer literal, optionally prefixed
@@ -11369,7 +11893,7 @@ _Defined in `lang/std/numeric/uint32.ks`._
 #### initializer `Parse Radix`
 
 ```kestrel
-public init[S](parsing: S, radix: Int64)? where S: Str, S: not Static
+public init(parsing: &StringSlice, radix: Int64)?
 ```
 
 Parses an unsigned integer in `radix` (base 2-36 inclusive). Letters
@@ -11439,6 +11963,30 @@ public init(truncating: UInt64)
 
 Converts from `UInt64` keeping only the low bits, reinterpreted as
 `UInt32`. Never traps.
+
+_Defined in `lang/std/numeric/uint32.ks`._
+
+#### initializer `Truncating`
+
+```kestrel
+public init(truncating: Float32)
+```
+
+Converts from `Float32`, dropping any fraction toward zero.
+Out-of-range values saturate to `UInt32.minValue` /
+`UInt32.maxValue` and NaN becomes 0. Never traps.
+
+_Defined in `lang/std/numeric/uint32.ks`._
+
+#### initializer `Truncating`
+
+```kestrel
+public init(truncating: Float64)
+```
+
+Converts from `Float64`, dropping any fraction toward zero.
+Out-of-range values saturate to `UInt32.minValue` /
+`UInt32.maxValue` and NaN becomes 0. Never traps.
 
 _Defined in `lang/std/numeric/uint32.ks`._
 
@@ -12446,7 +12994,7 @@ _Defined in `lang/std/numeric/uint32.ks`._
 
 ### Implements `Convertible`
 
-### Implements `LossyConvertible`
+### Implements `NarrowsFrom`
 
 ### Implements `Exitable`
 
@@ -12553,6 +13101,28 @@ when the value doesn't fit.
 
 _Defined in `lang/std/numeric/uint64.ks`._
 
+#### initializer `Clamping`
+
+```kestrel
+public init(clamping: Float32)
+```
+
+Same as `init(truncating:)`: drops the fraction, saturates out of
+range, and NaN becomes 0. Never traps.
+
+_Defined in `lang/std/numeric/uint64.ks`._
+
+#### initializer `Clamping`
+
+```kestrel
+public init(clamping: Float64)
+```
+
+Same as `init(truncating:)`: drops the fraction, saturates out of
+range, and NaN becomes 0. Never traps.
+
+_Defined in `lang/std/numeric/uint64.ks`._
+
 #### initializer `Default`
 
 ```kestrel
@@ -12569,10 +13139,86 @@ let n = Int64();   // 0
 
 _Defined in `lang/std/numeric/uint64.ks`._
 
+#### initializer `Exactly`
+
+```kestrel
+public init(exactly: Int8)?
+```
+
+Converts from `Int8` when the value fits in `UInt64`, and
+is `nil` when it doesn't. `Int8` doesn't always fit, so there is
+no `init(from:)`: use `init(truncating:)` or `init(clamping:)` to say
+what an out-of-range value should become.
+
+_Defined in `lang/std/numeric/uint64.ks`._
+
+#### initializer `Exactly`
+
+```kestrel
+public init(exactly: Int16)?
+```
+
+Converts from `Int16` when the value fits in `UInt64`, and
+is `nil` when it doesn't. `Int16` doesn't always fit, so there is
+no `init(from:)`: use `init(truncating:)` or `init(clamping:)` to say
+what an out-of-range value should become.
+
+_Defined in `lang/std/numeric/uint64.ks`._
+
+#### initializer `Exactly`
+
+```kestrel
+public init(exactly: Int32)?
+```
+
+Converts from `Int32` when the value fits in `UInt64`, and
+is `nil` when it doesn't. `Int32` doesn't always fit, so there is
+no `init(from:)`: use `init(truncating:)` or `init(clamping:)` to say
+what an out-of-range value should become.
+
+_Defined in `lang/std/numeric/uint64.ks`._
+
+#### initializer `Exactly`
+
+```kestrel
+public init(exactly: Int64)?
+```
+
+Converts from `Int64` when the value fits in `UInt64`, and
+is `nil` when it doesn't. `Int64` doesn't always fit, so there is
+no `init(from:)`: use `init(truncating:)` or `init(clamping:)` to say
+what an out-of-range value should become.
+
+_Defined in `lang/std/numeric/uint64.ks`._
+
+#### initializer `Exactly`
+
+```kestrel
+public init(exactly: Float32)?
+```
+
+Converts from `Float32` when the value is a whole number in
+`UInt64`'s range, and is `nil` otherwise (a fraction, NaN, an
+infinity, or out of range).
+
+_Defined in `lang/std/numeric/uint64.ks`._
+
+#### initializer `Exactly`
+
+```kestrel
+public init(exactly: Float64)?
+```
+
+Converts from `Float64` when the value is a whole number in
+`UInt64`'s range, and is `nil` otherwise (a fraction, NaN, an
+infinity, or out of range).
+
+_Defined in `lang/std/numeric/uint64.ks`._
+
 #### initializer `From Bytes`
 
 ```kestrel
-public init[S](fromBytes: &S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
+public init(fromBytes: &Slice[UInt8])?
 ```
 
 Reassembles a `UInt64` from 8 bytes in native byte order.
@@ -12583,7 +13229,7 @@ _Defined in `lang/std/numeric/uint64.ks`._
 #### initializer `From Bytes Big Endian`
 
 ```kestrel
-public init[S](fromBytesBigEndian: &S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
+public init(fromBytesBigEndian: &Slice[UInt8])?
 ```
 
 Reassembles a `UInt64` from 8 bytes in big-endian order.
@@ -12594,75 +13240,11 @@ _Defined in `lang/std/numeric/uint64.ks`._
 #### initializer `From Bytes Little Endian`
 
 ```kestrel
-public init[S](fromBytesLittleEndian: &S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
+public init(fromBytesLittleEndian: &Slice[UInt8])?
 ```
 
 Reassembles a `UInt64` from 8 bytes in little-endian order.
 Returns `null` if the input is not exactly 8 bytes long.
-
-_Defined in `lang/std/numeric/uint64.ks`._
-
-#### initializer `From Integer`
-
-```kestrel
-public init(from: Int8)
-```
-
-Converts from `Int8`, trapping when the value doesn't fit in
-`UInt64`. Use `init(truncating:)` or `init(clamping:)` when
-out-of-range values are expected.
-
-##### Errors
-
-Panics when `other` is outside `UInt64.minValue...UInt64.maxValue`.
-
-_Defined in `lang/std/numeric/uint64.ks`._
-
-#### initializer `From Integer`
-
-```kestrel
-public init(from: Int16)
-```
-
-Converts from `Int16`, trapping when the value doesn't fit in
-`UInt64`. Use `init(truncating:)` or `init(clamping:)` when
-out-of-range values are expected.
-
-##### Errors
-
-Panics when `other` is outside `UInt64.minValue...UInt64.maxValue`.
-
-_Defined in `lang/std/numeric/uint64.ks`._
-
-#### initializer `From Integer`
-
-```kestrel
-public init(from: Int32)
-```
-
-Converts from `Int32`, trapping when the value doesn't fit in
-`UInt64`. Use `init(truncating:)` or `init(clamping:)` when
-out-of-range values are expected.
-
-##### Errors
-
-Panics when `other` is outside `UInt64.minValue...UInt64.maxValue`.
-
-_Defined in `lang/std/numeric/uint64.ks`._
-
-#### initializer `From Integer`
-
-```kestrel
-public init(from: Int64)
-```
-
-Converts from `Int64`, trapping when the value doesn't fit in
-`UInt64`. Use `init(truncating:)` or `init(clamping:)` when
-out-of-range values are expected.
-
-##### Errors
-
-Panics when `other` is outside `UInt64.minValue...UInt64.maxValue`.
 
 _Defined in `lang/std/numeric/uint64.ks`._
 
@@ -12707,10 +13289,20 @@ counterpart of `raw`, for values coming back from intrinsics or C.
 
 _Defined in `lang/std/numeric/uint64.ks`._
 
+#### initializer `Identity`
+
+```kestrel
+public init(from: UInt64)
+```
+
+`UInt64` from itself, so a `Convertible[T]` bound accepts `UInt64`.
+
+_Defined in `lang/std/numeric/uint64.ks`._
+
 #### initializer `Parse`
 
 ```kestrel
-public init[S](parsing: S)? where S: Str, S: not Static
+public init(parsing: &StringSlice)?
 ```
 
 Parses a base-10 unsigned integer literal, optionally prefixed
@@ -12730,7 +13322,7 @@ _Defined in `lang/std/numeric/uint64.ks`._
 #### initializer `Parse Radix`
 
 ```kestrel
-public init[S](parsing: S, radix: Int64)? where S: Str, S: not Static
+public init(parsing: &StringSlice, radix: Int64)?
 ```
 
 Parses an unsigned integer in `radix` (base 2-36 inclusive). Letters
@@ -12789,6 +13381,30 @@ public init(truncating: Int64)
 
 Converts from `Int64` keeping only the low bits, reinterpreted as
 `UInt64`. Never traps.
+
+_Defined in `lang/std/numeric/uint64.ks`._
+
+#### initializer `Truncating`
+
+```kestrel
+public init(truncating: Float32)
+```
+
+Converts from `Float32`, dropping any fraction toward zero.
+Out-of-range values saturate to `UInt64.minValue` /
+`UInt64.maxValue` and NaN becomes 0. Never traps.
+
+_Defined in `lang/std/numeric/uint64.ks`._
+
+#### initializer `Truncating`
+
+```kestrel
+public init(truncating: Float64)
+```
+
+Converts from `Float64`, dropping any fraction toward zero.
+Out-of-range values saturate to `UInt64.minValue` /
+`UInt64.maxValue` and NaN becomes 0. Never traps.
 
 _Defined in `lang/std/numeric/uint64.ks`._
 
@@ -13805,7 +14421,7 @@ _Defined in `lang/std/numeric/uint64.ks`._
 
 ### Implements `Convertible`
 
-### Implements `LossyConvertible`
+### Implements `NarrowsFrom`
 
 ### Implements `Exitable`
 
@@ -13945,6 +14561,28 @@ when the value doesn't fit.
 
 _Defined in `lang/std/numeric/uint8.ks`._
 
+#### initializer `Clamping`
+
+```kestrel
+public init(clamping: Float32)
+```
+
+Same as `init(truncating:)`: drops the fraction, saturates out of
+range, and NaN becomes 0. Never traps.
+
+_Defined in `lang/std/numeric/uint8.ks`._
+
+#### initializer `Clamping`
+
+```kestrel
+public init(clamping: Float64)
+```
+
+Same as `init(truncating:)`: drops the fraction, saturates out of
+range, and NaN becomes 0. Never traps.
+
+_Defined in `lang/std/numeric/uint8.ks`._
+
 #### initializer `Default`
 
 ```kestrel
@@ -13961,10 +14599,125 @@ let n = Int64();   // 0
 
 _Defined in `lang/std/numeric/uint8.ks`._
 
+#### initializer `Exactly`
+
+```kestrel
+public init(exactly: Int8)?
+```
+
+Converts from `Int8` when the value fits in `UInt8`, and
+is `nil` when it doesn't. `Int8` doesn't always fit, so there is
+no `init(from:)`: use `init(truncating:)` or `init(clamping:)` to say
+what an out-of-range value should become.
+
+_Defined in `lang/std/numeric/uint8.ks`._
+
+#### initializer `Exactly`
+
+```kestrel
+public init(exactly: Int16)?
+```
+
+Converts from `Int16` when the value fits in `UInt8`, and
+is `nil` when it doesn't. `Int16` doesn't always fit, so there is
+no `init(from:)`: use `init(truncating:)` or `init(clamping:)` to say
+what an out-of-range value should become.
+
+_Defined in `lang/std/numeric/uint8.ks`._
+
+#### initializer `Exactly`
+
+```kestrel
+public init(exactly: Int32)?
+```
+
+Converts from `Int32` when the value fits in `UInt8`, and
+is `nil` when it doesn't. `Int32` doesn't always fit, so there is
+no `init(from:)`: use `init(truncating:)` or `init(clamping:)` to say
+what an out-of-range value should become.
+
+_Defined in `lang/std/numeric/uint8.ks`._
+
+#### initializer `Exactly`
+
+```kestrel
+public init(exactly: Int64)?
+```
+
+Converts from `Int64` when the value fits in `UInt8`, and
+is `nil` when it doesn't. `Int64` doesn't always fit, so there is
+no `init(from:)`: use `init(truncating:)` or `init(clamping:)` to say
+what an out-of-range value should become.
+
+_Defined in `lang/std/numeric/uint8.ks`._
+
+#### initializer `Exactly`
+
+```kestrel
+public init(exactly: UInt16)?
+```
+
+Converts from `UInt16` when the value fits in `UInt8`, and
+is `nil` when it doesn't. `UInt16` doesn't always fit, so there is
+no `init(from:)`: use `init(truncating:)` or `init(clamping:)` to say
+what an out-of-range value should become.
+
+_Defined in `lang/std/numeric/uint8.ks`._
+
+#### initializer `Exactly`
+
+```kestrel
+public init(exactly: UInt32)?
+```
+
+Converts from `UInt32` when the value fits in `UInt8`, and
+is `nil` when it doesn't. `UInt32` doesn't always fit, so there is
+no `init(from:)`: use `init(truncating:)` or `init(clamping:)` to say
+what an out-of-range value should become.
+
+_Defined in `lang/std/numeric/uint8.ks`._
+
+#### initializer `Exactly`
+
+```kestrel
+public init(exactly: UInt64)?
+```
+
+Converts from `UInt64` when the value fits in `UInt8`, and
+is `nil` when it doesn't. `UInt64` doesn't always fit, so there is
+no `init(from:)`: use `init(truncating:)` or `init(clamping:)` to say
+what an out-of-range value should become.
+
+_Defined in `lang/std/numeric/uint8.ks`._
+
+#### initializer `Exactly`
+
+```kestrel
+public init(exactly: Float32)?
+```
+
+Converts from `Float32` when the value is a whole number in
+`UInt8`'s range, and is `nil` otherwise (a fraction, NaN, an
+infinity, or out of range).
+
+_Defined in `lang/std/numeric/uint8.ks`._
+
+#### initializer `Exactly`
+
+```kestrel
+public init(exactly: Float64)?
+```
+
+Converts from `Float64` when the value is a whole number in
+`UInt8`'s range, and is `nil` otherwise (a fraction, NaN, an
+infinity, or out of range).
+
+_Defined in `lang/std/numeric/uint8.ks`._
+
 #### initializer `From Bytes`
 
 ```kestrel
-public init[S](fromBytes: &S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
+public init(fromBytes: &Slice[UInt8])?
 ```
 
 Reassembles a `UInt8` from 1 bytes in native byte order.
@@ -13975,7 +14728,7 @@ _Defined in `lang/std/numeric/uint8.ks`._
 #### initializer `From Bytes Big Endian`
 
 ```kestrel
-public init[S](fromBytesBigEndian: &S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
+public init(fromBytesBigEndian: &Slice[UInt8])?
 ```
 
 Reassembles a `UInt8` from 1 bytes in big-endian order.
@@ -13986,123 +14739,11 @@ _Defined in `lang/std/numeric/uint8.ks`._
 #### initializer `From Bytes Little Endian`
 
 ```kestrel
-public init[S](fromBytesLittleEndian: &S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
+public init(fromBytesLittleEndian: &Slice[UInt8])?
 ```
 
 Reassembles a `UInt8` from 1 bytes in little-endian order.
 Returns `null` if the input is not exactly 1 bytes long.
-
-_Defined in `lang/std/numeric/uint8.ks`._
-
-#### initializer `From Integer`
-
-```kestrel
-public init(from: Int8)
-```
-
-Converts from `Int8`, trapping when the value doesn't fit in
-`UInt8`. Use `init(truncating:)` or `init(clamping:)` when
-out-of-range values are expected.
-
-##### Errors
-
-Panics when `other` is outside `UInt8.minValue...UInt8.maxValue`.
-
-_Defined in `lang/std/numeric/uint8.ks`._
-
-#### initializer `From Integer`
-
-```kestrel
-public init(from: Int16)
-```
-
-Converts from `Int16`, trapping when the value doesn't fit in
-`UInt8`. Use `init(truncating:)` or `init(clamping:)` when
-out-of-range values are expected.
-
-##### Errors
-
-Panics when `other` is outside `UInt8.minValue...UInt8.maxValue`.
-
-_Defined in `lang/std/numeric/uint8.ks`._
-
-#### initializer `From Integer`
-
-```kestrel
-public init(from: Int32)
-```
-
-Converts from `Int32`, trapping when the value doesn't fit in
-`UInt8`. Use `init(truncating:)` or `init(clamping:)` when
-out-of-range values are expected.
-
-##### Errors
-
-Panics when `other` is outside `UInt8.minValue...UInt8.maxValue`.
-
-_Defined in `lang/std/numeric/uint8.ks`._
-
-#### initializer `From Integer`
-
-```kestrel
-public init(from: Int64)
-```
-
-Converts from `Int64`, trapping when the value doesn't fit in
-`UInt8`. Use `init(truncating:)` or `init(clamping:)` when
-out-of-range values are expected.
-
-##### Errors
-
-Panics when `other` is outside `UInt8.minValue...UInt8.maxValue`.
-
-_Defined in `lang/std/numeric/uint8.ks`._
-
-#### initializer `From Integer`
-
-```kestrel
-public init(from: UInt16)
-```
-
-Converts from `UInt16`, trapping when the value doesn't fit in
-`UInt8`. Use `init(truncating:)` or `init(clamping:)` when
-out-of-range values are expected.
-
-##### Errors
-
-Panics when `other` is outside `UInt8.minValue...UInt8.maxValue`.
-
-_Defined in `lang/std/numeric/uint8.ks`._
-
-#### initializer `From Integer`
-
-```kestrel
-public init(from: UInt32)
-```
-
-Converts from `UInt32`, trapping when the value doesn't fit in
-`UInt8`. Use `init(truncating:)` or `init(clamping:)` when
-out-of-range values are expected.
-
-##### Errors
-
-Panics when `other` is outside `UInt8.minValue...UInt8.maxValue`.
-
-_Defined in `lang/std/numeric/uint8.ks`._
-
-#### initializer `From Integer`
-
-```kestrel
-public init(from: UInt64)
-```
-
-Converts from `UInt64`, trapping when the value doesn't fit in
-`UInt8`. Use `init(truncating:)` or `init(clamping:)` when
-out-of-range values are expected.
-
-##### Errors
-
-Panics when `other` is outside `UInt8.minValue...UInt8.maxValue`.
 
 _Defined in `lang/std/numeric/uint8.ks`._
 
@@ -14117,10 +14758,20 @@ counterpart of `raw`, for values coming back from intrinsics or C.
 
 _Defined in `lang/std/numeric/uint8.ks`._
 
+#### initializer `Identity`
+
+```kestrel
+public init(from: UInt8)
+```
+
+`UInt8` from itself, so a `Convertible[T]` bound accepts `UInt8`.
+
+_Defined in `lang/std/numeric/uint8.ks`._
+
 #### initializer `Parse`
 
 ```kestrel
-public init[S](parsing: S)? where S: Str, S: not Static
+public init(parsing: &StringSlice)?
 ```
 
 Parses a base-10 unsigned integer literal, optionally prefixed
@@ -14140,7 +14791,7 @@ _Defined in `lang/std/numeric/uint8.ks`._
 #### initializer `Parse Radix`
 
 ```kestrel
-public init[S](parsing: S, radix: Int64)? where S: Str, S: not Static
+public init(parsing: &StringSlice, radix: Int64)?
 ```
 
 Parses an unsigned integer in `radix` (base 2-36 inclusive). Letters
@@ -14232,6 +14883,30 @@ public init(truncating: UInt64)
 
 Converts from `UInt64` keeping only the low bits, reinterpreted as
 `UInt8`. Never traps.
+
+_Defined in `lang/std/numeric/uint8.ks`._
+
+#### initializer `Truncating`
+
+```kestrel
+public init(truncating: Float32)
+```
+
+Converts from `Float32`, dropping any fraction toward zero.
+Out-of-range values saturate to `UInt8.minValue` /
+`UInt8.maxValue` and NaN becomes 0. Never traps.
+
+_Defined in `lang/std/numeric/uint8.ks`._
+
+#### initializer `Truncating`
+
+```kestrel
+public init(truncating: Float64)
+```
+
+Converts from `Float64`, dropping any fraction toward zero.
+Out-of-range values saturate to `UInt8.minValue` /
+`UInt8.maxValue` and NaN becomes 0. Never traps.
 
 _Defined in `lang/std/numeric/uint8.ks`._
 
@@ -15239,7 +15914,7 @@ _Defined in `lang/std/numeric/uint8.ks`._
 
 ### Implements `Convertible`
 
-### Implements `LossyConvertible`
+### Implements `NarrowsFrom`
 
 ### Implements `Exitable`
 

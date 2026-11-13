@@ -56,7 +56,7 @@ the type checker, and the code is assigned in one place,
 |---|---|---|
 | E100 | *(retired umbrella)* | Used to cover every inference error. Now carried only by an internal error that is never shown (an expression HIR lowering already reported); each kind below has its own code. |
 | E101 | {kind} condition must be Bool | An `if`/`while`/`guard` condition has a non-`Bool` type. |
-| E102 | no member '{name}' on type '{type}' | The member, associated type or tuple element does not exist on the receiver's type (includes tuple index out of bounds and member access on a primitive). |
+| E102 | no member '{name}' on type '{type}' | The member, associated type or tuple element does not exist on the receiver's type (includes tuple index out of bounds and member access on a primitive). When the receiver is an `Indirection` wrapper that peeled, the message names the receiver as written and adds "or its pointee '{pointee}'". |
 | E103 | ambiguous member / call to '{name}' | More than one candidate fits equally well. |
 | E104 | implicit member '.{name}' not found | `.Case` / `.member` has no match on the expected type. |
 | E105 | could not infer type / cannot infer type parameter | Nothing determines the type; add an annotation. |
@@ -110,6 +110,8 @@ the type checker, and the code is assigned in one place,
 | E156 | a slice cannot be assigned as a whole | The target of an assignment is unsized (`xs(1..<3) = ys`, a `Slice[T]` place), as in Rust. Copy into it with `xs(1..<3).assign(from: ys)` (lengths must match) or resize with `replaceSubrange`. |
 | E157 | \`?.\` requires a type that conforms to \`OptionalChain\`, found '{T}' | `a?.b` on a value with no payload to chain on (not an `Optional`, a `Result`, or another `OptionalChain` type). Use `.` for a non-optional value. Emitted by type inference. |
 | E158 | can't consume through \`?.\` on a place | A chain on a variable or field lends its payload by reference, so a `consuming` method or argument can't take it. Move the value out first: `a.take()?.…`. Emitted by the `optional_chain` analyzer. |
+| E159 | {construct} requires the \`{Builtin}\` lang item | Compiler-generated code (a `for` loop, `try`, `throw`, an operator, `?.`, `as?`, `lazy`, a format spec, a failable `init`) needs a lang item that no declaration carries the `@builtin(.X)` tag for. Usually the standard library is not imported; a `--no-std` program must declare and tag the item itself. Emitted by HIR lowering. |
+| E160 | a \`let\` condition can't be joined with \`and\` | `if let .Some(e) = end and start < e`: `and` binds tighter than the `let`, so the whole `end and start < e` would be the value matched, with `e` not yet bound. Separate conditions with `,` (`if let .Some(e) = end, start < e`); parenthesize to match against a `Bool` `and`. Applies to `if`, `guard` and `while`. Emitted by HIR lowering. |
 
 ### Example — E109 (type mismatch)
 
@@ -201,6 +203,7 @@ func unwrap(opt: Int64?) -> Int64 {
 | E411 | duplicate method '{name}': defined on both the type and an extension | An extension redefines a method the type already declares. |
 | E412 | duplicate method '{name}' in extensions of '{type}' | Two extensions of the same type instantiation define the same method. |
 | E413 | computed properties must use 'var' | A computed property (with `get`/`set`) can't be declared `let`. |
+| E414 | this file has no `module` declaration | A file that declares anything must start with a `module` line; without one its names leak into every other module. |
 | E415 | enums cannot have stored fields | Enums carry data in case payloads, not stored fields. |
 | E416 | static stored properties not supported in generic types | A stored static has one storage cell, so it cannot belong to a generic type (`Box[Int64].count` and `Box[String].count` would have to be one cell or many). This also applies in any `extend` of a generic type, `extend Box[Int64]` included, and in protocol extensions, whose `Self` is generic. Use a computed static instead (Swift's rule). |
 | E417 | protocol method '{method}' in '{protocol}' cannot have a body | Protocol requirements are signatures only; put default bodies in a protocol extension. |
@@ -332,7 +335,7 @@ protocol/extension-target arguments, where-clause types).
 | E494 | cannot return this reference/closure: it borrows local '{name}', which does not outlive the call | A reference (or a closure/value carrying one) rooted in a local would dangle after return. |
 | E495 | returning \`&mutating\` requires a mutable root | A `&mutating` return needs a `mutating` receiver/parameter or `Pointer.mutatingValue` as its root; statics and `.value` don't qualify. |
 | E496 | cannot return a reference rooted at consuming parameter '{name}': it is destroyed when the call returns | Consuming parameters die with the call, so references into them can't escape. |
-| E497 | a reference cannot stay live across a control-flow merge in this version | A reference may not cross an `if`/`match`/loop boundary (current-version limitation). |
+| E497 | a reference cannot stay live across a control-flow merge in this version | A reference may not cross an `if`/`match`/loop boundary (current-version limitation). This includes an arm whose result is a reference to an unsized type (`&StringSlice`), which cannot decay, and rebinding a shared-ref `var` inside a branch or loop ("ref binding '{name}' cannot be rebound inside a branch or loop in this version"). |
 | E498 | cannot consume {value} while a reference into it is live | Destroying or moving a value would leave an outstanding reference dangling. |
 | E499 | cannot borrow a temporary value · \`&\` pattern binding would borrow a temporary | `&` needs a named place; temporaries and get/set members have no stable storage to borrow. A `let` destructure with `&` binders must destructure a named place. |
 
@@ -370,6 +373,7 @@ These apply to non-`Copyable` types, which move instead of copy.
 | E509 | a reference to '{name}' is stored somewhere that outlives '{name}' | A value carrying `&x` (directly or inside a struct or enum value) is stored into a binding declared in an outer scope, which outlives `x`, so the reference would dangle. Returns are covered by E494. |
 | E510 | cannot consume '{name}' while the same call borrows it | One call passes a non-Copyable value both to a borrowing (or `mutating`) parameter or receiver and to a `consuming` parameter, as in `f(x, x)`. |
 | E511 | cannot move a field out of '{type}', which has a deinit | Moving a non-Copyable field out of a value would take it apart without running its type's `deinit`. Borrow or copy the field instead. |
+| E512 | passing a '{view}' to a borrowed '{owned}' parameter copies it | Warning. A borrowed parameter that names an owned type (`x: String`) converts a view argument (`&StringSlice`) through `DecaysFrom`, copying it. The callee only reads, so a `&StringSlice` parameter would borrow the view in place. |
 
 ### Example — E500 / E501 (use after move)
 
@@ -656,7 +660,7 @@ See `docs/plans/attributes/attributes-design.md`.
 | E908 *(warning)* | '{name}' is deprecated[ since {since}][: {message}][; use '{replacement}' instead] | A use of a `@deprecated` declaration: a call, reference, member access, enum case, or a type named in a body or signature. Not reported inside a declaration that is itself deprecated or unavailable, or nested in one. |
 | E909 | '@align({n})' must be a power of two between 1 and 4096 | `@align` takes a power of two; 4096 is the most `posix_memalign` and the stack provide without a special path. |
 | E910 | '@nonExhaustive' has no effect: '{name}' is not visible outside its module | An attribute that does not fit this type: `@nonExhaustive` on an enum that isn't `public` (only other modules must add a catch-all arm, so it does nothing); `'@layout(.Packed)' cannot be applied to an enum`; `'@layout(.Packed)' cannot be applied to a type with an unsized tail`; `'@layout(.C)' on an enum needs every case to be payload-less; 'Shape.Circle' has a payload`; `'@existentialOnly' needs a default for a requirement of the protocol it extends` (the attribute is not on a default, in `extend P`, for one of `P`'s requirements). |
-| E911 | field '{field}' of packed struct '{name}' is not Copyable; packed fields are copied on every read | Every field of a `@layout(.Packed)` struct must be bitwise `Copyable`: it may sit at a misaligned address, so a read copies it out first. |
+| E911 | field '{field}' of packed struct '{name}' is not Copyable; packed fields are copied on every read | Every field of a `@layout(.Packed)` struct must be bitwise `Copyable`: it may sit at a misaligned address, so a read copies it out first. An unsized tail reports E910 only. |
 | E912 | cannot borrow '{place}' in place: '{name}' is packed, so the field may be misaligned | `&h.length`, `&mutating h.length`, a `mutating` method on `h.length`, or `h.length` passed to a `mutating` parameter. Copy it first: `var n = h.length`. Reads and whole-field writes are fine. |
 | E913 | '{name}' is unavailable[: {message}][; use '{replacement}' instead] | A use of an `@unavailable` declaration. Reported everywhere, including inside other unavailable code. An unavailable protocol requirement needs no witness. |
 | E914 *(warning)* | '.{old}' is the old spelling; write '.{New}' | `@platform(.linux)` / `.darwin`: accepted for one release, renamed to `.Linux` / `.Darwin` in 0.18. |

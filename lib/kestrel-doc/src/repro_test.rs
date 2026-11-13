@@ -200,7 +200,7 @@ extend Foo: Eq {
         // Now fixed at the parser layer, but we keep this end-to-end
         // test to make sure no private items leak into Array's docs.
         let mut c = Compiler::new();
-        c.load_dir(std::path::Path::new("../../lang/std"));
+        c.load_std_dir(std::path::Path::new("../../lang/std"));
         let world = c.world();
 
         let (_, pages) = crate::extract(world, c.root());
@@ -234,7 +234,7 @@ mod multi_subscript_diag {
     #[test]
     fn subsequent_subscripts_have_docs() {
         let mut c = Compiler::new();
-        c.load_dir(std::path::Path::new("../../lang/std"));
+        c.load_std_dir(std::path::Path::new("../../lang/std"));
         let world = c.world();
 
         let mut count = 0;

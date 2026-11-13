@@ -157,7 +157,7 @@ enum Head {
 
 /// Look up the first segment in scope.
 fn resolve_head(ctx: &QueryContext<'_>, name: &str, context: Entity, root: Entity) -> Head {
-    if name == "Self" {
+    if crate::helpers::is_self_name(ctx, name, context) {
         return match try_resolve_self_value(ctx, context, root) {
             Some(target) => Head::SelfType(target),
             None => Head::Done(ValueResolution::SelfNotInScope),
@@ -707,6 +707,7 @@ mod tests {
         let std = world.spawn();
         world.set(std, NodeKind::Module);
         world.set(std, Name("std".into()));
+        world.set(std, kestrel_ast_builder::StdRootModule);
         world.set_parent(std, root);
 
         let core = world.spawn();

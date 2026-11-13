@@ -49,7 +49,7 @@ mod tests {
     fn lower_stdlib_items() {
         let mut c = Compiler::new();
         let path = stdlib_path();
-        c.load_dir(&path);
+        c.load_std_dir(&path);
 
         let mir = lower_module(c.world(), c.root());
         assert_eq!(mir.name, "main");
@@ -76,7 +76,7 @@ mod tests {
 
         let mut c = Compiler::new();
         let path = stdlib_path();
-        c.load_dir(&path);
+        c.load_std_dir(&path);
         CompilerDriver::new(&c).infer_all();
 
         let mir = lower_module(c.world(), c.root());
@@ -161,7 +161,7 @@ mod tests {
 
         let mut c = Compiler::new();
         let path = stdlib_path();
-        c.load_dir(&path);
+        c.load_std_dir(&path);
         CompilerDriver::new(&c).infer_all();
 
         let mir = lower_module(c.world(), c.root());
@@ -474,7 +474,7 @@ mod tests {
         use kestrel_compiler_driver::CompilerDriver;
 
         let mut c = Compiler::new();
-        c.load_dir(&stdlib_path());
+        c.load_std_dir(&stdlib_path());
         let file = c.set_source("g18_test.ks", source.to_string());
         c.build(file);
         CompilerDriver::new(&c).infer_all();
@@ -564,7 +564,7 @@ mod tests {
     #[test]
     fn bool_builtin_round_trips_through_entity_builtin() {
         let mut c = Compiler::new();
-        c.load_dir(&stdlib_path());
+        c.load_std_dir(&stdlib_path());
         let ctx = LowerCtx::new(c.world(), c.root(), "test");
 
         let entity = ctx
@@ -588,7 +588,7 @@ mod tests {
 
         let mut c = Compiler::new();
         let path = stdlib_path();
-        c.load_dir(&path);
+        c.load_std_dir(&path);
         CompilerDriver::new(&c).infer_all();
 
         let mut mir = lower_module(c.world(), c.root());
@@ -666,7 +666,7 @@ mod tests {
 
         let mut c = Compiler::new();
         let path = stdlib_path();
-        c.load_dir(&path);
+        c.load_std_dir(&path);
         CompilerDriver::new(&c).infer_all();
 
         let mut mir = lower_module(c.world(), c.root());
@@ -754,7 +754,7 @@ mod tests {
 
         let mut c = Compiler::new();
         let path = stdlib_path();
-        c.load_dir(&path);
+        c.load_std_dir(&path);
         CompilerDriver::new(&c).infer_all();
 
         let mut mir = lower_module(c.world(), c.root());

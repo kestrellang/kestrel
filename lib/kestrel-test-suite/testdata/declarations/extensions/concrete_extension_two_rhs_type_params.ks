@@ -13,7 +13,7 @@ protocol Pair[A, B] {
 
 struct Tag { public init() {} }
 
-extend Tag: Pair[A, B] {
+extend[A, B] Tag: Pair[A, B] {
     public func describe(a a: A, b b: B) -> lang.i64 { 7 }
 }
 

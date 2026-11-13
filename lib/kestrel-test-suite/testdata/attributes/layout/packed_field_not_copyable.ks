@@ -6,6 +6,9 @@
 
 module Main
 
+@builtin(.Copyable)
+protocol Copyable {}
+
 struct Handle: not Copyable {
     var fd: lang.i64;
 }

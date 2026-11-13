@@ -11,15 +11,15 @@ import std.core.(
     BitwiseAnd, BitwiseOr, BitwiseXor, BitwiseNot, LeftShift, RightShift,
     AddAssign, SubtractAssign, MultiplyAssign, DivideAssign, RemainderAssign,
     BitwiseAndAssign, BitwiseOrAssign, BitwiseXorAssign, LeftShiftAssign, RightShiftAssign,
-    ExpressibleByIntLiteral, Convertible, LossyConvertible, Defaultable,
+    ExpressibleByIntLiteral, Convertible, NarrowsFrom, Defaultable,
     RangeConstructible, ClosedRangeConstructible, Range, ClosedRange,
     RangeFromConstructible, RangeUpToConstructible, RangeThroughConstructible,
     RangeFrom, RangeUpTo, RangeThrough
 )
-import std.text.(String, Str, StringBuilder, Formatter, Formattable, FormatOptions, _writePadded)
+import std.text.(String, StringSlice, StringBuilder, Formatter, Formattable, FormatOptions)
 import std.memory.(UnsafeSlice, Pointer)
-import std.collections.(Sliceable, Slice)
-import std.numeric.(UInt8, Int64, UInt64)
+import std.collections.(Slice)
+import std.numeric.(UInt8, Int64, UInt64, Float32, Float64)
 
 /// A 8-bit unsigned integer.
 ///
@@ -89,20 +89,16 @@ public struct UInt8:
     RangeFromConstructible,
     RangeUpToConstructible,
     RangeThroughConstructible,
-    Convertible[Int8],
-    Convertible[Int16],
-    Convertible[Int32],
-    Convertible[Int64],
-    Convertible[UInt16],
-    Convertible[UInt32],
-    Convertible[UInt64],
-    LossyConvertible[Int8],
-    LossyConvertible[Int16],
-    LossyConvertible[Int32],
-    LossyConvertible[Int64],
-    LossyConvertible[UInt16],
-    LossyConvertible[UInt32],
-    LossyConvertible[UInt64]
+    Convertible[UInt8],
+    NarrowsFrom[Int8],
+    NarrowsFrom[Int16],
+    NarrowsFrom[Int32],
+    NarrowsFrom[Int64],
+    NarrowsFrom[UInt16],
+    NarrowsFrom[UInt32],
+    NarrowsFrom[UInt64],
+    NarrowsFrom[Float32],
+    NarrowsFrom[Float64]
 {
     /// The underlying primitive `lang.i8` value. Exposed for FFI
     /// and intrinsic use; prefer the typed surface for everything else.
@@ -170,17 +166,17 @@ public struct UInt8:
         self.raw = value
     }
 
-    /// @name From Integer
-    /// Converts from `Int8`, trapping when the value doesn't fit in
-    /// `UInt8`. Use `init(truncating:)` or `init(clamping:)` when
-    /// out-of-range values are expected.
-    ///
-    /// # Errors
-    ///
-    /// Panics when `other` is outside `UInt8.minValue...UInt8.maxValue`.
-    public init(from other: Int8) {
+    /// @name Identity
+    /// `UInt8` from itself, so a `Convertible[T]` bound accepts `UInt8`.
+    public init(from other: UInt8) { self.raw = other.raw }
+    /// @name Exactly
+    /// Converts from `Int8` when the value fits in `UInt8`, and
+    /// is `nil` when it doesn't. `Int8` doesn't always fit, so there is
+    /// no `init(from:)`: use `init(truncating:)` or `init(clamping:)` to say
+    /// what an out-of-range value should become.
+    public init(exactly other: Int8)? {
         if other < 0 {
-            fatalError("integer conversion overflow: value doesn't fit in UInt8")
+            return null
         }
         self.raw = other.raw
     }
@@ -201,17 +197,14 @@ public struct UInt8:
     /// @name Bit Pattern
     /// Reinterprets the bits of a same-width `Int8` as `UInt8`. Never traps.
     public init(bitPattern other: Int8) { self.raw = other.raw }
-    /// @name From Integer
-    /// Converts from `Int16`, trapping when the value doesn't fit in
-    /// `UInt8`. Use `init(truncating:)` or `init(clamping:)` when
-    /// out-of-range values are expected.
-    ///
-    /// # Errors
-    ///
-    /// Panics when `other` is outside `UInt8.minValue...UInt8.maxValue`.
-    public init(from other: Int16) {
+    /// @name Exactly
+    /// Converts from `Int16` when the value fits in `UInt8`, and
+    /// is `nil` when it doesn't. `Int16` doesn't always fit, so there is
+    /// no `init(from:)`: use `init(truncating:)` or `init(clamping:)` to say
+    /// what an out-of-range value should become.
+    public init(exactly other: Int16)? {
         if other < 0 or other > Int16(from: UInt8.maxValue) {
-            fatalError("integer conversion overflow: value doesn't fit in UInt8")
+            return null
         }
         self.raw = lang.cast_i16_i8(other.raw)
     }
@@ -231,17 +224,14 @@ public struct UInt8:
             self.raw = lang.cast_i16_i8(other.raw)
         }
     }
-    /// @name From Integer
-    /// Converts from `Int32`, trapping when the value doesn't fit in
-    /// `UInt8`. Use `init(truncating:)` or `init(clamping:)` when
-    /// out-of-range values are expected.
-    ///
-    /// # Errors
-    ///
-    /// Panics when `other` is outside `UInt8.minValue...UInt8.maxValue`.
-    public init(from other: Int32) {
+    /// @name Exactly
+    /// Converts from `Int32` when the value fits in `UInt8`, and
+    /// is `nil` when it doesn't. `Int32` doesn't always fit, so there is
+    /// no `init(from:)`: use `init(truncating:)` or `init(clamping:)` to say
+    /// what an out-of-range value should become.
+    public init(exactly other: Int32)? {
         if other < 0 or other > Int32(from: UInt8.maxValue) {
-            fatalError("integer conversion overflow: value doesn't fit in UInt8")
+            return null
         }
         self.raw = lang.cast_i32_i8(other.raw)
     }
@@ -261,17 +251,14 @@ public struct UInt8:
             self.raw = lang.cast_i32_i8(other.raw)
         }
     }
-    /// @name From Integer
-    /// Converts from `Int64`, trapping when the value doesn't fit in
-    /// `UInt8`. Use `init(truncating:)` or `init(clamping:)` when
-    /// out-of-range values are expected.
-    ///
-    /// # Errors
-    ///
-    /// Panics when `other` is outside `UInt8.minValue...UInt8.maxValue`.
-    public init(from other: Int64) {
+    /// @name Exactly
+    /// Converts from `Int64` when the value fits in `UInt8`, and
+    /// is `nil` when it doesn't. `Int64` doesn't always fit, so there is
+    /// no `init(from:)`: use `init(truncating:)` or `init(clamping:)` to say
+    /// what an out-of-range value should become.
+    public init(exactly other: Int64)? {
         if other < 0 or other > Int64(from: UInt8.maxValue) {
-            fatalError("integer conversion overflow: value doesn't fit in UInt8")
+            return null
         }
         self.raw = lang.cast_i64_i8(other.raw)
     }
@@ -291,17 +278,14 @@ public struct UInt8:
             self.raw = lang.cast_i64_i8(other.raw)
         }
     }
-    /// @name From Integer
-    /// Converts from `UInt16`, trapping when the value doesn't fit in
-    /// `UInt8`. Use `init(truncating:)` or `init(clamping:)` when
-    /// out-of-range values are expected.
-    ///
-    /// # Errors
-    ///
-    /// Panics when `other` is outside `UInt8.minValue...UInt8.maxValue`.
-    public init(from other: UInt16) {
+    /// @name Exactly
+    /// Converts from `UInt16` when the value fits in `UInt8`, and
+    /// is `nil` when it doesn't. `UInt16` doesn't always fit, so there is
+    /// no `init(from:)`: use `init(truncating:)` or `init(clamping:)` to say
+    /// what an out-of-range value should become.
+    public init(exactly other: UInt16)? {
         if other > UInt16(from: UInt8.maxValue) {
-            fatalError("integer conversion overflow: value doesn't fit in UInt8")
+            return null
         }
         self.raw = lang.cast_u16_i8(other.raw)
     }
@@ -319,17 +303,14 @@ public struct UInt8:
             self.raw = lang.cast_u16_i8(other.raw)
         }
     }
-    /// @name From Integer
-    /// Converts from `UInt32`, trapping when the value doesn't fit in
-    /// `UInt8`. Use `init(truncating:)` or `init(clamping:)` when
-    /// out-of-range values are expected.
-    ///
-    /// # Errors
-    ///
-    /// Panics when `other` is outside `UInt8.minValue...UInt8.maxValue`.
-    public init(from other: UInt32) {
+    /// @name Exactly
+    /// Converts from `UInt32` when the value fits in `UInt8`, and
+    /// is `nil` when it doesn't. `UInt32` doesn't always fit, so there is
+    /// no `init(from:)`: use `init(truncating:)` or `init(clamping:)` to say
+    /// what an out-of-range value should become.
+    public init(exactly other: UInt32)? {
         if other > UInt32(from: UInt8.maxValue) {
-            fatalError("integer conversion overflow: value doesn't fit in UInt8")
+            return null
         }
         self.raw = lang.cast_u32_i8(other.raw)
     }
@@ -347,17 +328,14 @@ public struct UInt8:
             self.raw = lang.cast_u32_i8(other.raw)
         }
     }
-    /// @name From Integer
-    /// Converts from `UInt64`, trapping when the value doesn't fit in
-    /// `UInt8`. Use `init(truncating:)` or `init(clamping:)` when
-    /// out-of-range values are expected.
-    ///
-    /// # Errors
-    ///
-    /// Panics when `other` is outside `UInt8.minValue...UInt8.maxValue`.
-    public init(from other: UInt64) {
+    /// @name Exactly
+    /// Converts from `UInt64` when the value fits in `UInt8`, and
+    /// is `nil` when it doesn't. `UInt64` doesn't always fit, so there is
+    /// no `init(from:)`: use `init(truncating:)` or `init(clamping:)` to say
+    /// what an out-of-range value should become.
+    public init(exactly other: UInt64)? {
         if other > UInt64(from: UInt8.maxValue) {
-            fatalError("integer conversion overflow: value doesn't fit in UInt8")
+            return null
         }
         self.raw = lang.cast_u64_i8(other.raw)
     }
@@ -374,6 +352,60 @@ public struct UInt8:
         } else {
             self.raw = lang.cast_u64_i8(other.raw)
         }
+    }
+    /// @name Exactly
+    /// Converts from `Float32` when the value is a whole number in
+    /// `UInt8`'s range, and is `nil` otherwise (a fraction, NaN, an
+    /// infinity, or out of range).
+    public init(exactly other: Float32)? {
+        // Written so a NaN fails the range test too.
+        if not (other >= 0.0 and other < 256.0) {
+            return null
+        }
+        if other.trunc() != other {
+            return null
+        }
+        self.raw = UInt8(clamping: Int64(raw: lang.cast_f32_i64(other.raw))).raw
+    }
+    /// @name Truncating
+    /// Converts from `Float32`, dropping any fraction toward zero.
+    /// Out-of-range values saturate to `UInt8.minValue` /
+    /// `UInt8.maxValue` and NaN becomes 0. Never traps.
+    public init(truncating other: Float32) {
+        self.raw = UInt8(clamping: Int64(raw: lang.cast_f32_i64(other.raw))).raw
+    }
+    /// @name Clamping
+    /// Same as `init(truncating:)`: drops the fraction, saturates out of
+    /// range, and NaN becomes 0. Never traps.
+    public init(clamping other: Float32) {
+        self.raw = UInt8(clamping: Int64(raw: lang.cast_f32_i64(other.raw))).raw
+    }
+    /// @name Exactly
+    /// Converts from `Float64` when the value is a whole number in
+    /// `UInt8`'s range, and is `nil` otherwise (a fraction, NaN, an
+    /// infinity, or out of range).
+    public init(exactly other: Float64)? {
+        // Written so a NaN fails the range test too.
+        if not (other >= 0.0 and other < 256.0) {
+            return null
+        }
+        if other.trunc() != other {
+            return null
+        }
+        self.raw = UInt8(clamping: Int64(raw: lang.cast_f64_i64(other.raw))).raw
+    }
+    /// @name Truncating
+    /// Converts from `Float64`, dropping any fraction toward zero.
+    /// Out-of-range values saturate to `UInt8.minValue` /
+    /// `UInt8.maxValue` and NaN becomes 0. Never traps.
+    public init(truncating other: Float64) {
+        self.raw = UInt8(clamping: Int64(raw: lang.cast_f64_i64(other.raw))).raw
+    }
+    /// @name Clamping
+    /// Same as `init(truncating:)`: drops the fraction, saturates out of
+    /// range, and NaN becomes 0. Never traps.
+    public init(clamping other: Float64) {
+        self.raw = UInt8(clamping: Int64(raw: lang.cast_f64_i64(other.raw))).raw
     }
 
     // ========================================================================
@@ -1060,7 +1092,7 @@ public struct UInt8:
     /// @name From Bytes
     /// Reassembles a `UInt8` from 1 bytes in native byte order.
     /// Returns `null` if the input is not exactly 1 bytes long.
-    public init[S](fromBytes fromBytes: &S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized {
+    public init(fromBytes fromBytes: &Slice[UInt8])? {
         let bytes = fromBytes.asUnsafeSlice();
         if bytes.count != 1 {
             return null
@@ -1078,7 +1110,7 @@ public struct UInt8:
     /// @name From Bytes Big Endian
     /// Reassembles a `UInt8` from 1 bytes in big-endian order.
     /// Returns `null` if the input is not exactly 1 bytes long.
-    public init[S](fromBytesBigEndian fromBytesBigEndian: &S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized {
+    public init(fromBytesBigEndian fromBytesBigEndian: &Slice[UInt8])? {
         let bytes = fromBytesBigEndian.asUnsafeSlice();
         if bytes.count != 1 {
             return null
@@ -1096,7 +1128,7 @@ public struct UInt8:
     /// @name From Bytes Little Endian
     /// Reassembles a `UInt8` from 1 bytes in little-endian order.
     /// Returns `null` if the input is not exactly 1 bytes long.
-    public init[S](fromBytesLittleEndian fromBytesLittleEndian: &S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized {
+    public init(fromBytesLittleEndian fromBytesLittleEndian: &Slice[UInt8])? {
         let bytes = fromBytesLittleEndian.asUnsafeSlice();
         if bytes.count != 1 {
             return null
@@ -1128,8 +1160,8 @@ public struct UInt8:
     /// let n = UInt8(parsing: "42");   // Some(42)
     /// let bad = UInt8(parsing: "-1"); // null (no sign for unsigned)
     /// ```
-    public init[S](parsing text: S)? where S: Str, S: not Static {
-        // One view for the whole parse; works on String and StringSlice alike.
+    public init(parsing text: &StringSlice)? {
+        // One view for the whole parse; a String argument lends its slice.
         let bytes = text.bytes;
         let len = bytes.count;
         if len == 0 {
@@ -1196,8 +1228,8 @@ public struct UInt8:
     /// let n = UInt8(parsing: "ff", radix: 16);      // Some(255 if it fits, else None)
     /// let m = UInt8(parsing: "101010", radix: 2);   // Some(42)
     /// ```
-    public init[S](parsing text: S, radix radix: Int64)? where S: Str, S: not Static {
-        // One view for the whole parse; works on String and StringSlice alike.
+    public init(parsing text: &StringSlice, radix radix: Int64)? {
+        // One view for the whole parse; a String argument lends its slice.
         let bytes = text.bytes;
         if radix < 2 or radix > 36 {
             return null
@@ -1306,31 +1338,26 @@ public struct UInt8:
         }
         }
 
-        // Build content: sign + prefix + reversed digits
-        var result = String();
-
-        if options.sign == .Always {
-            result.append(char: '+')
-        } else if options.sign == .Space {
-            result.append(char: ' ')
-        }
-
+        // The radix prefix shows only under `alternate` (`0xff`).
+        var prefix = "";
         if options.alternate {
             if radix == 2 {
-                result.append("0b")
+                prefix = "0b"
             } else if radix == 8 {
-                result.append("0o")
+                prefix = "0o"
             } else if radix == 16 {
-                result.append("0x")
+                prefix = "0x"
             }
         }
 
+        // The digits were built least significant first.
+        var result = String();
         var i = digits.bytes.count - 1;
         while i >= 0 {
             result.appendByte(unsafe digits.bytes(unchecked: i));
             i = i - 1
         }
 
-        _writePadded(into: writer, result, options)
+        writer.padIntegral(nonNegative: isNegative == false, prefix: prefix, digits: result, options)
     }}
 

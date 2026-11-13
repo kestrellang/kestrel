@@ -493,6 +493,13 @@ impl QueryFn for TypeParamCopyRequirement {
             builtin: Builtin::Cloneable,
             root: self.root,
         });
+        // `not Sized` relaxes Copyable too: a `T` that may be unsized is only
+        // ever used behind a borrow, so it is never copied (`print(value: &some
+        // Formattable and not Sized)` takes a non-Copyable `StringSlice`).
+        let sized = ctx.query(ResolveBuiltin {
+            builtin: Builtin::Sized,
+            root: self.root,
+        });
 
         // Every bound in scope is read before deciding: a positive `Copyable`
         // (or refining) bound WINS over a `not Copyable` relaxation — the
@@ -516,9 +523,8 @@ impl QueryFn for TypeParamCopyRequirement {
                         {
                             continue;
                         }
-                        if copyable.is_some()
-                            && resolve_type_entity(ctx, protocol, context, self.root) == copyable
-                        {
+                        let relaxed = resolve_type_entity(ctx, protocol, context, self.root);
+                        if relaxed.is_some() && (relaxed == copyable || relaxed == sized) {
                             negated = true;
                         }
                     },
@@ -926,27 +932,6 @@ fn nominal_copy_semantics_impl(
         };
     }
 
-    // Fallback: `: not Copyable` is meaningful syntactically even when the
-    // protocol path did not resolve to the builtin (for example, fixtures or
-    // modules that did not import std.core.Copyable). Match the last segment by
-    // name so the semantic copy classifier still agrees with the parser-level
-    // negative conformance. This string match exists ONLY for stdlib-less test
-    // fixtures where the builtin entity isn't registered; the ResolveBuiltin
-    // entity path above is the source of truth — don't extend this pattern.
-    if let Some(conf) = ctx.get::<Conformances>(entity)
-        && conf.0.iter().any(|item| {
-            matches!(
-                item,
-                ConformanceItem::Negative(ast_ty, _) if ast_type_last_segment_is(ast_ty, "Copyable")
-            )
-        })
-    {
-        return CopySemanticsInfo {
-            semantics: CopySemantics::NotCopyable,
-            reason: CopySemanticsReason::ExplicitNotCopyable,
-        };
-    }
-
     let child_types = collect_child_types(ctx, entity, root);
     for (child, ty) in &child_types {
         if hir_type_copy_semantics(ctx, ty, entity, root) == CopySemantics::NotCopyable {
@@ -1004,13 +989,6 @@ pub fn indirect_box_type(
 /// `name`. Matches the previous HIR-tracker behavior so tests like
 /// `struct Handle: not Copyable {}` (without `import std.core`) still
 /// pick up their non-copyable semantics.
-fn ast_type_last_segment_is(ast_ty: &AstType, name: &str) -> bool {
-    let AstType::Named { segments, .. } = ast_ty else {
-        return false;
-    };
-    segments.last().is_some_and(|s| s.name == name)
-}
-
 pub(crate) fn collect_child_types(
     ctx: &QueryContext<'_>,
     entity: Entity,
@@ -1131,6 +1109,7 @@ fn ast_type_span(ast_ty: &AstType) -> Span {
         | AstType::Inferred(span)
         | AstType::Some { span, .. }
         | AstType::Any { span, .. }
+        | AstType::Builtin(_, span)
         | AstType::Ref { span, .. } => span.clone(),
     }
 }
@@ -1154,5 +1133,6 @@ fn ast_type_name(ast_ty: &AstType) -> String {
         AstType::Some { .. } => "some".into(),
         AstType::Any { .. } => "any".into(),
         AstType::Ref { .. } => "reference".into(),
+        AstType::Builtin(builtin, _) => builtin.name().into(),
     }
 }

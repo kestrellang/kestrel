@@ -13,7 +13,7 @@ public func getFloat(v: Value) -> Float64 {
         .Some(f) => f,
         .None => {
             match v.asInt() {
-                .Some(n) => Float64(from: n),
+                .Some(n) => Float64(rounding: n),
                 .None => 0.0
             }
         }
@@ -33,7 +33,7 @@ public func getInt(v: Value) -> Int64 {
         .None => {
             match v.asFloat() {
                 .Some(f) => {
-                    match f.toInt64() {
+                    match Int64(exactly: f.trunc()) {
                         .Some(n) => n,
                         .None => 0
                     }
@@ -450,7 +450,7 @@ public func statShortLabel(statIdx: Int64) -> String {
 /// Round a Float64 to the nearest Int64 (used for SVG coords).
 public func roundInt(f: Float64) -> Int64 {
     let r = if f >= 0.0 { f + 0.5 } else { f - 0.5 };
-    match r.toInt64() {
+    match Int64(exactly: r.trunc()) {
         .Some(n) => n,
         .None => 0
     }

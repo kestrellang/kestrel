@@ -32,6 +32,7 @@ Always use a single source of truth, don't spread it over multiple locations
 Make sure to consider incremental compilation.
 Avoid fragile solutions, use holistic solutions that won't break down the line
 When you fix a mistake, think about how you can avoid the same mistake being made later
+**No name lookups for compiler-known things.** Never identify a lang item, stdlib declaration, lang type, enum case, protocol method or module by its spelling (`name == "Some"`, `"std"`, `"lang"`, `"Copyable"`, `"next"`), and never fall back to a name when the tag is missing. Tag it at the source (`@builtin(.X)` + `ResolveBuiltin`, a marker/`LangType` component set at seeding or load time, a resolution recorded by type-infer) and read the tag. Compiler-generated code that must name a lang item uses `AstType::Builtin`, not a path. A missing tag is an error, not a reason to guess. User-written paths resolve through normal scoping; this rule is about the compiler recognizing its own items.
 
 # Directory-scoped guidance (`AGENTS.md`)
 

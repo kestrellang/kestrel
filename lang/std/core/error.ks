@@ -15,8 +15,10 @@ module std.core
 @builtin(.ControlFlowEnum)
 public enum ControlFlow[C, B]: not Copyable where C: not Static {
     /// Normal flow — carries the value to use as the operator result.
+    @builtin(.ControlFlowContinueCase)
     case Continue(C)
     /// Residual-return flow — carries the residual to propagate via `FromResidual`.
+    @builtin(.ControlFlowBreakCase)
     case Break(B)
 }
 

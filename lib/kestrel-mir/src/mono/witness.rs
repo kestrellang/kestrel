@@ -398,9 +398,15 @@ fn witness_more_specific(arena: &TyArena, a: &WitnessDef, b: &WitnessDef) -> boo
     kestrel_entail::more_specific_rule(
         a_is_instance_of_b,
         b_is_instance_of_a,
-        a.constraints.len(),
-        b.constraints.len(),
+        requirement_count(a),
+        requirement_count(b),
     )
+}
+
+/// The where clauses that restrict a witness: relaxations (`T: not P`)
+/// apply to every type, so they don't make a witness more specific.
+fn requirement_count(w: &WitnessDef) -> usize {
+    w.constraints.iter().filter(|c| c.is_requirement()).count()
 }
 
 /// Check whether a witness's protocol type args match the expected concrete
@@ -417,7 +423,7 @@ fn witness_more_specific(arena: &TyArena, a: &WitnessDef, b: &WitnessDef) -> boo
 /// call site's arg here, so the witness's `where` clauses are judged on it:
 /// left unbound, `extend Result[T, H]: FromResidual[E] where E: Reportable`
 /// read as "undecidable, permitted" and absorbed a non-Reportable residual.
-fn witness_proto_args_match(
+pub(crate) fn witness_proto_args_match(
     arena: &TyArena,
     witness: &WitnessDef,
     expected: &[TyId],

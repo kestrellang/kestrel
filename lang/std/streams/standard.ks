@@ -114,19 +114,6 @@ internal func flushStandardOutput() -> Result[(), IoError] {
 }
 
 // ============================================================================
-// ACCESSORS
-// ============================================================================
-
-/// The process's standard input.
-public func standardInput() -> StandardInput { StandardInput() }
-
-/// The process's standard output.
-public func standardOutput() -> StandardOutput { StandardOutput() }
-
-/// The process's standard error.
-public func standardError() -> StandardError { StandardError() }
-
-// ============================================================================
 // PRINTING AND READING
 // ============================================================================
 
@@ -134,15 +121,15 @@ public func standardError() -> StandardError { StandardError() }
 ///
 /// Printing can't fail quietly: if the write fails (say, standard output is
 /// a file on a full disk), the process stops with a fatal error. To handle the error
-/// instead, write through `standardOutput()`.
-public func print(value: some Formattable and not Static) {
+/// instead, write through `StandardOutput()`.
+public func print(value: &some Formattable and not Static and not Sized) {
     var out = StandardOutput();
     expectPrinted(out.write(formatted: value));
 }
 
 /// Writes `value` and a `"\n"` to standard output. Stops the process with a
 /// fatal error if the write fails, like `print`.
-public func println(value: some Formattable and not Static) {
+public func println(value: &some Formattable and not Static and not Sized) {
     var out = StandardOutput();
     expectPrinted(out.write(formatted: value));
     expectPrinted(out.write(byte: 10));
@@ -157,14 +144,14 @@ public func println() {
 
 /// Writes `value` to standard error. If the write fails, the process traps:
 /// there is nowhere left to report the error.
-public func eprint(value: some Formattable and not Static) {
+public func eprint(value: &some Formattable and not Static and not Sized) {
     var err = StandardError();
     expectReported(err.write(formatted: value));
 }
 
 /// Writes `value` and a `"\n"` to standard error. Traps if the write fails,
 /// like `eprint`.
-public func eprintln(value: some Formattable and not Static) {
+public func eprintln(value: &some Formattable and not Static and not Sized) {
     var err = StandardError();
     expectReported(err.write(formatted: value));
     expectReported(err.write(byte: 10));

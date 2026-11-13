@@ -7,6 +7,9 @@
 // arguments) as an E507 freeze violation.
 module Test
 
+@builtin(.Copyable)
+protocol Copyable {}
+
 struct Res: not Copyable {
     var v: lang.i64
 }

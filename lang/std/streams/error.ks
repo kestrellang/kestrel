@@ -3,7 +3,7 @@
 module std.streams
 
 import std.numeric.(Int32, Int64)
-import std.text.(String, Formatter, Formattable, FormatOptions, _writePadded)
+import std.text.(String, Formatter, Formattable, FormatOptions)
 import std.core.(Bool, Equatable)
 import std.result.(Optional, Result)
 import std.memory.(RawPointer)
@@ -143,7 +143,7 @@ public enum IoErrorKind: Equatable, Formattable {
 
     /// Writes `description()`.
     public func format(mutating into writer: some Formatter, options: FormatOptions = FormatOptions.default()) {
-        _writePadded(into: writer, self.description(), options)
+        writer.pad(self.description(), options)
     }
 }
 
@@ -230,7 +230,7 @@ public struct IoError: Equatable, Formattable {
 
     /// Writes `description()`.
     public func format(mutating into writer: some Formatter, options: FormatOptions = FormatOptions.default()) {
-        _writePadded(into: writer, self.description(), options)
+        writer.pad(self.description(), options)
     }
 
     /// `NotFound`.

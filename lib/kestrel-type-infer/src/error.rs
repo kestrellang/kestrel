@@ -43,6 +43,10 @@ pub enum InferError {
         name: String,
         is_call: bool,
         span: Span,
+        /// The pointee also searched when `receiver` is an `Indirection`
+        /// wrapper that peeled (`rc.missing` on an `RcBox[Account]`): the
+        /// message names the receiver as written, then this.
+        searched_pointee: Option<TyVar>,
     },
 
     /// Multiple candidates for a member — ambiguous.
@@ -252,8 +256,9 @@ pub enum InferError {
     /// require the user to annotate — either at the call (`f[T, U](...)`)
     /// or at the binding (`let x: Result[T, U] = f(...)`).
     UnresolvedTypeParam {
-        /// The TypeParameter entity whose name is shown in the diagnostic.
-        param: Entity,
+        /// The TypeParameter entity whose name is shown in the diagnostic;
+        /// `None` for a slot with no nameable param.
+        param: Option<Entity>,
         /// The call site's span — used as the diagnostic's primary label.
         span: Span,
     },

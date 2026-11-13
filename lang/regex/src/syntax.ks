@@ -204,7 +204,7 @@ func otherCase(c: Int64) -> Int64 {
     if c >= 65 and c <= 90 { return c + 32; }
     if c >= 97 and c <= 122 { return c - 32; }
     if c < 128 { return c; }
-    guard let .Some(ch) = Char(UInt32(from: c)) else { return c; }
+    guard let .Some(ch) = Char(UInt32(exactly: c) ?? 0xFFFFFFFF) else { return c; }
     let lower = Int64(from: ch.lowercased().value());
     if lower != c { return lower; }
     Int64(from: ch.uppercased().value())

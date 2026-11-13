@@ -3,7 +3,8 @@
 
 // Regression: `Array == Array` monomorphization.
 //
-// `Array[T]: Equatable` is satisfied by the `isEqual` default on
+// `Array[T]` now declares its own `isEqual`, forwarding to `Slice`'s. Before
+// `Sliceable` was removed, `Array[T]: Equatable` was satisfied by the `isEqual` default on
 // `extend Sliceable[T] where T: Equatable` — a protocol-extension default reached
 // through a *different* protocol (Equatable) than the one it is defined on
 // (Sliceable). That default's own type param is the Slice element `T`, which

@@ -51,7 +51,7 @@ ImportItem =
   'ident' ('as' alias:'ident')?
 
 ExtensionDeclaration =
-  AttributeList? 'extend' Ty ConformanceList? WhereClause? ExtensionBody
+  AttributeList? 'extend' TypeParameterList? Ty ConformanceList? WhereClause? ExtensionBody
 
 ExtensionBody =
   '{' Item* '}'
@@ -381,7 +381,7 @@ ExpressionStatement =
   Expression ';'?
 
 GuardStatement =
-  'guard' Condition (',' Condition)* 'else' CodeBlock
+  'guard' Condition (',' Condition)* 'else' CodeBlock ';'?
 
 GuardCondition =
   'let' Pattern '=' Expression

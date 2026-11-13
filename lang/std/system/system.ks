@@ -7,7 +7,7 @@
 //
 // ```
 // let home = Environment.homeDirectory();
-// let status = try run("git", ["status", "--short"]);
+// let status = try Command("git").arguments(["status", "--short"]).run();
 // if Platform.current.operatingSystem == .Darwin { ... }
 // exit(ExitCode.success)
 // ```

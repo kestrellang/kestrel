@@ -3,19 +3,21 @@
 // backends: cranelift,llvm
 // expect-stdout: sum 9 3 utf8 hi count 4 5 append 4 starts true\n
 
-// A generic `Sliceable` param that relaxes `Sized` and `Copyable` takes a
+// A generic `Iterable` param that relaxes `Sized` and `Copyable` takes a
 // range place directly: `S` binds to the unsized `Slice[T]` and the slice
-// is passed by address (a borrowed param), so nothing is copied.
+// is passed by address (a borrowed param), so nothing is copied. A
+// `&Slice[T]` param takes the place too, and an `Array` peels to one.
 module Test
-import std.collections.(Array, Sliceable)
+import std.collections.(Array, Slice)
+import std.iter.(Iterable)
 
-func total[S](s: &S) -> Int64 where S: Sliceable[Int64], S: not Static, S: not Copyable, S: not Sized {
+func total[S](s: &S) -> Int64 where S: Iterable, S.Item = Int64, S: not Static, S: not Copyable, S: not Sized {
     var t: Int64 = 0;
     for x in s { t = t + x }
     t
 }
 
-func count(s: &some Sliceable[Int64] and not Static and not Copyable and not Sized) -> Int64 {
+func count(s: &Slice[Int64]) -> Int64 {
     s.count
 }
 

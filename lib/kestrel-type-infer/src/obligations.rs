@@ -71,12 +71,21 @@ pub fn finish_body(ctx: &mut InferCtx<'_>, hir: &HirBody) {
         let kind = kind.split([' ', '{', '(']).next().unwrap_or("");
         kestrel_debug::ktrace!("p5", "after-flush {kind}");
     }
+    // Borrowed arguments still waiting on their own type coerce now, before
+    // any literal default can pin what only the param would have.
+    ctx.view_peel_gate = false;
+    fixpoint(ctx);
     apply_defaults(ctx);
 
     // Every call/member that could type a check-mode leaf has fired, so a
     // leaf typed only by its target (`none()`) may now unify with it.
     ctx.synth_gate = false;
     fixpoint(ctx);
+
+    // Borrowed arguments still open link to their open params now.
+    ctx.view_link_gate = false;
+    fixpoint(ctx);
+    apply_defaults(ctx);
 
     // Type-parameter defaults (`H = DefaultHasher`) for vars nothing pinned.
     if solver::apply_type_param_defaults(ctx) {
@@ -90,6 +99,12 @@ pub fn finish_body(ctx: &mut InferCtx<'_>, hir: &HirBody) {
         fixpoint(ctx);
         apply_defaults(ctx);
     }
+
+    // A ref whose pointee no default resolved coerces into its
+    // `DecaysFrom` target now, which may pin the pointee itself.
+    ctx.decay_wait_gate = false;
+    fixpoint(ctx);
+    apply_defaults(ctx);
 
     // Reports. Unresolved generic type params first, so their vars are
     // poisoned before cascades; the never-fallback (Rust's

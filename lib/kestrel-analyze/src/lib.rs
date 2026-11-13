@@ -71,6 +71,7 @@ pub fn default_analyzers() -> AnalyzerRegistry {
     r.add_body_check(body::restricted_use::RestrictedUseAnalyzer);
     r.add_body_check(body::unsafe_use::UnsafeUseAnalyzer);
     r.add_body_check(body::packed_field_borrow::PackedFieldBorrowAnalyzer);
+    r.add_body_check(body::view_conversion::ViewConversionAnalyzer);
 
     // Declaration checks
     r.add_decl_check(decl::function_body::FunctionBodyAnalyzer);
@@ -130,6 +131,7 @@ pub fn default_analyzers() -> AnalyzerRegistry {
     );
     r.add_compilation_check(compilation::attribute_validation::AttributeValidationAnalyzer);
     r.add_compilation_check(compilation::entry_point::EntryPointAnalyzer);
+    r.add_compilation_check(compilation::module_declaration::ModuleDeclarationAnalyzer);
 
     r
 }

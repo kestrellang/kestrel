@@ -4,24 +4,22 @@
 
 module Test
 
-import std.text.(Str)
-
 // `some P` on an initializer parameter desugars to a synthetic type
 // parameter, the same as on a function. It used to stay a bare `some` type,
 // so the body couldn't look up members (E106) and calls failed.
 struct Unlabeled {
     var n: Int64
-    init(text: some Str) { self.n = if text.isEmpty { 0 } else { 1 } }
+    init(text: some Formattable) { self.n = if text.formatted().isEmpty { 0 } else { 1 } }
 }
 
 struct Labeled {
     var n: Int64
-    init(text text: some Str) { self.n = if text.isEmpty { 0 } else { 2 } }
+    init(text text: some Formattable) { self.n = if text.formatted().isEmpty { 0 } else { 2 } }
 }
 
 struct AcceptsSlices {
     var n: Int64
-    init(text: some Str and not Static) { self.n = if text.isEmpty { 0 } else { 5 } }
+    init(text: &some Formattable and not Copyable and not Static and not Sized) { self.n = if text.formatted().isEmpty { 0 } else { 5 } }
 }
 
 @main

@@ -27,6 +27,7 @@ pub(super) fn solve_applicable(
                 name,
                 is_call,
                 span,
+                searched_pointee: None,
             })
         },
         kestrel_entail::Tri::Fails | kestrel_entail::Tri::Unknown => {
@@ -650,6 +651,31 @@ pub(super) fn unify_bound_protocol_args(
         }
     }
     Ok(BoundArgs::Decided)
+}
+
+/// Whether `entity` declares `protocol` instantiated at itself
+/// (`extend UInt64: Convertible[UInt64]`, or a defaulted `[Other = Self]`).
+pub(super) fn declares_identity_instantiation(
+    ctx: &InferCtx<'_>,
+    entity: Entity,
+    protocol: Entity,
+) -> bool {
+    use kestrel_hir::ty::HirTy;
+    let insts = ctx
+        .query_ctx
+        .query(kestrel_name_res::ConformingProtocolInstantiations {
+            entity,
+            root: ctx.root,
+        });
+    insts.iter().filter(|(p, ..)| *p == protocol).any(|(_, source, ast_args)| {
+        let args =
+            kestrel_hir_lower::conformance_protocol_args(ctx.query_ctx, ctx.root, protocol, *source, ast_args);
+        match args.as_slice() {
+            [HirTy::SelfType(..)] => true,
+            [HirTy::Struct { entity: e, .. } | HirTy::Enum { entity: e, .. }] => *e == entity,
+            _ => false,
+        }
+    })
 }
 
 /// Outcome of [`unify_bound_protocol_args`] when no contradiction was found.

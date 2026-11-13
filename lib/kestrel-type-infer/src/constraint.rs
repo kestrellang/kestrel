@@ -246,6 +246,9 @@ pub enum Constraint {
     ImplicitPat {
         scrutinee: TyVar,
         name: String,
+        /// The case itself, for a qualified / desugared `HirPat::Variant`:
+        /// matched by identity on the scrutinee's enum, never by `name`.
+        case: Option<Entity>,
         /// TyVars for each sub-pattern binding (one per payload field).
         arg_tys: Vec<TyVar>,
         /// Each sub-pattern's label (`.A(x: a)`), checked against the case.

@@ -1,18 +1,18 @@
 // test: execution
 // stdlib: true
 
-// run() reports the child's exit code; a missing program is an error, not
+// Command.run() reports the child's exit code; a missing program is an error, not
 // an exit status.
 
 module Test
 
 @main
 func main() -> lang.i64 {
-    match run("true", []) {
+    match Command("true").run() {
         .Ok(status) => { if not status.isSuccess { return 1 } },
         .Err(_) => { return 2 }
     }
-    match run("false", []) {
+    match Command("false").run() {
         .Ok(status) => {
             if status.isSuccess { return 3 }
             if not status.isEqual(to: .Exited(1)) { return 4 }
@@ -28,7 +28,7 @@ func main() -> lang.i64 {
         },
         .Err(_) => { return 8 }
     }
-    match run("kestrel-no-such-program-xyz", []) {
+    match Command("kestrel-no-such-program-xyz").run() {
         .Ok(_) => { return 9 },
         .Err(e) => { match e.kind { .NotFound => {}, _ => { return 10 } } }
     }

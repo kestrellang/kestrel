@@ -216,6 +216,26 @@ var inner: R
 
 _Defined in `lang/std/streams/buffered.ks`._
 
+#### function `innerMutable`
+
+```kestrel
+public mutating func innerMutable() -> &mutating R
+```
+
+The wrapped reader, for writing a reply on the same stream or
+reading its state (Rust's `get_mut`). Reading from it directly skips
+whatever this reader has buffered.
+
+##### Examples
+
+```
+var reader = BufferedReader(socket);
+let request = try reader.readLine();
+try reader.innerMutable().write(line: "OK");
+```
+
+_Defined in `lang/std/streams/buffered.ks`._
+
 #### function `intoInner`
 
 ```kestrel
@@ -1984,7 +2004,7 @@ _Defined in `lang/std/streams/writable.ks`._
 #### function `write`
 
 ```kestrel
-public mutating func write(formatted: some Formattable and not Static) -> Result[(), IoError]
+public mutating func write(formatted: &some Formattable and not Static and not Sized) -> Result[(), IoError]
 ```
 
 Writes `value` formatted with its default options.
@@ -2027,7 +2047,7 @@ _Defined in `lang/std/streams/copy.ks`._
 ## function `eprint`
 
 ```kestrel
-public func eprint(some Formattable and not Static)
+public func eprint(&some Formattable and not Static and not Sized)
 ```
 
 Writes `value` to standard error. If the write fails, the process traps:
@@ -2038,7 +2058,7 @@ _Defined in `lang/std/streams/standard.ks`._
 ## function `eprintln`
 
 ```kestrel
-public func eprintln(some Formattable and not Static)
+public func eprintln(&some Formattable and not Static and not Sized)
 ```
 
 Writes `value` and a `"\n"` to standard error. Traps if the write fails,
@@ -2049,21 +2069,21 @@ _Defined in `lang/std/streams/standard.ks`._
 ## function `print`
 
 ```kestrel
-public func print(some Formattable and not Static)
+public func print(&some Formattable and not Static and not Sized)
 ```
 
 Writes `value` to standard output.
 
 Printing can't fail quietly: if the write fails (say, standard output is
 a file on a full disk), the process stops with a fatal error. To handle the error
-instead, write through `standardOutput()`.
+instead, write through `StandardOutput()`.
 
 _Defined in `lang/std/streams/standard.ks`._
 
 ## function `println`
 
 ```kestrel
-public func println(some Formattable and not Static)
+public func println(&some Formattable and not Static and not Sized)
 ```
 
 Writes `value` and a `"\n"` to standard output. Stops the process with a
@@ -2100,36 +2120,6 @@ public func readLine() -> Result[Optional[String], IoError]
 ```
 
 Reads a line from standard input. `None` at end of input.
-
-_Defined in `lang/std/streams/standard.ks`._
-
-## function `standardError`
-
-```kestrel
-public func standardError() -> StandardError
-```
-
-The process's standard error.
-
-_Defined in `lang/std/streams/standard.ks`._
-
-## function `standardInput`
-
-```kestrel
-public func standardInput() -> StandardInput
-```
-
-The process's standard input.
-
-_Defined in `lang/std/streams/standard.ks`._
-
-## function `standardOutput`
-
-```kestrel
-public func standardOutput() -> StandardOutput
-```
-
-The process's standard output.
 
 _Defined in `lang/std/streams/standard.ks`._
 

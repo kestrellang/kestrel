@@ -758,17 +758,23 @@ type SliceOutput = Slice[T]
 
 _Defined in `lang/std/collections/slice.ks`._
 
-### Implements `SliceClampable`
-
 ### Implements `SeqRange`
 
-#### function `resolve`
+#### field `endBound`
 
 ```kestrel
-public func resolve(Int64) -> Range[Int64]
+public var endBound: RangeBound { get }
 ```
 
-_Defined in `lang/std/collections/sliceable.ks`._
+_Defined in `lang/std/collections/slice_methods.ks`._
+
+#### field `startBound`
+
+```kestrel
+public var startBound: RangeBound { get }
+```
+
+_Defined in `lang/std/collections/slice_methods.ks`._
 
 ### Implements `RandomBounds`
 
@@ -782,133 +788,29 @@ public func inclusiveBounds() -> ClosedRange[T] where T: Steppable, T: Comparabl
 
 _Defined in `lang/std/numeric/random.ks`._
 
-### Implements `BytesIndex`
+### Implements `ViewIndex`
 
-#### typealias `BytesYield`
+_Conditional: `where V: TextView`._
+
+#### typealias `Output`
 
 ```kestrel
-type BytesYield = BytesView
+type Output = V where V: TextView
 ```
 
 _Defined in `lang/std/text/views.ks`._
 
-### Implements `BytesClampable`
+### Implements `ViewWrappable`
 
-#### typealias `BytesClampedYield`
+_Conditional: `where V: TextView`._
+
+#### typealias `WrappedOutput`
 
 ```kestrel
-type BytesClampedYield = BytesView
+type WrappedOutput = V where V: TextView
 ```
 
 _Defined in `lang/std/text/views.ks`._
-
-### Implements `BytesWrappable`
-
-#### typealias `BytesWrappedYield`
-
-```kestrel
-type BytesWrappedYield = BytesView
-```
-
-_Defined in `lang/std/text/views.ks`._
-
-### Implements `BytesSubstringIndex`
-
-### Implements `CharsIndex`
-
-#### typealias `CharsYield`
-
-```kestrel
-type CharsYield = CharsView
-```
-
-_Defined in `lang/std/text/views.ks`._
-
-### Implements `CharsClampable`
-
-#### typealias `CharsClampedYield`
-
-```kestrel
-type CharsClampedYield = CharsView
-```
-
-_Defined in `lang/std/text/views.ks`._
-
-### Implements `CharsWrappable`
-
-#### typealias `CharsWrappedYield`
-
-```kestrel
-type CharsWrappedYield = CharsView
-```
-
-_Defined in `lang/std/text/views.ks`._
-
-### Implements `CharsSubstringIndex`
-
-### Implements `GraphemesIndex`
-
-#### typealias `GraphemesYield`
-
-```kestrel
-type GraphemesYield = GraphemesView
-```
-
-_Defined in `lang/std/text/views.ks`._
-
-### Implements `GraphemesClampable`
-
-#### typealias `GraphemesClampedYield`
-
-```kestrel
-type GraphemesClampedYield = GraphemesView
-```
-
-_Defined in `lang/std/text/views.ks`._
-
-### Implements `GraphemesWrappable`
-
-#### typealias `GraphemesWrappedYield`
-
-```kestrel
-type GraphemesWrappedYield = GraphemesView
-```
-
-_Defined in `lang/std/text/views.ks`._
-
-### Implements `GraphemesSubstringIndex`
-
-### Implements `LinesIndex`
-
-#### typealias `LinesYield`
-
-```kestrel
-type LinesYield = LinesView
-```
-
-_Defined in `lang/std/text/views.ks`._
-
-### Implements `LinesClampable`
-
-#### typealias `LinesClampedYield`
-
-```kestrel
-type LinesClampedYield = LinesView
-```
-
-_Defined in `lang/std/text/views.ks`._
-
-### Implements `LinesWrappable`
-
-#### typealias `LinesWrappedYield`
-
-```kestrel
-type LinesWrappedYield = LinesView
-```
-
-_Defined in `lang/std/text/views.ks`._
-
-### Implements `LinesSubstringIndex`
 
 ## protocol `ClosedRangeConstructible`
 
@@ -1222,19 +1124,23 @@ _Conditional: `where C: Copyable, B: Copyable`._
 public protocol Convertible[From]
 ```
 
-Protocol for explicit type conversions via `init(from:)`.
+Protocol for explicit, lossless type conversions via `init(from:)`.
 
-Conform when you want callers to write `Target(from: source)`. Most
-numeric types do this for every other numeric width (see
-`lang/std/num/integer.ks.template`). Conformances should be lossless or
-document their loss behavior; for fallible conversions prefer a separate
-`Result`-returning function.
+`Convertible[From]` promises that every `From` value converts without
+loss and without trapping, so a `where Target: Convertible[T]` bound is
+safe to call on any `T` it admits. Every type converts from itself (the
+identity), so such a bound also accepts `Target`. Integers convert from
+every narrower integer and floats from every integer their mantissa holds
+exactly (see `lang/std/numeric/generate.py`). A source that doesn't always
+fit is `NarrowsFrom` instead.
 
 ### Examples
 
 ```
-let i: Int64 = 42;
-let u = UInt32(from: i);   // explicit narrowing conversion
+let i: Int32 = 42;
+let w = Int64(from: i);       // widening: always fits
+let big: Int64 = 300;
+let n = Int8(exactly: big);   // nil: 300 doesn't fit
 ```
 
 _Defined in `lang/std/core/convertible.ks`._
@@ -1267,6 +1173,45 @@ allocation, a file handle) where bitwise duplication would alias the
 resource and break ownership.
 
 _Defined in `lang/std/core/copy.ks`._
+
+## protocol `DecaysFrom`
+
+```kestrel
+public protocol DecaysFrom[Source] where Source: not Sized, Source: not Static, Source: not Copyable
+```
+
+A type an unsized borrowed view converts into where the type is named.
+
+A reference to an unsized view (`&StringSlice`, `&Slice[T]`) never decays
+on its own: an unannotated `let` keeps the view. Where the target names an
+owned type that conforms to `DecaysFrom[View]` (an annotation, a
+parameter, a field, a return type, an assignment target, or an annotated
+collection element) the compiler builds that type from the view by
+calling `decaying(from:)`. A `mutating` parameter never converts: writes
+would land in a temporary.
+
+### Examples
+
+```
+let text = "  hi  ";
+let word = text.trimmed();          // &StringSlice, borrows `text`
+let owned: String = text.trimmed(); // String, via DecaysFrom
+```
+
+_Defined in `lang/std/core/decays.ks`._
+
+### Members
+
+#### function `decaying`
+
+```kestrel
+static func decaying(from: &Source) -> Self
+```
+
+Builds an owned value holding a copy of `value`'s contents. Called by
+the compiler at the conversion site.
+
+_Defined in `lang/std/core/decays.ks`._
 
 ## protocol `Defaultable`
 
@@ -2081,52 +2026,6 @@ Returns the less-than-or-equal result as `Output` — typically `Bool`.
 
 _Defined in `lang/std/core/comparison.ks`._
 
-## protocol `LossyConvertible`
-
-```kestrel
-public protocol LossyConvertible[From]
-```
-
-Protocol for the explicit lossy forms of a conversion, for sources
-where `init(from:)` would trap because the value may not fit.
-
-Each integer type conforms once per source it can't always hold, so
-`Int8(truncating: x)` and `Int8(clamping: x)` work for every wider or
-differently-signed `x`.
-
-### Examples
-
-```
-let big: Int64 = 300;
-Int8(truncating: big);   // 44  (low 8 bits)
-Int8(clamping: big);     // 127
-```
-
-_Defined in `lang/std/core/convertible.ks`._
-
-### Members
-
-#### initializer `Clamping`
-
-```kestrel
-init(clamping: From)
-```
-
-Converts `value`, saturating to `Self`'s minimum or maximum when it
-doesn't fit. Never traps.
-
-_Defined in `lang/std/core/convertible.ks`._
-
-#### initializer `Truncating`
-
-```kestrel
-init(truncating: From)
-```
-
-Keeps the low bits of `value`, reinterpreted as `Self`. Never traps.
-
-_Defined in `lang/std/core/convertible.ks`._
-
 ## protocol `Matchable`
 
 ```kestrel
@@ -2254,6 +2153,67 @@ The pointee, lent in place. Member WRITES / RMW / mutating methods
 peel through its `mutating ref`.
 
 _Defined in `lang/std/core/indirection.ks`._
+
+## protocol `NarrowsFrom`
+
+```kestrel
+public protocol NarrowsFrom[From]
+```
+
+Protocol for conversions from a source that doesn't always fit.
+
+Each integer type conforms once per source it can't always hold, and
+offers three spellings that each say what an out-of-range value does:
+`exactly:` is `nil`, `truncating:` keeps the low bits, `clamping:`
+saturates. Integers also narrow from `Float32` and `Float64`: there
+`exactly:` is `nil` for a fraction, NaN or infinity too, and
+`truncating:` and `clamping:` both drop the fraction toward zero,
+saturate, and send NaN to 0.
+
+### Examples
+
+```
+let big: Int64 = 300;
+Int8(exactly: big);      // nil
+Int8(truncating: big);   // 44  (low 8 bits)
+Int8(clamping: big);     // 127
+Int64(truncating: -3.7); // -3
+```
+
+_Defined in `lang/std/core/convertible.ks`._
+
+### Members
+
+#### initializer `Clamping`
+
+```kestrel
+init(clamping: From)
+```
+
+Converts `value`, saturating to `Self`'s minimum or maximum when it
+doesn't fit. Never traps.
+
+_Defined in `lang/std/core/convertible.ks`._
+
+#### initializer `Exactly`
+
+```kestrel
+init(exactly: From)?
+```
+
+Converts `value` when it fits in `Self`, and is `nil` when it doesn't.
+
+_Defined in `lang/std/core/convertible.ks`._
+
+#### initializer `Truncating`
+
+```kestrel
+init(truncating: From)
+```
+
+Keeps the low bits of `value`, reinterpreted as `Self`. Never traps.
+
+_Defined in `lang/std/core/convertible.ks`._
 
 ## protocol `Negatable`
 
@@ -2734,17 +2694,23 @@ type SliceOutput = Slice[T]
 
 _Defined in `lang/std/collections/slice.ks`._
 
-### Implements `SliceClampable`
-
 ### Implements `SeqRange`
 
-#### function `resolve`
+#### field `endBound`
 
 ```kestrel
-public func resolve(Int64) -> Range[Int64]
+public var endBound: RangeBound { get }
 ```
 
-_Defined in `lang/std/collections/sliceable.ks`._
+_Defined in `lang/std/collections/slice_methods.ks`._
+
+#### field `startBound`
+
+```kestrel
+public var startBound: RangeBound { get }
+```
+
+_Defined in `lang/std/collections/slice_methods.ks`._
 
 ### Implements `RandomBounds`
 
@@ -2758,133 +2724,29 @@ public func inclusiveBounds() -> ClosedRange[T] where T: Steppable, T: Comparabl
 
 _Defined in `lang/std/numeric/random.ks`._
 
-### Implements `BytesIndex`
+### Implements `ViewIndex`
 
-#### typealias `BytesYield`
+_Conditional: `where V: TextView`._
+
+#### typealias `Output`
 
 ```kestrel
-type BytesYield = BytesView
+type Output = V where V: TextView
 ```
 
 _Defined in `lang/std/text/views.ks`._
 
-### Implements `BytesClampable`
+### Implements `ViewWrappable`
 
-#### typealias `BytesClampedYield`
+_Conditional: `where V: TextView`._
+
+#### typealias `WrappedOutput`
 
 ```kestrel
-type BytesClampedYield = BytesView
+type WrappedOutput = V where V: TextView
 ```
 
 _Defined in `lang/std/text/views.ks`._
-
-### Implements `BytesWrappable`
-
-#### typealias `BytesWrappedYield`
-
-```kestrel
-type BytesWrappedYield = BytesView
-```
-
-_Defined in `lang/std/text/views.ks`._
-
-### Implements `BytesSubstringIndex`
-
-### Implements `CharsIndex`
-
-#### typealias `CharsYield`
-
-```kestrel
-type CharsYield = CharsView
-```
-
-_Defined in `lang/std/text/views.ks`._
-
-### Implements `CharsClampable`
-
-#### typealias `CharsClampedYield`
-
-```kestrel
-type CharsClampedYield = CharsView
-```
-
-_Defined in `lang/std/text/views.ks`._
-
-### Implements `CharsWrappable`
-
-#### typealias `CharsWrappedYield`
-
-```kestrel
-type CharsWrappedYield = CharsView
-```
-
-_Defined in `lang/std/text/views.ks`._
-
-### Implements `CharsSubstringIndex`
-
-### Implements `GraphemesIndex`
-
-#### typealias `GraphemesYield`
-
-```kestrel
-type GraphemesYield = GraphemesView
-```
-
-_Defined in `lang/std/text/views.ks`._
-
-### Implements `GraphemesClampable`
-
-#### typealias `GraphemesClampedYield`
-
-```kestrel
-type GraphemesClampedYield = GraphemesView
-```
-
-_Defined in `lang/std/text/views.ks`._
-
-### Implements `GraphemesWrappable`
-
-#### typealias `GraphemesWrappedYield`
-
-```kestrel
-type GraphemesWrappedYield = GraphemesView
-```
-
-_Defined in `lang/std/text/views.ks`._
-
-### Implements `GraphemesSubstringIndex`
-
-### Implements `LinesIndex`
-
-#### typealias `LinesYield`
-
-```kestrel
-type LinesYield = LinesView
-```
-
-_Defined in `lang/std/text/views.ks`._
-
-### Implements `LinesClampable`
-
-#### typealias `LinesClampedYield`
-
-```kestrel
-type LinesClampedYield = LinesView
-```
-
-_Defined in `lang/std/text/views.ks`._
-
-### Implements `LinesWrappable`
-
-#### typealias `LinesWrappedYield`
-
-```kestrel
-type LinesWrappedYield = LinesView
-```
-
-_Defined in `lang/std/text/views.ks`._
-
-### Implements `LinesSubstringIndex`
 
 ## protocol `RangeConstructible`
 
@@ -3026,145 +2888,47 @@ type SliceOutput = Slice[T]
 
 _Defined in `lang/std/collections/slice.ks`._
 
-### Implements `SliceClampable`
-
 ### Implements `SeqRange`
 
-#### function `resolve`
+#### field `endBound`
 
 ```kestrel
-public func resolve(Int64) -> Range[Int64]
+public var endBound: RangeBound { get }
 ```
 
-_Defined in `lang/std/collections/sliceable.ks`._
+_Defined in `lang/std/collections/slice_methods.ks`._
 
-### Implements `BytesIndex`
-
-#### typealias `BytesYield`
+#### field `startBound`
 
 ```kestrel
-type BytesYield = BytesView
+public var startBound: RangeBound { get }
 ```
 
-_Defined in `lang/std/text/views.ks`._
+_Defined in `lang/std/collections/slice_methods.ks`._
 
-### Implements `BytesClampable`
+### Implements `ViewIndex`
 
-#### typealias `BytesClampedYield`
+_Conditional: `where V: TextView`._
 
-```kestrel
-type BytesClampedYield = BytesView
-```
-
-_Defined in `lang/std/text/views.ks`._
-
-### Implements `BytesWrappable`
-
-#### typealias `BytesWrappedYield`
+#### typealias `Output`
 
 ```kestrel
-type BytesWrappedYield = BytesView
+type Output = V where V: TextView
 ```
 
 _Defined in `lang/std/text/views.ks`._
 
-### Implements `BytesSubstringIndex`
+### Implements `ViewWrappable`
 
-### Implements `CharsIndex`
+_Conditional: `where V: TextView`._
 
-#### typealias `CharsYield`
+#### typealias `WrappedOutput`
 
 ```kestrel
-type CharsYield = CharsView
+type WrappedOutput = V where V: TextView
 ```
 
 _Defined in `lang/std/text/views.ks`._
-
-### Implements `CharsClampable`
-
-#### typealias `CharsClampedYield`
-
-```kestrel
-type CharsClampedYield = CharsView
-```
-
-_Defined in `lang/std/text/views.ks`._
-
-### Implements `CharsWrappable`
-
-#### typealias `CharsWrappedYield`
-
-```kestrel
-type CharsWrappedYield = CharsView
-```
-
-_Defined in `lang/std/text/views.ks`._
-
-### Implements `CharsSubstringIndex`
-
-### Implements `GraphemesIndex`
-
-#### typealias `GraphemesYield`
-
-```kestrel
-type GraphemesYield = GraphemesView
-```
-
-_Defined in `lang/std/text/views.ks`._
-
-### Implements `GraphemesClampable`
-
-#### typealias `GraphemesClampedYield`
-
-```kestrel
-type GraphemesClampedYield = GraphemesView
-```
-
-_Defined in `lang/std/text/views.ks`._
-
-### Implements `GraphemesWrappable`
-
-#### typealias `GraphemesWrappedYield`
-
-```kestrel
-type GraphemesWrappedYield = GraphemesView
-```
-
-_Defined in `lang/std/text/views.ks`._
-
-### Implements `GraphemesSubstringIndex`
-
-### Implements `LinesIndex`
-
-#### typealias `LinesYield`
-
-```kestrel
-type LinesYield = LinesView
-```
-
-_Defined in `lang/std/text/views.ks`._
-
-### Implements `LinesClampable`
-
-#### typealias `LinesClampedYield`
-
-```kestrel
-type LinesClampedYield = LinesView
-```
-
-_Defined in `lang/std/text/views.ks`._
-
-### Implements `LinesWrappable`
-
-#### typealias `LinesWrappedYield`
-
-```kestrel
-type LinesWrappedYield = LinesView
-```
-
-_Defined in `lang/std/text/views.ks`._
-
-### Implements `LinesSubstringIndex`
 
 ## protocol `RangeFromConstructible`
 
@@ -3427,145 +3191,47 @@ type SliceOutput = Slice[T]
 
 _Defined in `lang/std/collections/slice.ks`._
 
-### Implements `SliceClampable`
-
 ### Implements `SeqRange`
 
-#### function `resolve`
+#### field `endBound`
 
 ```kestrel
-public func resolve(Int64) -> Range[Int64]
+public var endBound: RangeBound { get }
 ```
 
-_Defined in `lang/std/collections/sliceable.ks`._
+_Defined in `lang/std/collections/slice_methods.ks`._
 
-### Implements `BytesIndex`
-
-#### typealias `BytesYield`
+#### field `startBound`
 
 ```kestrel
-type BytesYield = BytesView
+public var startBound: RangeBound { get }
 ```
 
-_Defined in `lang/std/text/views.ks`._
+_Defined in `lang/std/collections/slice_methods.ks`._
 
-### Implements `BytesClampable`
+### Implements `ViewIndex`
 
-#### typealias `BytesClampedYield`
+_Conditional: `where V: TextView`._
 
-```kestrel
-type BytesClampedYield = BytesView
-```
-
-_Defined in `lang/std/text/views.ks`._
-
-### Implements `BytesWrappable`
-
-#### typealias `BytesWrappedYield`
+#### typealias `Output`
 
 ```kestrel
-type BytesWrappedYield = BytesView
+type Output = V where V: TextView
 ```
 
 _Defined in `lang/std/text/views.ks`._
 
-### Implements `BytesSubstringIndex`
+### Implements `ViewWrappable`
 
-### Implements `CharsIndex`
+_Conditional: `where V: TextView`._
 
-#### typealias `CharsYield`
+#### typealias `WrappedOutput`
 
 ```kestrel
-type CharsYield = CharsView
+type WrappedOutput = V where V: TextView
 ```
 
 _Defined in `lang/std/text/views.ks`._
-
-### Implements `CharsClampable`
-
-#### typealias `CharsClampedYield`
-
-```kestrel
-type CharsClampedYield = CharsView
-```
-
-_Defined in `lang/std/text/views.ks`._
-
-### Implements `CharsWrappable`
-
-#### typealias `CharsWrappedYield`
-
-```kestrel
-type CharsWrappedYield = CharsView
-```
-
-_Defined in `lang/std/text/views.ks`._
-
-### Implements `CharsSubstringIndex`
-
-### Implements `GraphemesIndex`
-
-#### typealias `GraphemesYield`
-
-```kestrel
-type GraphemesYield = GraphemesView
-```
-
-_Defined in `lang/std/text/views.ks`._
-
-### Implements `GraphemesClampable`
-
-#### typealias `GraphemesClampedYield`
-
-```kestrel
-type GraphemesClampedYield = GraphemesView
-```
-
-_Defined in `lang/std/text/views.ks`._
-
-### Implements `GraphemesWrappable`
-
-#### typealias `GraphemesWrappedYield`
-
-```kestrel
-type GraphemesWrappedYield = GraphemesView
-```
-
-_Defined in `lang/std/text/views.ks`._
-
-### Implements `GraphemesSubstringIndex`
-
-### Implements `LinesIndex`
-
-#### typealias `LinesYield`
-
-```kestrel
-type LinesYield = LinesView
-```
-
-_Defined in `lang/std/text/views.ks`._
-
-### Implements `LinesClampable`
-
-#### typealias `LinesClampedYield`
-
-```kestrel
-type LinesClampedYield = LinesView
-```
-
-_Defined in `lang/std/text/views.ks`._
-
-### Implements `LinesWrappable`
-
-#### typealias `LinesWrappedYield`
-
-```kestrel
-type LinesWrappedYield = LinesView
-```
-
-_Defined in `lang/std/text/views.ks`._
-
-### Implements `LinesSubstringIndex`
 
 ## protocol `RangeThroughConstructible`
 
@@ -3674,145 +3340,47 @@ type SliceOutput = Slice[T]
 
 _Defined in `lang/std/collections/slice.ks`._
 
-### Implements `SliceClampable`
-
 ### Implements `SeqRange`
 
-#### function `resolve`
+#### field `endBound`
 
 ```kestrel
-public func resolve(Int64) -> Range[Int64]
+public var endBound: RangeBound { get }
 ```
 
-_Defined in `lang/std/collections/sliceable.ks`._
+_Defined in `lang/std/collections/slice_methods.ks`._
 
-### Implements `BytesIndex`
-
-#### typealias `BytesYield`
+#### field `startBound`
 
 ```kestrel
-type BytesYield = BytesView
+public var startBound: RangeBound { get }
 ```
 
-_Defined in `lang/std/text/views.ks`._
+_Defined in `lang/std/collections/slice_methods.ks`._
 
-### Implements `BytesClampable`
+### Implements `ViewIndex`
 
-#### typealias `BytesClampedYield`
+_Conditional: `where V: TextView`._
 
-```kestrel
-type BytesClampedYield = BytesView
-```
-
-_Defined in `lang/std/text/views.ks`._
-
-### Implements `BytesWrappable`
-
-#### typealias `BytesWrappedYield`
+#### typealias `Output`
 
 ```kestrel
-type BytesWrappedYield = BytesView
+type Output = V where V: TextView
 ```
 
 _Defined in `lang/std/text/views.ks`._
 
-### Implements `BytesSubstringIndex`
+### Implements `ViewWrappable`
 
-### Implements `CharsIndex`
+_Conditional: `where V: TextView`._
 
-#### typealias `CharsYield`
+#### typealias `WrappedOutput`
 
 ```kestrel
-type CharsYield = CharsView
+type WrappedOutput = V where V: TextView
 ```
 
 _Defined in `lang/std/text/views.ks`._
-
-### Implements `CharsClampable`
-
-#### typealias `CharsClampedYield`
-
-```kestrel
-type CharsClampedYield = CharsView
-```
-
-_Defined in `lang/std/text/views.ks`._
-
-### Implements `CharsWrappable`
-
-#### typealias `CharsWrappedYield`
-
-```kestrel
-type CharsWrappedYield = CharsView
-```
-
-_Defined in `lang/std/text/views.ks`._
-
-### Implements `CharsSubstringIndex`
-
-### Implements `GraphemesIndex`
-
-#### typealias `GraphemesYield`
-
-```kestrel
-type GraphemesYield = GraphemesView
-```
-
-_Defined in `lang/std/text/views.ks`._
-
-### Implements `GraphemesClampable`
-
-#### typealias `GraphemesClampedYield`
-
-```kestrel
-type GraphemesClampedYield = GraphemesView
-```
-
-_Defined in `lang/std/text/views.ks`._
-
-### Implements `GraphemesWrappable`
-
-#### typealias `GraphemesWrappedYield`
-
-```kestrel
-type GraphemesWrappedYield = GraphemesView
-```
-
-_Defined in `lang/std/text/views.ks`._
-
-### Implements `GraphemesSubstringIndex`
-
-### Implements `LinesIndex`
-
-#### typealias `LinesYield`
-
-```kestrel
-type LinesYield = LinesView
-```
-
-_Defined in `lang/std/text/views.ks`._
-
-### Implements `LinesClampable`
-
-#### typealias `LinesClampedYield`
-
-```kestrel
-type LinesClampedYield = LinesView
-```
-
-_Defined in `lang/std/text/views.ks`._
-
-### Implements `LinesWrappable`
-
-#### typealias `LinesWrappedYield`
-
-```kestrel
-type LinesWrappedYield = LinesView
-```
-
-_Defined in `lang/std/text/views.ks`._
-
-### Implements `LinesSubstringIndex`
 
 ## protocol `RangeUpToConstructible`
 
@@ -3956,6 +3524,40 @@ mutating func shiftRightAssign(by: Other)
 Mutates `self` to `self >> count`.
 
 _Defined in `lang/std/core/assign.ks`._
+
+## protocol `RoundsFrom`
+
+```kestrel
+public protocol RoundsFrom[From]
+```
+
+Protocol for conversions that round to the nearest representable value.
+
+A float conforms once per source whose values don't all fit its mantissa
+(`Int64` into `Float64`, `Float64` into `Float32`), so the conversion's
+name says it may lose low-order bits. A source that always converts
+exactly is `Convertible` instead.
+
+### Examples
+
+```
+let n: Int64 = 9_007_199_254_740_993;   // 2^53 + 1
+Float64(rounding: n);                   // 9007199254740992.0
+```
+
+_Defined in `lang/std/core/convertible.ks`._
+
+### Members
+
+#### initializer `Rounding`
+
+```kestrel
+init(rounding: From)
+```
+
+Converts `value`, rounding to the nearest `Self`.
+
+_Defined in `lang/std/core/convertible.ks`._
 
 ## protocol `Sized`
 

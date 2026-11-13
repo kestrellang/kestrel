@@ -167,7 +167,7 @@ struct Player {
     /// Move by the velocity for `dt` seconds, in small steps so a fast fall
     /// can't skip through a thin floor.
     mutating func moveThrough(world: World, dt: Float32) {
-        let steps = 1 + (((self.velocity * dt).length / 0.4).floor().toInt64() ?? 0);
+        let steps = 1 + (Int64(exactly: ((self.velocity * dt).length / 0.4).floor()) ?? 0);
         self.onGround = false;
         for _ in 0..<steps {
             self.step(world, self.velocity * (dt / Float32(from: steps)));

@@ -3,7 +3,7 @@
 
 module Test
 
-// Integer conversions: `from:` is exact, `truncating:` keeps the low bits,
+// Integer conversions: `exactly:` is nil when the value doesn't fit, `truncating:` keeps the low bits,
 // `clamping:` saturates, and `bitPattern:` reinterprets a same-width value.
 @main
 func main() -> lang.i64 {
@@ -13,7 +13,8 @@ func main() -> lang.i64 {
     if Int8(clamping: -big) != -128 { return 3 }
     if UInt8(clamping: -big) != 0 { return 4 }
     let ok: Int64 = 100;
-    if Int8(from: ok) != 100 { return 5 }
+    if Int8(exactly: ok)! != 100 { return 5 }
+    if Int8(exactly: big) != null { return 12 }
     let neg: Int32 = -1;
     if UInt32(bitPattern: neg) != 4294967295 { return 6 }
     if UInt64(truncating: neg) != 18446744073709551615 { return 7 }

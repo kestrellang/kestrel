@@ -41,6 +41,7 @@ pub enum AnalyzerId {
     CFunction,
     PackedFieldBorrow,
     OptionalChain,
+    ViewConversion,
 
     // Decl checks
     FunctionBody,
@@ -98,6 +99,7 @@ pub enum AnalyzerId {
     TypeAnnotationResolution,
     AttributeValidation,
     EntryPoint,
+    ModuleDeclaration,
 }
 
 impl AnalyzerId {
@@ -129,6 +131,7 @@ impl AnalyzerId {
             AnalyzerId::CFunction => "c_function",
             AnalyzerId::PackedFieldBorrow => "packed_field_borrow",
             AnalyzerId::OptionalChain => "optional_chain",
+            AnalyzerId::ViewConversion => "view_conversion",
             AnalyzerId::FunctionBody => "function_body",
             AnalyzerId::ProtocolMethod => "protocol_method",
             AnalyzerId::StaticContext => "static_context",
@@ -182,6 +185,7 @@ impl AnalyzerId {
             AnalyzerId::TypeAnnotationResolution => "type_annotation_resolution",
             AnalyzerId::AttributeValidation => "attribute_validation",
             AnalyzerId::EntryPoint => "entry_point",
+            AnalyzerId::ModuleDeclaration => "module_declaration",
         }
     }
 }

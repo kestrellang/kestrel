@@ -69,9 +69,21 @@ pub struct ParamDef {
     pub ty: TyId,
     pub convention: ParamConvention,
     pub external_label: Option<String>,
+    /// The synthesized environment pointer of a closure or thunk (always
+    /// params[0], see [`FunctionKind::takes_env_param`]). Set only by
+    /// [`ParamDef::env`] — never read off the parameter's name.
+    pub is_env: bool,
 }
 
 impl ParamDef {
+    /// The synthesized env-pointer param of a closure or thunk.
+    pub fn env(name: impl Into<String>, value: ValueId, ty: TyId) -> Self {
+        Self {
+            is_env: true,
+            ..Self::new(name, value, ty, ParamConvention::Consuming)
+        }
+    }
+
     pub fn new(
         name: impl Into<String>,
         value: ValueId,
@@ -84,6 +96,7 @@ impl ParamDef {
             ty,
             convention,
             external_label: None,
+            is_env: false,
         }
     }
 
@@ -100,6 +113,7 @@ impl ParamDef {
             ty,
             convention,
             external_label: label,
+            is_env: false,
         }
     }
 }
@@ -174,7 +188,10 @@ pub enum WhereConstraint {
     Implements {
         type_param: Entity,
         protocol: Entity,
-        protocol_type_args: Vec<Entity>,
+        /// The bound's protocol args as types (`T: P[Int64, U]`), in the
+        /// protocol's param order: they select which conformance the bound
+        /// names when the concrete type conforms to `P` more than once.
+        protocol_type_args: Vec<TyId>,
     },
     NotImplements {
         type_param: Entity,
@@ -202,7 +219,7 @@ impl WhereConstraint {
     pub fn implements_with_args(
         type_param: Entity,
         protocol: Entity,
-        protocol_type_args: Vec<Entity>,
+        protocol_type_args: Vec<TyId>,
     ) -> Self {
         Self::Implements {
             type_param,
@@ -216,6 +233,13 @@ impl WhereConstraint {
             type_param,
             protocol,
         }
+    }
+
+    /// Does this constraint restrict which types satisfy it? `T: not P`
+    /// only relaxes an implicit marker bound ("T may lack P"), so it never
+    /// excludes a type and doesn't count toward witness specificity.
+    pub fn is_requirement(&self) -> bool {
+        !matches!(self, Self::NotImplements { .. })
     }
 }
 

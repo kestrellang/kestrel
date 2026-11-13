@@ -666,20 +666,11 @@ fn init_effect_adapter(
         return None;
     }
     let ret = requirement_ret?;
-    let MirTy::Named {
-        entity: wrapper, ..
-    } = ctx.module.ty_arena.get(ret).clone()
-    else {
+    let MirTy::Named { .. } = ctx.module.ty_arena.get(ret) else {
         return None;
     };
     let def = ctx.module.functions.get(&init)?.clone();
-    let success = ctx.resolve_variant_idx(
-        wrapper,
-        match effect {
-            InitEffect::Failable => "Some",
-            InitEffect::Throwing => "Ok",
-        },
-    )?;
+    let (success, _) = ctx.effect_variant_idxs(&effect)?;
 
     let entity = ctx.next_synthetic_entity();
     let name = format!("{}.__effect", ctx.register_name(init));

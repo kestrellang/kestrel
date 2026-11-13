@@ -222,7 +222,7 @@ public func statsRadarSvg(statsArr: Array[Value]) -> String {
         let stat = unsafe statsArr(unchecked: statIdx);
         let value = getInt(getField(stat, "base_stat"));
         let cap = if value > 200 { 200 } else { value };
-        let normalized = (Float64(from: cap) / 200.0) * r;
+        let normalized = (Float64(rounding: cap) / 200.0) * r;
         let x = cx + normalized * unitX(pi);
         let y = cy + normalized * unitY(pi);
         s.append(roundInt(x).formatted());
@@ -239,7 +239,7 @@ public func statsRadarSvg(statsArr: Array[Value]) -> String {
         let stat = unsafe statsArr(unchecked: di);
         let value = getInt(getField(stat, "base_stat"));
         let cap = if value > 200 { 200 } else { value };
-        let normalized = (Float64(from: cap) / 200.0) * r;
+        let normalized = (Float64(rounding: cap) / 200.0) * r;
         let angIdx = statAngleIdx(di);
         let dotX = cx + normalized * unitX(angIdx);
         let dotY = cy + normalized * unitY(angIdx);

@@ -2,7 +2,8 @@
 // stdlib: true
 // expect-stdout: beta gamma\nalpha, beta, gamma, delta\n\n123\nb+c+d\n
 //
-// `joined(by:)` lives on `Sliceable`, so a slice of an array joins without
+// `joined(by:)` lives on `Slice` (an `Array` reaches it through the
+// `Indirection` peel), so a slice of an array joins without
 // copying it into an array first. An empty slice joins to "".
 
 module Test

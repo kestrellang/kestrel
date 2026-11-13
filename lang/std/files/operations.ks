@@ -57,7 +57,7 @@ extend File {
 
     /// Sets the permission bits of `path` (`chmod`).
     public static func setPermissions(path: Path, permissions: Permissions) -> Result[(), IoError] {
-        withNativePath(path, { (p) in unsafe native_chmod(p, Int32(from: permissions.mode)) })
+        withNativePath(path, { (p) in unsafe native_chmod(p, Int32(bitPattern: permissions.mode)) })
     }
 }
 

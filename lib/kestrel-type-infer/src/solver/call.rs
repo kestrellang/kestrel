@@ -202,6 +202,7 @@ pub(super) fn solve_call(
                 name: "subscript".to_string(),
                 is_call: true,
                 span,
+                searched_pointee: None,
             })
         },
     }
@@ -292,6 +293,7 @@ pub(super) fn solve_overloaded_call(
                 name: overload_name,
                 is_call: true,
                 span,
+                searched_pointee: None,
             }),
             [one] => emit_resolved_call(ctx, *one, &type_args, args, result, expr, span),
             // Receiver-less: an overloaded module-level function call has
@@ -340,10 +342,21 @@ pub(super) fn narrow_overloads(
     if !args.iter().all(|a| ctx.is_concrete(ctx.resolve(a.ty))) {
         return Narrowed::Open(matched);
     }
-    let compatible: Vec<Entity> = matched
-        .into_iter()
-        .filter(|&c| types_compatible(ctx, c, args))
+    // Exact nominal matches first; only when none fit does a borrowed
+    // parameter also take an argument that peels to it through `Indirection`
+    // (an `Array` for `&Slice[T]`), so a peel never makes an exact overload
+    // ambiguous.
+    let mut compatible: Vec<Entity> = matched
+        .iter()
+        .copied()
+        .filter(|&c| types_compatible(ctx, c, args, false))
         .collect();
+    if compatible.is_empty() {
+        compatible = matched
+            .into_iter()
+            .filter(|&c| types_compatible(ctx, c, args, true))
+            .collect();
+    }
     // The most specific candidate wins: when a concrete overload and a
     // generic one both fit (`init(from: CString)` and `init[I](from: I)` for
     // a `CString` argument), take the concrete.
@@ -409,6 +422,14 @@ pub(super) fn bind_call_result(
 ) {
     ctx.call_return_tvs.insert(expr, ret_tv);
     let rr = ctx.resolve(ret_tv);
+    kestrel_debug::ktrace!(
+        "decays-from",
+        "bind_call_result expr {expr:?}: ret {:?} result {:?} bind={} annotated={}",
+        ctx.slot(rr),
+        ctx.slot(ctx.resolve(result)),
+        ctx.binding_init_exprs.contains(&expr),
+        ctx.annotated_init_exprs.contains(&expr)
+    );
     // A return not known yet (`-> I.Ref` before `I` resolves) may still turn
     // out a ref: an unannotated binding decides once it does (the deferred
     // decay). An annotated one (`let a: Int64 = pick()`) must flow its type
@@ -446,8 +467,18 @@ pub(super) fn bind_call_result(
         // yet resolved (`I.SliceOutput` before `I` is known) decides later:
         // the deferred decay keeps the ref only if it turns out unsized
         // (`apply_ref_decay_defaults`).
-        if ctx.binding_init_exprs.contains(&expr) && !pinned_non_ref {
+        // The same holds for the other always-decay value positions (a
+        // tuple element, an arm), but not a collection literal's element.
+        let keeps_unsized = ctx.binding_init_exprs.contains(&expr)
+            || (ctx.always_decay_exprs.contains(&expr) && !ctx.collection_elements.contains(&expr));
+        if keeps_unsized && !pinned_non_ref {
             match super::pointee_sizedness(ctx, pointee) {
+                // An annotated binding (`let lo: Array[Int64] = xs(0..<2)`)
+                // coerces, so a view pointee can convert to the named type.
+                None if ctx.annotated_init_exprs.contains(&expr) => {
+                    ctx.coerce(ret_tv, result, expr, span);
+                    return;
+                },
                 None => {
                     ctx.equal_decayed(ret_tv, result, span);
                     return;
@@ -466,6 +497,15 @@ pub(super) fn bind_call_result(
             || (args_decay && ctx.call_arg_exprs.contains(&expr) && !arg_targets_ref(ctx, expr))
             || pinned_non_ref
         {
+            // An unsized pointee pinned to a named owned type (`let s: String
+            // = t.trimmed()`, a `String` param) reaches it by conversion
+            // (`DecaysFrom`), so it coerces rather than equates.
+            // A pointee not known yet (`I.SliceOutput`) coerces whole: the
+            // coercion waits for it rather than pinning it to the target.
+            if pinned_non_ref && super::pointee_sizedness(ctx, pointee) != Some(true) {
+                ctx.coerce(ret_tv, result, expr, span);
+                return;
+            }
             ctx.equal(result, pointee, span);
             return;
         }
@@ -477,6 +517,13 @@ pub(super) fn bind_call_result(
     if super::equality::optional_ref_decay_site(ctx, expr)
         && super::equality::optional_ref_pointee(ctx, rr).is_some()
     {
+        ctx.coerce(ret_tv, result, expr, span);
+        return;
+    }
+    // A return still projected (`I.SliceOutput`) into a `DecaysFrom` target
+    // (`let lo: Array[Int64] = xs(0..<2)`) may yet be a view's ref:
+    // coercing lets it wait for the projection and convert.
+    if super::equality::awaits_projection_into_decay(ctx, ret_tv, result) {
         ctx.coerce(ret_tv, result, expr, span);
         return;
     }
@@ -689,9 +736,18 @@ pub(super) fn emit_resolved_call(
 
 /// Check if a candidate's param types are compatible with concrete arg types.
 /// Does not mutate the type table — only inspects resolved types structurally.
-pub(super) fn types_compatible(ctx: &InferCtx<'_>, entity: Entity, args: &[CallArg]) -> bool {
+pub(super) fn types_compatible(
+    ctx: &InferCtx<'_>,
+    entity: Entity,
+    args: &[CallArg],
+    allow_peel: bool,
+) -> bool {
     let qctx = ctx.query_ctx;
     let root = ctx.root;
+    let views: Vec<Option<bool>> = qctx
+        .get::<Callable>(entity)
+        .map(|c| c.params.iter().map(|p| p.view()).collect())
+        .unwrap_or_default();
 
     let Some(param_hir_tys) = qctx.query(LowerCallableTypes { entity, root }) else {
         return false;
@@ -776,12 +832,14 @@ pub(super) fn types_compatible(ctx: &InferCtx<'_>, entity: Entity, args: &[CallA
                     continue;
                 }
                 match arg_kind.entity() {
-                    Some(arg_entity) => {
-                        if arg_entity != *param_entity {
-                            return false;
-                        }
-                    },
-                    None => return false,
+                    Some(arg_entity) if arg_entity == *param_entity => {},
+                    // A borrowed param may take a wrapper that peels to it;
+                    // `try_view_arg_peel` checks the `Target` when it coerces.
+                    Some(_)
+                        if allow_peel
+                            && views.get(slot).copied().flatten().is_some()
+                            && peels_through_indirection(ctx, arg_resolved, *param_entity) => {},
+                    _ => return false,
                 }
             },
             kestrel_hir::ty::HirTy::AssocProjection { .. } => {
@@ -861,5 +919,63 @@ pub(super) fn wrap_init_call_result(
             ctx.named(*entity, wrapped_args)
         },
         _ => inner_tv,
+    }
+}
+
+/// Whether a borrowed argument of `tv`'s type can peel through
+/// `Indirection` to `param` (see `try_view_arg_peel`): its type conforms,
+/// and its `Target` is `param`, peels on to it, or is abstract (a generic
+/// box's `T`), which only the coercion can settle.
+fn peels_through_indirection(ctx: &InferCtx<'_>, tv: TyVar, param: Entity) -> bool {
+    let hir = super::conformance::reify_tv(ctx, tv);
+    peels_to(ctx, &hir, param, 4)
+}
+
+fn peels_to(ctx: &InferCtx<'_>, ty: &kestrel_hir::ty::HirTy, param: Entity, depth: u8) -> bool {
+    let qctx = ctx.query_ctx;
+    let (Some(indirection), Some(target)) = (
+        qctx.query(ResolveBuiltin {
+            builtin: Builtin::Indirection,
+            root: ctx.root,
+        }),
+        ctx.resolver.builtin(Builtin::IndirectionTarget),
+    ) else {
+        return false;
+    };
+    let (kestrel_hir::ty::HirTy::Struct { entity, .. }
+    | kestrel_hir::ty::HirTy::Enum { entity, .. }) = ty
+    else {
+        return false;
+    };
+    if depth == 0 || !crate::conformance::type_satisfies(qctx, ty, indirection, ctx.root) {
+        return false;
+    }
+    let Some(pointee) = qctx
+        .query(kestrel_name_res::AssociatedTypeBinding {
+            type_entity: *entity,
+            assoc: target,
+            conformance_source: None,
+            root: ctx.root,
+        })
+        .and_then(|(alias, _)| {
+            qctx.query(kestrel_hir_lower::LowerTypeAnnotation {
+                entity: alias,
+                root: ctx.root,
+            })
+        })
+    else {
+        return true; // no concrete binding to judge by
+    };
+    match &pointee {
+        kestrel_hir::ty::HirTy::Struct { entity, .. }
+        | kestrel_hir::ty::HirTy::Enum { entity, .. }
+            if *entity == param =>
+        {
+            true
+        },
+        kestrel_hir::ty::HirTy::Struct { .. } | kestrel_hir::ty::HirTy::Enum { .. } => {
+            peels_to(ctx, &pointee, param, depth - 1)
+        },
+        _ => true,
     }
 }

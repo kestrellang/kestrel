@@ -239,7 +239,7 @@ fn collect_param_refs(
         AstType::Ref { inner, .. } => {
             collect_param_refs(cx, inner, context, param_set, out);
         },
-        AstType::Unit(_) | AstType::Never(_) | AstType::Inferred(_) => {},
+        AstType::Unit(_) | AstType::Never(_) | AstType::Inferred(_) | AstType::Builtin(..) => {},
     }
 }
 

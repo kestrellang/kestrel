@@ -8,6 +8,9 @@
 
 module Test
 
+@builtin(.Copyable)
+protocol Copyable {}
+
 struct Tok: not Copyable {
     var id: lang.i64
 }

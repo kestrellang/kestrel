@@ -18,7 +18,7 @@ module deflate
 public protocol Decompressor {
     /// Feeds the next chunk of compressed input and returns the newly
     /// decompressed bytes. After an error, every later call fails too.
-    mutating func write[S](input: &S) -> Result[Array[UInt8], DeflateError] where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
+    mutating func write(input: &Slice[UInt8]) -> Result[Array[UInt8], DeflateError]
 
     /// Says no more input is coming. Fails with `.UnexpectedEnd` if the
     /// stream stopped partway through.
@@ -41,7 +41,7 @@ public protocol Decompressor {
 public protocol Compressor {
     /// Feeds more input and returns any compressed bytes that are ready.
     /// Output is held back until there's enough input to fill a block.
-    mutating func write[S](input: &S) -> Array[UInt8] where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
+    mutating func write(input: &Slice[UInt8]) -> Array[UInt8]
 
     /// Compresses everything still buffered and ends the stream.
     mutating func finish() -> Array[UInt8]

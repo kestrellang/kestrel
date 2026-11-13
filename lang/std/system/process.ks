@@ -5,7 +5,7 @@ module std.system
 import std.numeric.(Int32, Int64, UInt8)
 import std.memory.(RawPointer, UnsafeSlice)
 import std.collections.(Array, Slice)
-import std.text.(String, Str, Formatter, Formattable, FormatOptions, _writePadded)
+import std.text.(String, Formatter, Formattable, FormatOptions)
 import std.core.(Bool, Equatable)
 import std.result.(Optional, Result)
 import std.streams.(IoError, Readable, Writable, flushStandardOutput)
@@ -24,7 +24,7 @@ public struct ProcessId: Equatable, Formattable {
     public func isEqual(to other: ProcessId) -> Bool { self.value == other.value }
 
     public func format(mutating into writer: some Formatter, options: FormatOptions = FormatOptions.default()) {
-        _writePadded(into: writer, "\(self.value)", options)
+        writer.pad("\(self.value)", options)
     }
 }
 
@@ -127,7 +127,7 @@ public enum ExitStatus: Equatable, Formattable {
             .Terminated(signal) => "terminated by signal \(signal)",
             .TimedOut => "timed out"
         };
-        _writePadded(into: writer, text, options)
+        writer.pad(text, options)
     }
 }
 
@@ -526,18 +526,6 @@ public struct Command: not Copyable {
     }
 }
 
-/// Runs `program` with `args`, inheriting stdio, and waits for it. Short
-/// for `Command(program).arguments(args).run()`.
-///
-/// # Examples
-///
-/// ```
-/// let status = try run("git", ["fetch", "origin"]);
-/// ```
-public func run(program: String, args: Array[String]) -> Result[ExitStatus, IoError] {
-    Command(program).arguments(args).run()
-}
-
 internal func pipeReader(fd: Int32) -> Optional[PipeReader] {
     if fd < 0 { .None } else { .Some(PipeReader(fd: fd)) }
 }
@@ -667,7 +655,7 @@ public struct Child: not Copyable {
             return .Ok(.None)
         }
         let status: ExitStatus = if cells.read(at: 0) == 1 {
-            .Exited(ExitCode(UInt8(from: cells.read(at: 1))))
+            .Exited(ExitCode(UInt8(exactly: cells.read(at: 1))!))
         } else {
             .Terminated(signal: cells.read(at: 1))
         };
@@ -729,7 +717,7 @@ public struct Child: not Copyable {
                     self.killForTimeout();
                     return .Ok(Output(status: .TimedOut, standardOutput: outBytes, standardError: errBytes))
                 }
-                wait = Int32(from: left)
+                wait = Int32(clamping: left)
             }
             if unsafe native_poll_two(outFd, errFd, wait, ready.asNative()) < 0 {
                 return .Err(IoError.last())

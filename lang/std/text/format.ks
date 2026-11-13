@@ -4,7 +4,7 @@ module std.text
 
 import std.core.(Bool, Equatable, Matchable, ExpressibleByStringLiteral)
 import std.numeric.(Int64)
-import std.text.(String, Char, Str, StringBuilder)
+import std.text.(String, Char, StringSlice, StringBuilder)
 import std.result.(Optional)
 import std.collections.(Array)
 import std.memory.(Allocator, GlobalAllocator)
@@ -344,6 +344,35 @@ public struct FormatOptions: Equatable {
     }
 }
 
+/// The `FormatOptions` a `{value:spec}` format specifier spells.
+///
+/// The compiler parses each specifier and builds its options through this
+/// function, so it never names `FormatOptions`' fields or cases itself.
+/// `width` / `precision` apply only when their `has` flag is set.
+/// `alignment`, `sign` and `floatStyle` arrive as codes: alignment 0 left,
+/// 1 right, 2 center; sign 0 negative-only, 1 always, 2 space; float style
+/// 0 auto, 1 fixed, 2 scientific, 3 scientific uppercase, 4 percent.
+@builtin(.FormatSpecOptions)
+public func _formatSpecOptions(hasWidth: Bool, width: Int64, hasPrecision: Bool, precision: Int64, alignment: Int64, fill: Char, radix: Int64, uppercase: Bool, sign: Int64, alternate: Bool, floatStyle: Int64, debug: Bool) -> FormatOptions {
+    var opts = FormatOptions();
+    if hasWidth { opts.width = .Some(width) }
+    if hasPrecision { opts.precision = .Some(precision) }
+    if alignment == 1 { opts.alignment = Alignment.Right }
+    if alignment == 2 { opts.alignment = Alignment.Center }
+    opts.fill = fill;
+    opts.radix = radix;
+    opts.uppercase = uppercase;
+    if sign == 1 { opts.sign = Sign.Always }
+    if sign == 2 { opts.sign = Sign.Space }
+    opts.alternate = alternate;
+    if floatStyle == 1 { opts.floatStyle = FloatStyle.Fixed }
+    if floatStyle == 2 { opts.floatStyle = FloatStyle.Scientific }
+    if floatStyle == 3 { opts.floatStyle = FloatStyle.ScientificUpper }
+    if floatStyle == 4 { opts.floatStyle = FloatStyle.Percent }
+    opts.debug = debug;
+    opts
+}
+
 // ============================================================================
 // FORMATTABLE PROTOCOL
 // ============================================================================
@@ -372,7 +401,7 @@ public struct FormatOptions: Equatable {
 /// points. `StringBuilder` is the default implementation; streaming sinks can
 /// implement this protocol without forcing an intermediate `String`.
 public protocol Formatter {
-    mutating func append(other: some Str and not Static)
+    mutating func append(other: &StringSlice)
     mutating func append(char c: Char)
 }
 
@@ -414,82 +443,120 @@ extend Formattable {
 }
 
 // ============================================================================
-// PADDING HELPER
+// PADDING HELPERS
 // ============================================================================
 
-/// Writes `content` into `writer` with width/alignment/fill padding applied.
-/// Used by String, integer, and float `format(into:)` implementations.
+/// Padding helpers for `format(into:)` implementations.
 ///
-/// When `fill == '0'` and padding goes on the left (right-align / center),
-/// any sign character (`-`, `+`, ` `) or radix prefix (`0b`, `0o`, `0x`,
-/// `0X`) that appears at the start of `content` is emitted *before* the
-/// zero-padding so the result matches the C `printf` "%08d" convention,
-/// e.g. `-5` with width 8 → `-0000005` rather than `000000-5`.
-public func _writePadded[A](mutating into writer: some Formatter, content: String[A], options: FormatOptions) where A: Allocator {
-    if let .Some(width) = options.width {
-        let currentLen = content.chars.count;
-        if width > currentLen {
-            let padding = width - currentLen;
-            var padLeft: Int64 = 0;
-            var padRight: Int64 = 0;
+/// A type's `format(into:)` receives the hole's whole `FormatOptions` and
+/// decides what width means for it; nothing pads on its behalf. These do the
+/// common cases: `pad` for text, `padIntegral` for numbers.
+extend Formatter {
+    /// Writes `content` padded to `options.width` with `options.fill`,
+    /// placed by `options.alignment`. A `precision` truncates `content` to
+    /// that many characters first, as for strings (`"\(s:.3)"`).
+    ///
+    /// Width and precision count code points, not bytes.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// struct Pt: Formattable {
+    ///     var x: Int64
+    ///     func format(mutating into writer: some Formatter, options: FormatOptions = FormatOptions.default()) {
+    ///         writer.pad("Pt(\(self.x))", options)
+    ///     }
+    /// }
+    /// "[\(Pt(x: 7):>8)]";   // "[   Pt(7)]"
+    /// ```
+    public mutating func pad(content: &StringSlice, options: FormatOptions) {
+        var count = content.chars.count;
+        var truncated = false;
+        if let .Some(precision) = options.precision {
+            if precision < count {
+                count = precision;
+                truncated = true
+            }
+        }
+        let (left, right) = paddingSplit(count, options);
+        self.appendFill(left, options.fill);
+        if truncated {
+            var it = content.chars.iter();
+            var i: Int64 = 0;
+            while i < count {
+                if let .Some(c) = it.next() { self.append(char: c) };
+                i = i + 1
+            }
+        } else {
+            self.append(content)
+        }
+        self.appendFill(right, options.fill)
+    }
 
-            if options.alignment == .Left {
-                padRight = padding
-            } else if options.alignment == .Right {
-                padLeft = padding
-            } else {
-                padLeft = padding / 2;
-                padRight = padding - padLeft
-            }
+    /// Writes a number as its sign, then `prefix`, then `digits`, padded to
+    /// `options.width`. The sign follows `options.sign` (`-` only when
+    /// `nonNegative` is false, by default). A `'0'` fill puts every padding
+    /// zero between the prefix and the digits, whatever the alignment:
+    /// `-0x002a`, not `000-0x2a` or `-0x2a000`.
+    ///
+    /// The caller decides the prefix (`"0x"` only under `alternate`, say)
+    /// and passes `""` for none.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// var options = FormatOptions();
+    /// options.width = .Some(4);
+    /// options.fill = '0';
+    /// var b = StringBuilder();
+    /// b.padIntegral(nonNegative: false, prefix: "", digits: "5", options);
+    /// b.build();   // "-005"
+    /// ```
+    public mutating func padIntegral(nonNegative nonNegative: Bool, prefix prefix: &StringSlice, digits digits: &StringSlice, options: FormatOptions) {
+        let sign: Char? = if nonNegative == false {
+            .Some('-')
+        } else if options.sign == .Always {
+            .Some('+')
+        } else if options.sign == .Space {
+            .Some(' ')
+        } else {
+            .None
+        };
+        let signCount: Int64 = if let .Some(_) = sign { 1 } else { 0 };
+        let count = signCount + prefix.chars.count + digits.chars.count;
+        let (before, after) = paddingSplit(count, options);
+        // Zero fill ignores alignment, as in Rust: `-5` is `-005`, never `-500`.
+        let zeroFill = options.fill == '0';
+        let left = if zeroFill { before + after } else { before };
+        let right = if zeroFill { 0 } else { after };
+        if zeroFill == false { self.appendFill(left, options.fill) };
+        if let .Some(c) = sign { self.append(char: c) };
+        self.append(prefix);
+        if zeroFill { self.appendFill(left, options.fill) };
+        self.append(digits);
+        self.appendFill(right, options.fill)
+    }
 
-            // When zero-filling and padding on the left, emit any sign/prefix
-            // before the zeros so we get "-0000005" rather than "000000-5".
-            let contentLen = content.bytes.count;
-            if padLeft > 0 and options.fill == '0' and contentLen > 0 {
-                // Detect sign character: '-' (45), '+' (43), ' ' (32)
-                let firstByte = Int64(from: unsafe content.bytes(unchecked: 0));
-                var prefixLen: Int64 = 0;
-                if firstByte == 45 or firstByte == 43 or firstByte == 32 {
-                    prefixLen = 1
-                }
-                // Detect radix prefix: "0b", "0o", "0x", "0X" after optional sign
-                if contentLen > prefixLen + 1 {
-                    let p0 = Int64(from: unsafe content.bytes(unchecked: prefixLen));
-                    let p1 = Int64(from: unsafe content.bytes(unchecked: prefixLen + 1));
-                    // p0 == '0' (48), p1 == 'b'(98)/'o'(111)/'x'(120)/'X'(88)
-                    if p0 == 48 and (p1 == 98 or p1 == 111 or p1 == 120 or p1 == 88) {
-                        prefixLen = prefixLen + 2
-                    }
-                }
-                if prefixLen > 0 {
-                    // Emit sign+prefix first, then zeros, then the numeric digits
-                    writer.append(content.substringBytes(from: 0, to: prefixLen));
-                    while padLeft > 0 {
-                        writer.append(char: options.fill);
-                        padLeft = padLeft - 1
-                    }
-                    writer.append(content.substringBytes(from: prefixLen, to: contentLen));
-                    while padRight > 0 {
-                        writer.append(char: options.fill);
-                        padRight = padRight - 1
-                    }
-                    return
-                }
-            }
-
-            while padLeft > 0 {
-                writer.append(char: options.fill);
-                padLeft = padLeft - 1
-            }
-            writer.append(content);
-            while padRight > 0 {
-                writer.append(char: options.fill);
-                padRight = padRight - 1
-            }
-            return
+    /// Appends `count` copies of `fill`.
+    private mutating func appendFill(count: Int64, fill: Char) {
+        var n = count;
+        while n > 0 {
+            self.append(char: fill);
+            n = n - 1
         }
     }
-    writer.append(content)
+}
+
+/// The fill counts before and after content `count` characters wide.
+func paddingSplit(count: Int64, options: FormatOptions) -> (Int64, Int64) {
+    guard let .Some(width) = options.width else { return (0, 0) }
+    if width <= count { return (0, 0) }
+    let padding = width - count;
+    match options.alignment {
+        .Left => (0, padding),
+        .Right => (padding, 0),
+        .Center => (padding / 2, padding - padding / 2)
+    }
 }
 
 // ============================================================================
@@ -608,7 +675,7 @@ public struct DefaultStringInterpolation: Interpolatable, Cloneable {
     }
 
     /// Formats one interpolation hole directly into the buffer.
-    public mutating func appendInterpolation(value: some Formattable and not Static, options: FormatOptions = FormatOptions.default()) {
+    public mutating func appendInterpolation(value: &some Formattable and not Static and not Sized, options: FormatOptions = FormatOptions.default()) {
         value.format(into: self.builder, options);
     }
 

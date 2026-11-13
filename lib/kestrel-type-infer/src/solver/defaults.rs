@@ -27,8 +27,30 @@ pub(crate) fn rule_l_applies(
         return false;
     };
     kind.is_nominal_concrete()
+        && operand_defaults_to_self(ctx, protocol)
         && crate::unify::conforms_to_literal_protocol(ctx, kind, *lit)
         && ctx.resolver.conforms_to(kind, protocol)
+}
+
+/// Whether the operator protocol's operand parameter defaults to `Self`
+/// (`Addable[Other = Self]`): only then is the right operand evidence for
+/// the receiver's type. A shift's count (`LeftShift[Other = Int64]`) says
+/// nothing about the value shifted, so `let a: UInt32 = 1 << n` leaves the
+/// literal to its expected type.
+fn operand_defaults_to_self(ctx: &InferCtx<'_>, protocol: Entity) -> bool {
+    let Some(kestrel_ast_builder::TypeParams(params)) = ctx.query_ctx.get(protocol) else {
+        return false;
+    };
+    let [param] = params.as_slice() else {
+        return false;
+    };
+    matches!(
+        ctx.query_ctx.query(kestrel_hir_lower::LowerTypeAnnotation {
+            entity: *param,
+            root: ctx.root,
+        }),
+        Some(kestrel_hir::ty::HirTy::SelfType(..))
+    )
 }
 
 pub(crate) fn apply_operator_literal_adoption(ctx: &mut InferCtx<'_>) -> bool {
@@ -141,12 +163,15 @@ pub(crate) fn apply_ref_decay_defaults_into(ctx: &mut InferCtx<'_>, only: Option
             }
             continue;
         }
-        let (from, to, binds) = match c {
-            Constraint::Coerce { from, to, expr, .. } => {
-                (from, to, ctx.binding_init_exprs.contains(expr))
-            },
+        let (from, to, binds, view_arg) = match c {
+            Constraint::Coerce { from, to, expr, .. } => (
+                from,
+                to,
+                ctx.binding_init_exprs.contains(expr),
+                ctx.view_args.contains_key(expr),
+            ),
             // Arm results / tuple-literal elements wait on the same race.
-            Constraint::EqualDecayed { value, target, .. } => (value, target, true),
+            Constraint::EqualDecayed { value, target, .. } => (value, target, true, false),
             _ => continue,
         };
         let fr = ctx.resolve(*from);
@@ -163,15 +188,21 @@ pub(crate) fn apply_ref_decay_defaults_into(ctx: &mut InferCtx<'_>, only: Option
             // An unsized pointee (`&Slice[T]`) has no value to copy out, so a
             // binding keeps the reference. A generic argument still takes the
             // pointee (`String(fromUtf8: buf(0..<n))` binds `S = Slice[UInt8]`):
-            // it is passed by borrow, so nothing is copied.
+            // it is passed by borrow, so nothing is copied. (A ref can't bind
+            // a `Static` generic param anyway; a `not Static` one keeps it.)
             // A binding whose pointee is still unresolved (`let s = xs(0..<2)`
             // before the literal defaults pick the range's type) waits: it
             // may yet be unsized. A stalled receiver (`only`) needs the type
             // now, and takes the pointee.
+            // A `not Static` generic param can hold the ref itself, so a ref
+            // argument binds it to the ref (Rust's `T = &mut S`): copying
+            // the pointee would send the callee's writes to the copy.
             let pointee = *pointee;
             let target = match (binds, pointee_sizedness(ctx, pointee)) {
                 (true, None) if only.is_none() => continue,
                 (true, Some(false)) => fr,
+                // (A `x: &T` param already takes the ref: `T` is its pointee.)
+                (false, _) if !view_arg && ctx.admits_ref(*to) => fr,
                 _ => pointee,
             };
             decays.push((*to, target));
@@ -490,6 +521,7 @@ fn apply_receiver_literal_defaults(ctx: &mut InferCtx<'_>) -> bool {
 pub(crate) fn apply_context_literals(ctx: &mut InferCtx<'_>) -> bool {
     let mut picks: Vec<(TyVar, Entity)> = Vec::new();
     let mut context_types: Vec<(TyVar, TyVar)> = Vec::new();
+    let mut identity_picks: Vec<(TyVar, TyVar)> = Vec::new();
     for constraint in &ctx.constraints {
         match constraint {
             Constraint::Member {
@@ -513,6 +545,34 @@ pub(crate) fn apply_context_literals(ctx: &mut InferCtx<'_>) -> bool {
                 result,
                 ..
             } => collect_context_literal(ctx, *receiver, *result, &mut context_types),
+            // `UInt64(from: 1)`: `UInt64: Convertible[ℓ]` has several
+            // instantiations a literal could spell; the receiver's own
+            // identity one is the literal's natural type, not the default.
+            Constraint::Conforms {
+                ty,
+                protocol,
+                protocol_args,
+                ..
+            } => {
+                let [arg] = protocol_args.as_slice() else {
+                    continue;
+                };
+                let arg = ctx.resolve(*arg);
+                let TySlot::Unresolved { literal: Some(lit) } = ctx.slot(arg) else {
+                    continue;
+                };
+                let receiver = ctx.resolve(*ty);
+                let TySlot::Resolved(kind) = ctx.slot(receiver) else {
+                    continue;
+                };
+                if let Some(entity) = kind.entity()
+                    && kind.is_nominal_concrete()
+                    && crate::unify::conforms_to_literal_protocol(ctx, kind, *lit)
+                    && super::conformance::declares_identity_instantiation(ctx, entity, *protocol)
+                {
+                    identity_picks.push((arg, receiver));
+                }
+            },
             _ => {},
         }
     }
@@ -525,6 +585,15 @@ pub(crate) fn apply_context_literals(ctx: &mut InferCtx<'_>) -> bool {
             let ty = ctx.named(entity, Vec::new());
             kestrel_debug::ktrace!("lit-default", "rule C pick {recv:?}");
             progress |= unify::unify(ctx, recv, ty).is_ok();
+        }
+    }
+    for (literal_tv, receiver) in identity_picks {
+        if matches!(
+            ctx.slot(ctx.resolve(literal_tv)),
+            TySlot::Unresolved { literal: Some(_) }
+        ) {
+            kestrel_debug::ktrace!("lit-default", "identity protocol arg {literal_tv:?}");
+            progress |= unify::unify(ctx, literal_tv, receiver).is_ok();
         }
     }
     for (literal_tv, context_tv) in &context_types {

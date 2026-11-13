@@ -137,7 +137,7 @@ public struct Bool:
             writer.append(char: ')')
         } else {
             // Honors width/alignment like every other formattable.
-            _writePadded(into: writer, value, options)
+            writer.pad(value, options)
         }
     }
 }

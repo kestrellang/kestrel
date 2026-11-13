@@ -4,7 +4,7 @@ module std.network
 
 import std.numeric.(Int64, UInt8, UInt16, UInt32, UInt64)
 import std.collections.(Array, Slice)
-import std.text.(String, Formatter, Formattable, FormatOptions, _writePadded)
+import std.text.(String, Formatter, Formattable, FormatOptions)
 import std.core.(Bool, Equatable, Hashable, Hasher)
 import std.result.(Optional)
 import std.memory.(RawPointer, UnsafeSlice)
@@ -113,7 +113,7 @@ public struct Ipv4Address: Equatable, Hashable, Formattable {
                 .Some(found) => found,
                 .None => return .None
             };
-            bits = (bits << 8) | UInt32(from: value);
+            bits = (bits << 8) | UInt32(exactly: value)!;
             parts = parts + 1;
             if next == b.count {
                 return if parts == 4 { .Some(Ipv4Address(bits: bits)) } else { .None }
@@ -127,7 +127,7 @@ public struct Ipv4Address: Equatable, Hashable, Formattable {
     }
 
     func octet(index: Int64) -> UInt8 {
-        UInt8(from: (self.bits >> (24 - index * 8)) & 255)
+        UInt8(truncating: (self.bits >> (24 - index * 8)) & 255)
     }
 
     /// Same address.
@@ -141,7 +141,7 @@ public struct Ipv4Address: Equatable, Hashable, Formattable {
     /// `a.b.c.d`.
     public func format(mutating into writer: some Formatter, options: FormatOptions = FormatOptions.default()) {
         let (a, b, c, d) = self.octets;
-        _writePadded(into: writer, "\(a).\(b).\(c).\(d)", options)
+        writer.pad("\(a).\(b).\(c).\(d)", options)
     }
 }
 
@@ -192,7 +192,7 @@ public struct Ipv6Address: Equatable, Hashable, Formattable {
     /// The segment at `index` (0 to 7).
     public func segment(index: Int64) -> UInt16 {
         let half = if index < 4 { self.high } else { self.low };
-        UInt16(from: (half >> ((3 - index % 4) * 16)) & 65535)
+        UInt16(truncating: (half >> ((3 - index % 4) * 16)) & 65535)
     }
 
     /// Parses RFC 4291 text: up to eight hex segments, one `::` for a run
@@ -213,7 +213,7 @@ public struct Ipv6Address: Equatable, Hashable, Formattable {
                 if next != b.count {
                     return .None
                 }
-                scope = UInt32(from: value);
+                scope = UInt32(exactly: value)!;
                 end = k;
                 break
             }
@@ -235,8 +235,8 @@ public struct Ipv6Address: Equatable, Hashable, Formattable {
                     .Some(a) => a,
                     .None => return .None
                 };
-                let upper = UInt16(from: v4.bits >> 16);
-                let lower = UInt16(from: v4.bits & 65535);
+                let upper = UInt16(truncating: v4.bits >> 16);
+                let lower = UInt16(truncating: v4.bits & 65535);
                 if gap {
                     tail.append(upper);
                     tail.append(lower)
@@ -338,7 +338,7 @@ public struct Ipv6Address: Equatable, Hashable, Formattable {
         if self.scopeId != 0 {
             text.append("%\(self.scopeId)")
         }
-        _writePadded(into: writer, text, options)
+        writer.pad(text, options)
     }
 }
 
@@ -389,7 +389,7 @@ public struct SocketAddress: Equatable, Hashable, Formattable {
                 .None => return .None
             }
         };
-        .Some(SocketAddress(host, port: UInt16(from: port)))
+        .Some(SocketAddress(host, port: UInt16(exactly: port)!))
     }
 
     /// Same address and port.
@@ -409,7 +409,7 @@ public struct SocketAddress: Equatable, Hashable, Formattable {
             .V4(a) => "\(a):\(self.port)",
             .V6(a) => "[\(a)]:\(self.port)"
         };
-        _writePadded(into: writer, text, options)
+        writer.pad(text, options)
     }
 
     /// Writes the address into a 40-byte `kestrel_address` for the shim.
@@ -433,8 +433,8 @@ public struct SocketAddress: Equatable, Hashable, Formattable {
                 var i = 0;
                 while i < 8 {
                     let s = a.segment(i);
-                    unsafe bytes.offset(by: i * 2).write(UInt8(from: s >> 8));
-                    unsafe bytes.offset(by: i * 2 + 1).write(UInt8(from: s & 255));
+                    unsafe bytes.offset(by: i * 2).write(UInt8(truncating: s >> 8));
+                    unsafe bytes.offset(by: i * 2 + 1).write(UInt8(truncating: s & 255));
                     i = i + 1
                 }
             }
@@ -445,7 +445,7 @@ public struct SocketAddress: Equatable, Hashable, Formattable {
     static func readNative(from cells: RawPointer) -> SocketAddress {
         let words = cells.cast[Int64]();
         let bytes = cells.cast[UInt8]().offset(by: 24);
-        let port = UInt16(from: unsafe words.offset(by: 1).read());
+        let port = UInt16(exactly: unsafe words.offset(by: 1).read())!;
         if unsafe words.read() == 4 {
             let ip = Ipv4Address(unsafe bytes.read(), unsafe bytes.offset(by: 1).read(), unsafe bytes.offset(by: 2).read(), unsafe bytes.offset(by: 3).read());
             return SocketAddress(IpAddress.V4(ip), port: port)
@@ -458,7 +458,7 @@ public struct SocketAddress: Equatable, Hashable, Formattable {
             if i < 8 { high = (high << 8) | byte } else { low = (low << 8) | byte }
             i = i + 1
         }
-        let scope = UInt32(from: unsafe words.offset(by: 2).read());
+        let scope = UInt32(exactly: unsafe words.offset(by: 2).read())!;
         SocketAddress(IpAddress.V6(Ipv6Address(high: high, low: low, scopeId: scope)), port: port)
     }
 }

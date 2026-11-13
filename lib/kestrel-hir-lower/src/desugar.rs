@@ -15,6 +15,11 @@ use kestrel_syntax_tree::{SyntaxElement, SyntaxKind, SyntaxNode};
 use crate::ctx::LowerCtx;
 use crate::syntax::{BlockSyntax, Cond, ExprSrc, PatSrc, expr_children, first_expr, token};
 
+/// The method each string-interpolation hole calls on the accumulator. A
+/// language-defined hook name (like an operator's spelling), not a lang-item
+/// lookup: accumulators declare their own overloads of it.
+const INTERPOLATION_HOOK: &str = "appendInterpolation";
+
 /// True if `expr` is syntactically shaped like a place expression (an
 /// expression that could appear on the LHS of `=`/`+=`). Conservative —
 /// rejects literals, calls, blocks, control-flow expressions, etc. and
@@ -365,7 +370,7 @@ impl LowerCtx<'_> {
         while_body: &BlockSyntax,
         span: &Span,
     ) -> HirExprId {
-        let lowered_value = self.lower_expr_src(value);
+        let lowered_value = self.lower_let_value(value);
 
         // Pattern bindings are visible inside the loop body but not after.
         self.push_scope();
@@ -544,12 +549,17 @@ impl LowerCtx<'_> {
             }));
             lowered_iterable = self.alloc_expr(HirExpr::Local(seq_local, span.clone()));
         }
+        let Some(iter_method) =
+            self.require_builtin(Builtin::IterableIterMethod, "`for` loop", span)
+        else {
+            return self.error_sugar(SugarKind::ForLoop, span);
+        };
         let iterate_call = self.alloc_expr(HirExpr::ProtocolCall {
-            requirement: self.protocol_requirement(iter_protocol, Builtin::IterableIterMethod),
+            requirement: Some(iter_method),
             from_operator: false,
             receiver: lowered_iterable,
             protocol: iter_protocol,
-            method: HirName::name("iter"),
+            method: self.member_name(iter_method),
             type_args: None,
             args: Vec::new(),
             span: span.clone(),
@@ -563,40 +573,37 @@ impl LowerCtx<'_> {
             span: span.clone(),
         });
 
-        // $iter.next() via Iterator protocol
-        let iter_ref = self.alloc_expr(HirExpr::Local(iter_local, span.clone()));
-        let next_call = if let Some(protocol) = self.resolve_builtin(Builtin::IteratorProtocol) {
-            self.alloc_expr(HirExpr::ProtocolCall {
-                requirement: self.protocol_requirement(protocol, Builtin::IteratorNextMethod),
-                from_operator: false,
-                receiver: iter_ref,
-                protocol,
-                method: HirName::name("next"),
-                type_args: None,
-                args: Vec::new(),
-                span: span.clone(),
-            })
-        } else {
-            self.alloc_expr(HirExpr::MethodCall {
-                receiver: iter_ref,
-                method: HirName::name("next"),
-                type_args: None,
-                args: Vec::new(),
-                span: span.clone(),
-            })
+        // $iter.next() via the Iterator protocol's tagged requirement.
+        let (Some(protocol), Some(next_method)) = (
+            self.require_builtin(Builtin::IteratorProtocol, "`for` loop", span),
+            self.require_builtin(Builtin::IteratorNextMethod, "`for` loop", span),
+        ) else {
+            return self.error_sugar(SugarKind::ForLoop, span);
         };
+        let iter_ref = self.alloc_expr(HirExpr::Local(iter_local, span.clone()));
+        let next_call = self.alloc_expr(HirExpr::ProtocolCall {
+            requirement: Some(next_method),
+            from_operator: false,
+            receiver: iter_ref,
+            protocol,
+            method: self.member_name(next_method),
+            type_args: None,
+            args: Vec::new(),
+            span: span.clone(),
+        });
 
         // Pattern for .Some(pattern)
         self.push_scope();
         let lowered_pat = self.lower_pat(pattern);
-        let some_pat = self.alloc_pat(HirPat::ImplicitVariant {
-            name: HirName::name("Some"),
-            args: vec![HirPatArg {
+        let some_pat = self.lang_case_pat(
+            Builtin::OptionalSomeCase,
+            vec![HirPatArg {
                 label: None,
                 pattern: lowered_pat,
             }],
-            span: span.clone(),
-        });
+            "`for` loop",
+            span,
+        );
 
         // Lower for body (push loop label so break/continue can validate)
         self.push_loop(label);
@@ -611,11 +618,8 @@ impl LowerCtx<'_> {
         });
 
         // .None => break
-        let none_pat = self.alloc_pat(HirPat::ImplicitVariant {
-            name: HirName::name("None"),
-            args: Vec::new(),
-            span: span.clone(),
-        });
+        let none_pat =
+            self.lang_case_pat(Builtin::OptionalNoneCase, Vec::new(), "`for` loop", span);
         let break_expr = self.alloc_expr(HirExpr::Break {
             label: label.map(|l| l.to_string()),
             span: span.clone(),
@@ -697,8 +701,8 @@ impl LowerCtx<'_> {
     /// `tryExtract()` is a ProtocolCall on Tryable, returning ControlFlow[Output, Early].
     /// `.fromResidual($early)` is an ImplicitMember bound to the tagged
     /// `FromResidual` requirement, called with Self = the function's return
-    /// type (which must conform to `FromResidual[Early]`).
-    /// Falls back to hardcoded .Ok/.Err if Tryable protocol is not available.
+    /// type (which must conform to `FromResidual[Early]`). Every piece is a
+    /// tagged lang item; a missing one is E128/E159, never a by-name guess.
     pub(crate) fn desugar_try(&mut self, operand: &ExprSrc, span: &Span) -> HirExprId {
         let lowered_operand = self.lower_expr_src(operand);
 
@@ -722,53 +726,57 @@ impl LowerCtx<'_> {
                 span: span.clone(),
             });
         };
+        let (Some(try_extract), Some(from_residual)) = (
+            self.require_builtin(Builtin::TryExtractMethod, "`try` expression", span),
+            self.require_builtin(Builtin::FromResidualMethod, "`try` expression", span),
+        ) else {
+            return self.error_sugar(SugarKind::Try, span);
+        };
         let scrutinee = self.alloc_expr(HirExpr::ProtocolCall {
-            requirement: self.protocol_requirement(try_protocol, Builtin::TryExtractMethod),
+            requirement: Some(try_extract),
             from_operator: false,
             receiver: lowered_operand,
             protocol: try_protocol,
-            method: HirName::name("tryExtract"),
+            method: self.member_name(try_extract),
             type_args: None,
             args: vec![],
             span: span.clone(),
         });
 
-        // Tryable is available — arms unwrap ControlFlow.
-        let (success_name, failure_name) = ("Continue", "Break");
-
-        // .Continue($value) => $value  (or .Ok($value) => $value)
+        // .Continue($value) => $value
         let value_local = self.define_local("$try_value", false, span.clone());
         let value_binding = self.alloc_pat(HirPat::Binding {
             local: value_local,
             by_ref: None,
             span: span.clone(),
         });
-        let continue_pat = self.alloc_pat(HirPat::ImplicitVariant {
-            name: HirName::name(success_name),
-            args: vec![HirPatArg {
+        let continue_pat = self.lang_case_pat(
+            Builtin::ControlFlowContinueCase,
+            vec![HirPatArg {
                 label: None,
                 pattern: value_binding,
             }],
-            span: span.clone(),
-        });
+            "`try` expression",
+            span,
+        );
         let continue_body = self.alloc_expr(HirExpr::Local(value_local, span.clone()));
 
         // .Break($early) => return .fromResidual($early)
-        // (or .Err($e) => return .Err($e) for fallback)
         let early_local = self.define_local("$try_early", false, span.clone());
         let early_binding = self.alloc_pat(HirPat::Binding {
             local: early_local,
             by_ref: None,
             span: span.clone(),
         });
-        let break_pat = self.alloc_pat(HirPat::ImplicitVariant {
-            name: HirName::name(failure_name),
-            args: vec![HirPatArg {
+        let break_pat = self.lang_case_pat(
+            Builtin::ControlFlowBreakCase,
+            vec![HirPatArg {
                 label: None,
                 pattern: early_binding,
             }],
-            span: span.clone(),
-        });
+            "`try` expression",
+            span,
+        );
         let early_ref = self.alloc_expr(HirExpr::Local(early_local, span.clone()));
 
         // .fromResidual($early): a call to the `@builtin(.FromResidualMethod)`
@@ -776,16 +784,15 @@ impl LowerCtx<'_> {
         // checks `Return: FromResidual[typeof $early]` and mono picks that
         // conformance — never a by-name lookup among the return type's statics.
         // The requirement's single param is positional: no label.
-        let from_residual = self.resolve_builtin(Builtin::FromResidualMethod);
         let return_value = self.alloc_expr(HirExpr::ImplicitMember {
             owner: None,
-            name: HirName::name("fromResidual"),
+            name: self.member_name(from_residual),
             args: Some(vec![HirCallArg {
                 trailing_closure: false,
                 label: None,
                 value: early_ref,
             }]),
-            requirement: from_residual,
+            requirement: Some(from_residual),
             span: span.clone(),
         });
         let return_early = self.alloc_expr(HirExpr::Return {
@@ -836,17 +843,8 @@ impl LowerCtx<'_> {
             return self.alloc_expr(HirExpr::Error { span: span.clone() });
         }
 
-        let err_wrap = self.alloc_expr(HirExpr::ImplicitMember {
-            owner: None,
-            name: HirName::name("Err"),
-            args: Some(vec![HirCallArg {
-                trailing_closure: false,
-                label: None,
-                value: lowered_value,
-            }]),
-            requirement: None,
-            span: span.clone(),
-        });
+        let err_wrap =
+            self.lang_case_value(Builtin::ResultErrCase, Some(lowered_value), "`throw`", span);
 
         self.alloc_expr(HirExpr::Return {
             value: Some(err_wrap),
@@ -943,19 +941,8 @@ impl LowerCtx<'_> {
         });
         let init_call = self.alloc_expr(HirExpr::ImplicitMember {
             owner: None,
-            name: HirName::name("init"),
-            args: Some(vec![
-                HirCallArg {
-                    trailing_closure: false,
-                    label: Some("literalCapacity".to_string()),
-                    value: lit_cap,
-                },
-                HirCallArg {
-                    trailing_closure: false,
-                    label: Some("interpolationCount".to_string()),
-                    value: interp_count,
-                },
-            ]),
+            name: self.member_name(acc_init),
+            args: Some(self.requirement_args(acc_init, vec![lit_cap, interp_count])),
             requirement: Some(acc_init),
             span: span.clone(),
         });
@@ -986,13 +973,9 @@ impl LowerCtx<'_> {
                         from_operator: false,
                         receiver: dsi_ref,
                         protocol: interpolatable,
-                        method: HirName::name("appendLiteral"),
+                        method: self.member_name(append_literal),
                         type_args: None,
-                        args: vec![HirCallArg {
-                            trailing_closure: false,
-                            label: None,
-                            value: str_lit,
-                        }],
+                        args: self.requirement_args(append_literal, vec![str_lit]),
                         span: span.clone(),
                     });
                     stmts.push(self.alloc_stmt(HirStmt::Expr {
@@ -1024,9 +1007,13 @@ impl LowerCtx<'_> {
                         });
                     }
 
+                    // Not a lang item: `appendInterpolation` is the
+                    // language-defined hook name each accumulator overloads
+                    // itself (see `Interpolatable`), resolved like any
+                    // user-written method call — as `+` is for operators.
                     let append = self.alloc_expr(HirExpr::MethodCall {
                         receiver: dsi_ref,
-                        method: HirName::name("appendInterpolation"),
+                        method: HirName::name(INTERPOLATION_HOOK),
                         type_args: None,
                         args,
                         span: span.clone(),
@@ -1045,12 +1032,8 @@ impl LowerCtx<'_> {
         let dsi_ref = self.alloc_expr(HirExpr::Local(dsi_local, span.clone()));
         let build_call = self.alloc_expr(HirExpr::ImplicitMember {
             owner: None,
-            name: HirName::name("init"),
-            args: Some(vec![HirCallArg {
-                trailing_closure: false,
-                label: Some("interpolation".to_string()),
-                value: dsi_ref,
-            }]),
+            name: self.member_name(finish),
+            args: Some(self.requirement_args(finish, vec![dsi_ref])),
             requirement: Some(finish),
             span: span.clone(),
         });
@@ -1093,10 +1076,10 @@ impl LowerCtx<'_> {
         }
     }
 
-    /// Build a FormatOptions expression from a format spec string.
-    /// Returns None if the spec can't be parsed or the builtin isn't available.
-    ///
-    /// Emits a block: `{ var $opts = FormatOptions(); $opts.radix = 16; ... ; $opts }`
+    /// Build a FormatOptions expression from a format spec string: a call to
+    /// the tagged `_formatSpecOptions` with every setting the spec spells (the
+    /// enum settings as their codes), so no field or case is named here.
+    /// Returns None if the spec can't be parsed or the lang item is missing.
     fn build_format_options_from_spec(&mut self, spec: &str, span: &Span) -> Option<HirExprId> {
         use crate::format_spec::{self, Alignment, FormatType, SignMode};
 
@@ -1113,187 +1096,105 @@ impl LowerCtx<'_> {
             },
         };
 
-        let fo_entity = self.resolve_builtin(Builtin::FormatOptions)?;
-
-        let mut stmts: Vec<HirStmtId> = Vec::new();
-
-        // var $opts = FormatOptions()
-        let opts_local = self.define_local("$opts", true, span.clone());
-        let fo_ref = self.alloc_expr(HirExpr::Def(fo_entity, Vec::new(), span.clone()));
-        let init_call = self.alloc_expr(HirExpr::Call {
-            callee: fo_ref,
-            args: Vec::new(),
+        let builder =
+            self.require_builtin(Builtin::FormatSpecOptions, "a format specifier", span)?;
+        let int = |this: &mut Self, n: i64| {
+            this.alloc_expr(HirExpr::Literal {
+                value: HirLiteral::Integer(n as i128),
+                span: span.clone(),
+            })
+        };
+        let bool = |this: &mut Self, b: bool| {
+            this.alloc_expr(HirExpr::Literal {
+                value: HirLiteral::Bool(b),
+                span: span.clone(),
+            })
+        };
+        // `width` / `precision`: a flag and the count (an unused count is 0).
+        // A nested hole (`{w}`) reads the named value at runtime.
+        let count = |this: &mut Self, count: &Option<crate::format_spec::Count>| {
+            let has = bool(this, count.is_some());
+            let value = match count {
+                Some(count) => this.format_count(count, span),
+                None => int(this, 0),
+            };
+            (has, value)
+        };
+        let (has_width, width) = count(self, &parsed.width);
+        let (has_precision, precision) = count(self, &parsed.precision);
+        let alignment = int(
+            self,
+            match parsed.alignment {
+                Alignment::Left => 0,
+                Alignment::Right => 1,
+                Alignment::Center => 2,
+            },
+        );
+        // Synthesized from a parsed format spec, not source text — there is
+        // no escape to fail.
+        let fill = self.alloc_expr(HirExpr::Literal {
+            value: HirLiteral::Char {
+                value: parsed.fill as u32,
+                escape_errors: Vec::new(),
+            },
             span: span.clone(),
         });
-        stmts.push(self.alloc_stmt(HirStmt::Let {
-            local: opts_local,
-            ty: None,
-            value: Some(init_call),
-            span: span.clone(),
-        }));
-
-        // Helper: emit `$opts.field = value`
-        let assign_field =
-            |this: &mut Self, stmts: &mut Vec<HirStmtId>, name: &str, value: HirExprId| {
-                let target_base = this.alloc_expr(HirExpr::Local(opts_local, span.clone()));
-                let target = this.alloc_expr(HirExpr::Field {
-                    base: target_base,
-                    name: HirName::name(name),
-                    span: span.clone(),
-                });
-                let assign = this.alloc_expr(HirExpr::Assign {
-                    target,
-                    value,
-                    span: span.clone(),
-                });
-                stmts.push(this.alloc_stmt(HirStmt::Expr {
-                    expr: assign,
-                    span: span.clone(),
-                }));
-            };
-
-        // width / precision: Int64? — only if specified. A nested hole
-        // (`{w}`) reads the named value at runtime.
-        for (field, count) in [("width", &parsed.width), ("precision", &parsed.precision)] {
-            let Some(count) = count else { continue };
-            let value = self.format_count(count, span);
-            let some_val = self.alloc_expr(HirExpr::ImplicitMember {
-                owner: None,
-                name: HirName::name("Some"),
-                args: Some(vec![HirCallArg {
-                    trailing_closure: false,
-                    label: None,
-                    value,
-                }]),
-                requirement: None,
-                span: span.clone(),
-            });
-            assign_field(self, &mut stmts, field, some_val);
-        }
-
-        // alignment — only if non-default (Left)
-        if parsed.alignment != Alignment::Left {
-            let variant = match parsed.alignment {
-                Alignment::Right => "Right",
-                Alignment::Center => "Center",
-                Alignment::Left => unreachable!(),
-            };
-            let val = self.alloc_expr(HirExpr::ImplicitMember {
-                owner: None,
-                name: HirName::name(variant),
-                args: None,
-                requirement: None,
-                span: span.clone(),
-            });
-            assign_field(self, &mut stmts, "alignment", val);
-        }
-
-        // fill — only if non-default (' ')
-        if parsed.fill != ' ' {
-            let val = self.alloc_expr(HirExpr::Literal {
-                // Synthesized from a parsed format spec, not source text —
-                // there is no escape to fail.
-                value: HirLiteral::Char {
-                    value: parsed.fill as u32,
-                    escape_errors: Vec::new(),
-                },
-                span: span.clone(),
-            });
-            assign_field(self, &mut stmts, "fill", val);
-        }
-
-        // radix — determined by format type
-        let radix: i64 = match parsed.format_type {
-            FormatType::Binary => 2,
-            FormatType::Octal => 8,
-            FormatType::Hex | FormatType::HexUpper => 16,
-            _ => 10,
-        };
-        if radix != 10 {
-            let val = self.alloc_expr(HirExpr::Literal {
-                value: HirLiteral::Integer(radix as i128),
-                span: span.clone(),
-            });
-            assign_field(self, &mut stmts, "radix", val);
-        }
-
-        // uppercase
-        if matches!(parsed.format_type, FormatType::HexUpper) {
-            let val = self.alloc_expr(HirExpr::Literal {
-                value: HirLiteral::Bool(true),
-                span: span.clone(),
-            });
-            assign_field(self, &mut stmts, "uppercase", val);
-        }
-
-        // sign — only if non-default (Negative)
-        if parsed.sign != SignMode::Negative {
-            let variant = match parsed.sign {
-                SignMode::Always => "Always",
-                SignMode::Space => "Space",
-                SignMode::Negative => unreachable!(),
-            };
-            let val = self.alloc_expr(HirExpr::ImplicitMember {
-                owner: None,
-                name: HirName::name(variant),
-                args: None,
-                requirement: None,
-                span: span.clone(),
-            });
-            assign_field(self, &mut stmts, "sign", val);
-        }
-
-        // alternate
-        if parsed.alternate {
-            let val = self.alloc_expr(HirExpr::Literal {
-                value: HirLiteral::Bool(true),
-                span: span.clone(),
-            });
-            assign_field(self, &mut stmts, "alternate", val);
-        }
-
-        // floatStyle — only if non-default (Auto)
-        let float_variant = match parsed.format_type {
-            FormatType::Fixed => Some("Fixed"),
-            FormatType::Scientific => Some("Scientific"),
-            FormatType::ScientificUpper => Some("ScientificUpper"),
-            FormatType::Percent => Some("Percent"),
-            _ => None,
-        };
-        if let Some(variant) = float_variant {
-            let val = self.alloc_expr(HirExpr::ImplicitMember {
-                owner: None,
-                name: HirName::name(variant),
-                args: None,
-                requirement: None,
-                span: span.clone(),
-            });
-            assign_field(self, &mut stmts, "floatStyle", val);
-        }
-
-        // debug
-        if matches!(parsed.format_type, FormatType::Debug) {
-            let val = self.alloc_expr(HirExpr::Literal {
-                value: HirLiteral::Bool(true),
-                span: span.clone(),
-            });
-            assign_field(self, &mut stmts, "debug", val);
-        }
-
-        // If no non-default fields were set, skip the block entirely
-        if stmts.len() == 1 {
-            // Only the Let stmt — return the init directly
-            return Some(init_call);
-        }
-
-        // Tail: $opts
-        let opts_ref = self.alloc_expr(HirExpr::Local(opts_local, span.clone()));
-
-        Some(self.alloc_expr(HirExpr::Block {
-            body: HirBlock {
-                stmts,
-                tail_expr: Some(opts_ref),
+        let radix = int(
+            self,
+            match parsed.format_type {
+                FormatType::Binary => 2,
+                FormatType::Octal => 8,
+                FormatType::Hex | FormatType::HexUpper => 16,
+                _ => 10,
             },
+        );
+        let uppercase = bool(self, matches!(parsed.format_type, FormatType::HexUpper));
+        let sign = int(
+            self,
+            match parsed.sign {
+                SignMode::Negative => 0,
+                SignMode::Always => 1,
+                SignMode::Space => 2,
+            },
+        );
+        let alternate = bool(self, parsed.alternate);
+        let float_style = int(
+            self,
+            match parsed.format_type {
+                FormatType::Fixed => 1,
+                FormatType::Scientific => 2,
+                FormatType::ScientificUpper => 3,
+                FormatType::Percent => 4,
+                _ => 0,
+            },
+        );
+        let debug = bool(self, matches!(parsed.format_type, FormatType::Debug));
+
+        let args = [
+            has_width,
+            width,
+            has_precision,
+            precision,
+            alignment,
+            fill,
+            radix,
+            uppercase,
+            sign,
+            alternate,
+            float_style,
+            debug,
+        ]
+        .into_iter()
+        .map(|value| HirCallArg {
+            trailing_closure: false,
+            label: None,
+            value,
+        })
+        .collect();
+        let callee = self.alloc_expr(HirExpr::Def(builder, Vec::new(), span.clone()));
+        Some(self.alloc_expr(HirExpr::Call {
+            callee,
+            args,
             span: span.clone(),
         }))
     }
@@ -1302,9 +1203,9 @@ impl LowerCtx<'_> {
 
     /// Resolve a builtin type/protocol to its entity ID.
     /// Uses ResolveBuiltin query (cached, resolves from root context).
-    /// `receiver.<op>(args)` as a call to the operator's tagged requirement.
-    /// `requirement` is `None` only when the protocol (a test prelude) lacks
-    /// the method tag; inference then falls back to the by-name lookup.
+    /// `receiver.<op>(args)` as a call to the operator's tagged requirement,
+    /// spelled and labelled as that requirement declares itself. A protocol
+    /// without the method tag is E159 — never a by-name lookup.
     fn operator_call(
         &mut self,
         op_req: OperatorRequirement,
@@ -1313,21 +1214,17 @@ impl LowerCtx<'_> {
         args: Vec<HirExprId>,
         span: &Span,
     ) -> HirExprId {
-        let requirement = self.protocol_requirement(protocol, op_req.method);
-        let args = args
-            .into_iter()
-            .map(|value| HirCallArg {
-                trailing_closure: false,
-                label: op_req.label.map(str::to_string),
-                value,
-            })
-            .collect();
+        let Some(requirement) = self.protocol_requirement(protocol, op_req.method) else {
+            self.require_builtin(op_req.method, "this operator", span);
+            return self.alloc_expr(HirExpr::Error { span: span.clone() });
+        };
+        let args = self.requirement_args(requirement, args);
         self.alloc_expr(HirExpr::ProtocolCall {
-            requirement,
+            requirement: Some(requirement),
             from_operator: true,
             receiver,
             protocol,
-            method: HirName::name(op_req.name),
+            method: self.member_name(requirement),
             type_args: None,
             args,
             span: span.clone(),
@@ -1356,6 +1253,121 @@ impl LowerCtx<'_> {
             kestrel_debug::ktrace!("hir-lower", "builtin not found: {:?}", builtin);
         }
         result
+    }
+
+    /// The `@builtin`-tagged lang item a desugaring of `what` needs, or E159
+    /// at `span` when no declaration carries the tag. Never a by-name guess.
+    pub(crate) fn require_builtin(
+        &self,
+        builtin: Builtin,
+        what: &str,
+        span: &Span,
+    ) -> Option<kestrel_hecs::Entity> {
+        let entity = self.resolve_builtin(builtin);
+        if entity.is_none() {
+            self.ctx.accumulate(
+                Diagnostic::error()
+                    .with_code("E159")
+                    .with_message(format!(
+                        "{what} requires the `{}` lang item",
+                        builtin.name()
+                    ))
+                    .with_labels(vec![Label::primary(span.file_id, span.range())])
+                    .with_notes(vec!["is the standard library imported?".to_string()]),
+            );
+        }
+        entity
+    }
+
+    /// A desugaring that could not be built (its diagnostic already
+    /// emitted): `kind`-tagged sugar around an error, so inference absorbs it.
+    pub(crate) fn error_sugar(&mut self, kind: SugarKind, span: &Span) -> HirExprId {
+        let inner = self.alloc_expr(HirExpr::Error { span: span.clone() });
+        self.alloc_expr(HirExpr::Sugar {
+            kind,
+            inner,
+            span: span.clone(),
+        })
+    }
+
+    /// The name a desugaring's call to `member` carries: the member's own
+    /// declared name (`init` for an initializer), read off the tagged entity
+    /// so no desugaring spells a stdlib name.
+    /// Positional call args labelled from `requirement`'s own parameter
+    /// labels, so compiler-built calls never spell a lang item's labels.
+    fn requirement_args(
+        &self,
+        requirement: kestrel_hecs::Entity,
+        values: Vec<HirExprId>,
+    ) -> Vec<HirCallArg> {
+        let labels: Vec<Option<String>> = self
+            .ctx
+            .get::<kestrel_ast_builder::Callable>(requirement)
+            .map(|c| c.params.iter().map(|p| p.label.clone()).collect())
+            .unwrap_or_default();
+        values
+            .into_iter()
+            .enumerate()
+            .map(|(i, value)| HirCallArg {
+                trailing_closure: false,
+                label: labels.get(i).cloned().flatten(),
+                value,
+            })
+            .collect()
+    }
+
+    pub(crate) fn member_name(&self, member: kestrel_hecs::Entity) -> HirName {
+        kestrel_name_res::helpers::member_lookup_name(self.ctx, member)
+            .map_or(HirName::Missing, HirName::name)
+    }
+
+    /// The lang-item enum case `case` as a pattern, matched by the case
+    /// entity itself (`HirPat::Variant`). A wildcard after E159 when the tag
+    /// is missing.
+    pub(crate) fn lang_case_pat(
+        &mut self,
+        case: Builtin,
+        args: Vec<HirPatArg>,
+        what: &str,
+        span: &Span,
+    ) -> HirPatId {
+        match self.require_builtin(case, what, span) {
+            Some(entity) => self.alloc_pat(HirPat::Variant {
+                entity,
+                args,
+                span: span.clone(),
+            }),
+            None => self.alloc_pat(HirPat::Wildcard { span: span.clone() }),
+        }
+    }
+
+    /// `.case(arg)` / `.case` for the lang-item enum case `case`: an implicit
+    /// member pinned to the case entity (`requirement`), so inference takes
+    /// that case — never whatever a lookup of its spelling would find. An
+    /// error expression after E159 when the tag is missing.
+    pub(crate) fn lang_case_value(
+        &mut self,
+        case: Builtin,
+        arg: Option<HirExprId>,
+        what: &str,
+        span: &Span,
+    ) -> HirExprId {
+        let Some(entity) = self.require_builtin(case, what, span) else {
+            return self.alloc_expr(HirExpr::Error { span: span.clone() });
+        };
+        self.alloc_expr(HirExpr::ImplicitMember {
+            owner: None,
+            name: self.member_name(entity),
+            args: arg.map(|value| {
+                vec![HirCallArg {
+                    trailing_closure: false,
+                    label: None,
+                    value,
+                }]
+            }),
+            requirement: Some(entity),
+            span: span.clone(),
+        })
     }
 
     /// Emit a diagnostic for a binary operator whose protocol couldn't be resolved.

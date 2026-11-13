@@ -13,7 +13,7 @@ public func getFloat(v: Value) -> Float64 {
         .Some(f) => f,
         .None => {
             match v.asInt() {
-                .Some(n) => Float64(from: n),
+                .Some(n) => Float64(rounding: n),
                 .None => 0.0
             }
         }
@@ -33,7 +33,7 @@ public func getInt(v: Value) -> Int64 {
         .None => {
             match v.asFloat() {
                 .Some(f) => {
-                    match f.toInt64() {
+                    match Int64(exactly: f.trunc()) {
                         .Some(n) => n,
                         .None => 0
                     }

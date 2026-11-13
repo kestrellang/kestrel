@@ -24,7 +24,7 @@ struct RayAxis {
 
     /// Along `direction` from `origin`, one axis of each.
     init(origin origin: Float32, direction direction: Float32) {
-        self.cell = origin.floor().toInt64() ?? 0;
+        self.cell = Int64(exactly: origin.floor()) ?? 0;
         self.step = if direction > 0.0 { 1 } else { -1 };
         self.delta = if direction == 0.0 { 1000000.0 } else { (1.0 / direction).abs() };
         let wall = Float32(from: self.cell);
@@ -82,8 +82,8 @@ extend World {
         // Cells the box touches; a box ending exactly on a wall doesn't
         // reach into the next cell.
         let epsilon: Float32 = 0.0001;
-        let first = (low.x.floor().toInt64() ?? 0, low.y.floor().toInt64() ?? 0, low.z.floor().toInt64() ?? 0);
-        let last = ((high.x - epsilon).floor().toInt64() ?? 0, (high.y - epsilon).floor().toInt64() ?? 0, (high.z - epsilon).floor().toInt64() ?? 0);
+        let first = (Int64(exactly: low.x.floor()) ?? 0, Int64(exactly: low.y.floor()) ?? 0, Int64(exactly: low.z.floor()) ?? 0);
+        let last = (Int64(exactly: (high.x - epsilon).floor()) ?? 0, Int64(exactly: (high.y - epsilon).floor()) ?? 0, Int64(exactly: (high.z - epsilon).floor()) ?? 0);
         let (sx, sy, sz) = (last.0 - first.0 + 1, last.1 - first.1 + 1, last.2 - first.2 + 1);
         for i in 0..<(sx * sy * sz) {
             if self.blocksPlayer(first.0 + i % sx, first.1 + i / (sx * sz), first.2 + i / sx % sz) {

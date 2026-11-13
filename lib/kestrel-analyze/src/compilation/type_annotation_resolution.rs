@@ -7,7 +7,9 @@
 //!
 //! This is a uniform check across all entity kinds (fields, type aliases,
 //! function return types, parameters, etc.) — anywhere a `TypeAnnotation`
-//! component exists.
+//! component exists — and over every declaration's conformance list, where
+//! an unresolved protocol or protocol arg (`extend Slot: Holds[T]` with no
+//! `extend[T]`) was otherwise silently dropped.
 //!
 //! ## Diagnostics
 //!
@@ -18,7 +20,7 @@ use crate::context::CompilationContext;
 use crate::diagnostic::*;
 use crate::traits::{AnalyzerId, CompilationCheck, Describe};
 use kestrel_ast::AstType;
-use kestrel_ast_builder::{NodeKind, TypeAnnotation};
+use kestrel_ast_builder::{ConformanceItem, Conformances, NodeKind, TypeAnnotation};
 use kestrel_hecs::Entity;
 use kestrel_name_res::{ResolveTypePath, TypeResolution};
 
@@ -92,6 +94,13 @@ fn walk_entity(
         }
     }
 
+    // The entity is the context, so an extension's declared params resolve.
+    if let Some(conformances) = cx.query.get::<Conformances>(entity) {
+        for item in &conformances.0 {
+            let (ConformanceItem::Positive(ty, ..) | ConformanceItem::Negative(ty, _)) = item;
+            check_ast_type(cx, ty, entity, diags);
+        }
+    }
     for &child in cx.query.children_of(entity) {
         walk_entity(cx, child, in_protocol || is_protocol, diags);
     }
@@ -129,7 +138,11 @@ fn names_bare_protocol(cx: &CompilationContext<'_>, ty: &AstType, context: Entit
             .iter()
             .flat_map(|b| &b.bindings)
             .any(|b| recurse(&b.ty)),
-        AstType::Some { .. } | AstType::Unit(_) | AstType::Never(_) | AstType::Inferred(_) => false,
+        AstType::Some { .. }
+        | AstType::Unit(_)
+        | AstType::Never(_)
+        | AstType::Inferred(_)
+        | AstType::Builtin(..) => false,
     }
 }
 
@@ -220,6 +233,6 @@ fn check_ast_type(
             check_ast_type(cx, inner, context, diags);
         },
         // Unit, Never, Inferred — no type references to check
-        AstType::Unit(_) | AstType::Never(_) | AstType::Inferred(_) => {},
+        AstType::Unit(_) | AstType::Never(_) | AstType::Inferred(_) | AstType::Builtin(..) => {},
     }
 }

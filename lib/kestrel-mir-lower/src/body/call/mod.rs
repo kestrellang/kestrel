@@ -8,9 +8,7 @@ use kestrel_hir::ty::HirTy;
 use kestrel_mir::callee::Callee;
 use kestrel_mir::inst::CallArg;
 use kestrel_mir::terminator::{SwitchArm, SwitchCase};
-use kestrel_mir::{
-    FieldIdx, Immediate, MirTy, Ownership, ParamConvention, TyId, ValueId, VariantIdx,
-};
+use kestrel_mir::{FieldIdx, Immediate, MirTy, Ownership, ParamConvention, TyId, ValueId};
 
 use super::OssaBodyCtx;
 use crate::ty::{lower_resolved_ty, lower_type};
@@ -342,24 +340,14 @@ impl OssaBodyCtx<'_, '_> {
         result_ty: TyId,
         effect: InitEffect,
     ) -> ValueId {
-        let enum_entity = match self.ctx.module.ty_arena.get(result_ty) {
-            MirTy::Named { entity, .. } => *entity,
-            // Not the expected failable enum — leave the result as-is (defensive;
-            // shouldn't occur for a resolved failable delegation).
-            _ => return result,
+        // Not the expected failable enum — leave the result as-is (defensive;
+        // shouldn't occur for a resolved failable delegation).
+        if !matches!(self.ctx.module.ty_arena.get(result_ty), MirTy::Named { .. }) {
+            return result;
+        }
+        let Some((success_idx, failure_idx)) = self.ctx.effect_variant_idxs(&effect) else {
+            return result;
         };
-        let (success_name, failure_name) = match effect {
-            InitEffect::Failable => ("Some", "None"),
-            InitEffect::Throwing => ("Ok", "Err"),
-        };
-        let success_idx = self
-            .ctx
-            .resolve_variant_idx(enum_entity, success_name)
-            .unwrap_or(VariantIdx::new(0));
-        let failure_idx = self
-            .ctx
-            .resolve_variant_idx(enum_entity, failure_name)
-            .unwrap_or(VariantIdx::new(1));
 
         let disc = self.emit_discriminant(result);
 
@@ -686,10 +674,7 @@ impl OssaBodyCtx<'_, '_> {
         // below must skip it, or the outer call re-dispatches to the inner
         // callee (#175 re-calls the method with the closure as self; #176
         // emits a Slice/user subscript witness on the FuncThick) (#175/#176).
-        let callee_is_call = matches!(
-            &self.hir.exprs[callee_expr],
-            HirExpr::Call { .. } | HirExpr::MethodCall { .. }
-        );
+        let callee_is_call = self.callee_is_call_result(callee_expr);
         let entity = if let Some(&resolved) = self
             .typed
             .as_ref()
@@ -804,7 +789,13 @@ impl OssaBodyCtx<'_, '_> {
         } else {
             let convs = self.collect_conventions(entity);
             let callee = if has_receiver {
-                let receiver_ty = self.resolve_expr_type(callee_expr);
+                // A subscript call peeled through `Indirection` (`v(1)` where
+                // only `v`'s target declares the subscript) dispatches on the
+                // pointee, so its type args come from the pointee's type.
+                let receiver_ty = match self.indirection_peels_of(expr_id) {
+                    Some(peels) => lower_resolved_ty(self.ctx, &peels.last().unwrap().target),
+                    None => self.resolve_expr_type(callee_expr),
+                };
                 let mut ta = self.prepend_receiver_type_args(receiver_ty, type_args);
                 if let Some(mir_func) = self.ctx.module.functions.get(&entity) {
                     ta.truncate(mir_func.type_params.len());
@@ -827,7 +818,7 @@ impl OssaBodyCtx<'_, '_> {
                 .first()
                 .copied()
                 .unwrap_or(ParamConvention::Borrow);
-            let receiver_arg = self.prepare_call_arg_for_expr(callee_expr, recv_conv);
+            let (receiver_arg, _) = self.member_receiver_arg(expr_id, callee_expr, recv_conv);
             call_args.insert(0, receiver_arg);
         }
 
@@ -938,6 +929,7 @@ impl OssaBodyCtx<'_, '_> {
         if let Some(init_effect) = init_effect {
             return self.emit_failable_init_call(entity, type_args, args, result_ty, init_effect);
         }
+        let instantiation = type_args.clone();
 
         let ptr_ty = self.ctx.module.ty_arena.pointer(result_ty);
         let one = self.emit_literal(Immediate::i64(1));
@@ -967,7 +959,14 @@ impl OssaBodyCtx<'_, '_> {
         }];
         // Init defaults referencing the init's own type params (rare) aren't
         // substituted here — pass no args (#148 covers the common free-fn case).
-        call_args.extend(self.lower_call_args_bound(args, entity, &conventions, 1, &[]));
+        call_args.extend(self.lower_call_args_instantiated(
+            args,
+            entity,
+            &conventions,
+            1,
+            &[],
+            &instantiation,
+        ));
 
         self.emit_call_void(callee, call_args);
         let ownership = self.ownership_for(result_ty);
@@ -990,26 +989,12 @@ impl OssaBodyCtx<'_, '_> {
         result_ty: TyId,
         effect: InitEffect,
     ) -> ValueId {
+        let instantiation = type_args.clone();
         // result_ty is Optional[T] or Result[T, E]. Extract inner struct type.
-        let (inner_ty, enum_entity, success_name, failure_name) = match &effect {
-            InitEffect::Failable => {
-                let (entity, inner) = match self.ctx.module.ty_arena.get(result_ty) {
-                    MirTy::Named { entity, type_args } if !type_args.is_empty() => {
-                        (*entity, type_args[0])
-                    },
-                    _ => panic!("failable init result_ty must be Optional[T]"),
-                };
-                (inner, entity, "Some", "None")
-            },
-            InitEffect::Throwing => {
-                let (entity, inner) = match self.ctx.module.ty_arena.get(result_ty) {
-                    MirTy::Named { entity, type_args } if !type_args.is_empty() => {
-                        (*entity, type_args[0])
-                    },
-                    _ => panic!("throwing init result_ty must be Result[T, E]"),
-                };
-                (inner, entity, "Ok", "Err")
-            },
+        // result_ty is Optional[T] or Result[T, E]; T is its first arg.
+        let (enum_entity, inner_ty) = match self.ctx.module.ty_arena.get(result_ty) {
+            MirTy::Named { entity, type_args } if !type_args.is_empty() => (*entity, type_args[0]),
+            _ => panic!("effectful init result_ty must be Optional[T] or Result[T, E]"),
         };
 
         // Allocate self as Pointer[T], not Pointer[Optional[T]]
@@ -1056,20 +1041,23 @@ impl OssaBodyCtx<'_, '_> {
             value: self_addr,
             convention: ParamConvention::MutBorrow,
         }];
-        call_args.extend(self.lower_call_args_bound(args, entity, &conventions, 1, &[]));
+        call_args.extend(self.lower_call_args_instantiated(
+            args,
+            entity,
+            &conventions,
+            1,
+            &[],
+            &instantiation,
+        ));
 
         // Call returns Optional[()] or Result[(), E]
         let init_ret = self.emit_call_returning(callee, call_args, init_ret_ty);
 
-        // Resolve variant indices
-        let success_idx = self
+        // Resolve variant indices by the cases' builtin tags.
+        let (success_idx, failure_idx) = self
             .ctx
-            .resolve_variant_idx(enum_entity, success_name)
-            .unwrap_or(VariantIdx::new(0));
-        let failure_idx = self
-            .ctx
-            .resolve_variant_idx(enum_entity, failure_name)
-            .unwrap_or(VariantIdx::new(1));
+            .effect_variant_idxs(&effect)
+            .expect("effectful init needs std's tagged Optional/Result cases");
 
         // Extract discriminant as I32 for switching (same pattern as match lowering)
         let disc = self.emit_discriminant(init_ret);
@@ -1126,7 +1114,7 @@ impl OssaBodyCtx<'_, '_> {
         self.restore_scope(&snapshot);
         self.switch_to(failure_block);
         self.rebind_scope_values(&live_vals, &failure_params);
-        let none_val = if failure_name == "None" {
+        let none_val = if matches!(effect, InitEffect::Failable) {
             self.emit_enum_variant(result_ty, failure_idx, vec![])
         } else {
             // Throwing: extract error payload from init_ret and re-wrap as Result[T, E]
@@ -1287,17 +1275,31 @@ impl OssaBodyCtx<'_, '_> {
         (self.lower_expr(callee_expr), true)
     }
 
+    /// Whether `callee_expr` is itself a call whose RESULT is the value the
+    /// outer `()` invokes: `s.mk()()`, `fs(0)()`, and desugared operator
+    /// calls such as `f!(2)` (a `forceUnwrap` protocol call, behind its
+    /// `Sugar` wrapper). Its recorded resolution is the inner call's callee,
+    /// never what the outer call dispatches to.
+    fn callee_is_call_result(&self, callee_expr: HirExprId) -> bool {
+        let mut expr = callee_expr;
+        while let HirExpr::Sugar { inner, .. } = &self.hir.exprs[expr] {
+            expr = *inner;
+        }
+        matches!(
+            &self.hir.exprs[expr],
+            HirExpr::Call { .. } | HirExpr::MethodCall { .. } | HirExpr::ProtocolCall { .. }
+        )
+    }
+
     fn resolve_callee_entity_from_expr(&self, callee_expr: HirExprId) -> Option<Entity> {
         // A call/method-call callee_expr produces a closure VALUE — its
         // resolution is the inner call's own callee, not an entity the outer
         // call dispatches to. Don't surface it (mirrors emit_resolved_call).
-        if !matches!(
-            &self.hir.exprs[callee_expr],
-            HirExpr::Call { .. } | HirExpr::MethodCall { .. }
-        ) && let Some(&resolved) = self
-            .typed
-            .as_ref()
-            .and_then(|t| t.resolutions.get(&callee_expr))
+        if !self.callee_is_call_result(callee_expr)
+            && let Some(&resolved) = self
+                .typed
+                .as_ref()
+                .and_then(|t| t.resolutions.get(&callee_expr))
         {
             return Some(resolved);
         }

@@ -300,12 +300,7 @@ impl OssaBodyCtx<'_, '_> {
         // Env param is the first ValueId (index 0) in the closure body
         let env_val =
             closure_body.alloc_value(ValueDef::owned(env_ty).with_root(RootProvenance::Param(0)));
-        func_def.params.push(ParamDef::new(
-            "env",
-            env_val,
-            env_ty,
-            ParamConvention::Consuming,
-        ));
+        func_def.params.push(ParamDef::env("env", env_val, env_ty));
         closure_body.param_count += 1;
 
         // Closure params — sequential ValueIds after env

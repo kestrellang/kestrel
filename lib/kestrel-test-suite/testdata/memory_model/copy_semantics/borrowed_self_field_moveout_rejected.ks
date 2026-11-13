@@ -9,6 +9,9 @@
 // did not also start permitting the borrowed case.
 module Test
 
+@builtin(.Copyable)
+protocol Copyable {}
+
 struct Res: not Copyable {
     var id: lang.i64
 }

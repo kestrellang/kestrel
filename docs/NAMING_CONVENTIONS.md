@@ -336,13 +336,13 @@ Iterator.first(where: ...)   // vs Array.find(where: ...)
 
 Public APIs use the safe slice types. `UnsafeSlice` only appears in APIs that are unsafe by name (`asUnsafeSlice()`, `memory.Buffer`).
 
-- **Read-only parameters** take `&some Sliceable[T]`, so callers can pass an `Array`, a `Slice` or a sub-slice without copying.
+- **Read-only parameters** take `&Slice[T]`. An `Array` or `UnsafeSlice` argument peels to it through `Indirection`, so callers pass an `Array`, a `Slice`, a sub-slice or an array literal without copying.
 - **Protocol requirements** take `Slice[T]`. A generic requirement can't be called through `any P` (E145), so `any Hasher` and `any Writable` need the concrete type.
 - **Returned views** are `&Slice[T]` (or `&mutating Slice[T]`), borrowed from the receiver: `asSlice()`, `prefix(n)`, `drop(first:)`, `asByteSlice()`.
 
 ```
 // Good
-func append(contentsOf other: &some Sliceable[T])
+func append(contentsOf other: &Slice[T])
 protocol Writable { mutating func write(from bytes: Slice[UInt8]) -> … }
 func asByteSlice() -> &Slice[UInt8]
 

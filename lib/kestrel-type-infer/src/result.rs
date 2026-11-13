@@ -346,6 +346,10 @@ pub enum ResolvedTy {
 pub struct ResolvedPromotion {
     pub method: Entity,
     pub target: ResolvedTy,
+    /// A `DecaysFrom` conversion of an argument to a borrowed param
+    /// (`see(x: String)` given a slice): the copy a `&View` param would
+    /// avoid. The `view_conversion` lint reports it.
+    pub borrowed_view: bool,
 }
 
 /// Resolve a TyVar into a fully concrete ResolvedTy.
@@ -484,11 +488,27 @@ fn kind_to_resolved(ctx: &InferCtx<'_>, kind: &TyKind) -> ResolvedTy {
 
 /// Build the final TypedBody from the completed InferCtx.
 pub fn build_result(ctx: &InferCtx<'_>) -> TypedBody {
-    let expr_types = ctx
+    let mut expr_types: HashMap<HirExprId, ResolvedTy> = ctx
         .expr_types
         .iter()
         .map(|(&id, &tv)| (id, resolve_to_concrete(ctx, tv)))
         .collect();
+    // A converted view's expression whose type the conversion target pinned
+    // (`let s: String = t.trimmed()` links the call's result to `String`
+    // before its ref return is known) still yields the view's ref: the
+    // conversion is applied on top of it, like any promotion.
+    for (id, info) in &ctx.promotions {
+        let Some(view) = info.view else { continue };
+        let target = resolve_to_concrete(ctx, info.target_ty);
+        if let Some(ty) = expr_types.get_mut(id)
+            && *ty == target
+        {
+            *ty = ResolvedTy::Ref {
+                pointee: Box::new(resolve_to_concrete(ctx, view)),
+                mutating: false,
+            };
+        }
+    }
 
     let local_types = ctx
         .local_types
@@ -507,6 +527,7 @@ pub fn build_result(ctx: &InferCtx<'_>) -> TypedBody {
                 ResolvedPromotion {
                     method: info.method,
                     target: resolve_to_concrete(ctx, info.target_ty),
+                    borrowed_view: ctx.borrowed_decay_args.contains(&id),
                 },
             )
         })
@@ -817,7 +838,11 @@ pub(crate) fn describe_error(ctx: &InferCtx<'_>, err: &InferError) -> String {
             }
             // Static failures get a "because" detail — deep in generic
             // instantiation chains the bare `T !: Static` is miserable.
+            if let Some(hint) = describe_lossy_conversion(ctx, *ty, *protocol, protocol_args) {
+                return format!("{} !: {} ({})", ty_name, proto_name, hint);
+            }
             if let Some(why) = describe_static_failure(ctx, *ty, *protocol)
+                .or_else(|| describe_unsized_value(ctx, *ty, *protocol))
                 .or_else(|| describe_sized_failure(ctx, *ty, *protocol))
             {
                 return format!("{} !: {} ({})", ty_name, proto_name, why);
@@ -841,6 +866,7 @@ pub(crate) fn describe_error(ctx: &InferCtx<'_>, err: &InferError) -> String {
             receiver,
             name,
             is_call,
+            searched_pointee,
             ..
         } => {
             // Wording mirrors lib1: delegating-init misses say "no method
@@ -859,11 +885,15 @@ pub(crate) fn describe_error(ctx: &InferCtx<'_>, err: &InferError) -> String {
             } else {
                 "member"
             };
+            let pointee = searched_pointee
+                .map(|p| format!(" or its pointee '{}'", describe_tyvar(ctx, p)))
+                .unwrap_or_default();
             format!(
-                "no {} '{}' on type '{}'",
+                "no {} '{}' on type '{}'{}",
                 kind,
                 name,
-                describe_tyvar(ctx, *receiver)
+                describe_tyvar(ctx, *receiver),
+                pointee
             )
         },
         InferError::AmbiguousMember { receiver, name, .. } => match receiver {
@@ -985,9 +1015,12 @@ pub(crate) fn describe_error(ctx: &InferCtx<'_>, err: &InferError) -> String {
             )
         },
         InferError::UnresolvedTypeParam { param, .. } => {
+            let Some(param) = *param else {
+                return "cannot infer a type parameter of this call".into();
+            };
             let name = ctx
                 .query_ctx
-                .get::<kestrel_ast_builder::Name>(*param)
+                .get::<kestrel_ast_builder::Name>(param)
                 .map(|n| n.0.clone())
                 .unwrap_or_else(|| "_".into());
             format!("cannot infer type parameter '{}'", name)
@@ -1041,6 +1074,30 @@ pub(crate) fn describe_error(ctx: &InferCtx<'_>, err: &InferError) -> String {
     }
 }
 
+/// "Because" detail for an unsized nominal (`StringSlice`, `Slice[T]`)
+/// failing a generic param's implicit `Copyable` / `Sized` bound: it can only
+/// be used in place, so point at the two ways to pass it.
+fn describe_unsized_value(ctx: &InferCtx<'_>, ty: TyVar, protocol: Entity) -> Option<String> {
+    let relevant = crate::solver::is_sized_builtin(ctx, protocol)
+        || crate::solver::copyable_builtin_kind(ctx, protocol).is_some();
+    if !relevant
+        || !matches!(
+            ctx.slot(ctx.resolve(ty)),
+            TySlot::Resolved(TyKind::Struct { .. })
+        )
+    {
+        return None;
+    }
+    if crate::solver::solver_ty_is_sized(ctx, ty, 0) {
+        return None;
+    }
+    Some(
+        "it is unsized, so a generic parameter takes it only when relaxed with 'not Sized' \
+         (`x: &T where T: not Sized`); otherwise convert it to its owned type"
+            .into(),
+    )
+}
+
 /// "Because" detail for a failed `Sized` bound (existentials).
 fn describe_sized_failure(ctx: &InferCtx<'_>, ty: TyVar, protocol: Entity) -> Option<String> {
     if !crate::solver::is_sized_builtin(ctx, protocol) {
@@ -1061,6 +1118,86 @@ fn describe_sized_failure(ctx: &InferCtx<'_>, ty: TyVar, protocol: Entity) -> Op
         TyKind::Struct { .. } => Some("its last stored field is unsized".into()),
         _ => None,
     }
+}
+
+/// Hint for a failed `T: Convertible[S]`: `init(from:)` is lossless only,
+/// so when `T` instead narrows or rounds from `S`, name the spellings that
+/// exist (`Int8(exactly:)` …) rather than leaving a bare `!: Convertible`.
+fn describe_lossy_conversion(
+    ctx: &InferCtx<'_>,
+    ty: TyVar,
+    protocol: Entity,
+    protocol_args: &[TyVar],
+) -> Option<String> {
+    use kestrel_hir::builtin::Builtin;
+    if ctx.resolver.builtin(Builtin::ConvertibleProtocol) != Some(protocol) {
+        return None;
+    }
+    let [source] = protocol_args else { return None };
+    let target = nominal_entity(ctx, ty)?;
+    let source_entity = nominal_entity(ctx, *source)?;
+    let declares = |builtin: Builtin| {
+        ctx.resolver
+            .builtin(builtin)
+            .is_some_and(|p| declares_conformance_from(ctx, target, p, source_entity))
+    };
+    let (ty_name, source_name) = (describe_tyvar(ctx, ty), describe_tyvar(ctx, *source));
+    if declares(Builtin::NarrowsFromProtocol) {
+        return Some(format!(
+            "not every '{source_name}' fits in '{ty_name}': use '{ty_name}(exactly:)', \
+             '{ty_name}(truncating:)' or '{ty_name}(clamping:)'"
+        ));
+    }
+    if declares(Builtin::RoundsFromProtocol) {
+        return Some(format!(
+            "'{source_name}' doesn't always convert exactly to '{ty_name}': use \
+             '{ty_name}(rounding:)'"
+        ));
+    }
+    None
+}
+
+/// The struct/enum entity `ty` resolves to, if any.
+fn nominal_entity(ctx: &InferCtx<'_>, ty: TyVar) -> Option<Entity> {
+    match ctx.slot(ctx.resolve(ty)) {
+        TySlot::Resolved(TyKind::Struct { entity, .. } | TyKind::Enum { entity, .. }) => {
+            Some(*entity)
+        },
+        _ => None,
+    }
+}
+
+/// Whether `entity` declares `protocol[Source]` for the nominal `source`
+/// (non-generic conformances only — enough for the numeric families).
+fn declares_conformance_from(
+    ctx: &InferCtx<'_>,
+    entity: Entity,
+    protocol: Entity,
+    source: Entity,
+) -> bool {
+    use kestrel_hir::ty::HirTy;
+    let insts = ctx
+        .query_ctx
+        .query(kestrel_name_res::ConformingProtocolInstantiations {
+            entity,
+            root: ctx.root,
+        });
+    insts
+        .iter()
+        .filter(|(p, ..)| *p == protocol)
+        .any(|(_, decl, ast_args)| {
+            let args = kestrel_hir_lower::conformance_protocol_args(
+                ctx.query_ctx,
+                ctx.root,
+                protocol,
+                *decl,
+                ast_args,
+            );
+            matches!(
+                args.as_slice(),
+                [HirTy::Struct { entity, .. } | HirTy::Enum { entity, .. }] if *entity == source
+            )
+        })
 }
 
 /// "Because" detail for a failed `Static` bound (references 2a): names the
@@ -1206,6 +1343,7 @@ mod tests {
                         ResolvedPromotion {
                             method: a,
                             target: ty(b),
+                            borrowed_view: false,
                         },
                     )]
                     .into_iter()

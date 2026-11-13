@@ -15,7 +15,7 @@ struct ModelBox: FFISafe {
 
     /// The cracks over block (x, y, z) as it's broken, `progress` 0 to 1.
     static func crack(x: Int64, y: Int64, z: Int64, progress: Float32) -> ModelBox {
-        let stage = (progress * Float32(from: Layer.crackStages)).toInt64() ?? 0;
+        let stage = Int64(exactly: (progress * Float32(from: Layer.crackStages)).trunc()) ?? 0;
         let layer = Layer.Crack0.number + Float32(from: stage.clamp(0, Layer.crackStages - 1));
         // A hair bigger than the block, so the cracks sit on its faces.
         let half: Float32 = 0.503;

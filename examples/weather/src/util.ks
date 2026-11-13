@@ -49,7 +49,7 @@ public func formatTemp(t: Float64) -> String {
     let negative = t < 0.0;
     let absVal = if negative { 0.0 - t } else { t };
     let scaled = absVal * 10.0 + 0.5; // round
-    let total = match scaled.toInt64() {
+    let total = match Int64(exactly: scaled.trunc()) {
         .Some(n) => n,
         .None => 0
     };
@@ -67,7 +67,7 @@ public func formatTempWhole(t: Float64) -> String {
     let negative = t < 0.0;
     let absVal = if negative { 0.0 - t } else { t };
     let rounded = absVal + 0.5;
-    let whole = match rounded.toInt64() {
+    let whole = match Int64(exactly: rounded.trunc()) {
         .Some(n) => n,
         .None => 0
     };

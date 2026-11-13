@@ -16,7 +16,7 @@ struct DbError: Reportable {
 struct HttpError { var status: Int64 }
 
 // Generic: any other Reportable error becomes a 500.
-extend Result[T, HttpError]: FromResidual[E] where E: Reportable {
+extend[E] Result[T, HttpError]: FromResidual[E] where E: Reportable {
     static func fromResidual(consuming residual: E) -> Result[T, HttpError] {
         .Err(HttpError(status: 500))
     }

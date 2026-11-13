@@ -96,7 +96,11 @@ fn opaque_span(ty: &AstType) -> Option<kestrel_span::Span> {
         AstType::Ref { inner, .. } => opaque_span(inner),
         // `any P` is a box — a fine field type; only a `some` nested in it is not.
         AstType::Any { .. } => ty.any_children().into_iter().find_map(opaque_span),
-        AstType::Named { .. } | AstType::Unit(_) | AstType::Never(_) | AstType::Inferred(_) => None,
+        AstType::Named { .. }
+        | AstType::Unit(_)
+        | AstType::Never(_)
+        | AstType::Inferred(_)
+        | AstType::Builtin(..) => None,
     }
 }
 

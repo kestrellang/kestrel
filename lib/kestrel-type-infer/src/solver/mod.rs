@@ -73,18 +73,21 @@ pub(crate) fn report_unresolved_type_params(ctx: &mut InferCtx<'_>) {
         .collect();
 
     for (expr, tvs, span) in entries {
-        // Map each TyVar back to its originating TypeParameter entity
-        // via the resolved callee's `TypeParams` component. Without a
-        // resolution (e.g. the call errored upstream) we can't name
-        // the param, so skip — the upstream error already covers it.
-        let Some(&callee) = ctx.resolutions.get(&expr) else {
-            continue;
+        // The param each slot stands for: recorded with the slots, or the
+        // resolved callee's own `TypeParams`. Neither (the call errored
+        // upstream): skip — the upstream error already covers it.
+        let params: Vec<Option<Entity>> = match ctx.type_arg_params.get(&expr) {
+            Some(slots) => slots.clone(),
+            None => {
+                let Some(&callee) = ctx.resolutions.get(&expr) else {
+                    continue;
+                };
+                ctx.query_ctx
+                    .get::<TypeParams>(callee)
+                    .map(|tp| tp.0.iter().map(|&p| Some(p)).collect())
+                    .unwrap_or_default()
+            },
         };
-        let params: Vec<Entity> = ctx
-            .query_ctx
-            .get::<TypeParams>(callee)
-            .map(|tp| tp.0.clone())
-            .unwrap_or_default();
 
         for (i, &tv) in tvs.iter().enumerate() {
             let resolved = ctx.resolve(tv);
@@ -96,9 +99,13 @@ pub(crate) fn report_unresolved_type_params(ctx: &mut InferCtx<'_>) {
             ) {
                 continue;
             }
-            let Some(&param) = params.get(i) else {
-                continue;
-            };
+            // A slot the callee's params can't name is still reported:
+            // skipping it let the hole reach monomorphization as `Error`.
+            let param = params.get(i).copied().flatten();
+            kestrel_debug::ktrace!(
+                "infer",
+                "unresolved type arg {i} of {expr:?}: param {param:?}"
+            );
             ctx.report_error(InferError::UnresolvedTypeParam {
                 param,
                 span: span.clone(),
@@ -734,6 +741,7 @@ pub(crate) fn report_unsolved(ctx: &mut InferCtx<'_>) {
                         name,
                         is_call,
                         span,
+                        searched_pointee: None,
                     },
                     Some(result),
                 )
@@ -754,6 +762,7 @@ pub(crate) fn report_unsolved(ctx: &mut InferCtx<'_>) {
                         name: "subscript".into(),
                         is_call: true,
                         span,
+                        searched_pointee: None,
                     },
                     Some(result),
                 )
@@ -778,6 +787,7 @@ pub(crate) fn report_unsolved(ctx: &mut InferCtx<'_>) {
                         name,
                         is_call: true,
                         span,
+                        searched_pointee: None,
                     },
                     Some(result),
                 )
@@ -861,6 +871,7 @@ pub(crate) fn report_unsolved(ctx: &mut InferCtx<'_>) {
                         name,
                         is_call,
                         span,
+                        searched_pointee: None,
                     },
                     None,
                 )
@@ -1082,10 +1093,11 @@ pub(super) fn try_solve_inner(ctx: &mut InferCtx<'_>, c: Constraint) -> SolveRes
         Constraint::ImplicitPat {
             scrutinee,
             name,
+            case,
             arg_tys,
             labels,
             span,
-        } => solve_implicit_pat(ctx, scrutinee, &name, arg_tys, labels, span),
+        } => solve_implicit_pat(ctx, scrutinee, &name, case, arg_tys, labels, span),
         Constraint::TupleRestPat {
             scrutinee,
             prefix_tys,

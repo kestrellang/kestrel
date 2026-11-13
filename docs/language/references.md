@@ -31,7 +31,7 @@ Rules for borrow expressions:
 - **Function and method return types** — `-> &Int64`, `-> &mutating T`
 - **Struct fields and tuple elements** — `var item: &Int64;`, `(&Int64, Int64)`
 - **Generic arguments** — `Optional[&T]`, iterator `Item` types
-- **Parameters** — `x: &T` borrows (like `x: T`) and `x: &mutating T` mutably borrows (like `mutating x: T`), in declarations, function types and closure params. Only a ref-typed param may take an unsized type: `func sum[S](s: &S) where S: Sliceable[Int64], S: not Copyable, S: not Sized` accepts a `Slice[Int64]`. Combining the ref with a `mutating`/`consuming` keyword is E480.
+- **Parameters** — `x: &T` borrows (like `x: T`) and `x: &mutating T` mutably borrows (like `mutating x: T`), in declarations, function types and closure params. Only a ref-typed param may take an unsized type: `func sum[S](s: &S) where S: Iterable, S.Item = Int64, S: not Copyable, S: not Sized` accepts a `Slice[Int64]` (`not Sized` alone also drops the implicit `Copyable`). Combining the ref with a `mutating`/`consuming` keyword is E480.
 
 They may **not** appear in:
 
@@ -114,11 +114,33 @@ b.slot() = 7;
 println("\(copied)");   // still 41 — a copy, not a view
 ```
 
-Decay applies to: bindings of ref-returning call results, assignment right-hand sides, `return`ed values in owned positions, `match`/`if` result merges, `??` right-hand sides, string interpolation holes, and array/tuple/dictionary literal elements (except a tuple element whose slot the expected type pins to `&T`; see below). Note the asymmetry: `let r = &x;` *holds* a reference, while `let v = b.peek();` *copies* — holding requires the explicit `&`.
+Decay applies to: bindings of ref-returning call results, assignment right-hand sides, `return`ed values in owned positions, `match`/`if` result merges, `??` right-hand sides, string interpolation holes, and array/tuple/dictionary literal elements (except a tuple element whose slot the expected type pins to `&T`, and a reference to an unsized type; see below). Note the asymmetry: `let r = &x;` *holds* a reference, while `let v = b.peek();` *copies* — holding requires the explicit `&`.
 
 Decay is a copy, so decaying a reference to a non-`Copyable`, non-`Cloneable` value is rejected as a move out of a borrow (E503).
 
 A lent `Optional[&T]` (`xs.first`, `xs(checked: i)`) decays the same way to `Optional[T]` in a binding, a call argument, a method receiver (`xs.first.map(f)`), and an operator's left operand (`xs.first ?? 0`, `xs.first == .Some(3)`). It stays a reference where one is asked for: a `match` / `if let` borrows the element (and `if let .Some(&mutating v) = xs(checked: i)` writes through it), and an `Optional[&T]` annotation or parameter keeps the reference. Only a shared payload decays; an `Optional[&mutating T]` is consumed through patterns. Construction is type-driven: an unannotated `Optional.Some(r)` snapshots the pointee (giving `Optional[Int64]`); with an `Optional[&T]` annotation the reference itself is stored.
+
+### References to unsized types
+
+A reference to an unsized type (`&StringSlice`, `&Slice[T]`) never decays on its own: there is no value to copy out. A binding or tuple element keeps the reference, so `let word = text.subslice(from: 0, to: 5)` is a `&StringSlice` that borrows `text`.
+
+Where the target *names* an owned type, the view converts to it instead. The owned type opts in by conforming to `DecaysFrom[View]`; the standard library ships `String: DecaysFrom[StringSlice]` and `Array[T]: DecaysFrom[Slice[T]] where T: Copyable`:
+
+```kestrel
+let owned: String = text.trimmed();     // annotation
+let firstTwo: Array[Int64] = xs(0..<2); // annotation
+let p = Person(name: text.trimmed());   // field
+func label(s: String) -> String { s.trimmed() } // return type
+var t: String = ""; t = text.trimmed(); // assignment
+let parts: Array[String] = [a.trimmed(), b.trimmed()]; // annotated elements
+```
+
+A `consuming` parameter converts, since the callee takes ownership. A borrowed parameter converts too, but warns (E512): the callee only reads, so taking `&StringSlice` would avoid the copy. A `mutating` parameter never converts (the writes would land in a temporary) and stays a type mismatch. `toOwned()` still converts explicitly.
+
+- **Branches.** A `match` / `if` arm whose result is such a reference cannot carry it across the merge in this version (E497). Bind the slice before the branch, or produce an owned value in each arm.
+- **Collection literals.** `Array` and `Dictionary` require `Static` elements, so `[a.subslice(from: 0, to: 2)]` is rejected with an "it is unsized" note, unless the literal's element type is named (`let xs: Array[String] = [...]`), which converts each element.
+- **Rebinding.** A `var` holding a shared reference rebinds on assignment: `var s = a.subslice(from: 0, to: 2); s = b.subslice(from: 1, to: 3)` points `s` at the new slice and writes nothing through the old one. A rebind inside a branch or loop is rejected (E497), and a `let` cannot be reassigned (E208).
+- **Generics.** Every generic parameter is implicitly `Sized`, `Static` and `Copyable`, so passing a slice to a plain `T` is rejected with an "it is unsized" note. A borrow-only parameter opts in with `not Sized`, which also drops the implicit `Copyable`: `func show(x: &some Formattable and not Static and not Sized)`, or `func show[T](x: &T) where T: Formattable, T: not Static, T: not Sized` (a slice borrows its owner, so it also needs `not Static`). The parameter must be written with `&`; a bare `T` that is `not Sized` is taken by value (E403). `print`, `println` and string interpolation take their argument this way, so `println(word)` prints a slice in place.
 
 ## References in Structs and Tuples
 

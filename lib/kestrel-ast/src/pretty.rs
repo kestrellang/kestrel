@@ -11,6 +11,8 @@ use crate::ast_type::{AnyBound, AstType};
 /// does not parse. Callers outside this crate use this; do not re-implement.
 pub fn format_type(ty: &AstType) -> String {
     match ty {
+        // The lang item's own name (`Copyable`) — what the source would say.
+        AstType::Builtin(builtin, _) => builtin.name().to_string(),
         AstType::Named { segments, .. } => segments
             .iter()
             .map(|s| {

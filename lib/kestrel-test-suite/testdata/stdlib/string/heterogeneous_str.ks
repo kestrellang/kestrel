@@ -3,8 +3,6 @@
 
 module Test
 
-import std.text.(Str)
-
 @main
 func main() -> lang.i64 {
     let owned: String = "alpha,beta";

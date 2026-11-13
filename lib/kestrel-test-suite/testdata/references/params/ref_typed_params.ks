@@ -9,7 +9,12 @@
 // type such as a slice.
 module Test
 
-import std.collections.(Array, Sliceable)
+import std.collections.(Array, Slice)
+
+// `Lends` stands in for the removed std `Sliceable`: a protocol whose
+// conformers lend their elements as a `Slice`.
+protocol Lends[T] { func asSlice() -> &Slice[T] }
+extend Slice[T]: Lends[T] { }
 
 struct Big { var xs: Array[Int64] }
 
@@ -18,9 +23,10 @@ func bump(b: &mutating Big, f: (&mutating Big) -> ()) { f(b) }
 func first(b: &Big) -> &Int64 { b.xs(0) }
 func setFirst(b: &mutating Big, to v: Int64) { b.xs(0) = v }
 
-func total[S](s: &S) -> Int64 where S: Sliceable[Int64], S: not Copyable, S: not Sized {
+func total[S](s: &S) -> Int64 where S: Lends[Int64], S: not Copyable, S: not Sized {
+    let v = s.asSlice();
     var t: Int64 = 0;
-    for i in 0..<s.count { t += s(i) }
+    for i in 0..<v.count { t += v(i) }
     t
 }
 

@@ -45,11 +45,11 @@ public struct QuerySet: not Copyable {
         PassTimestamps(cValue: raw.WGPUPassTimestampWrites(
             querySet: self.handle,
             beginningOfPassWriteIndex: match beginning {
-                .Some(i) => UInt32(from: i),
+                .Some(i) => UInt32(exactly: i)!,
                 .None => raw.WGPU_U32_UNDEFINED
             },
             endOfPassWriteIndex: match end {
-                .Some(i) => UInt32(from: i),
+                .Some(i) => UInt32(exactly: i)!,
                 .None => raw.WGPU_U32_UNDEFINED
             }
         ))
@@ -78,7 +78,7 @@ extend Device {
             nextInChain: Pointer.nullPointer(),
             label: view(label),
             kind: kind.cValue,
-            count: UInt32(from: count)
+            count: UInt32(exactly: count)!
         );
         QuerySet(handle: unsafe raw.wgpuDeviceCreateQuerySet(self.handle, descriptor))
     }
@@ -103,7 +103,7 @@ extend CommandEncoder {
     /// starting at byte `offset` (a multiple of 256).
     public func resolve(querySet: QuerySet, into buffer: Buffer, first first: Int64 = 0, count count: Int64? = .None, offset offset: Int64 = 0) {
         let n = count ?? (querySet.count - first);
-        unsafe raw.wgpuCommandEncoderResolveQuerySet(self.handle, querySet.handle, UInt32(from: first), UInt32(from: n), buffer.handle, UInt64(from: offset));
+        unsafe raw.wgpuCommandEncoderResolveQuerySet(self.handle, querySet.handle, UInt32(exactly: first)!, UInt32(exactly: n)!, buffer.handle, UInt64(exactly: offset)!);
     }
 }
 
@@ -154,36 +154,36 @@ public struct RenderBundleEncoder: not Copyable {
 
     public func setBindGroup(index: Int64, bindGroup: BindGroup, dynamicOffsets dynamicOffsets: [Int64] = []) {
         let offsets = dynamicOffsetArray(dynamicOffsets);
-        unsafe raw.wgpuRenderBundleEncoderSetBindGroup(self.handle, UInt32(from: index), bindGroup.handle, UInt64(from: offsets.count), offsets.asPointer().asRaw());
+        unsafe raw.wgpuRenderBundleEncoderSetBindGroup(self.handle, UInt32(exactly: index)!, bindGroup.handle, UInt64(exactly: offsets.count)!, offsets.asPointer().asRaw());
     }
 
     public func setVertexBuffer(slot: Int64, buffer: Buffer, offset offset: Int64 = 0, size size: Int64? = .None) {
-        unsafe raw.wgpuRenderBundleEncoderSetVertexBuffer(self.handle, UInt32(from: slot), buffer.handle, UInt64(from: offset), rangeSize(buffer, offset, size));
+        unsafe raw.wgpuRenderBundleEncoderSetVertexBuffer(self.handle, UInt32(exactly: slot)!, buffer.handle, UInt64(exactly: offset)!, rangeSize(buffer, offset, size));
     }
 
     public func setIndexBuffer(buffer: Buffer, format format: IndexFormat = .Uint32, offset offset: Int64 = 0, size size: Int64? = .None) {
-        unsafe raw.wgpuRenderBundleEncoderSetIndexBuffer(self.handle, buffer.handle, format.cValue, UInt64(from: offset), rangeSize(buffer, offset, size));
+        unsafe raw.wgpuRenderBundleEncoderSetIndexBuffer(self.handle, buffer.handle, format.cValue, UInt64(exactly: offset)!, rangeSize(buffer, offset, size));
     }
 
     public func setPushConstants[T](stages stages: [ShaderStage], value value: T, offset offset: Int64 = 0) where T: FFISafe {
         let size = Layout.of[T]().size;
-        unsafe raw.wgpuRenderBundleEncoderSetPushConstants(self.handle, stageBits(stages), UInt32(from: offset), UInt32(from: size), Pointer(to: value).asRaw());
+        unsafe raw.wgpuRenderBundleEncoderSetPushConstants(self.handle, stageBits(stages), UInt32(exactly: offset)!, UInt32(exactly: size)!, Pointer(to: value).asRaw());
     }
 
     public func draw(vertices vertices: Int64, instances instances: Int64 = 1, firstVertex firstVertex: Int64 = 0, firstInstance firstInstance: Int64 = 0) {
-        unsafe raw.wgpuRenderBundleEncoderDraw(self.handle, UInt32(from: vertices), UInt32(from: instances), UInt32(from: firstVertex), UInt32(from: firstInstance));
+        unsafe raw.wgpuRenderBundleEncoderDraw(self.handle, UInt32(exactly: vertices)!, UInt32(exactly: instances)!, UInt32(exactly: firstVertex)!, UInt32(exactly: firstInstance)!);
     }
 
     public func drawIndexed(indices indices: Int64, instances instances: Int64 = 1, firstIndex firstIndex: Int64 = 0, baseVertex baseVertex: Int64 = 0, firstInstance firstInstance: Int64 = 0) {
-        unsafe raw.wgpuRenderBundleEncoderDrawIndexed(self.handle, UInt32(from: indices), UInt32(from: instances), UInt32(from: firstIndex), Int32(from: baseVertex), UInt32(from: firstInstance));
+        unsafe raw.wgpuRenderBundleEncoderDrawIndexed(self.handle, UInt32(exactly: indices)!, UInt32(exactly: instances)!, UInt32(exactly: firstIndex)!, Int32(exactly: baseVertex)!, UInt32(exactly: firstInstance)!);
     }
 
     public func drawIndirect(buffer: Buffer, offset offset: Int64 = 0) {
-        unsafe raw.wgpuRenderBundleEncoderDrawIndirect(self.handle, buffer.handle, UInt64(from: offset));
+        unsafe raw.wgpuRenderBundleEncoderDrawIndirect(self.handle, buffer.handle, UInt64(exactly: offset)!);
     }
 
     public func drawIndexedIndirect(buffer: Buffer, offset offset: Int64 = 0) {
-        unsafe raw.wgpuRenderBundleEncoderDrawIndexedIndirect(self.handle, buffer.handle, UInt64(from: offset));
+        unsafe raw.wgpuRenderBundleEncoderDrawIndexedIndirect(self.handle, buffer.handle, UInt64(exactly: offset)!);
     }
 
     deinit {
@@ -203,13 +203,13 @@ extend Device {
         let descriptor = raw.WGPURenderBundleEncoderDescriptor(
             nextInChain: Pointer.nullPointer(),
             label: view(targets.label),
-            colorFormatCount: UInt64(from: formats.count),
+            colorFormatCount: UInt64(exactly: formats.count)!,
             colorFormats: formats.asPointer(),
             depthStencilFormat: match targets.depthFormat {
                 .Some(f) => f.cValue,
                 .None => raw.WGPUTextureFormat_Undefined
             },
-            sampleCount: UInt32(from: targets.sampleCount),
+            sampleCount: UInt32(exactly: targets.sampleCount)!,
             depthReadOnly: if targets.depthReadOnly { 1 } else { 0 },
             stencilReadOnly: if targets.depthReadOnly { 1 } else { 0 }
         );

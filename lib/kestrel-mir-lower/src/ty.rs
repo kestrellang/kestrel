@@ -3,7 +3,7 @@
 //! All type lowering returns `TyId` (interned). No `MirTy` clones flow
 //! through the pipeline — the arena deduplicates automatically.
 
-use kestrel_ast_builder::{Name, NodeKind, TypeParams};
+use kestrel_ast_builder::{NodeKind, TypeParams};
 use kestrel_hecs::Entity;
 use kestrel_hir::ty::HirTy;
 use kestrel_hir_lower::{LowerCallableReturnType, LowerCallableTypes, LowerTypeAnnotation};
@@ -448,60 +448,35 @@ fn lower_assoc_projection(ctx: &mut LowerCtx, base: &HirTy, assoc: Entity) -> Ty
     })
 }
 
-/// Recognize lang primitive types by checking the entity's parent is the
-/// `lang` module.
+/// Map a seeded `lang` entity to its primitive / structural MIR type, by its
+/// `LangType` tag.
 fn try_lang_primitive(ctx: &mut LowerCtx, entity: Entity, type_args: &[TyId]) -> Option<TyId> {
-    let parent = ctx.world.parent_of(entity)?;
-    let parent_kind = ctx.world.get::<NodeKind>(parent)?;
-    if *parent_kind != NodeKind::Module {
-        return None;
-    }
-    let parent_name = ctx.world.get::<Name>(parent)?;
-    if parent_name.0 != "lang" {
-        return None;
-    }
-
-    let name = ctx.world.get::<Name>(entity)?;
-    match name.0.as_str() {
-        "i1" => Some(ctx.module.ty_arena.bool()),
-        "i8" => Some(ctx.module.ty_arena.i8()),
-        "i16" => Some(ctx.module.ty_arena.i16()),
-        "i32" => Some(ctx.module.ty_arena.i32()),
-        "i64" => Some(ctx.module.ty_arena.i64()),
-        "f16" => Some(ctx.module.ty_arena.f16()),
-        "f32" => Some(ctx.module.ty_arena.f32()),
-        "f64" => Some(ctx.module.ty_arena.f64()),
-        "str" => Some(ctx.module.ty_arena.str_ty()),
+    use kestrel_ast_builder::LangType;
+    let lang_ty = *ctx.world.get::<LangType>(entity)?;
+    let arena = &mut ctx.module.ty_arena;
+    Some(match lang_ty {
+        LangType::I1 => arena.bool(),
+        LangType::I8 => arena.i8(),
+        LangType::I16 => arena.i16(),
+        LangType::I32 => arena.i32(),
+        LangType::I64 => arena.i64(),
+        LangType::F16 => arena.f16(),
+        LangType::F32 => arena.f32(),
+        LangType::F64 => arena.f64(),
+        LangType::Str => arena.str_ty(),
         // Synthetic structural singletons (see `seed_lang_module`).
-        "()" => Some(ctx.module.ty_arena.unit()),
-        "!" => Some(ctx.module.ty_arena.never()),
-        "ptr" => {
-            let inner = type_args.first().copied()?;
-            Some(ctx.module.ty_arena.pointer(inner))
-        },
-        "slice" => {
-            let elem = type_args.first().copied()?;
-            Some(ctx.module.ty_arena.slice(elem))
-        },
+        LangType::Unit => arena.unit(),
+        LangType::Never => arena.never(),
+        LangType::Ptr => arena.pointer(*type_args.first()?),
+        LangType::Slice => arena.slice(*type_args.first()?),
         // Synthetic ref-extension targets: the type layer always uses
         // `MirTy::Ref` — the entities exist only for decl/name-res.
-        "&" => {
-            let inner = type_args.first().copied()?;
-            Some(ctx.module.ty_arena.ref_ty(inner, false))
-        },
-        "&mutating" => {
-            let inner = type_args.first().copied()?;
-            Some(ctx.module.ty_arena.ref_ty(inner, true))
-        },
+        LangType::Ref { mutating } => arena.ref_ty(*type_args.first()?, mutating),
         // Synthetic tuple-extension targets (`lang.(,)`, …): the elements
         // are the type args.
-        n if type_args.len() >= 2
-            && n == kestrel_ast_builder::lang_module::lang_tuple_name(type_args.len()) =>
-        {
-            Some(ctx.module.ty_arena.tuple(type_args.to_vec()))
-        },
-        _ => None,
-    }
+        LangType::Tuple(arity) if type_args.len() == arity => arena.tuple(type_args.to_vec()),
+        LangType::Tuple(_) => return None,
+    })
 }
 
 /// Walk HirTy, replacing Opaque nodes with the concrete type from inference.
@@ -594,6 +569,7 @@ fn contains_opaque(ty: &HirTy) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use kestrel_ast_builder::Name;
     use kestrel_compiler::Compiler;
     use kestrel_hecs::World;
     use kestrel_mir::MirTy;
@@ -795,7 +771,7 @@ mod tests {
     fn setup_stdlib_compiler() -> Compiler {
         let mut c = Compiler::new();
         let path = stdlib_path();
-        c.load_dir(&path);
+        c.load_std_dir(&path);
         c
     }
 

@@ -2089,17 +2089,17 @@ impl OssaBodyCtx<'_, '_> {
     /// binding `type Element = T` substitutes `T → Int64`; for a non-generic
     /// one (`Trio` with `type Element = Int64`) the binding is concrete.
     fn array_element_ty(&mut self, array_ty: TyId) -> TyId {
-        self.array_assoc_ty(array_ty, "Element")
+        self.array_assoc_ty(array_ty, kestrel_hir::Builtin::ArrayMatchableElement)
     }
 
     /// An `ArrayMatchable` associated type (`Element` or `Rest`) of the
     /// conformer `array_ty`, substituted with its type args.
-    fn array_assoc_ty(&mut self, array_ty: TyId, name: &str) -> TyId {
+    fn array_assoc_ty(&mut self, array_ty: TyId, assoc: kestrel_hir::Builtin) -> TyId {
         let MirTy::Named { entity, type_args } = self.ctx.module.ty_arena.get(array_ty).clone()
         else {
             return array_ty;
         };
-        let Some((binding, owner)) = self.resolve_array_assoc_binding(entity, name) else {
+        let Some((binding, owner)) = self.resolve_array_assoc_binding(entity, assoc) else {
             // Binding lookup failed (broken stdlib / missing protocol) — fall
             // back to the first type arg so generic conformers still work.
             return type_args.first().copied().unwrap_or(array_ty);
@@ -2127,16 +2127,16 @@ impl OssaBodyCtx<'_, '_> {
         kestrel_mir::substitute(&mut self.ctx.module.ty_arena, binding, &subst)
     }
 
-    /// Find the `type <name> = ...` binding (`Element` or `Rest`) for an `ArrayMatchable` conformer,
+    /// Find the `type <assoc> = ...` binding (`Element` or `Rest`) for an `ArrayMatchable` conformer,
     /// returning the (unsubstituted) binding type and the entity that OWNS it
     /// (the type body, or the conforming extension) — the owner provides the
     /// type params for substitution.
     fn resolve_array_assoc_binding(
         &mut self,
         type_entity: Entity,
-        name: &str,
+        assoc: kestrel_hir::Builtin,
     ) -> Option<(TyId, Entity)> {
-        let assoc = self.array_matchable_assoc(name)?;
+        let assoc = self.array_matchable_assoc(assoc)?;
         let (alias, owner) = self
             .ctx
             .query
@@ -2150,34 +2150,13 @@ impl OssaBodyCtx<'_, '_> {
         Some((ty, owner))
     }
 
-    /// The `ArrayMatchable` associated-type requirement `name`. `Element` is
-    /// found by its `@builtin` tag; `Rest` has no tag yet, so it is still
-    /// matched by name among the protocol's associated types.
-    fn array_matchable_assoc(&mut self, name: &str) -> Option<Entity> {
-        if name == "Element" {
-            return self.ctx.query.query(kestrel_name_res::ResolveBuiltin {
-                builtin: kestrel_hir::Builtin::ArrayMatchableElement,
-                root: self.ctx.root,
-            });
-        }
-        let proto = self.ctx.query.query(kestrel_name_res::ResolveBuiltin {
-            builtin: kestrel_hir::Builtin::ArrayMatchable,
+    /// An `ArrayMatchable` associated-type requirement, by its `@builtin` tag
+    /// (`ArrayMatchableElement` / `ArrayMatchableRest`).
+    fn array_matchable_assoc(&mut self, assoc: kestrel_hir::Builtin) -> Option<Entity> {
+        self.ctx.query.query(kestrel_name_res::ResolveBuiltin {
+            builtin: assoc,
             root: self.ctx.root,
-        })?;
-        self.ctx
-            .query
-            .query(kestrel_name_res::ProtocolAssociatedTypes {
-                protocol: proto,
-                root: self.ctx.root,
-            })
-            .into_iter()
-            .map(|m| m.entity)
-            .find(|&e| {
-                self.ctx
-                    .world
-                    .get::<kestrel_ast_builder::Name>(e)
-                    .is_some_and(|n| n.0 == name)
-            })
+        })
     }
 
     /// The stdlib `Int64` type — the index/length type of `ArrayMatchable`,
@@ -2266,7 +2245,7 @@ impl OssaBodyCtx<'_, '_> {
         // suffix elements; `suffix_len == 0` gives the whole tail).
         let to_raw = self.emit_array_index_from_end(array, array_ty, suffix_len);
         let to = self.emit_int64_wrap(to_raw, int64_ty);
-        let result_ty = self.array_assoc_ty(array_ty, "Rest");
+        let result_ty = self.array_assoc_ty(array_ty, kestrel_hir::Builtin::ArrayMatchableRest);
         self.emit_array_matchable_call(
             proto,
             kestrel_hir::Builtin::ArrayMatchableMatchSlice,

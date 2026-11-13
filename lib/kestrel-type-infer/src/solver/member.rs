@@ -242,6 +242,7 @@ pub(super) fn member_not_found_error(
     name: &str,
     is_call: bool,
     span: Span,
+    searched_pointee: Option<TyVar>,
 ) -> InferError {
     if let Some(family) = primitive_family(ctx, recv_kind) {
         if !is_call && is_known_primitive_method(family, name) {
@@ -290,6 +291,7 @@ pub(super) fn member_not_found_error(
         name: name.to_string(),
         is_call,
         span,
+        searched_pointee,
     }
 }
 
@@ -314,6 +316,7 @@ pub(crate) fn try_indirection_peel(
 ) -> Option<TyVar> {
     let peel = indirection_peel_step(ctx, recv_kind, receiver, span)?;
     let pointee_tv = peel.target_tv;
+    ctx.peel_receivers.entry(expr).or_insert(receiver);
     // Record the peel for MIR — append so nested wrappers build a chain.
     // `target_tv` is resolved in `build_result`.
     ctx.indirection_peels.entry(expr).or_default().push(peel);
@@ -716,8 +719,17 @@ pub(super) fn solve_member(
                         ctx.poison(result);
                         return SolveResult::Solved;
                     }
+                    // Name the receiver as written (`rc`), and the pointee
+                    // the peel searched too.
+                    let written = ctx.peel_receivers.get(&expr).copied();
                     return SolveResult::Error(member_not_found_error(
-                        ctx, receiver, &recv_kind, name, is_call, span,
+                        ctx,
+                        written.unwrap_or(receiver),
+                        &recv_kind,
+                        name,
+                        is_call,
+                        span,
+                        written.map(|_| receiver),
                     ));
                 },
             }
@@ -745,6 +757,7 @@ pub(super) fn solve_member(
                     name: name.to_string(),
                     is_call,
                     span,
+                    searched_pointee: None,
                 });
             }
 
@@ -821,6 +834,7 @@ pub(super) fn solve_member(
                             name: name.to_string(),
                             is_call,
                             span,
+                            searched_pointee: None,
                         });
                     },
                     super::call::Narrowed::ByLabels(picks)
@@ -961,6 +975,7 @@ pub(super) fn solve_member(
                     name: name.to_string(),
                     is_call,
                     span,
+                    searched_pointee: None,
                 });
             },
             kestrel_entail::Tri::Fails | kestrel_entail::Tri::Unknown => {
@@ -1032,6 +1047,7 @@ pub(super) fn solve_member(
                     name: name.to_string(),
                     is_call,
                     span,
+                    searched_pointee: None,
                 });
             }
         }
@@ -1122,21 +1138,10 @@ pub(super) fn solve_member(
         }
     }
 
-    // Map extension target type params to receiver type args.
-    // Extension type params are different entities from the struct's type params,
-    // but represent the same types (e.g., extend Box[T] has its own T entity).
-    if let Some(ext) = resolution.from_extension {
-        let ext_type_params: Vec<kestrel_hecs::Entity> = ctx
-            .query_ctx
-            .get::<TypeParams>(ext)
-            .map(|tp| tp.0.clone())
-            .unwrap_or_default();
-        for (&param, &arg) in ext_type_params.iter().zip(recv_type_args.iter()) {
-            if !subs.iter().any(|(e, _)| *e == param) {
-                subs.push((param, arg));
-            }
-        }
-    }
+    // An extension's declared params (`U` in `extend[U] Box[Bool]`) are never
+    // the receiver's args: the target binds those through its own params and
+    // pattern params below. Declared params get fresh vars with the method's
+    // own (`resolve` appends them to `type_params`).
 
     // Pattern params (`X` in `extend Box[W[X]]`) bind by matching: equate
     // each receiver arg with the target arg written in that position, the
@@ -1169,6 +1174,7 @@ pub(super) fn solve_member(
     // If protocol_type_args are provided (from where clause, e.g., F: Factory[i64]),
     // use those. Otherwise default to receiver (e.g., Addable[Rhs = Self]).
     let mut proto_type_args_tvs: Vec<TyVar> = Vec::new();
+    let mut proto_slot_params: Vec<kestrel_hecs::Entity> = Vec::new();
     let self_is_protocol = resolution
         .self_type
         .map(|e| ctx.query_ctx.get::<NodeKind>(e) == Some(&NodeKind::Protocol))
@@ -1179,6 +1185,7 @@ pub(super) fn solve_member(
             .get::<TypeParams>(self_entity)
             .map(|tp| tp.0.clone())
             .unwrap_or_default();
+        proto_slot_params.clone_from(&proto_type_params);
         // When the method comes from a protocol extension, the extension has
         // its own type params that are positionally equivalent to the protocol's.
         // These already have TyVars from body inference. Use them instead of
@@ -1202,11 +1209,25 @@ pub(super) fn solve_member(
                 // a concrete TyVar (e.g. recv `Array[Int64]` mapped SliceExt's
                 // T → Int64), use *that* — otherwise the abstract
                 // `ctx.param(ext_param)` would collapse `T` to a free Param.
+                //
+                // Outside that extension the param is not in scope: it is
+                // the call's own choice (`Sq.twin()` through `extend[T]
+                // Shape: Describe[T]` picks a `T`), so a fresh var that the
+                // arguments or context solve — or that is reported E105
+                // when nothing does. A free `Param` there reached
+                // monomorphization as an `Error` type arg (an ICE).
+                let in_scope = ext_param_in_scope(ctx, ext_param);
                 let tv = subs
                     .iter()
                     .find(|(e, _)| *e == ext_param)
                     .map(|&(_, tv)| tv)
-                    .unwrap_or_else(|| ctx.param(ext_param));
+                    .unwrap_or_else(|| {
+                        if in_scope {
+                            ctx.param(ext_param)
+                        } else {
+                            ctx.fresh()
+                        }
+                    });
                 subs.push((param, tv));
                 tv
             } else if recv_entity
@@ -1267,6 +1288,11 @@ pub(super) fn solve_member(
     // Pattern params follow: MIR's signature orders the extension's own
     // params (`ExtensionOwnTypeParams`) after the receiver's.
     let mut recorded_type_args = proto_type_args_tvs.clone();
+    // The param each slot stands for, so an uninferred one is reported by
+    // name: the protocol's params, then (unnamed) receiver and pattern
+    // slots, then the method's own.
+    let mut slot_params: Vec<Option<kestrel_hecs::Entity>> =
+        proto_slot_params.iter().map(|&p| Some(p)).collect();
     // A type's own init (`String[A].init[I](from:)`, reached here when
     // several inits share the call's labels) leads with the type's args,
     // the same full list `gen_struct_init` records for a lone match: the
@@ -1275,9 +1301,12 @@ pub(super) fn solve_member(
         recorded_type_args.extend(recv_type_args.iter().copied());
     }
     recorded_type_args.extend(pattern_tvs);
+    slot_params.resize(recorded_type_args.len(), None);
     recorded_type_args.extend(fresh_params.iter().copied());
+    slot_params.extend(resolution.type_params.iter().map(|&p| Some(p)));
     if !recorded_type_args.is_empty() {
         ctx.record_type_args(expr, recorded_type_args, span.clone());
+        ctx.type_arg_params.insert(expr, slot_params);
     }
 
     // Emit where clause constraints.
@@ -1404,9 +1433,11 @@ pub(super) fn solve_member(
     // The protocol's args ride along: `Int8(from: x)` resolves through
     // `Convertible[From]`, and `Int8: Convertible` alone holds for ANY
     // declared `From` — the obligation is `Int8: Convertible[typeof x]`.
-    if let Some(protocol) = resolution.via_protocol {
-        ctx.conforms_with_args(receiver, protocol, proto_type_args_tvs, span.clone());
-    }
+    // Emitted after the arguments bind (below), so a lone applicable
+    // conformance (`Int8: Convertible[Int8]`) can't pin the protocol args
+    // ahead of the call's real argument: `Int8(from: someInt64)` then fails
+    // as `Int8 !: Convertible[Int64]`, not as a bare argument mismatch.
+    let via_protocol_obligation = resolution.via_protocol.map(|p| (p, proto_type_args_tvs));
 
     // Bind arguments to parameters in declaration order, allowing defaulted
     // params to be skipped anywhere. Single source of truth: `arg_binding`.
@@ -1612,6 +1643,19 @@ pub(super) fn solve_member(
             ctx.ref_ty(ret_tv, lends_mutating)
         },
         _ => ret_tv,
+    };
+    if let Some((protocol, args)) = via_protocol_obligation {
+        ctx.conforms_with_args(receiver, protocol, args, span.clone());
+    }
+    // An init called on its type produces the receiver, wrapped by its
+    // effect (`Self?` for a failable `init(exactly:)?`, `Self throws E`) —
+    // not its declared `()`. Same-label inits picked here by argument type
+    // rely on it. A delegating `self.init(...)` (instance context) stays `()`.
+    let ret_tv = if is_static_context && matches!(resolution.kind, crate::resolve::MemberKind::Init)
+    {
+        super::call::wrap_init_call_result(ctx, resolution.entity, receiver, &subs, &span)
+    } else {
+        ret_tv
     };
     let args_decay = !matches!(resolution.kind, crate::resolve::MemberKind::Field { .. });
     bind_call_result(ctx, result, ret_tv, expr, span.clone(), args_decay);
@@ -1942,6 +1986,7 @@ pub(super) fn solve_implicit_pat(
     ctx: &mut InferCtx<'_>,
     scrutinee: TyVar,
     name: &str,
+    case: Option<Entity>,
     arg_tys: Vec<TyVar>,
     labels: Vec<Option<String>>,
     span: Span,
@@ -1951,6 +1996,7 @@ pub(super) fn solve_implicit_pat(
         return SolveResult::Deferred(Constraint::ImplicitPat {
             scrutinee,
             name: name.to_string(),
+            case,
             arg_tys,
             labels,
             span,
@@ -1987,15 +2033,20 @@ pub(super) fn solve_implicit_pat(
         },
     };
 
-    // Search children for an enum case with the matching name
+    // A pinned case is matched by identity (a scrutinee of another enum
+    // already failed the pattern's `Equal`); an implicit `.Name` searches the
+    // scrutinee's cases for that name.
     let children = ctx.query_ctx.children_of(enum_entity).to_vec();
-    let case_entity = children.iter().copied().find(|&child| {
-        ctx.query_ctx.get::<NodeKind>(child) == Some(&NodeKind::EnumCase)
-            && ctx
-                .query_ctx
-                .get::<Name>(child)
-                .is_some_and(|n| n.0 == name)
-    });
+    let case_entity = match case {
+        Some(case) => children.contains(&case).then_some(case),
+        None => children.iter().copied().find(|&child| {
+            ctx.query_ctx.get::<NodeKind>(child) == Some(&NodeKind::EnumCase)
+                && ctx
+                    .query_ctx
+                    .get::<Name>(child)
+                    .is_some_and(|n| n.0 == name)
+        }),
+    };
 
     let Some(case_entity) = case_entity else {
         // No matching case found — poison arg TyVars to suppress cascades.
@@ -2265,4 +2316,20 @@ pub(super) fn receiver_conformance_count(
     protocol: kestrel_hecs::Entity,
 ) -> usize {
     positive_conformances_to(ctx, recv, protocol).len()
+}
+
+/// Whether an extension's own param is in scope in the body being inferred:
+/// the body lies inside that extension.
+fn ext_param_in_scope(ctx: &InferCtx<'_>, param: kestrel_hecs::Entity) -> bool {
+    let Some(ext) = ctx.query_ctx.parent_of(param) else {
+        return false;
+    };
+    let mut current = Some(ctx.owner);
+    while let Some(entity) = current {
+        if entity == ext {
+            return true;
+        }
+        current = ctx.query_ctx.parent_of(entity);
+    }
+    false
 }

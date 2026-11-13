@@ -135,7 +135,7 @@ fn is_compound_assign(kind: Option<K>) -> bool {
 /// | 15 | `??` (right-assoc) |
 /// | 20 | `and` |
 /// | 30 | `==` `!=` `<` `>` `<=` `>=` `is` (left-assoc: `a < b < c` is `(a < b) < c`) |
-/// | 40 | `..=` `..<` |
+/// | 40 | `..=` `..<`, and the one-sided `a..` `..<b` `..=b` ([`RANGE_BP`]) |
 /// | 50 | `+` `-` `\|` `^` |
 /// | 60 | `*` `/` `%` `&` |
 /// | 70 | `<<` `>>` |
@@ -155,7 +155,7 @@ pub(crate) fn binary_binding_power(kind: K) -> Option<(u8, u8)> {
         | K::Greater
         | K::LessEquals
         | K::GreaterEquals => 30,
-        K::DotDotEquals | K::DotDotLess => 40,
+        K::DotDotEquals | K::DotDotLess => RANGE_BP,
         K::Plus | K::Minus | K::Pipe | K::Caret => 50,
         K::Star | K::Slash | K::Percent | K::Ampersand => 60,
         K::LessLess | K::GreaterGreater => 70,
@@ -210,6 +210,11 @@ fn binary(p: &mut Parser<'_>, cond: bool) -> Option<ExprInfo> {
     binary_bp(p, cond, 0)
 }
 
+/// Binding power of every range operator: binary `a..<b` / `a..=b`, and the
+/// one-sided forms, which group like a binary range missing an end —
+/// `x + 2..` is `(x + 2)..`, `..<n - 1` is `..<(n - 1)`, `-2..` is `(-2)..`.
+const RANGE_BP: u8 = 40;
+
 /// Binding power of `is` / `as?`, which take a type on the right.
 const IS_BP: u8 = 30;
 const AS_BP: u8 = 80;
@@ -236,6 +241,11 @@ fn binary_bp(p: &mut Parser<'_>, cond: bool, min_bp: u8) -> Option<ExprInfo> {
     loop {
         if let Some(folded) = type_operator(p, lhs, min_bp) {
             lhs = folded;
+            continue;
+        }
+        // Postfix `start..` closes everything to its left at range level.
+        if p.at(K::DotDot) && RANGE_BP >= min_bp {
+            lhs = wrap(p, lhs.cm, K::ExprPostfix, |p| p.bump(K::DotDot));
             continue;
         }
         let Some((left, right)) = p.current().and_then(binary_binding_power) else {
@@ -296,11 +306,15 @@ fn operand(p: &mut Parser<'_>, cond: bool) -> Option<ExprInfo> {
 fn unary(p: &mut Parser<'_>, cond: bool) -> ExprInfo {
     let m = start2(p);
     let is_amp = p.at(K::Ampersand);
+    let is_range = p.at_any(&[K::DotDotLess, K::DotDotEquals]);
     p.bump_any();
     if is_amp {
         p.eat(K::Mutating);
     }
-    if !cond && is_unary_op(p.current()) {
+    if is_range {
+        // `..<end` takes its end like a binary range's right operand.
+        binary_bp(p, cond, RANGE_BP + 1);
+    } else if !cond && is_unary_op(p.current()) {
         unary(p, cond);
     } else {
         postfix(p, cond);
@@ -399,7 +413,7 @@ fn at_optional_bind(p: &Parser<'_>) -> bool {
     p.at(K::Question) && p.nth_at(1, K::Dot) && p.joined_at(p.token_pos() + 1)
 }
 
-/// Calls, adjacent member accesses, `?.` binds, `!` and `..`. In a
+/// Calls, adjacent member accesses, `?.` binds and `!`. In a
 /// condition, `.` may also follow a line break and `init` is not a member
 /// name. Sets `binds` when a `?.` is consumed.
 fn tight_ops(p: &mut Parser<'_>, mut chain: Chain, cond: bool, binds: &mut bool) -> Chain {
@@ -423,7 +437,7 @@ fn tight_ops(p: &mut Parser<'_>, mut chain: Chain, cond: bool, binds: &mut bool)
                 // `?.b` / `?.0`: the joined-`.` arm takes the member next.
                 chain = Chain::Done(w.cm, w.kind);
             },
-            Some(K::Bang | K::DotDot) => {
+            Some(K::Bang) => {
                 let info = close(p, chain);
                 let w = wrap(p, info.cm, K::ExprPostfix, |p| p.bump_any());
                 chain = Chain::Done(w.cm, w.kind);

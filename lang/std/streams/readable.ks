@@ -34,6 +34,14 @@ public protocol Readable {
     mutating func read(mutating into buf: Slice[UInt8]) -> Result[Int64, IoError]
 }
 
+/// A borrowed reader reads from its referent, so a wrapper can borrow a
+/// stream instead of consuming it: `BufferedReader(&mutating socket)`.
+extend &mutating R: Readable where R: Readable {
+    public mutating func read(mutating into buf: Slice[UInt8]) -> Result[Int64, IoError] {
+        self.read(into: buf)
+    }
+}
+
 extend Readable {
     /// Reads to end of stream, appending to `buf`. Returns the number of
     /// bytes appended. Retries reads interrupted by a signal.

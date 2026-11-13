@@ -75,7 +75,7 @@ public struct Inflater: Decompressor {
     /// trailer). Only meaningful once `isFinished` is true.
     public var remainingInput: Array[UInt8] { copyTail(self.input, from: self.bitOffset / 8) }
 
-    public mutating func write[S](input: &S) -> Result[Array[UInt8], DeflateError] where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized {
+    public mutating func write(input: &Slice[UInt8]) -> Result[Array[UInt8], DeflateError] {
         if let .Some(error) = self.failure { return .Err(error); }
         self.input.append(contentsOf: input.asUnsafeSlice());
 

@@ -285,8 +285,10 @@ pub enum WhereClause {
     /// name string (D7's deferred fold, G25 step 3). `WhereClausesOf` produces
     /// exactly two shapes, read through [`WhereSubject::equality_lhs`].
     Equality { subject: WhereSubject, rhs: HirTy },
-    /// `T: not P` — a negative bound. Decided by the entailment kernel
-    /// (`Goal::NotConforms`) and lowered to MIR's `NotImplements`.
+    /// `T: not P` — a relaxation of an implicit marker bound (Copyable,
+    /// Static, Sized): `T` *may* lack `P`. Never a requirement, so the
+    /// entailment kernel has no goal for it; lowered to MIR's
+    /// `NotImplements` so copy and drop behavior know `T` may lack `P`.
     NotBound {
         subject: WhereSubject,
         protocol: Entity,
@@ -932,6 +934,12 @@ impl TypeResolver for WorldResolver<'_> {
                     return Err(MemberError::NotFound);
                 }
             },
+            1 if witnesses_parameterized_requirement(self.ctx, self.root, entity, matches[0]) => {
+                match self.try_resolve_through_protocol(entity, name, args, &matches) {
+                    Some(proto_res) => return Ok(proto_res),
+                    None => matches[0],
+                }
+            },
             1 => matches[0],
             _ => {
                 // Same-label overloads that all witness one requirement of a
@@ -953,6 +961,49 @@ impl TypeResolver for WorldResolver<'_> {
 
         self.build_member_resolution(member)
     }
+}
+
+/// Whether init `member` of `type_entity` witnesses a requirement of a
+/// PARAMETERIZED protocol the type conforms to with args that appear in the
+/// member's own parameter types: `Int8.init(from: Int8)` for
+/// `Convertible[Int8]`. Such a call resolves through the protocol even with
+/// a single candidate, so it is checked like the multi-witness case
+/// (`Int64(from:)`): a wrong argument fails as `Int8 !: Convertible[Int64]`,
+/// which names the conversion that does exist, not as a bare mismatch.
+pub(crate) fn witnesses_parameterized_requirement(
+    ctx: &QueryContext<'_>,
+    root: Entity,
+    type_entity: Entity,
+    member: Entity,
+) -> bool {
+    // Inits only: an init's result is the type itself, so collapsing loses
+    // nothing. A method's result can name an associated type (`Equals.Output`)
+    // that the abstract requirement leaves open.
+    if ctx.get::<NodeKind>(member) != Some(&NodeKind::Initializer) {
+        return false;
+    }
+    let Some(param_tys) = ctx.query(LowerCallableTypes {
+        entity: member,
+        root,
+    }) else {
+        return false;
+    };
+    let param_tys: Vec<HirTy> = param_tys.into_iter().flatten().collect();
+    let insts = ctx.query(kestrel_name_res::ConformingProtocolInstantiations {
+        entity: type_entity,
+        root,
+    });
+    insts.iter().any(|(protocol, source, ast_args)| {
+        if ast_args.is_empty() {
+            return false;
+        }
+        let args =
+            kestrel_hir_lower::conformance_protocol_args(ctx, root, *protocol, *source, ast_args);
+        !args.is_empty()
+            && args
+                .iter()
+                .all(|a| param_tys.iter().any(|p| p.same_type(a)))
+    })
 }
 
 /// Compatibility check between a protocol method's parameter types and a
@@ -1113,13 +1164,9 @@ pub(crate) fn structural_ty_kind(
     if let Some(arity) = lang_tuple_arity(ctx, entity) {
         return (args.len() == arity).then(|| TyKind::Tuple(args.to_vec()));
     }
-    let in_lang = ctx
-        .parent_of(entity)
-        .and_then(|p| ctx.get::<kestrel_ast_builder::Name>(p))
-        .is_some_and(|n| n.0 == "lang");
-    match ctx.get::<kestrel_ast_builder::Name>(entity)?.0.as_str() {
-        "()" if in_lang => Some(TyKind::Tuple(Vec::new())),
-        "!" if in_lang => Some(TyKind::Never),
+    match ctx.get::<kestrel_ast_builder::LangType>(entity)? {
+        kestrel_ast_builder::LangType::Unit => Some(TyKind::Tuple(Vec::new())),
+        kestrel_ast_builder::LangType::Never => Some(TyKind::Never),
         _ => None,
     }
 }
@@ -1131,24 +1178,20 @@ impl WorldResolver<'_> {
     /// `(A, B, …)` → (`lang.(,)` of that arity, the elements). `None` for
     /// every other type. The reverse is [`structural_ty_kind`].
     pub(crate) fn structural_view(&self, ty: &TyKind) -> Option<(Entity, Vec<TyVar>)> {
-        let (name, args) = match ty {
-            TyKind::Ref {
-                mutating: true,
-                pointee,
-            } => ("&mutating".to_string(), vec![*pointee]),
-            TyKind::Ref {
-                mutating: false,
-                pointee,
-            } => ("&".to_string(), vec![*pointee]),
-            TyKind::Tuple(elems) if elems.is_empty() => ("()".to_string(), Vec::new()),
-            TyKind::Tuple(elems) => (
-                kestrel_ast_builder::lang_module::lang_tuple_name(elems.len()),
-                elems.clone(),
+        use kestrel_ast_builder::LangType;
+        let (lang_ty, args) = match ty {
+            TyKind::Ref { mutating, pointee } => (
+                LangType::Ref {
+                    mutating: *mutating,
+                },
+                vec![*pointee],
             ),
-            TyKind::Never => ("!".to_string(), Vec::new()),
+            TyKind::Tuple(elems) if elems.is_empty() => (LangType::Unit, Vec::new()),
+            TyKind::Tuple(elems) => (LangType::Tuple(elems.len()), elems.clone()),
+            TyKind::Never => (LangType::Never, Vec::new()),
             _ => return None,
         };
-        let entity = kestrel_name_res::extensions::resolve_lang_child(self.ctx, self.root, &name)?;
+        let entity = kestrel_name_res::extensions::resolve_lang_type(self.ctx, self.root, lang_ty)?;
         Some((entity, args))
     }
 
@@ -1477,6 +1520,12 @@ impl WorldResolver<'_> {
                     _ => return Err(MemberError::NotFound),
                 }
             },
+            1 if witnesses_parameterized_requirement(self.ctx, self.root, *entity, matches[0]) => {
+                match self.try_resolve_through_protocol(*entity, name, _args, &matches) {
+                    Some(proto_res) => return Ok(proto_res),
+                    None => matches[0],
+                }
+            },
             1 => matches[0],
             _ => {
                 // Multiple candidates with same labels — try protocol-based resolution.
@@ -1704,8 +1753,8 @@ impl WorldResolver<'_> {
         };
 
         // Get type parameters. When the member sits inside an extension
-        // that introduces its own free type params from the conformance RHS
-        // (e.g., `extend Int64: ArrayIndex[T]`), append those so the
+        // that declares its own type params (e.g., `extend[T] Int64:
+        // ArrayIndex[T]`), append those so the
         // call-site gets fresh inferable TyVars for them — they can't be
         // substituted from the receiver (concrete target like `Int64` carries
         // no args).

@@ -40,15 +40,12 @@ pub(super) enum BlockFlavor {
 }
 
 impl BlockFlavor {
-    fn allows_guard(self) -> bool {
-        matches!(self, Self::Top | Self::Inline | Self::Closure)
-    }
-
+    /// The flavor of a `guard`'s `else` block. A guard may nest inside
+    /// another's `else`, which keeps the outer block's flavor.
     fn guard_else(self) -> Self {
-        if self == Self::Top {
-            Self::GuardElseTop
-        } else {
-            Self::GuardElseInline
+        match self {
+            Self::Top | Self::GuardElseTop => Self::GuardElseTop,
+            Self::Inline | Self::Closure | Self::GuardElseInline => Self::GuardElseInline,
         }
     }
 
@@ -131,7 +128,7 @@ fn at_stmt_boundary(p: &Parser<'_>) -> bool {
 pub(super) fn block_items(p: &mut Parser<'_>, flavor: BlockFlavor) {
     while !p.at(K::RBrace) && !p.at_eof() {
         match p.current() {
-            Some(K::Guard) if flavor.allows_guard() => guard_stmt(p, flavor.guard_else()),
+            Some(K::Guard) => guard_stmt(p, flavor.guard_else()),
             Some(K::Deinit) => deinit_stmt(p),
             Some(K::Let | K::Var) => var_decl(p),
             _ if at_expr_start(p) => expr_item(p, flavor),
@@ -215,7 +212,9 @@ fn deinit_stmt(p: &mut Parser<'_>) {
     s.complete(p, K::Statement);
 }
 
-/// `guard cond, let p = v, … else { … }`. Conditions are full expressions.
+/// `guard cond, let p = v, … else { … };?`. Conditions are full
+/// expressions. The `;` is optional: a guard reads like a `let`, which
+/// takes one, so writing it is not an error.
 fn guard_stmt(p: &mut Parser<'_>, else_flavor: BlockFlavor) {
     let s = p.start();
     let m = p.start();
@@ -233,6 +232,7 @@ fn guard_stmt(p: &mut Parser<'_>, else_flavor: BlockFlavor) {
     if p.expect(K::Else) {
         block(p, else_flavor);
     }
+    p.eat(K::Semicolon);
     m.complete(p, K::GuardStatement);
     s.complete(p, K::Statement);
 }

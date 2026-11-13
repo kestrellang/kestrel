@@ -38,6 +38,17 @@ public protocol Writable {
     mutating func flush() -> Result[(), IoError]
 }
 
+/// A borrowed writer writes to its referent, so a wrapper can borrow a
+/// stream instead of consuming it: `BufferedWriter(&mutating file)`.
+extend &mutating W: Writable where W: Writable {
+    public mutating func write(from buf: Slice[UInt8]) -> Result[Int64, IoError] {
+        self.write(from: buf)
+    }
+    public mutating func flush() -> Result[(), IoError] {
+        self.flush()
+    }
+}
+
 extend Writable {
     /// Writes all of `buf`, looping over short writes and retrying writes
     /// interrupted by a signal.
@@ -82,7 +93,7 @@ extend Writable {
     }
 
     /// Writes `value` formatted with its default options.
-    public mutating func write(formatted value: some Formattable and not Static) -> Result[(), IoError] {
+    public mutating func write(formatted value: &some Formattable and not Static and not Sized) -> Result[(), IoError] {
         self.write(text: value.formatted())
     }
 

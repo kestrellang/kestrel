@@ -195,6 +195,31 @@ pub struct InferCtx<'a> {
     /// whose type only the target can give (`none()`) still unifies.
     pub(crate) synth_pending_exprs: HashSet<HirExprId>,
     pub(crate) synth_gate: bool,
+    /// While up, a borrowed argument whose own type is still pending (a
+    /// method call's result) waits for it before coercing, so it can peel
+    /// through `Indirection` instead of being pinned to the param's type.
+    /// Drops after the first flush, before literal defaults, so a pending
+    /// argument only the param can type (`x.f(1 << 26)`) still unifies with
+    /// it ahead of defaulting.
+    pub(crate) view_peel_gate: bool,
+    /// While up, a borrowed argument whose type is still open is not linked
+    /// to an equally open param type (`show(sl)` with `let sl = xs(0..<2)`
+    /// still deferred): the argument may yet turn out to be a ref, which
+    /// passes its pointee. Drops after the defaults, so an argument only the
+    /// param can type (`show(.none)`) still unifies with it.
+    pub(crate) view_link_gate: bool,
+    /// The receiver a member lookup started on, for one that peeled through
+    /// `Indirection`: a miss reports the type the user wrote (`String`), not
+    /// the pointee the lookup ended on (`StringSlice`).
+    pub(crate) peel_receivers: HashMap<HirExprId, TyVar>,
+    /// Values assigned to a `var` local (`a = s.trimmedStart()`). When the
+    /// local holds a shared ref, the assignment REBINDS it to the new ref:
+    /// writing through a `&` is never legal, so nothing else can be meant.
+    pub(crate) rebind_values: HashSet<HirExprId>,
+    /// Array / dictionary literal elements: a slice element decays to its
+    /// pointee (a collection's element must be Static, which a ref never
+    /// is), so the error is the clearer "it is unsized" one.
+    pub(crate) collection_elements: HashSet<HirExprId>,
     /// Tail leaves of optional-chain arms. Their pending coerce waits for
     /// the leaf's own type even after `synth_gate` drops: unifying first
     /// would assume flattening, a silent miscompile when the tail is not an
@@ -302,6 +327,16 @@ pub struct InferCtx<'a> {
     /// (`solve_coerce`); a `consuming` argument never does.
     pub(crate) view_args: HashMap<HirExprId, bool>,
 
+    /// Borrowed arguments converted by `DecaysFrom` (`see(x: String)` given a
+    /// slice): the call copies a view it could have borrowed, so a lint
+    /// suggests taking `&View` instead.
+    pub(crate) borrowed_decay_args: HashSet<HirExprId>,
+
+    /// While up, a ref whose pointee is still open waits before coercing
+    /// into a `DecaysFrom` target, so the view isn't pinned to the owned
+    /// type. Dropped once every default has run.
+    pub(crate) decay_wait_gate: bool,
+
     /// `Indirection`-peel chain per ARGUMENT expr (`takes(xs)` with
     /// `takes(xs: &Slice[T])` and `xs: Array[T]`). Kept apart from
     /// `indirection_peels`, which an argument that is itself a peeled member
@@ -325,6 +360,11 @@ pub struct InferCtx<'a> {
     /// point at the right call site without threading HirBody through
     /// the solver.
     pub(crate) type_arg_spans: HashMap<HirExprId, Span>,
+    /// For a recorded type-arg list whose slots aren't the callee's own
+    /// `TypeParams` (a member reached through a protocol extension leads
+    /// with the protocol's params), the param each slot stands for, `None`
+    /// where it has no name. Read by `report_unresolved_type_params`.
+    pub(crate) type_arg_params: HashMap<HirExprId, Vec<Option<Entity>>>,
 
     /// Source span of each collection-literal TyVar (array / dictionary), so
     /// the type it defaults to (`Array[?E]`) is well-formedness-checked at
@@ -421,6 +461,10 @@ pub struct InferCtx<'a> {
     /// convention upgrade to literals only — a named function value's
     /// conventions reflect its real ABI and must not be rewritten.
     pub(crate) closure_literal_exprs: HashSet<HirExprId>,
+    /// Collection-literal arguments generated as a placeholder and checked
+    /// against the param's type later (`gen_call_args_phased`). Their
+    /// coercion is what hands them that type, so it never waits.
+    pub(crate) postponed_literal_args: HashSet<HirExprId>,
 
     /// TyVars that were unified with `Never` while still unresolved.
     /// `unify(Never, Unresolved)` is intentionally a no-op — Never is
@@ -481,6 +525,10 @@ pub struct InferCtx<'a> {
     /// Applied after constraint solving: only type vars still unconstrained
     /// get their default, so generic bodies like `Set.init()` keep `H` free.
     pub(crate) type_param_defaults: Vec<(TyVar, HirTy)>,
+    /// Vars instantiating a `not Static` type param: a ref argument binds
+    /// them to the ref itself, not to a copy of its pointee (see
+    /// `apply_ref_decay_defaults_into`).
+    pub(crate) ref_admitting_vars: Vec<TyVar>,
 
     /// De-dup set for TYPE-ARGUMENT conformance FAILURES, keyed by
     /// `(structural type string, protocol)`. The same wellformedness
@@ -502,6 +550,9 @@ pub struct PromotionInfo {
     pub method: Entity,
     /// Target type (what we're promoting to).
     pub target_ty: TyVar,
+    /// A `DecaysFrom` conversion's view type (`StringSlice`), held by
+    /// reference; `None` for a `FromValue` promotion.
+    pub view: Option<TyVar>,
 }
 
 /// Metadata for a function with an opaque return type (`some P`).
@@ -553,6 +604,11 @@ impl<'a> InferCtx<'a> {
             optional_chain_leaves: HashSet::default(),
             chain_modes: HashMap::default(),
             synth_gate: true,
+            view_peel_gate: true,
+            view_link_gate: true,
+            peel_receivers: HashMap::default(),
+            rebind_values: HashSet::default(),
+            collection_elements: HashSet::default(),
             interpolation_depth: 0,
             solving_depth: 0,
             formation_site: None,
@@ -572,11 +628,14 @@ impl<'a> InferCtx<'a> {
             resolutions: HashMap::default(),
             indirection_peels: HashMap::default(),
             view_args: HashMap::default(),
+            borrowed_decay_args: HashSet::default(),
+            decay_wait_gate: true,
             arg_indirection_peels: HashMap::default(),
             field_subscripts: HashMap::default(),
             promotions: HashMap::default(),
             type_args: HashMap::default(),
             type_arg_spans: HashMap::default(),
+            type_arg_params: HashMap::default(),
             literal_spans: HashMap::default(),
             literal_default_args: Vec::new(),
             expr_types: HashMap::default(),
@@ -597,6 +656,7 @@ impl<'a> InferCtx<'a> {
             type_tests: HashMap::default(),
             literal_pats: HashMap::default(),
             closure_literal_exprs: HashSet::default(),
+            postponed_literal_args: HashSet::default(),
             never_fallback_targets: HashSet::default(),
             expectation: None,
             expectation_pushed: false,
@@ -606,6 +666,7 @@ impl<'a> InferCtx<'a> {
             loop_break_tys: Vec::new(),
             opaque_return: None,
             type_param_defaults: Vec::new(),
+            ref_admitting_vars: Vec::new(),
             reported_typearg_conformance: HashSet::default(),
         }
     }
@@ -680,6 +741,7 @@ impl<'a> InferCtx<'a> {
     /// Give `tv` type param `param`'s declared default (`A = GlobalAllocator`)
     /// if nothing pins it by the end of solving. No-op without a default.
     pub(crate) fn defer_type_param_default(&mut self, tv: TyVar, param: Entity) {
+        self.note_type_param_var(tv, param);
         if let Some(default_ty) = self
             .query_ctx
             .query(kestrel_hir_lower::LowerTypeAnnotation {
@@ -689,6 +751,33 @@ impl<'a> InferCtx<'a> {
         {
             self.type_param_defaults.push((tv, default_ty));
         }
+    }
+
+    /// Record that `tv` instantiates type param `param`. A `not Static`
+    /// param may hold a reference, so it joins `ref_admitting_vars`. An
+    /// enum's params don't: an unpinned payload (`.Some(r)`) is an owned
+    /// snapshot of the pointee, and `Optional[&T]` takes an annotation.
+    pub(crate) fn note_type_param_var(&mut self, tv: TyVar, param: Entity) {
+        let context = self.query_ctx.parent_of(param).unwrap_or(param);
+        if self.query_ctx.get::<kestrel_ast_builder::NodeKind>(context)
+            == Some(&kestrel_ast_builder::NodeKind::Enum)
+        {
+            return;
+        }
+        let requirement = self.query_ctx.query(kestrel_semantics::TypeParamStaticRequirement {
+            param,
+            context,
+            root: self.root,
+        });
+        if requirement == kestrel_semantics::StaticRequirement::MayBeNonStatic {
+            self.ref_admitting_vars.push(tv);
+        }
+    }
+
+    /// Whether `tv` instantiates a `not Static` type param.
+    pub(crate) fn admits_ref(&self, tv: TyVar) -> bool {
+        let tv = self.resolve(tv);
+        self.ref_admitting_vars.iter().any(|&v| self.resolve(v) == tv)
     }
 
     /// Allocate a fresh type variable with a literal marker.

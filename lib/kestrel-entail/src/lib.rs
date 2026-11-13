@@ -184,8 +184,6 @@ pub enum Goal {
     /// `ty: protocol`. Protocol identity is by entity (protocol type args are
     /// pinned separately by the solver's `unify_bound_protocol_args`).
     Conforms { ty: ETy, protocol: Entity },
-    /// `ty: not protocol`.
-    NotConforms { ty: ETy, protocol: Entity },
     /// `a = b` — equality clauses (`where T = Int64`, `where I.Item = U`).
     Equal(ETy, ETy),
 }
@@ -305,13 +303,6 @@ fn entails_at<L: EntailLayer + ?Sized>(l: &L, goal: &Goal, depth: u32) -> Tri {
     }
     match goal {
         Goal::Conforms { ty, protocol } => conforms(l, &normalize(l, ty), *protocol, depth),
-        Goal::NotConforms { ty, protocol } => {
-            let ty = normalize(l, ty);
-            if ty == ETy::Poison {
-                return Tri::Holds;
-            }
-            !conforms(l, &ty, *protocol, depth)
-        },
         Goal::Equal(a, b) => same(l, &normalize(l, a), &normalize(l, b)),
     }
 }
@@ -543,10 +534,6 @@ fn normalize<L: EntailLayer + ?Sized>(l: &L, ty: &ETy) -> ETy {
 fn subst_goal(goal: &Goal, binds: &[(Entity, ETy)], recv: &ETy) -> Goal {
     match goal {
         Goal::Conforms { ty, protocol } => Goal::Conforms {
-            ty: subst(ty, binds, recv),
-            protocol: *protocol,
-        },
-        Goal::NotConforms { ty, protocol } => Goal::NotConforms {
             ty: subst(ty, binds, recv),
             protocol: *protocol,
         },

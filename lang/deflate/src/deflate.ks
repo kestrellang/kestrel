@@ -66,7 +66,7 @@ public struct Deflater: Compressor {
         self.distanceSymbols = makeDistanceSymbolTable();
     }
 
-    public mutating func write[S](input: &S) -> Array[UInt8] where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized {
+    public mutating func write(input: &Slice[UInt8]) -> Array[UInt8] {
         if self.isFinished { return []; }
         self.buffer.append(contentsOf: input.asUnsafeSlice());
         if self.buffer.count - self.historyLength >= compressChunkSize {
@@ -134,8 +134,8 @@ public struct Deflater: Compressor {
             self.writer.write(finalBit, 1);
             self.writer.write(0, 2);
             self.writer.alignToByte();
-            self.writer.write(UInt64(from: length), 16);
-            self.writer.write(UInt64(from: length ^ 0xFFFF), 16);
+            self.writer.write(UInt64(truncating: length), 16);
+            self.writer.write(UInt64(truncating: length ^ 0xFFFF), 16);
             for i in position..<(position + length) {
                 self.writer.bytes.append(self.buffer(i));
             }
@@ -218,12 +218,12 @@ public struct Deflater: Compressor {
             let lengthIndex = self.lengthSymbols(length);
             let symbol = 257 + lengthIndex;
             self.writer.writeCode(literalCodes(symbol), literalLengths(symbol));
-            self.writer.write(UInt64(from: length - LENGTH_BASES(lengthIndex)), LENGTH_EXTRA_BITS(lengthIndex));
+            self.writer.write(UInt64(truncating: length - LENGTH_BASES(lengthIndex)), LENGTH_EXTRA_BITS(lengthIndex));
 
             let distance = tokens.values(i);
             let distanceSymbol = self.distanceSymbols(distance);
             self.writer.writeCode(distanceCodes(distanceSymbol), distanceLengths(distanceSymbol));
-            self.writer.write(UInt64(from: distance - DISTANCE_BASES(distanceSymbol)), DISTANCE_EXTRA_BITS(distanceSymbol));
+            self.writer.write(UInt64(truncating: distance - DISTANCE_BASES(distanceSymbol)), DISTANCE_EXTRA_BITS(distanceSymbol));
         }
         self.writer.writeCode(literalCodes(256), literalLengths(256));
     }
@@ -449,19 +449,19 @@ struct DynamicHeader {
     }
 
     func write(mutating writer: BitWriter) {
-        writer.write(UInt64(from: self.literalCount - 257), 5);
-        writer.write(UInt64(from: self.distanceCount - 1), 5);
-        writer.write(UInt64(from: self.codeLengthCount - 4), 4);
+        writer.write(UInt64(truncating: self.literalCount - 257), 5);
+        writer.write(UInt64(truncating: self.distanceCount - 1), 5);
+        writer.write(UInt64(truncating: self.codeLengthCount - 4), 4);
         for i in 0..<self.codeLengthCount {
-            writer.write(UInt64(from: self.codeLengthLengths(CODE_LENGTH_ORDER(i))), 3);
+            writer.write(UInt64(truncating: self.codeLengthLengths(CODE_LENGTH_ORDER(i))), 3);
         }
         let codes = canonicalCodes(self.codeLengthLengths);
         for k in 0..<self.runSymbols.count {
             let symbol = self.runSymbols(k);
             writer.writeCode(codes(symbol), self.codeLengthLengths(symbol));
-            if symbol == 16 { writer.write(UInt64(from: self.runExtras(k)), 2); }
-            if symbol == 17 { writer.write(UInt64(from: self.runExtras(k)), 3); }
-            if symbol == 18 { writer.write(UInt64(from: self.runExtras(k)), 7); }
+            if symbol == 16 { writer.write(UInt64(truncating: self.runExtras(k)), 2); }
+            if symbol == 17 { writer.write(UInt64(truncating: self.runExtras(k)), 3); }
+            if symbol == 18 { writer.write(UInt64(truncating: self.runExtras(k)), 7); }
         }
     }
 }

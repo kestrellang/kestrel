@@ -53,7 +53,7 @@ public struct ZlibDecoder: Decompressor {
 
     public var isFinished: Bool { self.state == wrapperDone }
 
-    public mutating func write[S](input: &S) -> Result[Array[UInt8], DeflateError] where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized {
+    public mutating func write(input: &Slice[UInt8]) -> Result[Array[UInt8], DeflateError] {
         if let .Some(error) = self.failure { return .Err(error); }
         match self.step(input.asUnsafeSlice()) {
             .Ok(output) => .Ok(output),
@@ -126,7 +126,7 @@ public struct ZlibEncoder: Compressor {
         self.level = level;
     }
 
-    public mutating func write[S](input: &S) -> Array[UInt8] where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized {
+    public mutating func write(input: &Slice[UInt8]) -> Array[UInt8] {
         let data = input.asUnsafeSlice();
         self.checksum.update(data);
         var output = self.header();
@@ -179,7 +179,7 @@ public struct GzipDecoder: Decompressor {
     /// True after a complete member, when no further member has started.
     public var isFinished: Bool { self.state == wrapperDone }
 
-    public mutating func write[S](input: &S) -> Result[Array[UInt8], DeflateError] where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized {
+    public mutating func write(input: &Slice[UInt8]) -> Result[Array[UInt8], DeflateError] {
         if let .Some(error) = self.failure { return .Err(error); }
         self.pending.append(contentsOf: input.asUnsafeSlice());
         match self.step() {
@@ -289,7 +289,7 @@ public struct GzipEncoder: Compressor {
         self.level = level;
     }
 
-    public mutating func write[S](input: &S) -> Array[UInt8] where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized {
+    public mutating func write(input: &Slice[UInt8]) -> Array[UInt8] {
         let data = input.asUnsafeSlice();
         self.checksum.update(data);
         self.length = self.length + data.count;
@@ -302,7 +302,7 @@ public struct GzipEncoder: Compressor {
         var output = self.header();
         output.append(contentsOf: self.deflater.finish());
         appendUInt32LittleEndian(output, self.checksum.value);
-        appendUInt32LittleEndian(output, UInt32(from: self.length & 0xFFFFFFFF));
+        appendUInt32LittleEndian(output, UInt32(truncating: self.length & 0xFFFFFFFF));
         output
     }
 
@@ -344,38 +344,38 @@ func compressAll[C](encoder: C, data: UnsafeSlice[UInt8]) -> Array[UInt8] where 
 /// let unpacked = try Deflate.decompress(packed);
 /// ```
 public struct Deflate {
-    public static func compress[S](data: &S, level level: CompressionLevel = CompressionLevel.standard) -> Array[UInt8] where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized {
+    public static func compress(data: &Slice[UInt8], level level: CompressionLevel = CompressionLevel.standard) -> Array[UInt8] {
         compressAll(Deflater(level: level), data.asUnsafeSlice())
     }
 
     /// Fails on malformed or truncated input. Bytes after the end of the
     /// stream are ignored.
-    public static func decompress[S](data: &S) -> Result[Array[UInt8], DeflateError] where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized {
+    public static func decompress(data: &Slice[UInt8]) -> Result[Array[UInt8], DeflateError] {
         decompressAll(Inflater(), data.asUnsafeSlice())
     }
 }
 
 /// zlib (RFC 1950) in one call.
 public struct Zlib {
-    public static func compress[S](data: &S, level level: CompressionLevel = CompressionLevel.standard) -> Array[UInt8] where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized {
+    public static func compress(data: &Slice[UInt8], level level: CompressionLevel = CompressionLevel.standard) -> Array[UInt8] {
         compressAll(ZlibEncoder(level: level), data.asUnsafeSlice())
     }
 
     /// Fails on malformed or truncated input, a bad checksum, or trailing bytes.
-    public static func decompress[S](data: &S) -> Result[Array[UInt8], DeflateError] where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized {
+    public static func decompress(data: &Slice[UInt8]) -> Result[Array[UInt8], DeflateError] {
         decompressAll(ZlibDecoder(), data.asUnsafeSlice())
     }
 }
 
 /// gzip (RFC 1952) in one call.
 public struct Gzip {
-    public static func compress[S](data: &S, level level: CompressionLevel = CompressionLevel.standard) -> Array[UInt8] where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized {
+    public static func compress(data: &Slice[UInt8], level level: CompressionLevel = CompressionLevel.standard) -> Array[UInt8] {
         compressAll(GzipEncoder(level: level), data.asUnsafeSlice())
     }
 
     /// Decompresses every member. Fails on malformed or truncated input, a
     /// bad checksum or length, or trailing bytes that aren't a member.
-    public static func decompress[S](data: &S) -> Result[Array[UInt8], DeflateError] where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized {
+    public static func decompress(data: &Slice[UInt8]) -> Result[Array[UInt8], DeflateError] {
         decompressAll(GzipDecoder(), data.asUnsafeSlice())
     }
 }

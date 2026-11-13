@@ -2,13 +2,14 @@
 // stdlib: true
 
 // Fuzz H20: a call resolved through a generic protocol's member must check
-// the protocol's ARGS, not just the protocol. `Int8` conforms to
-// `Convertible[Int16]`, `[Int32]`, … but not `Convertible[Int8]`, so
-// `Int8(from: Int8)` is rejected at type-check (it used to pass and then
-// fail post-mono verification).
+// the protocol's ARGS, not just the protocol. `Int16` conforms to
+// `Convertible[Int8]`, `[UInt8]` and `[Int16]` but not `Convertible[Int32]`,
+// so `Int16(from: Int32)` is rejected at type-check (the original
+// `Int8(from: Int8)` case used to pass and then fail post-mono verification;
+// since lossless conversions, every type converts from itself).
 module Test
 
-import std.numeric.(Int8, Int64)
+import std.numeric.(Int16, Int32, Int64)
 
 protocol Sink[In] {
     func take(x: In) -> Int64
@@ -24,6 +25,6 @@ func f(s: S, t: String) -> Int64 {
 }
 
 func g() {
-    let a: Int8 = 5;
-    let b = Int8(from: a); // ERROR(E107)
+    let a: Int32 = 5;
+    let b = Int16(from: a); // ERROR(E107)
 }
