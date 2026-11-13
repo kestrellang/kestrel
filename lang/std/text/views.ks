@@ -1316,7 +1316,7 @@ fileprivate func endUnit(bound: RangeBound) -> Int64? {
 
 /// The sub-view over units `[start, end)`; `end` of `.None` runs to the end.
 /// `.None` unless `0 <= start <= end <= count`. One walk on walking views.
-fileprivate func sliceChecked[V, R](view: V, range: R) -> V? where V: TextView, V: not Static, R: SeqRange {
+fileprivate func sliceChecked[V, R](view: V, range: R) -> V? where V: TextView, V: not Static, R: SeqRange, R: not Copyable {
     let start = startUnit(range.startBound);
     if start < 0 {
         return .None
@@ -1336,7 +1336,7 @@ fileprivate func sliceChecked[V, R](view: V, range: R) -> V? where V: TextView, 
 }
 
 /// `view(range)`: the sub-view, trapping when the range doesn't fit.
-fileprivate func sliceOf[V, R](view: V, range: R) -> V where V: TextView, V: not Static, R: SeqRange {
+fileprivate func sliceOf[V, R](view: V, range: R) -> V where V: TextView, V: not Static, R: SeqRange, R: not Copyable {
     guard let .Some(sub) = sliceChecked(view, range) else {
         fatalError("text view range out of bounds")
     }
@@ -1352,7 +1352,7 @@ fileprivate func sliceUnits[V](view: V, start: Int64, end: Int64) -> V where V: 
 
 /// `view(unchecked: range)`: the sub-view with no bounds check; an open
 /// end runs to the end.
-fileprivate func sliceUnchecked[V, R](view: V, range: R) -> V where V: TextView, V: not Static, R: SeqRange {
+fileprivate func sliceUnchecked[V, R](view: V, range: R) -> V where V: TextView, V: not Static, R: SeqRange, R: not Copyable {
     let start = startUnit(range.startBound);
     if let .Some(end) = endUnit(range.endBound) {
         return sliceUnits(view, start, end)
@@ -1418,7 +1418,7 @@ fileprivate func clampUnit(position: Int64, n: Int64) -> Int64 {
 /// range keeps its length, cut at the end. A range with a start wraps the
 /// start (`-2..` is the last two); one without wraps the end (`..=-1` is
 /// everything). Empty on an empty view.
-fileprivate func sliceWrapped[V, R](view: V, range: R) -> V where V: TextView, V: not Static, R: SeqRange {
+fileprivate func sliceWrapped[V, R](view: V, range: R) -> V where V: TextView, V: not Static, R: SeqRange, R: not Copyable {
     let n = view.count;
     if n == 0 {
         return view._subView(startByte: 0, endByte: 0)
@@ -1655,64 +1655,18 @@ extend[V] Int64: ViewWrappable[V] where V: TextView, V: not Static {
     public static func readWrapped(consuming index: Int64, view: V) -> V.Element? { unitWrapped(view, index) }
 }
 
-extend[V] Range[Int64]: ViewIndex[V] where V: TextView, V: not Static {
+// Every `SeqRange` (`a..<b`, `a...b`, `a...`, `..<b`, `...b`) slices a
+// view; one blanket conformance covers them all.
+extend[V] SeqRange: ViewIndex[V] where V: TextView, V: not Static {
     type Output = V
-    public static func read(consuming index: Range[Int64], view: V) -> V { sliceOf(view, index) }
-    public static func readChecked(consuming index: Range[Int64], view: V) -> V? { sliceChecked(view, index) }
-    public static unsafe func readUnchecked(consuming index: Range[Int64], view: V) -> V { sliceUnchecked(view, index) }
+    public static func read(consuming index: Self, view: V) -> V { sliceOf(view, index) }
+    public static func readChecked(consuming index: Self, view: V) -> V? { sliceChecked(view, index) }
+    public static unsafe func readUnchecked(consuming index: Self, view: V) -> V { sliceUnchecked(view, index) }
 }
 
-extend[V] Range[Int64]: ViewWrappable[V] where V: TextView, V: not Static {
+extend[V] SeqRange: ViewWrappable[V] where V: TextView, V: not Static {
     type WrappedOutput = V
-    public static func readWrapped(consuming index: Range[Int64], view: V) -> V { sliceWrapped(view, index) }
-}
-
-extend[V] ClosedRange[Int64]: ViewIndex[V] where V: TextView, V: not Static {
-    type Output = V
-    public static func read(consuming index: ClosedRange[Int64], view: V) -> V { sliceOf(view, index) }
-    public static func readChecked(consuming index: ClosedRange[Int64], view: V) -> V? { sliceChecked(view, index) }
-    public static unsafe func readUnchecked(consuming index: ClosedRange[Int64], view: V) -> V { sliceUnchecked(view, index) }
-}
-
-extend[V] ClosedRange[Int64]: ViewWrappable[V] where V: TextView, V: not Static {
-    type WrappedOutput = V
-    public static func readWrapped(consuming index: ClosedRange[Int64], view: V) -> V { sliceWrapped(view, index) }
-}
-
-extend[V] RangeFrom[Int64]: ViewIndex[V] where V: TextView, V: not Static {
-    type Output = V
-    public static func read(consuming index: RangeFrom[Int64], view: V) -> V { sliceOf(view, index) }
-    public static func readChecked(consuming index: RangeFrom[Int64], view: V) -> V? { sliceChecked(view, index) }
-    public static unsafe func readUnchecked(consuming index: RangeFrom[Int64], view: V) -> V { sliceUnchecked(view, index) }
-}
-
-extend[V] RangeFrom[Int64]: ViewWrappable[V] where V: TextView, V: not Static {
-    type WrappedOutput = V
-    public static func readWrapped(consuming index: RangeFrom[Int64], view: V) -> V { sliceWrapped(view, index) }
-}
-
-extend[V] RangeUpTo[Int64]: ViewIndex[V] where V: TextView, V: not Static {
-    type Output = V
-    public static func read(consuming index: RangeUpTo[Int64], view: V) -> V { sliceOf(view, index) }
-    public static func readChecked(consuming index: RangeUpTo[Int64], view: V) -> V? { sliceChecked(view, index) }
-    public static unsafe func readUnchecked(consuming index: RangeUpTo[Int64], view: V) -> V { sliceUnchecked(view, index) }
-}
-
-extend[V] RangeUpTo[Int64]: ViewWrappable[V] where V: TextView, V: not Static {
-    type WrappedOutput = V
-    public static func readWrapped(consuming index: RangeUpTo[Int64], view: V) -> V { sliceWrapped(view, index) }
-}
-
-extend[V] RangeThrough[Int64]: ViewIndex[V] where V: TextView, V: not Static {
-    type Output = V
-    public static func read(consuming index: RangeThrough[Int64], view: V) -> V { sliceOf(view, index) }
-    public static func readChecked(consuming index: RangeThrough[Int64], view: V) -> V? { sliceChecked(view, index) }
-    public static unsafe func readUnchecked(consuming index: RangeThrough[Int64], view: V) -> V { sliceUnchecked(view, index) }
-}
-
-extend[V] RangeThrough[Int64]: ViewWrappable[V] where V: TextView, V: not Static {
-    type WrappedOutput = V
-    public static func readWrapped(consuming index: RangeThrough[Int64], view: V) -> V { sliceWrapped(view, index) }
+    public static func readWrapped(consuming index: Self, view: V) -> V { sliceWrapped(view, index) }
 }
 
 extend ByteIndex: ViewIndex[BytesView] {
