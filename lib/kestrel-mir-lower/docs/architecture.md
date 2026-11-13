@@ -119,7 +119,7 @@ back to the historical stack-env snapshot path.
   Each test compares the box's table pointer with the table literal at `T`
   (tables are interned per payload); `PathElement::Payload` views the data
   word as `&T`. Type-test patterns always lower in place mode.
-  `TakePayload` frees the box through `consumePointee` with the take thunk.
+  `TakePayload` frees the box through `consumeValue` with the take thunk.
 
 ## What Lives Elsewhere
 

@@ -65,7 +65,6 @@ struct UniqueBoxStorage[T]: not Copyable where T: not Copyable {
 ///   runs `T.deinit`.
 /// - `destroy()` runs `T.deinit` exactly once when the payload is still
 ///   present, and never when it has already been taken.
-@builtin(.UniqueBox)
 public struct UniqueBox[T, A = GlobalAllocator]: not Copyable where T: not Copyable, A: Allocator, A: Copyable {
     // `fileprivate` mirrors `RcBox.ptr`: same-file extensions may reach it.
     fileprivate var ptr: Pointer[UniqueBoxStorage[T]]

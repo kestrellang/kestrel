@@ -341,52 +341,51 @@ pub enum Builtin {
     /// A `mutating` requirement called through `any[B] P` needs it.
     MutableIndirection,
 
-    // ===== Shared-ownership box (implicit boxing) =====
-    /// The generic struct the compiler instantiates for implicit boxing —
-    /// escaping closure environments today; class storage, `any` payloads and
-    /// `indirect enum` payloads later. Bound to `RcBox` in the stdlib via
-    /// `@builtin(.SharedBox)`; the binding is swappable, so every boxing site
-    /// resolves the *entity* through this builtin and then calls only
-    /// `SharedBox` protocol requirements on it (docs/design/shared-box.md).
+    // ===== Boxes (implicit boxing) =====
+    /// `Box` — a handle onto one `Target` behind a pointer, built from a
+    /// value (`init(consuming:)`) and able to say whether it is the value's
+    /// sole owner (`isUnique`). The contract `any[B] P` checks (E402).
+    Box,
+    /// `SharedBox: Box` — a box whose handles alias: `sharedMutRef()` and
+    /// `isIdentical(to:)`. What closure and class boxes must provide.
     SharedBox,
-
-    // ===== Unique-ownership box (one-shot `consuming` closure envs) =====
-    /// The generic struct the compiler instantiates for a UNIQUELY owned heap
-    /// environment — a `consuming` closure's captures today. Bound to
-    /// `UniqueBox` in the stdlib via `@builtin(.UniqueBox)`.
-    ///
-    /// Deliberately not the shared box: a shared release drops the whole
-    /// payload, which double-frees the capture slots a one-shot body already
-    /// moved out (docs/plans/closure-kinds/closure-kinds-plan.md D5).
-    UniqueBox,
-
-    // ===== Existentials =====
-    /// The box `any P` desugars to: `any P` is `DefaultBox[<raw any P>]`.
-    /// `@builtin(.DefaultBoxType) public type DefaultBox[T] = RcBox[T]`
-    /// denotes the alias *target*, like the default literal types
-    /// (docs/plans/existentials/existentials-design.md).
-    DefaultBoxType,
+    /// A box that can give up its value: consuming requirements and
+    /// `consuming x as? T` go through `consumeValue`.
+    ConsumingIndirection,
     /// A type whose size is known at compile time — every type except a raw
     /// existential and a struct whose unsized tail is unsized. Structural,
     /// like `Static`: never declared; every type parameter carries an
     /// implicit `T: Sized`, relaxed with `where T: not Sized`.
     Sized,
-    /// The contract a box type must meet to appear in `any[B] P`.
-    ExistentialBox,
-    /// A box that can give up its payload: consuming requirements and
-    /// `consuming x as? T` go through `consumePointee`.
-    ConsumingIndirection,
-    /// The stdlib's single-owner box (`OwnedBox`): the box diagnostics
-    /// suggest when an existential's payload must be consumed.
+
+    // ===== Box bindings (`std.memory.box_bindings`) =====
+    // Each is a tagged type alias that denotes its (possibly chained) alias
+    // target, so std picks every box in one file and the compiler never names
+    // a box type (docs/design/shared-box.md). The feature bindings carry the
+    // protocol bound E470 checks at the alias ([`Builtin::box_binding_bound`]).
+    /// `Owned[T]` — std's single-owner box: what E145/E148 suggest for an
+    /// existential that must consume its value.
     OwnedBox,
+    /// `ClosureBox[T]` — escaping closure environments.
+    ClosureBox,
+    /// `ClassBox[T]` — class storage (unused until classes land).
+    ClassBox,
+    /// `AnyBox[T]` — the box plain `any P` is written in.
+    AnyBox,
+    /// `IndirectBox[T]` — a boxed recursive `indirect enum` case.
+    IndirectBox,
+    /// `ConsumingClosureBox[T]` — `consuming` closure environments. A shared
+    /// release would double-free the capture slots a one-shot body already
+    /// moved out (docs/plans/closure-kinds/closure-kinds-plan.md D5).
+    ConsumingClosureBox,
 
     // ===== Requirements / members the compiler calls by tag =====
     /// `BooleanConditional.boolValue()` — what a non-`Bool` condition calls.
     BooleanConditionalBoolValue,
-    /// `ConsumingIndirection.consumePointee(body:)` — hands a box's payload out.
-    ConsumingIndirectionConsumePointee,
-    /// `ExistentialBox.init(consuming value:)` — moves a payload into a new box.
-    ExistentialBoxInit,
+    /// `ConsumingIndirection.consumeValue(body:)` — hands a box's value out.
+    ConsumingIndirectionConsumeValue,
+    /// `Box.init(consuming value:)` — moves a value into a new box.
+    BoxInit,
     /// `SharedBox.sharedMutRef()` — mutable access through a shared handle.
     SharedBoxSharedMutRef,
     /// `UniqueBox.init(consuming value:)`.
@@ -653,8 +652,8 @@ impl Builtin {
             Self::Exitable => "Exitable",
             Self::ExitableReport => "ExitableReport",
             Self::BooleanConditionalBoolValue => "BooleanConditionalBoolValue",
-            Self::ConsumingIndirectionConsumePointee => "ConsumingIndirectionConsumePointee",
-            Self::ExistentialBoxInit => "ExistentialBoxInit",
+            Self::ConsumingIndirectionConsumeValue => "ConsumingIndirectionConsumeValue",
+            Self::BoxInit => "BoxInit",
             Self::SharedBoxSharedMutRef => "SharedBoxSharedMutRef",
             Self::UniqueBoxInit => "UniqueBoxInit",
             Self::UniqueBoxTakeValue => "UniqueBoxTakeValue",
@@ -675,26 +674,18 @@ impl Builtin {
             Self::Indirection => "Indirection",
             Self::MutableIndirection => "MutableIndirection",
 
-            // Shared box — a display name only, deliberately neither the
-            // conformer's name (`RcBox`) nor the protocol's (`SharedBox`):
-            // the binding is whatever type carries `@builtin(.SharedBox)`
-            // (`RcBox` today), found through the attribute index like every
-            // builtin. (This sentinel predates index-only resolution, when a
-            // name-based lookup would have found the wrong entity.)
-            Self::SharedBox => "SharedBoxBinding",
-
-            // Unique box — same rationale as the shared box above: resolution
-            // must go through the attribute index so the binding stays
-            // swappable, and the sentinel must not name any source type.
-            Self::UniqueBox => "UniqueBoxBinding",
-
-            // Default existential box — resolved through the index only, like
-            // the boxes above.
-            Self::DefaultBoxType => "DefaultBoxBinding",
+            // Boxes and their bindings: display names only; every one is
+            // found through the attribute index.
+            Self::Box => "Box",
+            Self::SharedBox => "SharedBox",
             Self::Sized => "Sized",
-            Self::ExistentialBox => "ExistentialBox",
             Self::ConsumingIndirection => "ConsumingIndirection",
-            Self::OwnedBox => "OwnedBox",
+            Self::OwnedBox => "Owned",
+            Self::ClosureBox => "ClosureBox",
+            Self::ClassBox => "ClassBox",
+            Self::AnyBox => "AnyBox",
+            Self::IndirectBox => "IndirectBox",
+            Self::ConsumingClosureBox => "ConsumingClosureBox",
         }
     }
 
@@ -931,8 +922,8 @@ impl Builtin {
             "Exitable" => Some(Self::Exitable),
             "ExitableReport" => Some(Self::ExitableReport),
             "BooleanConditionalBoolValue" => Some(Self::BooleanConditionalBoolValue),
-            "ConsumingIndirectionConsumePointee" => Some(Self::ConsumingIndirectionConsumePointee),
-            "ExistentialBoxInit" => Some(Self::ExistentialBoxInit),
+            "ConsumingIndirectionConsumeValue" => Some(Self::ConsumingIndirectionConsumeValue),
+            "BoxInit" => Some(Self::BoxInit),
             "SharedBoxSharedMutRef" => Some(Self::SharedBoxSharedMutRef),
             "UniqueBoxInit" => Some(Self::UniqueBoxInit),
             "UniqueBoxTakeValue" => Some(Self::UniqueBoxTakeValue),
@@ -953,18 +944,17 @@ impl Builtin {
             "Indirection" => Some(Self::Indirection),
             "MutableIndirection" => Some(Self::MutableIndirection),
 
-            // Shared-ownership box (implicit boxing)
+            // Boxes and their bindings
+            "Box" => Some(Self::Box),
             "SharedBox" => Some(Self::SharedBox),
-
-            // Unique-ownership box (one-shot closure environments)
-            "UniqueBox" => Some(Self::UniqueBox),
-
-            // Existentials
-            "DefaultBoxType" => Some(Self::DefaultBoxType),
             "Sized" => Some(Self::Sized),
-            "ExistentialBox" => Some(Self::ExistentialBox),
             "ConsumingIndirection" => Some(Self::ConsumingIndirection),
             "OwnedBox" => Some(Self::OwnedBox),
+            "ClosureBox" => Some(Self::ClosureBox),
+            "ClassBox" => Some(Self::ClassBox),
+            "AnyBox" => Some(Self::AnyBox),
+            "IndirectBox" => Some(Self::IndirectBox),
+            "ConsumingClosureBox" => Some(Self::ConsumingClosureBox),
 
             _ => None,
         }
@@ -987,8 +977,34 @@ impl Builtin {
                 | Self::DefaultNullLiteralType
                 | Self::DefaultArrayLiteralType
                 | Self::DefaultDictionaryLiteralType
-                | Self::DefaultBoxType
+                | Self::OwnedBox
+                | Self::ClosureBox
+                | Self::ClassBox
+                | Self::AnyBox
+                | Self::IndirectBox
+                | Self::ConsumingClosureBox
         )
+    }
+
+    /// The protocols a box binding's target must conform to: what the
+    /// compiler calls on that feature's box. `None` for every non-binding
+    /// builtin. Checked where the alias is declared (E470), so a mis-bound
+    /// box fails in std instead of at a lowering site.
+    pub fn box_binding_bound(self) -> Option<&'static [Builtin]> {
+        Some(match self {
+            // Escaping closures and classes alias their storage.
+            Self::ClosureBox | Self::ClassBox => &[Self::SharedBox],
+            // `any P` only needs `init(consuming:)` and the peel.
+            Self::AnyBox => &[Self::Box],
+            // Matching a boxed case moves the payload back out.
+            Self::IndirectBox => &[Self::Box, Self::ConsumingIndirection],
+            // The suggested single-owner box must actually consume.
+            Self::OwnedBox => &[Self::Box, Self::ConsumingIndirection],
+            // Still the bespoke `UniqueBox` (tag-called members, no
+            // protocols) until consuming closures move onto `Owned`.
+            Self::ConsumingClosureBox => &[],
+            _ => return None,
+        })
     }
 
     /// Metadata about what symbol kind this builtin expects.
@@ -1060,8 +1076,13 @@ impl Builtin {
             | Self::DefaultCharLiteralType
             | Self::DefaultNullLiteralType
             | Self::DefaultArrayLiteralType
-            | Self::DefaultDictionaryLiteralType
-            | Self::DefaultBoxType => BuiltinKind::TypeAlias,
+            | Self::DefaultDictionaryLiteralType => BuiltinKind::TypeAlias,
+            Self::OwnedBox
+            | Self::ClosureBox
+            | Self::ClassBox
+            | Self::AnyBox
+            | Self::IndirectBox
+            | Self::ConsumingClosureBox => BuiltinKind::TypeAlias,
 
             // FFI
             Self::FFISafe => BuiltinKind::Protocol {
@@ -1214,8 +1235,8 @@ impl Builtin {
             Self::Exitable => BuiltinKind::protocol(),
             Self::ExitableReport => BuiltinKind::ProtocolMethod,
             Self::BooleanConditionalBoolValue
-            | Self::ConsumingIndirectionConsumePointee
-            | Self::ExistentialBoxInit
+            | Self::ConsumingIndirectionConsumeValue
+            | Self::BoxInit
             | Self::SharedBoxSharedMutRef
             | Self::IndirectionPointeeRef
             | Self::MutableIndirectionPointeeMutRef => BuiltinKind::ProtocolMethod,
@@ -1240,17 +1261,7 @@ impl Builtin {
                 requires_fields_conform: false,
                 disallow_enum_conformance: false,
             },
-            Self::ExistentialBox | Self::ConsumingIndirection => BuiltinKind::protocol(),
-
-            // Shared box: the annotated symbol is the generic *struct* the
-            // compiler instantiates (`RcBox`), not the `SharedBox` protocol
-            // that states its contract.
-            Self::SharedBox => BuiltinKind::Struct,
-
-            // Unique box: the annotated symbol is the generic *struct* the
-            // compiler instantiates (`UniqueBox`).
-            Self::UniqueBox => BuiltinKind::Struct,
-            Self::OwnedBox => BuiltinKind::Struct,
+            Self::Box | Self::SharedBox | Self::ConsumingIndirection => BuiltinKind::protocol(),
 
             // Well-known types — `Bool` resolves by name first, but carries
             // `@builtin(.Bool)` as the attribute anchor so strategy 2 works too.

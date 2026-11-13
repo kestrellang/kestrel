@@ -98,14 +98,14 @@ fn lower_enum_drop_behavior(ctx: &LowerCtx, entity: Entity) -> DropBehavior {
     }
 }
 
-/// Store a recursive `indirect enum` case behind one `OwnedBox` holding its
+/// Store a recursive `indirect enum` case behind one `IndirectBox` holding its
 /// whole payload (A1 of the indirect-enums plan): the declared fields move to
 /// `indirect`, and the physical payload becomes the single box field, so
 /// layout, drop/clone shims, mono and codegen need no indirect-specific code.
-/// Without a stdlib `OwnedBox` the case stays inline (E406 is reported).
+/// Without a stdlib `IndirectBox` the case stays inline (E406 is reported).
 fn box_case(ctx: &mut LowerCtx, case: &mut EnumCaseDef) {
     let Some(owned_box) = ctx.query.query(kestrel_name_res::ResolveBuiltin {
-        builtin: kestrel_hir::Builtin::OwnedBox,
+        builtin: kestrel_hir::Builtin::IndirectBox,
         root: ctx.root,
     }) else {
         return;

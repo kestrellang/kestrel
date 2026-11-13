@@ -83,6 +83,7 @@ pub fn default_analyzers() -> AnalyzerRegistry {
     r.add_decl_check(decl::existential_box::ExistentialBoxAnalyzer);
     r.add_body_check(decl::existential_box::ExistentialBoxBodyAnalyzer);
     r.add_decl_check(decl::builtin_marker_protocol::BuiltinMarkerProtocolAnalyzer);
+    r.add_decl_check(decl::box_binding::BoxBindingAnalyzer);
     r.add_decl_check(decl::duplicate_builtin::DuplicateBuiltinAnalyzer);
     r.add_decl_check(decl::conformance_rules::ConformanceRulesAnalyzer);
     r.add_decl_check(decl::duplicate_deinit::DuplicateDeinitAnalyzer);

@@ -1,9 +1,11 @@
 //! The owning closure tiers: a heap-boxed environment, shared or unique.
 //!
-//! - **`escaping`** — the `@builtin(.SharedBox)` binding (`RcBox` today,
-//!   swappable — docs/design/shared-box.md): many handles, many calls, the
+//! - **`escaping`** — the `@builtin(.ClosureBox)` binding (`Shared`, i.e.
+//!   `RcBox`, today — swappable in `std.memory.box_bindings`,
+//!   docs/design/shared-box.md): many handles, many calls, the
 //!   last release destroys the captures.
-//! - **`consuming`** — the `@builtin(.UniqueBox)` binding: ONE owner, ONE
+//! - **`consuming`** — the `@builtin(.ConsumingClosureBox)` binding
+//!   (`UniqueBox` today): ONE owner, ONE
 //!   call. The call takes the environment out of the box into the callee's
 //!   frame (where per-slot partial-move machinery applies) and the release
 //!   shim reclaims the block; a closure that is never called releases with
@@ -13,8 +15,8 @@
 //!
 //! The compiler emits NO retain/release/allocate sequence of its own: it
 //! instantiates the binding at the synthesized environment struct `E` and
-//! touches it only through the binding's requirements, so a single lang-item
-//! swap retargets every boxing site.
+//! touches it only through the binding's requirements, so editing the
+//! binding alias retargets every boxing site.
 //!
 //! Value shape (4 words, `passes/layout.rs` + both codegen `ty.rs`):
 //! `{fn_ptr, env_handle, retain_fn, release_fn}`. The two shim pointers are
@@ -139,7 +141,7 @@ fn forget_handle_insts(
     cur
 }
 
-/// The resolved `@builtin(.SharedBox)` binding, specialized at one payload
+/// A resolved box binding (`ClosureBox` or `ConsumingClosureBox`), specialized at one payload
 /// type. Every member is found BY REQUIREMENT NAME on the binding entity —
 /// never by a hard-coded `RcBox` reference (plan D9).
 pub(crate) struct BoxBinding {
@@ -203,7 +205,7 @@ fn exactly_one_box_member<T: Copy>(matches: &[T], requirement: &str) -> T {
         [one] => *one,
         [] => panic!(
             "ICE: box binding is missing its required member `{requirement}` — \
-             the `@builtin(.SharedBox)`/`@builtin(.UniqueBox)` type resolved but \
+             the `@builtin(.ClosureBox)`/`@builtin(.ConsumingClosureBox)` box resolved but \
              does not implement the requirement"
         ),
         many => panic!(
@@ -217,11 +219,10 @@ fn exactly_one_box_member<T: Copy>(matches: &[T], requirement: &str) -> T {
 
 impl OssaBodyCtx<'_, '_> {
     /// Resolve the shared-box binding at `payload_ty`, or `None` when the
-    /// stdlib supplies no `@builtin(.SharedBox)` type (a `stdlib: false` test):
+    /// stdlib supplies no `@builtin(.ClosureBox)` binding (a `stdlib: false` test):
     /// the caller then falls back to the historical stack environment.
     pub(crate) fn resolve_box_binding(&mut self, payload_ty: TyId) -> Option<BoxBinding> {
-        let mut b =
-            self.resolve_box_common(Builtin::SharedBox, Builtin::ExistentialBoxInit, payload_ty)?;
+        let mut b = self.resolve_box_common(Builtin::ClosureBox, Builtin::BoxInit, payload_ty)?;
         let entity = match self.ctx.module.ty_arena.get(b.handle_ty) {
             MirTy::Named { entity, .. } => *entity,
             _ => return None,
@@ -232,13 +233,16 @@ impl OssaBodyCtx<'_, '_> {
         Some(b)
     }
 
-    /// Resolve the `@builtin(.UniqueBox)` binding at `payload_ty` — the
+    /// Resolve the `@builtin(.ConsumingClosureBox)` binding at `payload_ty` — the
     /// `consuming` tier's container. Same shape as [`Self::resolve_box_binding`],
     /// different requirements: a unique box is taken from (once) or destroyed
     /// (once), never shared.
     pub(crate) fn resolve_unique_box_binding(&mut self, payload_ty: TyId) -> Option<BoxBinding> {
-        let mut b =
-            self.resolve_box_common(Builtin::UniqueBox, Builtin::UniqueBoxInit, payload_ty)?;
+        let mut b = self.resolve_box_common(
+            Builtin::ConsumingClosureBox,
+            Builtin::UniqueBoxInit,
+            payload_ty,
+        )?;
         let entity = match self.ctx.module.ty_arena.get(b.handle_ty) {
             MirTy::Named { entity, .. } => *entity,
             _ => return None,
@@ -366,7 +370,7 @@ impl OssaBodyCtx<'_, '_> {
     /// peeled to a raw pointer), so a missing tag or a missing / duplicated
     /// member is a broken stdlib, never the legitimate "no box available"
     /// case. See [`exactly_one_box_member`].
-    fn find_box_member(&mut self, entity: Entity, tag: Builtin) -> Entity {
+    pub(crate) fn find_box_member(&mut self, entity: Entity, tag: Builtin) -> Entity {
         let what = tag.name();
         let Some(requirement) = self.ctx.query.query(kestrel_name_res::ResolveBuiltin {
             builtin: tag,
@@ -382,53 +386,6 @@ impl OssaBodyCtx<'_, '_> {
             return requirement;
         }
         exactly_one_box_member(&matches, what)
-    }
-
-    /// Find the ONE member of `entity` (or its extensions) whose shape
-    /// matches `pred`. Only for boxes with no `@builtin` tags yet (the
-    /// indirect-enum `OwnedBox`); a tagged box uses [`Self::find_box_member`].
-    /// Missing or duplicated matches are a broken stdlib (ICE).
-    pub(crate) fn find_box_member_by_shape(
-        &mut self,
-        entity: Entity,
-        kind: kestrel_ast_builder::NodeKind,
-        requirement: &str,
-        pred: impl Fn(&Callable, &str) -> bool,
-    ) -> Entity {
-        let mut parents = vec![entity];
-        parents.extend(
-            self.ctx
-                .query
-                .query(kestrel_name_res::extensions::ExtensionsFor {
-                    target: entity,
-                    root: self.ctx.root,
-                }),
-        );
-        // Collect ALL matches rather than taking the first: "first hit wins"
-        // is what made the selection depend on declaration order (F4).
-        let mut matches = Vec::new();
-        for parent in parents {
-            for &child in self.ctx.query.children_of(parent).iter() {
-                if self.ctx.query.get::<kestrel_ast_builder::NodeKind>(child) != Some(&kind) {
-                    continue;
-                }
-                let name = self
-                    .ctx
-                    .query
-                    .get::<kestrel_ast_builder::Name>(child)
-                    .map(|n| n.0.clone())
-                    .unwrap_or_default();
-                if self
-                    .ctx
-                    .query
-                    .get::<Callable>(child)
-                    .is_some_and(|c| pred(c, &name))
-                {
-                    matches.push(child);
-                }
-            }
-        }
-        exactly_one_box_member(&matches, requirement)
     }
 
     /// Move `env` (an @owned environment struct) into managed storage and

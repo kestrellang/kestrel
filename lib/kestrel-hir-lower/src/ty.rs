@@ -324,7 +324,7 @@ fn lower_structural_type(
 }
 
 /// `any[B] P and Q` → `B[RawExistential { P, Q }]`; plain `any` uses the
-/// `@builtin(.DefaultBoxType)` box. Nothing after HIR lowering knows `any`
+/// `@builtin(.AnyBox)` box. Nothing after HIR lowering knows `any`
 /// was written: an existential is an ordinary box instantiation.
 fn lower_any_type(
     ctx: &QueryContext<'_>,
@@ -390,14 +390,14 @@ fn resolve_existential_box(
 ) -> Option<Entity> {
     let Some(box_ty) = box_ty else {
         let found = ctx.query(ResolveBuiltin {
-            builtin: Builtin::DefaultBoxType,
+            builtin: Builtin::AnyBox,
             root,
         });
         if found.is_none() {
             ctx.accumulate(
                 Diagnostic::error()
                     .with_code("E141")
-                    .with_message("DefaultBox is not defined")
+                    .with_message("AnyBox is not defined")
                     .with_labels(vec![Label::primary(span.file_id, span.range())])
                     .with_notes(vec![
                         "'any P' needs the standard library's default box; is the standard \
