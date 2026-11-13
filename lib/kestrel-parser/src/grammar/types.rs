@@ -35,19 +35,27 @@ pub(super) fn adjacent(p: &Parser<'_>, idx: usize) -> bool {
 /// Tokens that can begin a type.
 pub(super) fn at_type_start(p: &Parser<'_>) -> bool {
     match p.current() {
+        Some(K::Mutating | K::Consuming) => at_kinded_fn(p),
+        kind => starts_plain_type(kind),
+    }
+}
+
+/// Does a token of `kind` start a type on its own, without lookahead? Every
+/// type start except a kinded function type (`mutating (…) -> …`).
+pub(super) fn starts_plain_type(kind: Option<K>) -> bool {
+    matches!(
+        kind,
         Some(
             K::Ampersand
-            | K::Some
-            | K::Bang
-            | K::Underscore
-            | K::LParen
-            | K::LBracket
-            | K::At
-            | K::Identifier,
-        ) => true,
-        Some(K::Mutating | K::Consuming) => at_kinded_fn(p),
-        _ => false,
-    }
+                | K::Some
+                | K::Bang
+                | K::Underscore
+                | K::LParen
+                | K::LBracket
+                | K::At
+                | K::Identifier
+        )
+    )
 }
 
 /// A full type. Reports "expected type" (and returns `None`) when nothing

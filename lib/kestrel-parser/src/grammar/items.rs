@@ -23,7 +23,7 @@ use super::blocks::{expect_closer, top_block};
 use super::exprs::expr;
 use super::generics::{opt_conformance_list, opt_type_parameter_list, opt_where_clause};
 use super::patterns::{at_param_pattern_start, param_pattern};
-use super::types::{at_type_start, ty, type_argument_list};
+use super::types::{at_type_start, starts_plain_type, ty, type_argument_list};
 use super::{delimited, is_label_keyword, matching_close, name};
 use crate::core::Parser;
 use crate::syntax_error::SyntaxError;
@@ -428,8 +428,10 @@ fn extension_decl(p: &mut Parser<'_>) {
 }
 
 /// Is the `[` after `extend` a param list rather than array sugar for the
-/// target (`extend [T]: P`)? A param list is followed by the target type;
-/// a sugar target by `:`, `where`, `{` or nothing.
+/// target (`extend [T]: P`, `extend [T]?: P`)? A param list is always
+/// followed by the target type, so the brackets are params exactly when a
+/// type starts after the matching `]`. (The target can't be a kinded
+/// function type, so the plain type starts are enough.)
 fn at_extension_param_list(p: &Parser<'_>) -> bool {
     if !p.at(K::LBracket) {
         return false;
@@ -437,10 +439,7 @@ fn at_extension_param_list(p: &Parser<'_>) -> bool {
     let Some(close) = matching_close(p, p.token_pos()) else {
         return true;
     };
-    !matches!(
-        p.kind_at(close + 1),
-        None | Some(K::Colon | K::Where | K::LBrace)
-    )
+    starts_plain_type(p.kind_at(close + 1))
 }
 
 /// `struct`/`enum`/`protocol` declarations.
