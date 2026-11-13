@@ -69,9 +69,21 @@ pub struct ParamDef {
     pub ty: TyId,
     pub convention: ParamConvention,
     pub external_label: Option<String>,
+    /// The synthesized environment pointer of a closure or thunk (always
+    /// params[0], see [`FunctionKind::takes_env_param`]). Set only by
+    /// [`ParamDef::env`] — never read off the parameter's name.
+    pub is_env: bool,
 }
 
 impl ParamDef {
+    /// The synthesized env-pointer param of a closure or thunk.
+    pub fn env(name: impl Into<String>, value: ValueId, ty: TyId) -> Self {
+        Self {
+            is_env: true,
+            ..Self::new(name, value, ty, ParamConvention::Consuming)
+        }
+    }
+
     pub fn new(
         name: impl Into<String>,
         value: ValueId,
@@ -84,6 +96,7 @@ impl ParamDef {
             ty,
             convention,
             external_label: None,
+            is_env: false,
         }
     }
 
@@ -100,6 +113,7 @@ impl ParamDef {
             ty,
             convention,
             external_label: label,
+            is_env: false,
         }
     }
 }

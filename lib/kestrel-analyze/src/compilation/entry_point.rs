@@ -53,7 +53,7 @@ use kestrel_hecs::Entity;
 use kestrel_hir::builtin::Builtin;
 use kestrel_hir::ty::HirTy;
 use kestrel_hir_lower::lower_ast_type;
-use kestrel_name_res::{ResolveBuiltin, ResolveTypePath, TypeResolution};
+use kestrel_name_res::ResolveBuiltin;
 use kestrel_span::Span;
 
 static DESCRIPTORS: &[DiagnosticDescriptor] = &[
@@ -243,17 +243,11 @@ fn conforms_to_exitable(cx: &CompilationContext<'_>, ty: &HirTy) -> bool {
 /// (`i8`/`i16`/`i32`/`i64`). These are seeded under the `lang` module and are
 /// distinct from the stdlib `IntN` struct wrappers.
 fn is_lang_primitive_int(cx: &CompilationContext<'_>, resolved: Entity) -> bool {
-    for name in ["i8", "i16", "i32", "i64"] {
-        if let TypeResolution::Found(e) = cx.query.query(ResolveTypePath {
-            segments: vec!["lang".into(), name.into()],
-            context: cx.root,
-            root: cx.root,
-        }) && e == resolved
-        {
-            return true;
-        }
-    }
-    false
+    use kestrel_ast_builder::LangType;
+    matches!(
+        cx.query.get::<LangType>(resolved),
+        Some(LangType::I8 | LangType::I16 | LangType::I32 | LangType::I64)
+    )
 }
 
 /// Span to anchor the whole-program "missing entry point" error on. Module
@@ -269,8 +263,10 @@ fn entry_module_span(cx: &CompilationContext<'_>) -> Span {
 fn last_decl_span(cx: &CompilationContext<'_>, entity: Entity, out: &mut Option<Span>) {
     // Anchor on the program's own code, never on the standard library (which
     // loads alongside it and would otherwise supply the last declaration).
-    if cx.query.get::<NodeKind>(entity) == Some(&NodeKind::Module)
-        && util::entity_name(cx.query, entity) == "std"
+    if cx
+        .query
+        .get::<kestrel_ast_builder::StdRootModule>(entity)
+        .is_some()
     {
         return;
     }

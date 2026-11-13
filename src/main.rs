@@ -600,7 +600,7 @@ impl Globals {
             if self.verbose {
                 eprintln!("  Loading stdlib from {}", std_dir.display());
             }
-            compiler.load_dir(&std_dir);
+            compiler.load_std_dir(&std_dir);
             std_dir_out = Some(std_dir);
         }
 

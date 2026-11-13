@@ -365,8 +365,10 @@ impl EntailLayer for FrontEndLayer<'_, '_> {
             // on the synthetic `lang.&` entities (args = [pointee]). No
             // declaring extension → no conformance.
             ETy::Ref { mutating, .. } => {
-                let name = if *mutating { "&mutating" } else { "&" };
-                match kestrel_name_res::extensions::resolve_lang_child(self.ctx, self.root, name) {
+                let ty = kestrel_ast_builder::LangType::Ref {
+                    mutating: *mutating,
+                };
+                match kestrel_name_res::extensions::resolve_lang_type(self.ctx, self.root, ty) {
                     Some(amp) => self.nominal_supply(amp, protocol),
                     None => Supply::Sources(Vec::new()),
                 }
@@ -374,12 +376,13 @@ impl EntailLayer for FrontEndLayer<'_, '_> {
             // `()`, `!` and `(A, B, …)` conform through their synthetic
             // `lang` entities; a tuple's elements are that entity's args,
             // which the kernel binds against the extension's `(X, Y)`.
-            ETy::Tuple(elems) if elems.is_empty() => self.lang_supply("()", protocol),
-            ETy::Tuple(elems) => self.lang_supply(
-                &kestrel_ast_builder::lang_module::lang_tuple_name(elems.len()),
-                protocol,
-            ),
-            ETy::Never => self.lang_supply("!", protocol),
+            ETy::Tuple(elems) if elems.is_empty() => {
+                self.lang_supply(kestrel_ast_builder::LangType::Unit, protocol)
+            },
+            ETy::Tuple(elems) => {
+                self.lang_supply(kestrel_ast_builder::LangType::Tuple(elems.len()), protocol)
+            },
+            ETy::Never => self.lang_supply(kestrel_ast_builder::LangType::Never, protocol),
             ETy::Param(p) => Supply::Decided(self.param_supply(*p, protocol)),
             // Functions, opaques, unreduced aliases and projections,
             // abstract `Self`: no declaration to evaluate here.
@@ -548,8 +551,8 @@ impl FrontEndLayer<'_, '_> {
         sources
     }
 
-    fn lang_supply(&self, name: &str, protocol: Entity) -> Supply {
-        match kestrel_name_res::extensions::resolve_lang_child(self.ctx, self.root, name) {
+    fn lang_supply(&self, ty: kestrel_ast_builder::LangType, protocol: Entity) -> Supply {
+        match kestrel_name_res::extensions::resolve_lang_type(self.ctx, self.root, ty) {
             Some(e) => self.nominal_supply(e, protocol),
             None => Supply::Decided(Tri::Holds),
         }

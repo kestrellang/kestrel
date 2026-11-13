@@ -43,9 +43,11 @@ import std.iter.(Iterator)
 // slot stays Static (`throws` + refs is E490; a ref error never forms).
 public enum Result[T, E]: Tryable, not Copyable where T: not Static {
     /// The success branch — wraps a `T`.
+    @builtin(.ResultOkCase)
     case Ok(T)
 
     /// The failure branch — wraps an `E`.
+    @builtin(.ResultErrCase)
     case Err(E)
 
     // Tryable - associated types

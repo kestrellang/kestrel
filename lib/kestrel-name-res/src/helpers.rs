@@ -36,6 +36,18 @@ pub fn is_ancestor_of(ctx: &QueryContext<'_>, ancestor: Entity, descendant: Enti
     }
 }
 
+/// The standard library's root module (`std`), if a stdlib is loaded: the
+/// root child the stdlib loader marked [`StdRootModule`], never a module
+/// that is merely named `std`.
+///
+/// [`StdRootModule`]: kestrel_ast_builder::StdRootModule
+pub fn std_root_module(ctx: &QueryContext<'_>, root: Entity) -> Option<Entity> {
+    ctx.children_of(root)
+        .iter()
+        .copied()
+        .find(|&c| ctx.get::<kestrel_ast_builder::StdRootModule>(c).is_some())
+}
+
 /// Find direct children of `parent` that have a matching Name component.
 /// Returns all matching children (may be multiple for overloaded functions).
 pub fn find_children_by_name(ctx: &QueryContext<'_>, parent: Entity, name: &str) -> Vec<Entity> {
@@ -46,13 +58,14 @@ pub fn find_children_by_name(ctx: &QueryContext<'_>, parent: Entity, name: &str)
         .collect()
 }
 
-/// Check if an entity is inside a `std.*` module.
-/// Walks ancestors looking for a module named "std".
+/// Check if an entity is inside the standard library's module tree: walks
+/// ancestors looking for the [`StdRootModule`] the stdlib loader marked.
 pub fn is_in_std_module(ctx: &QueryContext<'_>, entity: Entity) -> bool {
     let mut current = entity;
     loop {
-        if ctx.get::<NodeKind>(current) == Some(&NodeKind::Module)
-            && ctx.get::<Name>(current).is_some_and(|n| n.0 == "std")
+        if ctx
+            .get::<kestrel_ast_builder::StdRootModule>(current)
+            .is_some()
         {
             return true;
         }
@@ -168,6 +181,7 @@ mod tests {
         let std = world.spawn();
         world.set(std, NodeKind::Module);
         world.set(std, Name("std".into()));
+        world.set(std, kestrel_ast_builder::StdRootModule);
         world.set_parent(std, root);
 
         let core = world.spawn();

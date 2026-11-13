@@ -114,17 +114,16 @@ fn scan_builtins(
 }
 
 /// Whether `entity`'s `@builtin` annotation may define a lang item. With a
-/// stdlib loaded (a top-level `std` module exists) only declarations inside
-/// it may — user code cannot claim a lang item (E401, kestrel-analyze
+/// stdlib loaded (the loader marked a `StdRootModule`) only declarations
+/// inside it may — user code cannot claim a lang item (E401, kestrel-analyze
 /// `duplicate_builtin`). Without a stdlib (`--no-std` programs, test
 /// preludes) the program supplies its own lang items, so any module may.
 ///
 /// Single source of truth for both the index and the diagnostic. Stdlib
-/// membership is by module path, so a user file declaring `module std.x`
-/// still passes; telling stdlib files apart by origin needs a file-level
-/// marker the loader does not set today.
+/// membership is by module tree, so a user file declaring `module std.x`
+/// (joining the stdlib's module) still passes.
 pub fn builtin_annotation_allowed(ctx: &QueryContext<'_>, root: Entity, entity: Entity) -> bool {
-    let Some(std_module) = crate::resolve_module::find_child_module(ctx, root, "std") else {
+    let Some(std_module) = crate::helpers::std_root_module(ctx, root) else {
         return true;
     };
     let mut current = entity;

@@ -8,9 +8,7 @@ use kestrel_hir::ty::HirTy;
 use kestrel_mir::callee::Callee;
 use kestrel_mir::inst::CallArg;
 use kestrel_mir::terminator::{SwitchArm, SwitchCase};
-use kestrel_mir::{
-    FieldIdx, Immediate, MirTy, Ownership, ParamConvention, TyId, ValueId, VariantIdx,
-};
+use kestrel_mir::{FieldIdx, Immediate, MirTy, Ownership, ParamConvention, TyId, ValueId};
 
 use super::OssaBodyCtx;
 use crate::ty::{lower_resolved_ty, lower_type};
@@ -342,24 +340,14 @@ impl OssaBodyCtx<'_, '_> {
         result_ty: TyId,
         effect: InitEffect,
     ) -> ValueId {
-        let enum_entity = match self.ctx.module.ty_arena.get(result_ty) {
-            MirTy::Named { entity, .. } => *entity,
-            // Not the expected failable enum — leave the result as-is (defensive;
-            // shouldn't occur for a resolved failable delegation).
-            _ => return result,
+        // Not the expected failable enum — leave the result as-is (defensive;
+        // shouldn't occur for a resolved failable delegation).
+        if !matches!(self.ctx.module.ty_arena.get(result_ty), MirTy::Named { .. }) {
+            return result;
+        }
+        let Some((success_idx, failure_idx)) = self.ctx.effect_variant_idxs(&effect) else {
+            return result;
         };
-        let (success_name, failure_name) = match effect {
-            InitEffect::Failable => ("Some", "None"),
-            InitEffect::Throwing => ("Ok", "Err"),
-        };
-        let success_idx = self
-            .ctx
-            .resolve_variant_idx(enum_entity, success_name)
-            .unwrap_or(VariantIdx::new(0));
-        let failure_idx = self
-            .ctx
-            .resolve_variant_idx(enum_entity, failure_name)
-            .unwrap_or(VariantIdx::new(1));
 
         let disc = self.emit_discriminant(result);
 
@@ -1003,25 +991,10 @@ impl OssaBodyCtx<'_, '_> {
     ) -> ValueId {
         let instantiation = type_args.clone();
         // result_ty is Optional[T] or Result[T, E]. Extract inner struct type.
-        let (inner_ty, enum_entity, success_name, failure_name) = match &effect {
-            InitEffect::Failable => {
-                let (entity, inner) = match self.ctx.module.ty_arena.get(result_ty) {
-                    MirTy::Named { entity, type_args } if !type_args.is_empty() => {
-                        (*entity, type_args[0])
-                    },
-                    _ => panic!("failable init result_ty must be Optional[T]"),
-                };
-                (inner, entity, "Some", "None")
-            },
-            InitEffect::Throwing => {
-                let (entity, inner) = match self.ctx.module.ty_arena.get(result_ty) {
-                    MirTy::Named { entity, type_args } if !type_args.is_empty() => {
-                        (*entity, type_args[0])
-                    },
-                    _ => panic!("throwing init result_ty must be Result[T, E]"),
-                };
-                (inner, entity, "Ok", "Err")
-            },
+        // result_ty is Optional[T] or Result[T, E]; T is its first arg.
+        let (enum_entity, inner_ty) = match self.ctx.module.ty_arena.get(result_ty) {
+            MirTy::Named { entity, type_args } if !type_args.is_empty() => (*entity, type_args[0]),
+            _ => panic!("effectful init result_ty must be Optional[T] or Result[T, E]"),
         };
 
         // Allocate self as Pointer[T], not Pointer[Optional[T]]
@@ -1080,15 +1053,11 @@ impl OssaBodyCtx<'_, '_> {
         // Call returns Optional[()] or Result[(), E]
         let init_ret = self.emit_call_returning(callee, call_args, init_ret_ty);
 
-        // Resolve variant indices
-        let success_idx = self
+        // Resolve variant indices by the cases' builtin tags.
+        let (success_idx, failure_idx) = self
             .ctx
-            .resolve_variant_idx(enum_entity, success_name)
-            .unwrap_or(VariantIdx::new(0));
-        let failure_idx = self
-            .ctx
-            .resolve_variant_idx(enum_entity, failure_name)
-            .unwrap_or(VariantIdx::new(1));
+            .effect_variant_idxs(&effect)
+            .expect("effectful init needs std's tagged Optional/Result cases");
 
         // Extract discriminant as I32 for switching (same pattern as match lowering)
         let disc = self.emit_discriminant(init_ret);
@@ -1145,7 +1114,7 @@ impl OssaBodyCtx<'_, '_> {
         self.restore_scope(&snapshot);
         self.switch_to(failure_block);
         self.rebind_scope_values(&live_vals, &failure_params);
-        let none_val = if failure_name == "None" {
+        let none_val = if matches!(effect, InitEffect::Failable) {
             self.emit_enum_variant(result_ty, failure_idx, vec![])
         } else {
             // Throwing: extract error payload from init_ret and re-wrap as Result[T, E]
@@ -1328,9 +1297,9 @@ impl OssaBodyCtx<'_, '_> {
         // call dispatches to. Don't surface it (mirrors emit_resolved_call).
         if !self.callee_is_call_result(callee_expr)
             && let Some(&resolved) = self
-            .typed
-            .as_ref()
-            .and_then(|t| t.resolutions.get(&callee_expr))
+                .typed
+                .as_ref()
+                .and_then(|t| t.resolutions.get(&callee_expr))
         {
             return Some(resolved);
         }

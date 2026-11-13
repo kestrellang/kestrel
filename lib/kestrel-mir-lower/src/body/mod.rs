@@ -717,13 +717,16 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
             // a `mutating` one reads like a borrowed one: peel the slot into
             // the let-ref view below, and calls on `self` reach the pointee
             // instead of the slot holding the address.
-            let sig_ref = matches!(convention, ParamConvention::Borrow | ParamConvention::MutBorrow)
-                .then(|| param_sig_tys.get(i))
-                .flatten()
-                .and_then(|&t| match self.ctx.module.ty_arena.get(t) {
-                    MirTy::Ref { pointee, .. } => Some((t, *pointee)),
-                    _ => None,
-                });
+            let sig_ref = matches!(
+                convention,
+                ParamConvention::Borrow | ParamConvention::MutBorrow
+            )
+            .then(|| param_sig_tys.get(i))
+            .flatten()
+            .and_then(|&t| match self.ctx.module.ty_arena.get(t) {
+                MirTy::Ref { pointee, .. } => Some((t, *pointee)),
+                _ => None,
+            });
             let val = match (convention, sig_ref) {
                 (_, Some((ref_ty, pointee))) => {
                     let val = self.body.alloc_value(ValueDef {
@@ -1706,10 +1709,13 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
             let Some(&opt_ty) = field_tys.get(idx.index()) else {
                 continue;
             };
-            let MirTy::Named { entity: opt, .. } = self.ctx.module.ty_arena.get(opt_ty) else {
+            let MirTy::Named { .. } = self.ctx.module.ty_arena.get(opt_ty) else {
                 continue;
             };
-            let Some(none) = self.ctx.resolve_variant_idx(*opt, "None") else {
+            let Some(none) = self
+                .ctx
+                .builtin_variant_idx(kestrel_hir::Builtin::OptionalNoneCase)
+            else {
                 continue;
             };
             out.push((idx, self.emit_enum_variant(opt_ty, none, Vec::new())));
@@ -1851,14 +1857,22 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
     /// (`ImplicitMember`); failure is anything else (`return null`, `throw` →
     /// `.Err`, `try` → `fromResidual`). A void return (`None`) is not a failure.
     pub fn is_init_failure_return(&self, value: &Option<HirExprId>) -> bool {
-        match value {
-            Some(v) => !matches!(
-                &self.hir.exprs[*v],
-                HirExpr::ImplicitMember { name, .. }
-                    if matches!(name.as_str_or_empty(), "Some" | "Ok")
-            ),
-            None => false,
+        let Some(v) = value else {
+            return false;
+        };
+        if !matches!(&self.hir.exprs[*v], HirExpr::ImplicitMember { .. }) {
+            return true;
         }
+        // The success case, by the tag on the case it resolved to.
+        let resolved = self.typed.as_ref().and_then(|t| t.resolutions.get(v));
+        let is_case = |b| {
+            self.ctx.query.query(kestrel_name_res::ResolveBuiltin {
+                builtin: b,
+                root: self.ctx.root,
+            }) == resolved.copied()
+        };
+        !(is_case(kestrel_hir::Builtin::OptionalSomeCase)
+            || is_case(kestrel_hir::Builtin::ResultOkCase))
     }
 
     /// At a failure `return` in a failable init, flag-guard-drop each

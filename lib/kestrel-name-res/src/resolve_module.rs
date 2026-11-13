@@ -89,8 +89,7 @@ impl QueryFn for StdModules {
     type Output = Vec<Entity>;
 
     fn execute(&self, ctx: &QueryContext<'_>) -> Vec<Entity> {
-        // Find the "std" module under root
-        let Some(std_mod) = find_child_module(ctx, self.root, "std") else {
+        let Some(std_mod) = crate::helpers::std_root_module(ctx, self.root) else {
             return Vec::new();
         };
 
@@ -131,6 +130,7 @@ mod tests {
         let std = world.spawn();
         world.set(std, NodeKind::Module);
         world.set(std, Name("std".into()));
+        world.set(std, kestrel_ast_builder::StdRootModule);
         world.set_parent(std, root);
 
         let core = world.spawn();

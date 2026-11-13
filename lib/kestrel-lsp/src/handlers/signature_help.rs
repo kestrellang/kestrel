@@ -465,21 +465,7 @@ fn collapse_ws(s: &str) -> String {
 }
 
 fn ast_type_span(ty: &AstType) -> Span {
-    match ty {
-        AstType::Named { span, .. } => span.clone(),
-        AstType::Tuple(_, span) => span.clone(),
-        AstType::Function { span, .. } => span.clone(),
-        AstType::Array(_, span) => span.clone(),
-        AstType::Dictionary(_, _, span) => span.clone(),
-        AstType::Optional(_, span) => span.clone(),
-        AstType::Result { span, .. } => span.clone(),
-        AstType::Unit(span) => span.clone(),
-        AstType::Never(span) => span.clone(),
-        AstType::Inferred(span) => span.clone(),
-        AstType::Some { span, .. } => span.clone(),
-        AstType::Any { span, .. } => span.clone(),
-        AstType::Ref { span, .. } => span.clone(),
-    }
+    ty.span()
 }
 
 #[cfg(test)]

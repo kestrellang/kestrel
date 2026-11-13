@@ -32,6 +32,7 @@
 mod generate;
 mod shape;
 
+use kestrel_ast::AstType;
 use kestrel_hecs::{Entity, World};
 use kestrel_hir::Builtin;
 use kestrel_span::Span;
@@ -42,7 +43,8 @@ use crate::attrs::{ParsedAttr, parse::parse_standalone};
 use crate::build::{Built, build_items};
 use crate::builders::helpers::extract_attribute;
 use crate::components::{
-    AstAttribute, DerivedFile, DerivedFrom, FileSyntax, Name, NodeKind, TargetConfig,
+    AstAttribute, DerivedFile, DerivedFrom, FileSyntax, Name, NodeKind, TargetConfig, WhereClause,
+    WhereConstraint,
 };
 
 pub use shape::{Shape, ShapeBody, Slot};
@@ -111,15 +113,6 @@ impl DeriveKind {
             _ => self.builtin(),
         }
     }
-
-    /// The spelling of [`Self::field_bound`] in generated `where` clauses, or
-    /// `None` when it is the derived protocol itself (spelled as written).
-    pub(crate) fn field_bound_name(self) -> Option<&'static str> {
-        match self {
-            Self::Cloneable => Some("Copyable"),
-            _ => None,
-        }
-    }
 }
 
 /// Expand every `@derive` among the containers of one built file.
@@ -153,6 +146,7 @@ pub(crate) fn expand(
         let mut source = String::new();
         let mut protocols: Vec<Vec<String>> = Vec::new();
         let mut kinds: Vec<DeriveKind> = Vec::new();
+        let mut lang_bounds: Vec<usize> = Vec::new();
         for path in paths {
             let Some(kind) = path.last().and_then(|n| DeriveKind::from_name(n)) else {
                 continue;
@@ -161,10 +155,12 @@ pub(crate) fn expand(
             if kinds.contains(&kind) {
                 continue;
             }
-            let Some(text) = generate::extension(kind, &path.join("."), &header, &shape) else {
+            let Some(generated) = generate::extension(kind, &path.join("."), &header, &shape)
+            else {
                 continue;
             };
-            source.push_str(&text);
+            source.push_str(&generated.text);
+            lang_bounds.push(generated.lang_bounds);
             kinds.push(kind);
             protocols.push(path);
         }
@@ -185,7 +181,8 @@ pub(crate) fn expand(
         ) else {
             continue;
         };
-        for (ext, protocol) in top_level.into_iter().zip(protocols) {
+        for (i, (ext, protocol)) in top_level.into_iter().zip(protocols).enumerate() {
+            pin_lang_bounds(world, ext, kinds[i].field_bound(), lang_bounds[i]);
             world.set(
                 ext,
                 DerivedFrom {
@@ -196,6 +193,27 @@ pub(crate) fn expand(
             );
         }
     }
+}
+
+/// Point the first `count` `where` constraints of a derived extension at the
+/// lang item `bound` itself ([`AstType::Builtin`]), replacing the placeholder
+/// name `generate` wrote for them — a by-name `Copyable` would resolve to a
+/// user type of that name.
+fn pin_lang_bounds(world: &mut World, ext: Entity, bound: Builtin, count: usize) {
+    if count == 0 {
+        return;
+    }
+    let Some(mut clause) = world.get::<WhereClause>(ext).cloned() else {
+        return;
+    };
+    for constraint in clause.0.iter_mut().take(count) {
+        if let WhereConstraint::Bound { protocols, .. } = constraint {
+            for protocol in protocols.iter_mut() {
+                *protocol = AstType::Builtin(bound, protocol.span());
+            }
+        }
+    }
+    world.set(ext, clause);
 }
 
 /// The declaration's `@derive` attribute, with the span of all of it.

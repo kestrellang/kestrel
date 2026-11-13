@@ -271,6 +271,10 @@ pub enum Builtin {
     OptionalSomeCase,
     OptionalNoneCase,
 
+    // ===== Result =====
+    ResultOkCase,
+    ResultErrCase,
+
     // ===== Type operators (type aliases) =====
     OptionalTypeOperator,
     ArrayTypeOperator,
@@ -383,6 +387,10 @@ pub enum Builtin {
     UniqueBoxInit,
     /// `UniqueBox.takeValue()` — moves the payload out (once).
     UniqueBoxTakeValue,
+    /// `OwnedBox.takeValue()` — moves an indirect enum payload out of its box.
+    OwnedBoxTakeValue,
+    /// `Pointer.init(to:)` — a pointer to a value, tracked for dangling-reference checks.
+    PointerToInit,
     /// `UniqueBox.destroy()` — the box's single reclamation point.
     UniqueBoxDestroy,
     /// `Indirection.pointeeRef()` — the member peel's read accessor.
@@ -401,6 +409,8 @@ pub enum Builtin {
     DictionaryLiteralValue,
     /// `ArrayMatchable.Element` — an array pattern's element type.
     ArrayMatchableElement,
+    /// `ArrayMatchable.Rest` — an array pattern's rest-binding type.
+    ArrayMatchableRest,
 }
 
 /// The place `Indirection` requires (`var value: Target { ref }`, refined to
@@ -598,6 +608,8 @@ impl Builtin {
             Self::OptionalEnum => "OptionalEnum",
             Self::OptionalSomeCase => "OptionalSomeCase",
             Self::OptionalNoneCase => "OptionalNoneCase",
+            Self::ResultOkCase => "ResultOkCase",
+            Self::ResultErrCase => "ResultErrCase",
 
             // Type operators
             Self::OptionalTypeOperator => "OptionalTypeOperator",
@@ -637,6 +649,8 @@ impl Builtin {
             Self::SharedBoxSharedMutRef => "SharedBoxSharedMutRef",
             Self::UniqueBoxInit => "UniqueBoxInit",
             Self::UniqueBoxTakeValue => "UniqueBoxTakeValue",
+            Self::OwnedBoxTakeValue => "OwnedBoxTakeValue",
+            Self::PointerToInit => "PointerToInit",
             Self::UniqueBoxDestroy => "UniqueBoxDestroy",
             Self::IndirectionPointeeRef => "IndirectionPointeeRef",
             Self::MutableIndirectionPointeeMutRef => "MutableIndirectionPointeeMutRef",
@@ -645,6 +659,7 @@ impl Builtin {
             Self::DictionaryLiteralKey => "DictionaryLiteralKey",
             Self::DictionaryLiteralValue => "DictionaryLiteralValue",
             Self::ArrayMatchableElement => "ArrayMatchableElement",
+            Self::ArrayMatchableRest => "ArrayMatchableRest",
             Self::ExitCode => "ExitCode",
 
             // Indirection — resolves by source name (auto-imported from std.core).
@@ -869,6 +884,8 @@ impl Builtin {
             "OptionalEnum" => Some(Self::OptionalEnum),
             "OptionalSomeCase" => Some(Self::OptionalSomeCase),
             "OptionalNoneCase" => Some(Self::OptionalNoneCase),
+            "ResultOkCase" => Some(Self::ResultOkCase),
+            "ResultErrCase" => Some(Self::ResultErrCase),
 
             // Type operators
             "OptionalTypeOperator" => Some(Self::OptionalTypeOperator),
@@ -907,6 +924,8 @@ impl Builtin {
             "SharedBoxSharedMutRef" => Some(Self::SharedBoxSharedMutRef),
             "UniqueBoxInit" => Some(Self::UniqueBoxInit),
             "UniqueBoxTakeValue" => Some(Self::UniqueBoxTakeValue),
+            "OwnedBoxTakeValue" => Some(Self::OwnedBoxTakeValue),
+            "PointerToInit" => Some(Self::PointerToInit),
             "UniqueBoxDestroy" => Some(Self::UniqueBoxDestroy),
             "IndirectionPointeeRef" => Some(Self::IndirectionPointeeRef),
             "MutableIndirectionPointeeMutRef" => Some(Self::MutableIndirectionPointeeMutRef),
@@ -915,6 +934,7 @@ impl Builtin {
             "DictionaryLiteralKey" => Some(Self::DictionaryLiteralKey),
             "DictionaryLiteralValue" => Some(Self::DictionaryLiteralValue),
             "ArrayMatchableElement" => Some(Self::ArrayMatchableElement),
+            "ArrayMatchableRest" => Some(Self::ArrayMatchableRest),
             "ExitCode" => Some(Self::ExitCode),
 
             // Indirection / smart-pointer member peel
@@ -962,6 +982,9 @@ impl Builtin {
     /// Metadata about what symbol kind this builtin expects.
     pub fn kind(self) -> BuiltinKind {
         match self {
+            Self::PointerToInit => BuiltinKind::Function,
+            Self::ArrayMatchableRest => BuiltinKind::TypeAlias,
+            Self::OwnedBoxTakeValue => BuiltinKind::Function,
             // Copy/Clone
             Self::Copyable => BuiltinKind::Protocol {
                 implicit_conformance: true,
@@ -1144,6 +1167,7 @@ impl Builtin {
             // Optional
             Self::OptionalEnum => BuiltinKind::Enum,
             Self::OptionalSomeCase | Self::OptionalNoneCase => BuiltinKind::EnumCase,
+            Self::ResultOkCase | Self::ResultErrCase => BuiltinKind::EnumCase,
 
             // Type operators
             Self::OptionalTypeOperator

@@ -10,7 +10,7 @@ use kestrel_syntax_tree::ast::{self, AstNode, HasAttributes};
 
 use crate::attrs::{self, ParsedAttr};
 use crate::builders::helpers::extract_attribute;
-use crate::components::{FileSyntax, TargetConfig};
+use crate::components::{FileSyntax, StdRootModule, StdlibSource, TargetConfig};
 
 use crate::builders::{
     enum_decl, extension, field, function, import, module, protocol, struct_decl, subscript,
@@ -52,6 +52,7 @@ pub fn build_declarations(
         })
         .map(|m| module::resolve_module_path(world, root, &m))
         .unwrap_or(root);
+    mark_std_root(world, file_entity, module_parent, root);
 
     let built = build_items(
         world,
@@ -61,6 +62,22 @@ pub fn build_declarations(
         target,
     );
     crate::derive::expand(world, file_entity, module_parent, target, &built);
+}
+
+/// Tag the top-level module a stdlib file declares as [`StdRootModule`].
+fn mark_std_root(world: &mut World, file_entity: Entity, module: Entity, root: Entity) {
+    if world.get::<StdlibSource>(file_entity).is_none() {
+        return;
+    }
+    let mut top = module;
+    while let Some(parent) = world.parent_of(top)
+        && parent != root
+    {
+        top = parent;
+    }
+    if top != root {
+        world.set(top, StdRootModule);
+    }
 }
 
 /// What [`build_items`] built, for passes that run after it.
@@ -1045,6 +1062,7 @@ mod tests {
     /// Short display name for an AstType.
     fn type_name(ty: &AstType) -> String {
         match ty {
+            AstType::Builtin(builtin, _) => builtin.name().to_string(),
             AstType::Named { segments, .. } => {
                 let parts: Vec<_> = segments
                     .iter()

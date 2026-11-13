@@ -186,9 +186,34 @@ pub enum AstType {
         mutating: bool,
         span: Span,
     },
+    /// A lang item named by its `@builtin` tag rather than a path. Never
+    /// parsed — only compiler-generated code builds it (`@derive`'s
+    /// `T: Copyable` field bounds), so no user declaration can shadow it.
+    /// Resolves through `ResolveBuiltin`.
+    Builtin(crate::Builtin, Span),
 }
 
 impl AstType {
+    /// The source span of the whole annotation.
+    pub fn span(&self) -> Span {
+        match self {
+            AstType::Named { span, .. }
+            | AstType::Tuple(_, span)
+            | AstType::Function { span, .. }
+            | AstType::Array(_, span)
+            | AstType::Dictionary(_, _, span)
+            | AstType::Optional(_, span)
+            | AstType::Result { span, .. }
+            | AstType::Unit(span)
+            | AstType::Never(span)
+            | AstType::Inferred(span)
+            | AstType::Some { span, .. }
+            | AstType::Any { span, .. }
+            | AstType::Ref { span, .. }
+            | AstType::Builtin(_, span) => span.clone(),
+        }
+    }
+
     /// A param type that spells its access mode (`&T` / `&mutating T`):
     /// the pointee and whether it is mutating. A nested ref (`&&T`) is not
     /// one — it stays, and is rejected as nesting (E487).

@@ -785,8 +785,19 @@ fn is_init_failure_value(cx: &BodyContext<'_>, expr_id: HirExprId) -> bool {
             value: HirLiteral::Null,
             ..
         } => true,
-        HirExpr::ImplicitMember { name, .. } if name.as_str() == Some("Err") => true,
-        HirExpr::ImplicitMember { name, .. } if name.as_str() == Some("None") => true,
+        // `.Err(…)` / `.None`, by the tag on the case it resolved to.
+        HirExpr::ImplicitMember { .. } => {
+            let resolved = cx.typed.resolutions.get(&expr_id).copied();
+            let is_case = |b| {
+                cx.query.query(kestrel_name_res::ResolveBuiltin {
+                    builtin: b,
+                    root: cx.root,
+                }) == resolved
+            };
+            resolved.is_some()
+                && (is_case(kestrel_hir::Builtin::ResultErrCase)
+                    || is_case(kestrel_hir::Builtin::OptionalNoneCase))
+        },
         _ => false,
     }
 }

@@ -65,7 +65,7 @@ fn stdlib_cache() -> &'static StdlibCache {
     STDLIB_CACHE.get_or_init(|| {
         let mut compiler = Compiler::new();
         let std_path = find_stdlib_path();
-        compiler.load_dir(&std_path);
+        compiler.load_std_dir(&std_path);
         CompilerDriver::new(&compiler).infer_all();
         // Render error-severity diagnostics NOW, against the cache compiler's
         // own world (see field doc).

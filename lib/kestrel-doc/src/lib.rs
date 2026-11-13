@@ -88,7 +88,10 @@ pub fn extract(world: &World, root: Entity) -> (ModuleIndex, Vec<ModulePage>) {
         .iter()
         .copied()
         .filter(|&e| matches!(world.get::<NodeKind>(e), Some(NodeKind::Module)))
-        .filter(|&e| world.get::<Name>(e).map(|n| n.0 != "lang").unwrap_or(false))
+        .filter(|&e| {
+            world.get::<Name>(e).is_some()
+                && world.get::<kestrel_ast_builder::LangModule>(e).is_none()
+        })
         .collect();
     roots.sort_by_key(|&e| {
         world

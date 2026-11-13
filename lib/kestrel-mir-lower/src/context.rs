@@ -139,6 +139,47 @@ impl<'w> LowerCtx<'w> {
         def.fields.get(field_idx.index()).map(|f| f.ty)
     }
 
+    /// The VariantIdx of an enum case entity: its position among its enum's
+    /// cases, the order `enum_lower` lowers them in.
+    pub fn variant_idx_of_case(&self, case: Entity) -> Option<VariantIdx> {
+        let owner = self.world.parent_of(case)?;
+        self.world
+            .children_of(owner)
+            .iter()
+            .filter(|&&c| self.world.get::<NodeKind>(c) == Some(&NodeKind::EnumCase))
+            .position(|&c| c == case)
+            .map(VariantIdx::new)
+    }
+
+    /// The VariantIdx of a builtin-tagged case (`Builtin::OptionalNoneCase`),
+    /// identified by its tag, never by its spelling.
+    pub fn builtin_variant_idx(&self, case: kestrel_hir::Builtin) -> Option<VariantIdx> {
+        let entity = self.query.query(kestrel_name_res::ResolveBuiltin {
+            builtin: case,
+            root: self.root,
+        })?;
+        self.variant_idx_of_case(entity)
+    }
+
+    /// The (success, failure) case indices of an effectful init's result:
+    /// `Optional`'s `Some`/`None` for a failable init, `Result`'s `Ok`/`Err`
+    /// for a throwing one. `None` when std (which tags them) isn't loaded.
+    pub fn effect_variant_idxs(
+        &self,
+        effect: &kestrel_ast_builder::InitEffect,
+    ) -> Option<(VariantIdx, VariantIdx)> {
+        use kestrel_ast_builder::InitEffect;
+        use kestrel_hir::Builtin;
+        let (success, failure) = match effect {
+            InitEffect::Failable => (Builtin::OptionalSomeCase, Builtin::OptionalNoneCase),
+            InitEffect::Throwing => (Builtin::ResultOkCase, Builtin::ResultErrCase),
+        };
+        Some((
+            self.builtin_variant_idx(success)?,
+            self.builtin_variant_idx(failure)?,
+        ))
+    }
+
     /// Resolve an enum case name to its VariantIdx within a lowered EnumDef.
     pub fn resolve_variant_idx(&self, enum_entity: Entity, case_name: &str) -> Option<VariantIdx> {
         let def = self.module.enums.get(&enum_entity)?;

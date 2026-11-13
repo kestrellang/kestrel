@@ -254,6 +254,7 @@ fn lower_structural_type(
         AstType::Unit(span) => HirTy::Tuple(Vec::new(), span.clone()),
         AstType::Never(span) => HirTy::Never(span.clone()),
         AstType::Inferred(span) => HirTy::Infer(span.clone()),
+        AstType::Builtin(builtin, span) => lower_builtin_type(ctx, root, *builtin, span),
         AstType::Some {
             bounds,
             negative,
@@ -1188,36 +1189,53 @@ fn lower_sugar_type(
         .map(|t| lower_ast_type(ctx, owner, root, t))
         .collect();
 
-    if let Some(entity) = kestrel_name_res::resolve_sugar_type(ctx, owner, root, builtin, name) {
-        let args = fill_type_arg_defaults(ctx, root, entity, lowered_args);
-        // Dispatch by NodeKind — Optional is an enum, Array/Dictionary are structs.
-        match ctx.get::<NodeKind>(entity).cloned() {
-            Some(NodeKind::Enum) => HirTy::Enum {
-                entity,
-                args,
-                span: span.clone(),
-            },
-            Some(NodeKind::Protocol) => HirTy::Protocol {
-                entity,
-                args,
-                span: span.clone(),
-            },
-            _ => HirTy::Struct {
-                entity,
-                args,
-                span: span.clone(),
-            },
-        }
-    } else {
-        ctx.accumulate(
-            Diagnostic::error()
-                .with_code("E141")
-                .with_message(format!("{name} is not defined"))
-                .with_labels(vec![Label::primary(span.file_id, span.range())])
-                .with_notes(vec!["is the standard library imported?".to_string()]),
-        );
-        HirTy::Error(span.clone())
+    match kestrel_name_res::resolve_sugar_type(ctx, owner, root, builtin, name) {
+        Some(entity) => {
+            let args = fill_type_arg_defaults(ctx, root, entity, lowered_args);
+            nominal_hir_ty(ctx, entity, args, span)
+        },
+        None => undefined_lang_type(ctx, name, span),
     }
+}
+
+/// A compiler-generated reference to a lang item by its `@builtin` tag
+/// (`AstType::Builtin`). No path is looked up, so nothing can shadow it.
+fn lower_builtin_type(
+    ctx: &QueryContext<'_>,
+    root: Entity,
+    builtin: Builtin,
+    span: &Span,
+) -> HirTy {
+    match ctx.query(kestrel_name_res::ResolveBuiltin { builtin, root }) {
+        Some(entity) => {
+            let args = fill_type_arg_defaults(ctx, root, entity, Vec::new());
+            nominal_hir_ty(ctx, entity, args, span)
+        },
+        None => undefined_lang_type(ctx, builtin.name(), span),
+    }
+}
+
+/// The HIR type naming nominal `entity`, by its kind: Optional is an enum,
+/// Array/Dictionary are structs, `Copyable` is a protocol.
+fn nominal_hir_ty(ctx: &QueryContext<'_>, entity: Entity, args: Vec<HirTy>, span: &Span) -> HirTy {
+    let span = span.clone();
+    match ctx.get::<NodeKind>(entity).cloned() {
+        Some(NodeKind::Enum) => HirTy::Enum { entity, args, span },
+        Some(NodeKind::Protocol) => HirTy::Protocol { entity, args, span },
+        _ => HirTy::Struct { entity, args, span },
+    }
+}
+
+/// E141: a type the language names (sugar or a lang item) has no declaration.
+fn undefined_lang_type(ctx: &QueryContext<'_>, name: &str, span: &Span) -> HirTy {
+    ctx.accumulate(
+        Diagnostic::error()
+            .with_code("E141")
+            .with_message(format!("{name} is not defined"))
+            .with_labels(vec![Label::primary(span.file_id, span.range())])
+            .with_notes(vec!["is the standard library imported?".to_string()]),
+    );
+    HirTy::Error(span.clone())
 }
 
 /// Fill in default type arguments for type parameters beyond user-provided args.
@@ -1814,6 +1832,7 @@ fn ast_type_span(ty: &AstType) -> Span {
         | AstType::Inferred(span)
         | AstType::Some { span, .. }
         | AstType::Any { span, .. }
+        | AstType::Builtin(_, span)
         | AstType::Ref { span, .. } => span.clone(),
     }
 }

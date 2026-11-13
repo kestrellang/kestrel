@@ -55,8 +55,8 @@ impl QueryFn for SelfTypeEntity {
 
 /// Resolve a type annotation to the entity it names, looked up from
 /// `context`. Paths go through `ResolveTypePath`; sugar (`[T]`, `T?`,
-/// `[K: V]`, `T throws E`) goes through its lang item, as HIR lowering does,
-/// so a user type named `Array` cannot shadow it. Annotations that name no
+/// `[K: V]`, `T throws E`) and `AstType::Builtin` go through their lang item,
+/// as HIR lowering does, so a user type named `Array` cannot shadow them. Annotations that name no
 /// single entity (tuples, functions, `some P`, ...) are `NotFound`. `Self`
 /// comes back as `SelfType`; [`annotation_entity`] resolves it.
 pub fn resolve_annotation(
@@ -71,6 +71,16 @@ pub fn resolve_annotation(
             context,
             root,
         });
+    }
+    // A compiler-generated lang-item reference: by its tag, never a path.
+    if let AstType::Builtin(builtin, _) = ast_ty {
+        return match ctx.query(crate::ResolveBuiltin {
+            builtin: *builtin,
+            root,
+        }) {
+            Some(entity) => TypeResolution::Found(entity),
+            None => TypeResolution::NotFound(builtin.name().to_string()),
+        };
     }
     let Some((builtin, name)) = sugar_builtin(ast_ty) else {
         return TypeResolution::NotFound(String::new());

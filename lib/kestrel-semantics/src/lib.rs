@@ -1109,6 +1109,7 @@ fn ast_type_span(ast_ty: &AstType) -> Span {
         | AstType::Inferred(span)
         | AstType::Some { span, .. }
         | AstType::Any { span, .. }
+        | AstType::Builtin(_, span)
         | AstType::Ref { span, .. } => span.clone(),
     }
 }
@@ -1132,5 +1133,6 @@ fn ast_type_name(ast_ty: &AstType) -> String {
         AstType::Some { .. } => "some".into(),
         AstType::Any { .. } => "any".into(),
         AstType::Ref { .. } => "reference".into(),
+        AstType::Builtin(builtin, _) => builtin.name().into(),
     }
 }

@@ -1164,13 +1164,9 @@ pub(crate) fn structural_ty_kind(
     if let Some(arity) = lang_tuple_arity(ctx, entity) {
         return (args.len() == arity).then(|| TyKind::Tuple(args.to_vec()));
     }
-    let in_lang = ctx
-        .parent_of(entity)
-        .and_then(|p| ctx.get::<kestrel_ast_builder::Name>(p))
-        .is_some_and(|n| n.0 == "lang");
-    match ctx.get::<kestrel_ast_builder::Name>(entity)?.0.as_str() {
-        "()" if in_lang => Some(TyKind::Tuple(Vec::new())),
-        "!" if in_lang => Some(TyKind::Never),
+    match ctx.get::<kestrel_ast_builder::LangType>(entity)? {
+        kestrel_ast_builder::LangType::Unit => Some(TyKind::Tuple(Vec::new())),
+        kestrel_ast_builder::LangType::Never => Some(TyKind::Never),
         _ => None,
     }
 }
@@ -1182,24 +1178,20 @@ impl WorldResolver<'_> {
     /// `(A, B, …)` → (`lang.(,)` of that arity, the elements). `None` for
     /// every other type. The reverse is [`structural_ty_kind`].
     pub(crate) fn structural_view(&self, ty: &TyKind) -> Option<(Entity, Vec<TyVar>)> {
-        let (name, args) = match ty {
-            TyKind::Ref {
-                mutating: true,
-                pointee,
-            } => ("&mutating".to_string(), vec![*pointee]),
-            TyKind::Ref {
-                mutating: false,
-                pointee,
-            } => ("&".to_string(), vec![*pointee]),
-            TyKind::Tuple(elems) if elems.is_empty() => ("()".to_string(), Vec::new()),
-            TyKind::Tuple(elems) => (
-                kestrel_ast_builder::lang_module::lang_tuple_name(elems.len()),
-                elems.clone(),
+        use kestrel_ast_builder::LangType;
+        let (lang_ty, args) = match ty {
+            TyKind::Ref { mutating, pointee } => (
+                LangType::Ref {
+                    mutating: *mutating,
+                },
+                vec![*pointee],
             ),
-            TyKind::Never => ("!".to_string(), Vec::new()),
+            TyKind::Tuple(elems) if elems.is_empty() => (LangType::Unit, Vec::new()),
+            TyKind::Tuple(elems) => (LangType::Tuple(elems.len()), elems.clone()),
+            TyKind::Never => (LangType::Never, Vec::new()),
             _ => return None,
         };
-        let entity = kestrel_name_res::extensions::resolve_lang_child(self.ctx, self.root, &name)?;
+        let entity = kestrel_name_res::extensions::resolve_lang_type(self.ctx, self.root, lang_ty)?;
         Some((entity, args))
     }
 

@@ -3,9 +3,9 @@
 //! Finds extensions for a given type entity and resolves extension
 //! target types from AstType to entities.
 
-use kestrel_ast_builder::lang_module::lang_tuple_name;
 use kestrel_ast_builder::{
-    ExtensionLhsParamNames, ExtensionPatternCandidates, ExtensionTarget, Name, NodeKind, TypeParams,
+    ExtensionLhsParamNames, ExtensionPatternCandidates, ExtensionTarget, LangModule, LangType,
+    Name, NodeKind, TypeParams,
 };
 use kestrel_hecs::{Entity, QueryContext, QueryFn};
 
@@ -51,15 +51,21 @@ impl QueryFn for ExtensionTargetEntity {
         // `&T` / `&mutating T` resolve to the generic synthetic entities
         // `lang.&` / `lang.&mutating` (pointee = the single type arg).
         match ast_type {
-            kestrel_ast::AstType::Unit(..) => return resolve_lang_child(ctx, self.root, "()"),
-            kestrel_ast::AstType::Never(..) => return resolve_lang_child(ctx, self.root, "!"),
+            kestrel_ast::AstType::Unit(..) => {
+                return resolve_lang_type(ctx, self.root, LangType::Unit);
+            },
+            kestrel_ast::AstType::Never(..) => {
+                return resolve_lang_type(ctx, self.root, LangType::Never);
+            },
             kestrel_ast::AstType::Ref { mutating, .. } => {
-                let name = if *mutating { "&mutating" } else { "&" };
-                return resolve_lang_child(ctx, self.root, name);
+                let ty = LangType::Ref {
+                    mutating: *mutating,
+                };
+                return resolve_lang_type(ctx, self.root, ty);
             },
             // `(X, Y)` → the synthetic `lang.(,)` of that arity.
             kestrel_ast::AstType::Tuple(elems, _) if elems.len() >= 2 => {
-                return resolve_lang_child(ctx, self.root, &lang_tuple_name(elems.len()));
+                return resolve_lang_type(ctx, self.root, LangType::Tuple(elems.len()));
             },
             // Type sugar names its standard type: `extend [T]` is
             // `extend Array[T]` (and likewise `T?`, `[K: V]`).
@@ -301,15 +307,10 @@ fn structural_target_elements(
 /// `lang.(,)`-style entities, `None` otherwise. THE check for every
 /// Entity-keyed site that must map the entity back to a tuple type.
 pub fn lang_tuple_arity(ctx: &QueryContext<'_>, entity: Entity) -> Option<usize> {
-    let name = &ctx.get::<Name>(entity)?.0;
-    let arity = name.matches(',').count() + 1;
-    if arity < 2 || *name != lang_tuple_name(arity) {
-        return None;
+    match ctx.get::<LangType>(entity)? {
+        LangType::Tuple(arity) => Some(*arity),
+        _ => None,
     }
-    let parent = ctx.parent_of(entity)?;
-    (ctx.get::<NodeKind>(parent) == Some(&NodeKind::Module)
-        && ctx.get::<Name>(parent).is_some_and(|n| n.0 == "lang"))
-    .then_some(arity)
 }
 
 /// Reverse detector for the synthetic ref-extension entities: `Some(false)`
@@ -317,31 +318,25 @@ pub fn lang_tuple_arity(ctx: &QueryContext<'_>, entity: Entity) -> Option<usize>
 /// shared check for every Entity-keyed site that must map the entity back to
 /// a ref type (the type layer never uses these entities).
 pub fn lang_ref_mutability(ctx: &QueryContext<'_>, entity: Entity) -> Option<bool> {
-    let mutating = match ctx.get::<Name>(entity)?.0.as_str() {
-        "&" => false,
-        "&mutating" => true,
-        _ => return None,
-    };
-    let parent = ctx.parent_of(entity)?;
-    (ctx.get::<NodeKind>(parent) == Some(&NodeKind::Module)
-        && ctx
-            .get::<Name>(parent)
-            .map(|n| n.0 == "lang")
-            .unwrap_or(false))
-    .then_some(mutating)
+    match ctx.get::<LangType>(entity)? {
+        LangType::Ref { mutating } => Some(*mutating),
+        _ => None,
+    }
 }
 
-/// Resolve a synthetic child of the `lang` module by its (possibly
-/// non-identifier) name — used for the structural singletons `()` / `!`.
-pub fn resolve_lang_child(ctx: &QueryContext<'_>, root: Entity, name: &str) -> Option<Entity> {
-    let lang = ctx.children_of(root).iter().copied().find(|&c| {
-        ctx.get::<NodeKind>(c) == Some(&NodeKind::Module)
-            && ctx.get::<Name>(c).map(|n| n.0 == "lang").unwrap_or(false)
-    })?;
+/// The seeded `lang` entity for `ty` (the structural singletons `()` / `!`,
+/// the ref and tuple extension targets, the primitives), found by its
+/// [`LangType`] tag under the [`LangModule`]-marked module.
+pub fn resolve_lang_type(ctx: &QueryContext<'_>, root: Entity, ty: LangType) -> Option<Entity> {
+    let lang = ctx
+        .children_of(root)
+        .iter()
+        .copied()
+        .find(|&c| ctx.get::<LangModule>(c).is_some())?;
     ctx.children_of(lang)
         .iter()
         .copied()
-        .find(|&c| ctx.get::<Name>(c).map(|n| n.0 == name).unwrap_or(false))
+        .find(|&c| ctx.get::<LangType>(c) == Some(&ty))
 }
 
 // ===== ExtensionsFor =====
@@ -434,6 +429,7 @@ mod tests {
         let std = world.spawn();
         world.set(std, NodeKind::Module);
         world.set(std, Name("std".into()));
+        world.set(std, kestrel_ast_builder::StdRootModule);
         world.set_parent(std, root);
 
         let core = world.spawn();

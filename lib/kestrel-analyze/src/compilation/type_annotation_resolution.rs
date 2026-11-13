@@ -138,7 +138,11 @@ fn names_bare_protocol(cx: &CompilationContext<'_>, ty: &AstType, context: Entit
             .iter()
             .flat_map(|b| &b.bindings)
             .any(|b| recurse(&b.ty)),
-        AstType::Some { .. } | AstType::Unit(_) | AstType::Never(_) | AstType::Inferred(_) => false,
+        AstType::Some { .. }
+        | AstType::Unit(_)
+        | AstType::Never(_)
+        | AstType::Inferred(_)
+        | AstType::Builtin(..) => false,
     }
 }
 
@@ -229,6 +233,6 @@ fn check_ast_type(
             check_ast_type(cx, inner, context, diags);
         },
         // Unit, Never, Inferred — no type references to check
-        AstType::Unit(_) | AstType::Never(_) | AstType::Inferred(_) => {},
+        AstType::Unit(_) | AstType::Never(_) | AstType::Inferred(_) | AstType::Builtin(..) => {},
     }
 }

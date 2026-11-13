@@ -92,6 +92,7 @@ public unsafe protocol ArrayMatchable {
     type Element
     /// What `..rest` binds: the view `matchSlice` returns (`&Slice[T]` for
     /// arrays and slices).
+    @builtin(.ArrayMatchableRest)
     type Rest
 
     /// Total number of elements available to match.

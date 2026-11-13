@@ -170,6 +170,7 @@ public struct Pointer[T]: Equatable, Hashable where T: not Copyable, T: not Stat
     /// through a pointer captured from an immutable place is the C
     /// const-cast footgun: it compiles, and it is on the caller to know the
     /// storage is actually mutable.
+    @builtin(.PointerToInit)
     public init(to value: T) where T: Sized {
         self._raw = lang.ptr_to(value)
     }

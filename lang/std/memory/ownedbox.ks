@@ -140,6 +140,7 @@ extend OwnedBox[T, A]: ExistentialBox where A: Defaultable {}
 
 // Moves the payload out and frees the block.
 extend OwnedBox[T, A] where T: Sized {
+    @builtin(.OwnedBoxTakeValue)
     public consuming func takeValue() -> T {
         self.consumePointee { (p) in unsafe p.take() }
     }
