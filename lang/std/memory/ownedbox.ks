@@ -140,14 +140,6 @@ extend OwnedBox[T, A]: Box where A: Defaultable {
     public var isUnique: Bool { true }
 }
 
-// Moves the boxed value out and frees the block.
-extend OwnedBox[T, A] where T: Sized {
-    @builtin(.OwnedBoxTakeValue)
-    public consuming func takeValue() -> T {
-        self.consumeValue { (p) in unsafe p.take() }
-    }
-}
-
 // A clone allocates a fresh block holding a copy of the boxed value — a bit-copy
 // or the boxed value's own `clone()`, whichever copying `T` means.
 extend OwnedBox[T, A]: Cloneable where T: Copyable, T: Sized {

@@ -10,15 +10,18 @@
 //! - `emit_enum_variant` packs the logical fields and boxes them
 //!   (`Box.init(consuming:)`) — [`OssaBodyCtx::emit_indirect_box`];
 //! - `emit_destructure_enum` moves the box out and takes the payload back
-//!   (`takeValue()`, which frees the block) — [`OssaBodyCtx::emit_indirect_unbox`];
+//!   (`ConsumingIndirection.takeValue()`, which frees the block) —
+//!   [`OssaBodyCtx::emit_indirect_unbox`];
 //! - `emit_enum_payload` views the payload IN PLACE through the box's
 //!   pointer, a scope-tracked address borrow like an `is T` payload view —
 //!   [`OssaBodyCtx::emit_indirect_view`].
 //!
 //! The box is found through `@builtin(.IndirectBox)` and its init through the
 //! tagged `Box.init(consuming:)` requirement, never by a hard-coded path or
-//! shape, like the closure-box bindings. `takeValue()` is still a member tag
-//! on `OwnedBox` (`.OwnedBoxTakeValue`).
+//! shape, like the closure-box bindings, and the payload comes back out
+//! through the `ConsumingIndirection.takeValue()` extension
+//! (`.ConsumingIndirectionTakeValue`), so any box meeting the binding's
+//! E470 bound works.
 
 use kestrel_hecs::Entity;
 use kestrel_mir::callee::Callee;
@@ -118,21 +121,30 @@ impl OssaBodyCtx<'_, '_> {
         case: &IndirectCase,
         boxed: ValueId,
     ) -> Vec<ValueId> {
+        // `ConsumingIndirection.takeValue()` is a protocol-extension method,
+        // dispatched on the binding's box like a user-written `b.takeValue()`:
+        // the enum touches its box only through the protocols E470 checks.
         let take_value = self
             .ctx
             .query
             .query(kestrel_name_res::ResolveBuiltin {
-                builtin: kestrel_hir::Builtin::OwnedBoxTakeValue,
+                builtin: kestrel_hir::Builtin::ConsumingIndirectionTakeValue,
                 root: self.ctx.root,
             })
-            .expect("ICE: `@builtin(.OwnedBoxTakeValue)` missing — boxed enum cases need std");
-        self.ctx.register_name(take_value);
+            .expect("ICE: `@builtin(.ConsumingIndirectionTakeValue)` missing — boxed enum cases need std");
+        let protocol = self
+            .ctx
+            .is_protocol_method(take_value)
+            .expect("ICE: `takeValue` is not a `ConsumingIndirection` member");
+        self.ctx.register_name(protocol);
+        let method = self.ctx.witness_method_key(take_value);
         let payload = self.emit_call_returning(
-            Callee::direct_with_args(
-                take_value,
-                self.box_type_args(case.box_ty),
-                Some(case.box_ty),
-            ),
+            Callee::Witness {
+                protocol,
+                method,
+                self_type: case.box_ty,
+                method_type_args: vec![],
+            },
             vec![CallArg {
                 value: boxed,
                 convention: ParamConvention::Consuming,

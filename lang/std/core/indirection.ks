@@ -60,3 +60,13 @@ public protocol ConsumingIndirection: MutableIndirection {
     @builtin(.ConsumingIndirectionConsumeValue)
     consuming func consumeValue[R](body: (Pointer[Target]) -> R) -> R where R: not Copyable, R: not Static
 }
+
+extend ConsumingIndirection where Target: Sized {
+    /// Ends the box and hands its value back: `consumeValue` with a body
+    /// that moves the value out. Boxed `indirect enum` cases are unboxed
+    /// through this when a match takes them apart.
+    @builtin(.ConsumingIndirectionTakeValue)
+    public consuming func takeValue() -> Target {
+        self.consumeValue { (p) in unsafe p.take() }
+    }
+}

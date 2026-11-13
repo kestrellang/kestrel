@@ -392,8 +392,8 @@ pub enum Builtin {
     UniqueBoxInit,
     /// `UniqueBox.takeValue()` — moves the payload out (once).
     UniqueBoxTakeValue,
-    /// `OwnedBox.takeValue()` — moves an indirect enum payload out of its box.
-    OwnedBoxTakeValue,
+    /// `ConsumingIndirection.takeValue()` — moves an indirect enum payload out of its box.
+    ConsumingIndirectionTakeValue,
     /// `Pointer.init(to:)` — a pointer to a value, tracked for dangling-reference checks.
     PointerToInit,
     /// `UniqueBox.destroy()` — the box's single reclamation point.
@@ -657,7 +657,7 @@ impl Builtin {
             Self::SharedBoxSharedMutRef => "SharedBoxSharedMutRef",
             Self::UniqueBoxInit => "UniqueBoxInit",
             Self::UniqueBoxTakeValue => "UniqueBoxTakeValue",
-            Self::OwnedBoxTakeValue => "OwnedBoxTakeValue",
+            Self::ConsumingIndirectionTakeValue => "ConsumingIndirectionTakeValue",
             Self::PointerToInit => "PointerToInit",
             Self::UniqueBoxDestroy => "UniqueBoxDestroy",
             Self::IndirectionPointeeRef => "IndirectionPointeeRef",
@@ -927,7 +927,7 @@ impl Builtin {
             "SharedBoxSharedMutRef" => Some(Self::SharedBoxSharedMutRef),
             "UniqueBoxInit" => Some(Self::UniqueBoxInit),
             "UniqueBoxTakeValue" => Some(Self::UniqueBoxTakeValue),
-            "OwnedBoxTakeValue" => Some(Self::OwnedBoxTakeValue),
+            "ConsumingIndirectionTakeValue" => Some(Self::ConsumingIndirectionTakeValue),
             "PointerToInit" => Some(Self::PointerToInit),
             "UniqueBoxDestroy" => Some(Self::UniqueBoxDestroy),
             "IndirectionPointeeRef" => Some(Self::IndirectionPointeeRef),
@@ -1015,7 +1015,7 @@ impl Builtin {
             Self::ControlFlowContinueCase => BuiltinKind::EnumCase,
             Self::PointerToInit => BuiltinKind::Function,
             Self::ArrayMatchableRest => BuiltinKind::TypeAlias,
-            Self::OwnedBoxTakeValue => BuiltinKind::Function,
+            Self::ConsumingIndirectionTakeValue => BuiltinKind::Function,
             // Copy/Clone
             Self::Copyable => BuiltinKind::Protocol {
                 implicit_conformance: true,

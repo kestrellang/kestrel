@@ -140,9 +140,10 @@ public type Shared[T] = RcBox[T]                   // role: shared ownership
 - `ResolveBuiltin` follows alias chains to the struct, and lowering then
   touches it only through protocol requirements (`BoxInit`,
   `SharedBoxSharedMutRef`, `ConsumingIndirectionConsumeValue`), never by name
-  or shape. `ConsumingClosureBox` still uses `UniqueBox`'s own member tags,
-  and indirect-enum unboxing still calls `OwnedBox.takeValue()` by its tag;
-  both go away when consuming closures move onto `Owned`.
+  or shape. Indirect-enum unboxing calls `takeValue()`, an extension on
+  `ConsumingIndirection` built on `consumeValue`, through the witness table.
+  `ConsumingClosureBox` still uses `UniqueBox`'s own member tags until
+  consuming closures move off it.
 - Each feature tag carries the protocols its box must provide
   (`Builtin::box_binding_bound`), checked at the alias by **E470**:
 

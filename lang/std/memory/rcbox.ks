@@ -37,8 +37,8 @@ struct RcBoxStorage[T]: not Copyable where T: not Copyable, T: not Sized, T: not
 ///
 /// ```
 /// let a = RcBox(value: [1, 2, 3]);
-/// let b = a.clone();          // shares storage; refCount == 2
-/// b.mutatingValue.append(4);  // every handle sees it
+/// var b = a.clone();          // shares storage; refCount == 2
+/// b.value.append(4);           // every handle sees it
 /// &a.value;                   // read-only borrow: [1, 2, 3, 4]
 /// ```
 ///
@@ -119,24 +119,11 @@ public struct RcBox[T, A = GlobalAllocator]: Cloneable where T: not Copyable, T:
 
     /// The boxed value, in place. A write through it (`rc.value.x = 1`, or a
     /// member write through the peel) needs a `var` handle, and every handle
-    /// onto this storage sees it; `mutatingValue` writes through a `let`
+    /// onto this storage sees it. `sharedMutRef()` writes through a `let`
     /// handle.
     public var value: T {
         ref { unsafe self.valuePtr().value }
         mutating ref { unsafe self.valuePtr().mutatingValue }
-    }
-
-    /// The boxed value for writing, through a shared handle: no fork, and
-    /// every clone observes the write. Works on a `let` handle. The same
-    /// operation as `sharedMutRef()`, as a place.
-    ///
-    /// # Safety
-    ///
-    /// Sound only while Kestrel is single-threaded.
-    //
-    // Must stay a direct pointer-peel chain: see `sharedMutRef`.
-    public var mutatingValue: &mutating T {
-        unsafe self.valuePtr().mutatingValue
     }
 
     // Byte offset of `value` inside the storage block `[refCount: Int64,
