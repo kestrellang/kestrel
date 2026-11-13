@@ -80,11 +80,14 @@ pub(crate) fn report_unresolved_type_params(ctx: &mut InferCtx<'_>) {
         let Some(&callee) = ctx.resolutions.get(&expr) else {
             continue;
         };
-        let params: Vec<Entity> = ctx
-            .query_ctx
-            .get::<TypeParams>(callee)
-            .map(|tp| tp.0.clone())
-            .unwrap_or_default();
+        let params: Vec<Option<Entity>> = match ctx.type_arg_params.get(&expr) {
+            Some(slots) => slots.clone(),
+            None => ctx
+                .query_ctx
+                .get::<TypeParams>(callee)
+                .map(|tp| tp.0.iter().map(|&p| Some(p)).collect())
+                .unwrap_or_default(),
+        };
 
         for (i, &tv) in tvs.iter().enumerate() {
             let resolved = ctx.resolve(tv);
@@ -96,9 +99,13 @@ pub(crate) fn report_unresolved_type_params(ctx: &mut InferCtx<'_>) {
             ) {
                 continue;
             }
-            let Some(&param) = params.get(i) else {
-                continue;
-            };
+            // A slot the callee's params can't name is still reported:
+            // skipping it let the hole reach monomorphization as `Error`.
+            let param = params.get(i).copied().flatten();
+            kestrel_debug::ktrace!(
+                "infer",
+                "unresolved type arg {i} of {expr:?}: param {param:?}"
+            );
             ctx.report_error(InferError::UnresolvedTypeParam {
                 param,
                 span: span.clone(),

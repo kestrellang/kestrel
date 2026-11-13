@@ -360,6 +360,11 @@ pub struct InferCtx<'a> {
     /// point at the right call site without threading HirBody through
     /// the solver.
     pub(crate) type_arg_spans: HashMap<HirExprId, Span>,
+    /// For a recorded type-arg list whose slots aren't the callee's own
+    /// `TypeParams` (a member reached through a protocol extension leads
+    /// with the protocol's params), the param each slot stands for, `None`
+    /// where it has no name. Read by `report_unresolved_type_params`.
+    pub(crate) type_arg_params: HashMap<HirExprId, Vec<Option<Entity>>>,
 
     /// Source span of each collection-literal TyVar (array / dictionary), so
     /// the type it defaults to (`Array[?E]`) is well-formedness-checked at
@@ -630,6 +635,7 @@ impl<'a> InferCtx<'a> {
             promotions: HashMap::default(),
             type_args: HashMap::default(),
             type_arg_spans: HashMap::default(),
+            type_arg_params: HashMap::default(),
             literal_spans: HashMap::default(),
             literal_default_args: Vec::new(),
             expr_types: HashMap::default(),

@@ -1174,6 +1174,7 @@ pub(super) fn solve_member(
     // If protocol_type_args are provided (from where clause, e.g., F: Factory[i64]),
     // use those. Otherwise default to receiver (e.g., Addable[Rhs = Self]).
     let mut proto_type_args_tvs: Vec<TyVar> = Vec::new();
+    let mut proto_slot_params: Vec<kestrel_hecs::Entity> = Vec::new();
     let self_is_protocol = resolution
         .self_type
         .map(|e| ctx.query_ctx.get::<NodeKind>(e) == Some(&NodeKind::Protocol))
@@ -1184,6 +1185,7 @@ pub(super) fn solve_member(
             .get::<TypeParams>(self_entity)
             .map(|tp| tp.0.clone())
             .unwrap_or_default();
+        proto_slot_params.clone_from(&proto_type_params);
         // When the method comes from a protocol extension, the extension has
         // its own type params that are positionally equivalent to the protocol's.
         // These already have TyVars from body inference. Use them instead of
@@ -1207,11 +1209,25 @@ pub(super) fn solve_member(
                 // a concrete TyVar (e.g. recv `Array[Int64]` mapped SliceExt's
                 // T → Int64), use *that* — otherwise the abstract
                 // `ctx.param(ext_param)` would collapse `T` to a free Param.
+                //
+                // Outside that extension the param is not in scope: it is
+                // the call's own choice (`Sq.twin()` through `extend[T]
+                // Shape: Describe[T]` picks a `T`), so a fresh var that the
+                // arguments or context solve — or that is reported E105
+                // when nothing does. A free `Param` there reached
+                // monomorphization as an `Error` type arg (an ICE).
+                let in_scope = ext_param_in_scope(ctx, ext_param);
                 let tv = subs
                     .iter()
                     .find(|(e, _)| *e == ext_param)
                     .map(|&(_, tv)| tv)
-                    .unwrap_or_else(|| ctx.param(ext_param));
+                    .unwrap_or_else(|| {
+                        if in_scope {
+                            ctx.param(ext_param)
+                        } else {
+                            ctx.fresh()
+                        }
+                    });
                 subs.push((param, tv));
                 tv
             } else if recv_entity
@@ -1272,6 +1288,11 @@ pub(super) fn solve_member(
     // Pattern params follow: MIR's signature orders the extension's own
     // params (`ExtensionOwnTypeParams`) after the receiver's.
     let mut recorded_type_args = proto_type_args_tvs.clone();
+    // The param each slot stands for, so an uninferred one is reported by
+    // name: the protocol's params, then (unnamed) receiver and pattern
+    // slots, then the method's own.
+    let mut slot_params: Vec<Option<kestrel_hecs::Entity>> =
+        proto_slot_params.iter().map(|&p| Some(p)).collect();
     // A type's own init (`String[A].init[I](from:)`, reached here when
     // several inits share the call's labels) leads with the type's args,
     // the same full list `gen_struct_init` records for a lone match: the
@@ -1280,9 +1301,12 @@ pub(super) fn solve_member(
         recorded_type_args.extend(recv_type_args.iter().copied());
     }
     recorded_type_args.extend(pattern_tvs);
+    slot_params.resize(recorded_type_args.len(), None);
     recorded_type_args.extend(fresh_params.iter().copied());
+    slot_params.extend(resolution.type_params.iter().map(|&p| Some(p)));
     if !recorded_type_args.is_empty() {
         ctx.record_type_args(expr, recorded_type_args, span.clone());
+        ctx.type_arg_params.insert(expr, slot_params);
     }
 
     // Emit where clause constraints.
@@ -2292,4 +2316,20 @@ pub(super) fn receiver_conformance_count(
     protocol: kestrel_hecs::Entity,
 ) -> usize {
     positive_conformances_to(ctx, recv, protocol).len()
+}
+
+/// Whether an extension's own param is in scope in the body being inferred:
+/// the body lies inside that extension.
+fn ext_param_in_scope(ctx: &InferCtx<'_>, param: kestrel_hecs::Entity) -> bool {
+    let Some(ext) = ctx.query_ctx.parent_of(param) else {
+        return false;
+    };
+    let mut current = Some(ctx.owner);
+    while let Some(entity) = current {
+        if entity == ext {
+            return true;
+        }
+        current = ctx.query_ctx.parent_of(entity);
+    }
+    false
 }
