@@ -274,6 +274,10 @@ pub enum Builtin {
     // ===== Result =====
     ResultOkCase,
     ResultErrCase,
+    /// `ControlFlow.Continue` — the case a `try` operand's value comes out of.
+    ControlFlowContinueCase,
+    /// `ControlFlow.Break` — the case a `try` operand's residual comes out of.
+    ControlFlowBreakCase,
 
     // ===== Type operators (type aliases) =====
     OptionalTypeOperator,
@@ -302,6 +306,8 @@ pub enum Builtin {
     /// `Interpolatable.appendLiteral` — appends one static segment.
     InterpolatableAppendLiteral,
     FormatOptions,
+    /// `_formatSpecOptions` — builds the `FormatOptions` a `{value:spec}` format specifier spells.
+    FormatSpecOptions,
 
     // ===== References =====
     /// `@builtin(.DecayOptionalRef) func decayOptionalRef[T](_: Optional[&T])
@@ -610,6 +616,8 @@ impl Builtin {
             Self::OptionalNoneCase => "OptionalNoneCase",
             Self::ResultOkCase => "ResultOkCase",
             Self::ResultErrCase => "ResultErrCase",
+            Self::ControlFlowContinueCase => "ControlFlowContinueCase",
+            Self::ControlFlowBreakCase => "ControlFlowBreakCase",
 
             // Type operators
             Self::OptionalTypeOperator => "OptionalTypeOperator",
@@ -630,6 +638,7 @@ impl Builtin {
             Self::InterpolatableAppendLiteral => "InterpolatableAppendLiteral",
             Self::DecayOptionalRef => "DecayOptionalRef",
             Self::FormatOptions => "FormatOptions",
+            Self::FormatSpecOptions => "FormatSpecOptions",
             Self::FormattableProtocol => "FormattableProtocol",
             Self::FormattableFormatIntoMethod => "FormattableFormatInto",
 
@@ -886,6 +895,8 @@ impl Builtin {
             "OptionalNoneCase" => Some(Self::OptionalNoneCase),
             "ResultOkCase" => Some(Self::ResultOkCase),
             "ResultErrCase" => Some(Self::ResultErrCase),
+            "ControlFlowContinueCase" => Some(Self::ControlFlowContinueCase),
+            "ControlFlowBreakCase" => Some(Self::ControlFlowBreakCase),
 
             // Type operators
             "OptionalTypeOperator" => Some(Self::OptionalTypeOperator),
@@ -906,6 +917,7 @@ impl Builtin {
             "InterpolatableAppendLiteral" => Some(Self::InterpolatableAppendLiteral),
             "DecayOptionalRef" => Some(Self::DecayOptionalRef),
             "FormatOptions" => Some(Self::FormatOptions),
+            "FormatSpecOptions" => Some(Self::FormatSpecOptions),
             "FormattableProtocol" => Some(Self::FormattableProtocol),
             "FormattableFormatInto" => Some(Self::FormattableFormatIntoMethod),
 
@@ -982,6 +994,9 @@ impl Builtin {
     /// Metadata about what symbol kind this builtin expects.
     pub fn kind(self) -> BuiltinKind {
         match self {
+            Self::FormatSpecOptions => BuiltinKind::Function,
+            Self::ControlFlowBreakCase => BuiltinKind::EnumCase,
+            Self::ControlFlowContinueCase => BuiltinKind::EnumCase,
             Self::PointerToInit => BuiltinKind::Function,
             Self::ArrayMatchableRest => BuiltinKind::TypeAlias,
             Self::OwnedBoxTakeValue => BuiltinKind::Function,

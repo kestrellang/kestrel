@@ -803,7 +803,42 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
             // is the expected type, i.e. the value's own type. (No early
             // `return`: the value must reach the `expr_types` record at the
             // end of `gen_expr`, which MIR lowering reads as the call's Self.)
-            if let Some(requirement) = requirement {
+            // A desugaring's lang-item case (`.Some(x)` from `lazy`, `?.`,
+            // `throw`): the case entity is pinned, so its home is the case's
+            // own enum — never a lookup of its spelling on the expected type.
+            let pinned_case = requirement
+                .filter(|&r| ctx.query_ctx.get::<NodeKind>(r) == Some(&NodeKind::EnumCase));
+            if let Some(case) = pinned_case {
+                let Some((home_enum, name_str)) = ctx.query_ctx.parent_of(case).zip(name.as_str())
+                else {
+                    ctx.poison(result_tv);
+                    return result_tv;
+                };
+                // Check mode: an expected type that IS the case's enum is the
+                // home (so the payload is checked against it in place);
+                // otherwise the enum with fresh args.
+                let expected_home = expect.as_ref().map(|(e, _)| *e).filter(|&e| {
+                    matches!(
+                        ctx.slot(ctx.resolve(e)),
+                        TySlot::Resolved(TyKind::Enum { entity, .. }) if *entity == home_enum
+                    )
+                });
+                let home = match expected_home {
+                    Some(home) => home,
+                    None => {
+                        let params: Vec<Entity> = ctx
+                            .query_ctx
+                            .get::<TypeParams>(home_enum)
+                            .map(|tp| tp.0.clone())
+                            .unwrap_or_default();
+                        let args: Vec<TyVar> = params.iter().map(|_| ctx.fresh()).collect();
+                        ctx.named(home_enum, args)
+                    },
+                };
+                ctx.equal(result_tv, home, span.clone());
+                ctx.implicit(result_tv, name_str, arg_tvs, result_tv, id, span.clone());
+                result_tv
+            } else if let Some(requirement) = requirement {
                 crate::solver::requirement_call(
                     ctx,
                     *requirement,
@@ -4452,54 +4487,41 @@ fn gen_variant_pat(
     span: &Span,
     source: MatchSource,
 ) {
-    let qctx = ctx.query_ctx;
-    let root = ctx.root;
-    let labels: Vec<Option<String>> = args.iter().map(|a| a.label.clone()).collect();
-    check_variant_pattern_labels(ctx, entity, &labels, span);
-
-    // Build substitution map: enum type params → fresh TyVars linked to scrutinee.
-    // This ensures payload types like HirTy::Param(T) resolve to the scrutinee's
-    // actual type arg, not the canonical Param TyVar.
-    let mut subs: Vec<(Entity, TyVar)> = Vec::new();
-    if let Some(parent_enum) = qctx.parent_of(entity) {
-        let parent_tps: Vec<Entity> = qctx
+    // The scrutinee must be the case's enum (with fresh args, so the
+    // pattern can drive the scrutinee's inference).
+    if let Some(parent_enum) = ctx.query_ctx.parent_of(entity) {
+        let parent_args: Vec<TyVar> = ctx
+            .query_ctx
             .get::<TypeParams>(parent_enum)
-            .map(|tp| tp.0.clone())
+            .map(|tp| tp.0.iter().map(|_| ctx.fresh()).collect())
             .unwrap_or_default();
-        let parent_args: Vec<TyVar> = parent_tps.iter().map(|_| ctx.fresh()).collect();
-        let enum_tv = ctx.named(parent_enum, parent_args.clone());
-
-        // Scrutinee must be this enum type
+        let enum_tv = ctx.named(parent_enum, parent_args);
         ctx.equal(scrutinee_tv, enum_tv, span.clone());
-
-        // Map enum type params to the fresh args linked to scrutinee
-        for (&param, &arg) in parent_tps.iter().zip(parent_args.iter()) {
-            subs.push((param, arg));
-        }
     }
-
-    // Get case's payload types, substituting enum type params with scrutinee args
-    let payload_types: Vec<TyVar> = match qctx.query(LowerCallableTypes { entity, root }) {
-        Some(types) => types
-            .iter()
-            .map(|t| match t {
-                Some(hir_ty) => lower_hir_ty_with_subs(ctx, hir_ty, &subs),
-                None => ctx.fresh(),
-            })
-            .collect(),
-        // No Callable → unit case, args should be empty
-        None => vec![],
+    // Bind the payload against the settled scrutinee, like an implicit
+    // `.Case` (bidi P3f) — so an error scrutinee poisons the bindings
+    // instead of leaving them uninferred — but with the case pinned.
+    let arg_tys: Vec<TyVar> = args.iter().map(|_| ctx.fresh()).collect();
+    let name = ctx
+        .query_ctx
+        .get::<Name>(entity)
+        .map(|n| n.0.clone())
+        .unwrap_or_default();
+    let pat = crate::constraint::Constraint::ImplicitPat {
+        scrutinee: scrutinee_tv,
+        name,
+        case: Some(entity),
+        arg_tys: arg_tys.clone(),
+        labels: args.iter().map(|a| a.label.clone()).collect(),
+        span: span.clone(),
     };
-
-    // Constrain each arg pattern against the corresponding payload type
-    let payload_len = payload_types.len();
-    for (arg, payload_tv) in args.iter().zip(payload_types) {
-        gen_pat(ctx, hir, arg.pattern, payload_tv, source);
+    if receiver_open(ctx, scrutinee_tv) {
+        ctx.constraints.push(pat);
+    } else {
+        crate::solver::solve_now(ctx, pat);
     }
-    // Extra args with no corresponding type get fresh TyVars
-    for arg in args.iter().skip(payload_len) {
-        let arg_tv = ctx.fresh();
-        gen_pat(ctx, hir, arg.pattern, arg_tv, source);
+    for (arg, &tv) in args.iter().zip(&arg_tys) {
+        gen_pat(ctx, hir, arg.pattern, tv, source);
     }
 }
 
@@ -4551,6 +4573,7 @@ fn gen_implicit_variant_pat(
     let pat = crate::constraint::Constraint::ImplicitPat {
         scrutinee: scrutinee_tv,
         name: name.to_string(),
+        case: None,
         arg_tys: arg_tys.clone(),
         labels: args.iter().map(|a| a.label.clone()).collect(),
         span: span.clone(),

@@ -72,9 +72,8 @@ impl QueryFn for ExtensionTargetEntity {
             kestrel_ast::AstType::Array(..)
             | kestrel_ast::AstType::Optional(..)
             | kestrel_ast::AstType::Dictionary(..) => {
-                let (builtin, name) = sugar_builtin(ast_type)?;
-                let context = ctx.parent_of(self.extension).unwrap_or(self.root);
-                return crate::resolve_sugar_type(ctx, context, self.root, builtin, name);
+                let (builtin, _) = sugar_builtin(ast_type)?;
+                return crate::resolve_sugar_type(ctx, self.root, builtin);
             },
             _ => {},
         }

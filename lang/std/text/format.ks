@@ -344,6 +344,35 @@ public struct FormatOptions: Equatable {
     }
 }
 
+/// The `FormatOptions` a `{value:spec}` format specifier spells.
+///
+/// The compiler parses each specifier and builds its options through this
+/// function, so it never names `FormatOptions`' fields or cases itself.
+/// `width` / `precision` apply only when their `has` flag is set.
+/// `alignment`, `sign` and `floatStyle` arrive as codes: alignment 0 left,
+/// 1 right, 2 center; sign 0 negative-only, 1 always, 2 space; float style
+/// 0 auto, 1 fixed, 2 scientific, 3 scientific uppercase, 4 percent.
+@builtin(.FormatSpecOptions)
+public func _formatSpecOptions(hasWidth: Bool, width: Int64, hasPrecision: Bool, precision: Int64, alignment: Int64, fill: Char, radix: Int64, uppercase: Bool, sign: Int64, alternate: Bool, floatStyle: Int64, debug: Bool) -> FormatOptions {
+    var opts = FormatOptions();
+    if hasWidth { opts.width = .Some(width) }
+    if hasPrecision { opts.precision = .Some(precision) }
+    if alignment == 1 { opts.alignment = Alignment.Right }
+    if alignment == 2 { opts.alignment = Alignment.Center }
+    opts.fill = fill;
+    opts.radix = radix;
+    opts.uppercase = uppercase;
+    if sign == 1 { opts.sign = Sign.Always }
+    if sign == 2 { opts.sign = Sign.Space }
+    opts.alternate = alternate;
+    if floatStyle == 1 { opts.floatStyle = FloatStyle.Fixed }
+    if floatStyle == 2 { opts.floatStyle = FloatStyle.Scientific }
+    if floatStyle == 3 { opts.floatStyle = FloatStyle.ScientificUpper }
+    if floatStyle == 4 { opts.floatStyle = FloatStyle.Percent }
+    opts.debug = debug;
+    opts
+}
+
 // ============================================================================
 // FORMATTABLE PROTOCOL
 // ============================================================================

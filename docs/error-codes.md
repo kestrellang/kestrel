@@ -110,6 +110,7 @@ the type checker, and the code is assigned in one place,
 | E156 | a slice cannot be assigned as a whole | The target of an assignment is unsized (`xs(1..<3) = ys`, a `Slice[T]` place), as in Rust. Copy into it with `xs(1..<3).assign(from: ys)` (lengths must match) or resize with `replaceSubrange`. |
 | E157 | \`?.\` requires a type that conforms to \`OptionalChain\`, found '{T}' | `a?.b` on a value with no payload to chain on (not an `Optional`, a `Result`, or another `OptionalChain` type). Use `.` for a non-optional value. Emitted by type inference. |
 | E158 | can't consume through \`?.\` on a place | A chain on a variable or field lends its payload by reference, so a `consuming` method or argument can't take it. Move the value out first: `a.take()?.…`. Emitted by the `optional_chain` analyzer. |
+| E159 | {construct} requires the \`{Builtin}\` lang item | Compiler-generated code (a `for` loop, `try`, `throw`, an operator, `?.`, `as?`, `lazy`, a format spec, a failable `init`) needs a lang item that no declaration carries the `@builtin(.X)` tag for. Usually the standard library is not imported; a `--no-std` program must declare and tag the item itself. Emitted by HIR lowering. |
 
 ### Example — E109 (type mismatch)
 

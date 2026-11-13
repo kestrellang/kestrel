@@ -95,10 +95,10 @@ impl BodyCheck for ForLoopPatternAnalyzer {
 }
 
 /// Extract the user's pattern from inside `.Some(user_pattern)`. The
-/// for-loop desugar always makes its first arm that one-arg variant, so the
-/// shape alone identifies it (no need to read the case's spelling).
+/// for-loop desugar always makes its first arm that one-arg variant (matched
+/// by the `OptionalSomeCase` entity), so the shape alone identifies it.
 fn extract_user_pattern(hir: &HirBody, pat_id: HirPatId) -> Option<HirPatId> {
-    let HirPat::ImplicitVariant { args, .. } = &hir.pats[pat_id] else {
+    let HirPat::Variant { args, .. } = &hir.pats[pat_id] else {
         return None;
     };
     let [arg] = args.as_slice() else {

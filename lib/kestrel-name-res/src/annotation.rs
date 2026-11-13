@@ -85,7 +85,7 @@ pub fn resolve_annotation(
     let Some((builtin, name)) = sugar_builtin(ast_ty) else {
         return TypeResolution::NotFound(String::new());
     };
-    match crate::resolve_sugar_type(ctx, context, root, builtin, name) {
+    match crate::resolve_sugar_type(ctx, root, builtin) {
         Some(entity) => TypeResolution::Found(entity),
         None => TypeResolution::NotFound(name.to_string()),
     }

@@ -6,7 +6,9 @@ struct Error {
     var message: lang.str
 }
 enum Result[T, E] {
+    @builtin(.ResultOkCase)
     case Ok(T)
+    @builtin(.ResultErrCase)
     case Err(E)
 }
 extend Result[T, E]: Prelude.FromResidual[E] {

@@ -1086,10 +1086,11 @@ pub(super) fn try_solve_inner(ctx: &mut InferCtx<'_>, c: Constraint) -> SolveRes
         Constraint::ImplicitPat {
             scrutinee,
             name,
+            case,
             arg_tys,
             labels,
             span,
-        } => solve_implicit_pat(ctx, scrutinee, &name, arg_tys, labels, span),
+        } => solve_implicit_pat(ctx, scrutinee, &name, case, arg_tys, labels, span),
         Constraint::TupleRestPat {
             scrutinee,
             prefix_tys,

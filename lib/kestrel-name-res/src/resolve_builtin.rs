@@ -193,21 +193,15 @@ fn alias_target(ctx: &QueryContext<'_>, alias: Entity, root: Entity) -> Option<E
 /// `[Int]`, and every array literal in that file failed to conform to
 /// `_ExpressibleByArrayLiteral`.
 ///
-/// Falls back to the name for worlds built without the stdlib (unit tests,
-/// `--no-std`), where there is no lang item to find.
+/// No name fallback: a world without the lang item (a `--no-std` program
+/// that never declares it) has no sugar, and the caller reports E141.
 pub fn resolve_sugar_type(
     ctx: &QueryContext<'_>,
-    owner: Entity,
     root: Entity,
     builtin: Builtin,
-    name: &str,
 ) -> Option<Entity> {
-    if let Some(alias) = ctx.query(ResolveBuiltin { builtin, root })
-        && let Some(target) = sugar_alias_target(ctx, root, alias)
-    {
-        return Some(target);
-    }
-    resolve_std_type(ctx, owner, root, name)
+    let alias = ctx.query(ResolveBuiltin { builtin, root })?;
+    sugar_alias_target(ctx, root, alias)
 }
 
 /// Follow `@builtin(.ArrayTypeOperator) type ArrayTypeOperator[T] = Array[T]`
@@ -226,24 +220,6 @@ fn sugar_alias_target(ctx: &QueryContext<'_>, root: Entity, alias: Entity) -> Op
         context: alias,
         root,
     }) {
-        TypeResolution::Found(entity) => Some(entity),
-        _ => None,
-    }
-}
-
-/// Resolve a well-known standard library type name (e.g. "Array", "Optional").
-fn resolve_std_type(
-    ctx: &QueryContext<'_>,
-    owner: Entity,
-    root: Entity,
-    name: &str,
-) -> Option<Entity> {
-    let result = ctx.query(ResolveTypePath {
-        segments: vec![name.to_string()],
-        context: owner,
-        root,
-    });
-    match result {
         TypeResolution::Found(entity) => Some(entity),
         _ => None,
     }

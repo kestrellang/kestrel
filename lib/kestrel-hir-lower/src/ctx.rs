@@ -270,20 +270,10 @@ impl<'a> LowerCtx<'a> {
             elements: vec![],
             span: span.clone(),
         });
-        let wrapper_name = match effect {
-            InitEffect::Failable => "Some",
-            InitEffect::Throwing => "Ok",
+        let case = match effect {
+            InitEffect::Failable => kestrel_hir::Builtin::OptionalSomeCase,
+            InitEffect::Throwing => kestrel_hir::Builtin::ResultOkCase,
         };
-        Some(self.alloc_expr(HirExpr::ImplicitMember {
-            owner: None,
-            name: HirName::name(wrapper_name),
-            args: Some(vec![HirCallArg {
-                trailing_closure: false,
-                label: None,
-                value: unit_expr,
-            }]),
-            requirement: None,
-            span,
-        }))
+        Some(self.lang_case_value(case, Some(unit_expr), "this initializer", &span))
     }
 }

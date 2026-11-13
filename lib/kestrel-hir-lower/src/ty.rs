@@ -214,7 +214,7 @@ fn lower_structural_type(
 
         // Sugar types → resolve standard library entity + Struct.
         // The `Builtin` is the `@builtin(.XTypeOperator)` lang item that binds
-        // the syntax; the string is only a fallback for worlds without it.
+        // the syntax; the string only names it in the E141 message.
         AstType::Array(elem, span) => lower_sugar_type(
             ctx,
             owner,
@@ -1189,7 +1189,7 @@ fn lower_sugar_type(
         .map(|t| lower_ast_type(ctx, owner, root, t))
         .collect();
 
-    match kestrel_name_res::resolve_sugar_type(ctx, owner, root, builtin, name) {
+    match kestrel_name_res::resolve_sugar_type(ctx, root, builtin) {
         Some(entity) => {
             let args = fill_type_arg_defaults(ctx, root, entity, lowered_args);
             nominal_hir_ty(ctx, entity, args, span)

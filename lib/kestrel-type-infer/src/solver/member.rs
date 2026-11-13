@@ -1962,6 +1962,7 @@ pub(super) fn solve_implicit_pat(
     ctx: &mut InferCtx<'_>,
     scrutinee: TyVar,
     name: &str,
+    case: Option<Entity>,
     arg_tys: Vec<TyVar>,
     labels: Vec<Option<String>>,
     span: Span,
@@ -1971,6 +1972,7 @@ pub(super) fn solve_implicit_pat(
         return SolveResult::Deferred(Constraint::ImplicitPat {
             scrutinee,
             name: name.to_string(),
+            case,
             arg_tys,
             labels,
             span,
@@ -2007,15 +2009,20 @@ pub(super) fn solve_implicit_pat(
         },
     };
 
-    // Search children for an enum case with the matching name
+    // A pinned case is matched by identity (a scrutinee of another enum
+    // already failed the pattern's `Equal`); an implicit `.Name` searches the
+    // scrutinee's cases for that name.
     let children = ctx.query_ctx.children_of(enum_entity).to_vec();
-    let case_entity = children.iter().copied().find(|&child| {
-        ctx.query_ctx.get::<NodeKind>(child) == Some(&NodeKind::EnumCase)
-            && ctx
-                .query_ctx
-                .get::<Name>(child)
-                .is_some_and(|n| n.0 == name)
-    });
+    let case_entity = match case {
+        Some(case) => children.contains(&case).then_some(case),
+        None => children.iter().copied().find(|&child| {
+            ctx.query_ctx.get::<NodeKind>(child) == Some(&NodeKind::EnumCase)
+                && ctx
+                    .query_ctx
+                    .get::<Name>(child)
+                    .is_some_and(|n| n.0 == name)
+        }),
+    };
 
     let Some(case_entity) = case_entity else {
         // No matching case found — poison arg TyVars to suppress cascades.
