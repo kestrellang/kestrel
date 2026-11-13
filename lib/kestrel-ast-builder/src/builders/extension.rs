@@ -5,11 +5,11 @@ use kestrel_hecs::{Entity, World};
 use kestrel_span::Span;
 
 use kestrel_syntax_tree::SyntaxNodePtr;
-use kestrel_syntax_tree::ast::{self, AstNode};
+use kestrel_syntax_tree::ast::{self, AstNode, HasName};
 use kestrel_syntax_tree::utils::get_decl_span;
 
 use super::helpers::*;
-use super::type_param::build_type_parameters;
+use super::type_param::build_type_parameters_except;
 use crate::ast_type::lower_opt_type;
 use crate::components::*;
 
@@ -45,15 +45,28 @@ pub fn build_extension(
     set_attributes(world, entity, node, file_id);
     set_conformances(world, entity, node, file_id);
     set_where_clause(world, entity, node, file_id);
+    let self_alias = retarget_param_extension(world, entity, node);
 
     // Record what the LHS introduces before the pattern scan, which consumes
     // the same list. Both must agree on it — see `ExtensionLhsParamNames`.
     let lhs_names = collect_lhs_target_names(world, entity);
     world.set(entity, ExtensionLhsParamNames(lhs_names.clone()));
 
-    // Declared params are claimed before the pattern scan, so a declared
-    // name nested in the target (`extend[X] Box[W[X]]`) isn't a candidate.
-    build_type_parameters(world, entity, node, file_entity, file_id);
+    // A declared param the target mentions (`extend[T] Box[T]`, `extend[X]
+    // Box[W[X]]`) is the same param the undeclared spelling introduces: the
+    // target binds it — a top-level arg binds the target's own param, a
+    // nested one a pattern param solved from the receiver. Only params the
+    // target never mentions (`extend[T] Int64: ArrayIndex[T]`) become the
+    // extension's own `TypeParams`, which nothing at a use site could bind.
+    let mut in_target: Vec<(String, Span)> = Vec::new();
+    if let Some(target) = world.get::<ExtensionTarget>(entity) {
+        for arg in target_args(&target.0) {
+            collect_bare_names(arg, &mut in_target);
+        }
+    }
+    let mut in_target: Vec<String> = in_target.into_iter().map(|(n, _)| n).collect();
+    in_target.extend(self_alias);
+    build_type_parameters_except(world, entity, node, file_entity, file_id, &in_target);
     let mut claimed = lhs_names;
     claimed.extend(declared_param_names(world, entity));
     introduce_pattern_candidates(world, entity, file_entity, &claimed);
@@ -63,6 +76,68 @@ pub fn build_extension(
         .map(|b| b.items().collect())
         .unwrap_or_default();
     (entity, members)
+}
+
+/// `extend[T, R] R: P[T] where R: Q` is the blanket conformance `extend[T]
+/// Q: P[T]` spelled on a param. Retarget it at `Q` — the first protocol the
+/// where clause bounds `R` by — so it takes the protocol-extension path, and
+/// record `R` as this extension's name for `Self` (`ExtensionSelfAlias`). Its
+/// remaining `R` clauses become `Self` clauses (`R: Copyable` →
+/// `Self: Copyable`). Returns the alias, which is then no declared param.
+/// A param target with no bound to retarget at is left as written (E452).
+fn retarget_param_extension(
+    world: &mut World,
+    entity: Entity,
+    node: &ast::ExtensionDeclaration,
+) -> Option<String> {
+    let target = world.get::<ExtensionTarget>(entity)?;
+    let name = bare_name(&target.0)?.to_string();
+    let declared = node
+        .type_parameter_list()?
+        .type_parameters()
+        .filter_map(|p| p.name_text())
+        .any(|n| n == name);
+    if !declared {
+        return None;
+    }
+    let mut clause = world.get::<WhereClause>(entity)?.clone();
+    let idx = clause.0.iter().position(|c| {
+        matches!(c, WhereConstraint::Bound { subject, protocols, .. }
+            if bare_name(subject) == Some(name.as_str()) && !protocols.is_empty())
+    })?;
+    let WhereConstraint::Bound { protocols, .. } = &mut clause.0[idx] else {
+        return None;
+    };
+    let new_target = protocols.remove(0);
+    if protocols.is_empty() {
+        clause.0.remove(idx);
+    }
+    for constraint in &mut clause.0 {
+        let subject = match constraint {
+            WhereConstraint::Bound { subject, .. }
+            | WhereConstraint::NegativeBound { subject, .. } => subject,
+            WhereConstraint::Equality { lhs, .. } => lhs,
+        };
+        rename_head(subject, &name, "Self");
+    }
+    world.set(entity, ExtensionTarget(new_target));
+    if clause.0.is_empty() {
+        world.remove_component::<WhereClause>(entity);
+    } else {
+        world.set(entity, clause);
+    }
+    world.set(entity, ExtensionSelfAlias(name.clone()));
+    Some(name)
+}
+
+/// Rename a path's first segment (`R` / `R.Item` → `Self` / `Self.Item`).
+fn rename_head(ty: &mut AstType, from: &str, to: &str) {
+    if let AstType::Named { segments, .. } = ty
+        && let Some(first) = segments.first_mut()
+        && first.name == from
+    {
+        first.name = to.to_string();
+    }
 }
 
 /// Names of the extension's declared `extend[T, …]` params.

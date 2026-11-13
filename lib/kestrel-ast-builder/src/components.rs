@@ -605,6 +605,13 @@ pub struct ExtensionTarget(pub AstType);
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct ExtensionLhsParamNames(pub Vec<String>);
 
+/// On an extension written on one of its own params, `extend[T, R] R: P[T]
+/// where R: Q`: the param's name, `R`. The builder retargets such an
+/// extension at `Q` (it is the blanket conformance `extend[T] Q: P[T]`), and
+/// `R` names that extension's `Self` (`kestrel_name_res::is_self_name`).
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct ExtensionSelfAlias(pub String);
+
 /// Candidate type parameters a NESTED position of an extension's target
 /// introduces: `X` in `extend Box[W[X]]`, `A`/`B` in `extend Box[(A, B)]`.
 /// A pattern parameter binds by matching the receiver's arg against the

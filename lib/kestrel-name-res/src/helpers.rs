@@ -9,6 +9,24 @@ use kestrel_hecs::{Entity, QueryContext};
 use crate::extensions::ExtensionsFor;
 use crate::visibility::{IsVisibleFrom, VisibleChildrenByName};
 
+/// Whether `name`, written in `context`, names the enclosing `Self`: the
+/// `Self` keyword, or the param an `extend[R] R: P where R: Q` extension was
+/// written on (`ExtensionSelfAlias`, recorded when the builder retargeted it
+/// at `Q`). THE check for a path head that means `Self`.
+pub fn is_self_name(ctx: &QueryContext<'_>, name: &str, context: Entity) -> bool {
+    if name == "Self" {
+        return true;
+    }
+    let mut current = Some(context);
+    while let Some(entity) = current {
+        if let Some(alias) = ctx.get::<kestrel_ast_builder::ExtensionSelfAlias>(entity) {
+            return alias.0 == name;
+        }
+        current = ctx.parent_of(entity);
+    }
+    false
+}
+
 /// Walk parent_of chain to find the nearest ancestor with NodeKind::Module.
 /// Returns None if no module ancestor exists (e.g. entity is the root).
 pub fn ancestor_module(ctx: &QueryContext<'_>, entity: Entity) -> Option<Entity> {

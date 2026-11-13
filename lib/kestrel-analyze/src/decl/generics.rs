@@ -561,11 +561,17 @@ fn check_where_clause_bounds(
         return;
     };
 
-    // Collect declared type param names for checking subjects
-    let declared_names: Vec<String> = params
+    // Collect declared type param names for checking subjects. An
+    // extension's `Self` is always in scope there (`extend[T] P: Q[T] where
+    // Self: Copyable`, which `extend[T, R] R: Q[T] where R: P, R: Copyable`
+    // becomes).
+    let mut declared_names: Vec<String> = params
         .iter()
         .filter_map(|&p| cx.query.get::<Name>(p).map(|n| n.0.clone()))
         .collect();
+    if cx.query.get::<NodeKind>(cx.entity) == Some(&NodeKind::Extension) {
+        declared_names.push("Self".to_string());
+    }
 
     for constraint in &wc.0 {
         let (subject, protocols) = match constraint {

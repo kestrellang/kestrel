@@ -118,12 +118,12 @@ impl QueryFn for ExtensionTargetEntity {
 ///
 /// Each entry pairs the name the extension WROTE with the parameter it binds;
 /// consumers match on that name, never the parameter's own `Name`:
-/// - a nominal target binds by name, as it always has (`extend Box[U]` binds
-///   nothing);
-/// - a structural target (`&T`, `(X, Y)`) binds by position — its synthetic
-///   `lang` entity's parameter names are invented. An element binds only when
-///   it is a bare name that resolves to no type, so `extend (Int64, Y)` keeps
-///   `Int64` concrete and binds `Y` alone;
+/// - every target binds by position: `extend Box[U]` binds Box's first
+///   param under the name `U`, `extend [U]` binds Array's. An arg binds only
+///   when it is a bare name that resolves to no type, so `extend (Int64, Y)`
+///   keeps `Int64` concrete and binds `Y` alone, and `extend Box[Payload]`
+///   binds nothing. (Matching by the param's own name made `extend[U] [U]`
+///   bind nothing, since Array's param is not spelled `U`.)
 /// - a NESTED position (`X` in `extend Box[W[X]]`) binds an extension-owned
 ///   pattern parameter (`ExtensionPatternParams`), solved by matching the
 ///   receiver's arg against the written pattern.
@@ -164,17 +164,9 @@ impl ExtensionLhsParams {
         let Some(params) = ctx.get::<TypeParams>(target) else {
             return Vec::new();
         };
-        if let Some(elements) = structural_target_elements(ctx, self.extension, target) {
-            return self.bind_positionally(ctx, &elements, &params.0);
-        }
-        params
-            .0
-            .iter()
-            .filter_map(|&tp| {
-                let name = &ctx.get::<Name>(tp)?.0;
-                lhs.0.contains(name).then(|| (name.clone(), tp))
-            })
-            .collect()
+        let elements = structural_target_elements(ctx, self.extension, target)
+            .unwrap_or_else(|| nominal_target_args(ctx, self.extension));
+        self.bind_positionally(ctx, &elements, &params.0)
     }
 
     /// Pair each bare, unresolvable element name with the parameter at its
@@ -208,13 +200,18 @@ impl ExtensionLhsParams {
 
 /// THE rule for whether a name written in an extension target introduces a
 /// parameter: it resolves to no type from the extension's enclosing scope.
+/// A name that finds a non-type (a user `module H` is visible from the
+/// stdlib's `extend Dictionary[K, V, H, A]`) names no type either.
 fn names_no_type(ctx: &QueryContext<'_>, context: Entity, root: Entity, name: &str) -> bool {
     let resolved = ctx.query(ResolveTypePath {
         segments: vec![name.to_string()],
         context,
         root,
     });
-    matches!(resolved, TypeResolution::NotFound(..))
+    matches!(
+        resolved,
+        TypeResolution::NotFound(..) | TypeResolution::NotAType(..)
+    )
 }
 
 // ===== ExtensionPatternParams =====
@@ -299,6 +296,25 @@ fn structural_target_elements(
         kestrel_ast::AstType::Ref { inner, .. } => Some(vec![inner.as_ref().clone()]),
         kestrel_ast::AstType::Tuple(elems, _) => Some(elems.clone()),
         _ => None,
+    }
+}
+
+/// The written type args of a nominal extension target, in the target's
+/// parameter order: `Box[T]`'s args, or the element types of the sugar
+/// spellings (`[T]`, `T?`, `[K: V]`).
+fn nominal_target_args(ctx: &QueryContext<'_>, extension: Entity) -> Vec<kestrel_ast::AstType> {
+    use kestrel_ast::AstType;
+    let Some(target) = ctx.get::<ExtensionTarget>(extension) else {
+        return Vec::new();
+    };
+    match &target.0 {
+        AstType::Named { segments, .. } => segments
+            .last()
+            .map(|s| s.type_args.clone())
+            .unwrap_or_default(),
+        AstType::Array(elem, _) | AstType::Optional(elem, _) => vec![elem.as_ref().clone()],
+        AstType::Dictionary(key, val, _) => vec![key.as_ref().clone(), val.as_ref().clone()],
+        _ => Vec::new(),
     }
 }
 

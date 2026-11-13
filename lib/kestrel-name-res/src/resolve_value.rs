@@ -157,7 +157,7 @@ enum Head {
 
 /// Look up the first segment in scope.
 fn resolve_head(ctx: &QueryContext<'_>, name: &str, context: Entity, root: Entity) -> Head {
-    if name == "Self" {
+    if crate::helpers::is_self_name(ctx, name, context) {
         return match try_resolve_self_value(ctx, context, root) {
             Some(target) => Head::SelfType(target),
             None => Head::Done(ValueResolution::SelfNotInScope),

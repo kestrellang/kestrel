@@ -1707,6 +1707,34 @@ impl LowerCtx<'_> {
     /// Let-conditions create bindings in the current scope.
     /// `source` tags any desugared let-condition matches so the right
     /// diagnostic fires (IfLet → E302, WhileLet → E308, Guard → E309).
+    /// Lower a `let` condition's value. A bare `and` there (`if let .Some(e)
+    /// = end and start < e`) is E160: `and` binds tighter than the `let`, so
+    /// it would scrutinize `end and start < e` with `e` not yet bound. The
+    /// fix is a condition list, `if let .Some(e) = end, start < e`.
+    /// Parenthesized (`= (a and b)`) it is an ordinary `Bool` scrutinee.
+    pub(crate) fn lower_let_value(&mut self, value: &ExprSrc) -> HirExprId {
+        let Some(node) = value.node().map(unwrap_expr).filter(|n| {
+            n.kind() == SyntaxKind::ExprBinary && binary_op(n) == Some(kestrel_ast::BinaryOp::And)
+        }) else {
+            return self.lower_expr_src(value);
+        };
+        let span = self.span(&node);
+        self.ctx.accumulate(
+            Diagnostic::error()
+                .with_code("E160")
+                .with_message("a `let` condition can't be joined with `and`")
+                .with_labels(vec![
+                    Label::primary(span.file_id, span.range())
+                        .with_message("`and` makes this whole expression the value being matched"),
+                ])
+                .with_notes(vec![
+                    "separate conditions with `,`: `if let .Some(x) = value, x > 0 { … }`"
+                        .to_string(),
+                ]),
+        );
+        self.alloc_expr(HirExpr::Error { span })
+    }
+
     pub(crate) fn lower_if_conditions(
         &mut self,
         conditions: &[Cond],
@@ -1725,7 +1753,7 @@ impl LowerCtx<'_> {
                 Cond::Expr(expr) => self.lower_expr_src(expr),
                 Cond::Let { pat, value } => {
                     // if let pattern = value → desugar to match with bool result
-                    let lowered_value = self.lower_expr_src(value);
+                    let lowered_value = self.lower_let_value(value);
                     let lowered_pat = self.lower_pat(pat);
 
                     // match value { pattern => true, _ => false }
@@ -2171,7 +2199,7 @@ impl LowerCtx<'_> {
 
         match first {
             Cond::Let { pat, value } => {
-                let scrutinee = self.lower_expr_src(value);
+                let scrutinee = self.lower_let_value(value);
 
                 // Bindings are visible in the success continuation (deeper
                 // conditions + the body), not in the fail branch. Scope the

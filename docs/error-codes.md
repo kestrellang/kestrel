@@ -111,6 +111,7 @@ the type checker, and the code is assigned in one place,
 | E157 | \`?.\` requires a type that conforms to \`OptionalChain\`, found '{T}' | `a?.b` on a value with no payload to chain on (not an `Optional`, a `Result`, or another `OptionalChain` type). Use `.` for a non-optional value. Emitted by type inference. |
 | E158 | can't consume through \`?.\` on a place | A chain on a variable or field lends its payload by reference, so a `consuming` method or argument can't take it. Move the value out first: `a.take()?.…`. Emitted by the `optional_chain` analyzer. |
 | E159 | {construct} requires the \`{Builtin}\` lang item | Compiler-generated code (a `for` loop, `try`, `throw`, an operator, `?.`, `as?`, `lazy`, a format spec, a failable `init`) needs a lang item that no declaration carries the `@builtin(.X)` tag for. Usually the standard library is not imported; a `--no-std` program must declare and tag the item itself. Emitted by HIR lowering. |
+| E160 | a \`let\` condition can't be joined with \`and\` | `if let .Some(e) = end and start < e`: `and` binds tighter than the `let`, so the whole `end and start < e` would be the value matched, with `e` not yet bound. Separate conditions with `,` (`if let .Some(e) = end, start < e`); parenthesize to match against a `Bool` `and`. Applies to `if`, `guard` and `while`. Emitted by HIR lowering. |
 
 ### Example — E109 (type mismatch)
 

@@ -370,7 +370,7 @@ impl LowerCtx<'_> {
         while_body: &BlockSyntax,
         span: &Span,
     ) -> HirExprId {
-        let lowered_value = self.lower_expr_src(value);
+        let lowered_value = self.lower_let_value(value);
 
         // Pattern bindings are visible inside the loop body but not after.
         self.push_scope();
