@@ -6,6 +6,9 @@
 
 module Test
 
+@builtin(.Copyable)
+protocol Copyable {}
+
 struct Box[T] where T: not Copyable {
     var v: T
 }

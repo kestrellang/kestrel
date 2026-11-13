@@ -3,6 +3,9 @@
 
 module Test
 
+@builtin(.Copyable)
+protocol Copyable {}
+
 protocol Resource {}
 
 struct Handle: Resource, not Copyable {

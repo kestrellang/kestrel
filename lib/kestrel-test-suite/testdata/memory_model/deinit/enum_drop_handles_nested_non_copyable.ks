@@ -3,6 +3,9 @@
 
 module Test
 
+@builtin(.Copyable)
+protocol Copyable {}
+
 struct Inner: not Copyable {
     var id: lang.i64
     deinit {}

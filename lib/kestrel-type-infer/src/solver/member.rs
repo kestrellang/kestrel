@@ -1138,21 +1138,10 @@ pub(super) fn solve_member(
         }
     }
 
-    // Map extension target type params to receiver type args.
-    // Extension type params are different entities from the struct's type params,
-    // but represent the same types (e.g., extend Box[T] has its own T entity).
-    if let Some(ext) = resolution.from_extension {
-        let ext_type_params: Vec<kestrel_hecs::Entity> = ctx
-            .query_ctx
-            .get::<TypeParams>(ext)
-            .map(|tp| tp.0.clone())
-            .unwrap_or_default();
-        for (&param, &arg) in ext_type_params.iter().zip(recv_type_args.iter()) {
-            if !subs.iter().any(|(e, _)| *e == param) {
-                subs.push((param, arg));
-            }
-        }
-    }
+    // An extension's declared params (`U` in `extend[U] Box[Bool]`) are never
+    // the receiver's args: the target binds those through its own params and
+    // pattern params below. Declared params get fresh vars with the method's
+    // own (`resolve` appends them to `type_params`).
 
     // Pattern params (`X` in `extend Box[W[X]]`) bind by matching: equate
     // each receiver arg with the target arg written in that position, the

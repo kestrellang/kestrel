@@ -40,16 +40,13 @@ use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 
 use kestrel_ast::AstType;
-use kestrel_ast_builder::{
-    Callable, ConformanceItem, Conformances, NodeKind, ReceiverKind, WhereClause as AstWhereClause,
-    WhereConstraint,
-};
+use kestrel_ast_builder::{Callable, NodeKind, ReceiverKind};
 use kestrel_copy_fold::CopyLayer;
 use kestrel_hecs::Entity;
 use kestrel_hir::body::*;
 use kestrel_hir::res::LocalId;
 use kestrel_hir::{Builtin, HirTy};
-use kestrel_name_res::{ResolveBuiltin, ResolveTypePath, TypeResolution};
+use kestrel_name_res::ResolveBuiltin;
 use kestrel_semantics::{
     ConditionalCopyableParams, CopyRequirement, CopySemantics, ExplicitlyNegatesProtocol,
     NominalCopySemantics, TypeParamCopyRequirement,
@@ -2469,86 +2466,29 @@ fn ty_is_copyable(mcx: &MoveCtx<'_>, ty: &ResolvedTy) -> bool {
     }
 }
 
-/// True if the entity explicitly opts out of `Copyable`. Uses the
-/// semantics query when the builtin is visible; otherwise falls back to
-/// matching the last path segment by name so `stdlib: false` test inputs
-/// that only declare `: not Copyable` without registering the builtin
-/// still see the move semantics.
+/// True if the entity explicitly opts out of `Copyable`. Without the
+/// builtin (no std and no `@builtin(.Copyable)` declaration) nothing can
+/// name it, so nothing opts out.
 fn entity_negates_copyable(mcx: &MoveCtx<'_>, entity: Entity) -> bool {
-    if let Some(copyable) = mcx.copyable {
-        return mcx.cx.query.query(ExplicitlyNegatesProtocol {
-            entity,
-            protocol: copyable,
-            root: mcx.cx.root,
-        });
-    }
-    let Some(conf) = mcx.cx.query.get::<Conformances>(entity) else {
+    let Some(copyable) = mcx.copyable else {
         return false;
     };
-    conf.0.iter().any(|item| match item {
-        ConformanceItem::Negative(ast_ty, _) => ast_last_segment_is_copyable(ast_ty),
-        _ => false,
+    mcx.cx.query.query(ExplicitlyNegatesProtocol {
+        entity,
+        protocol: copyable,
+        root: mcx.cx.root,
     })
 }
 
 /// True if a where-clause reachable from the body owner declares
 /// `param_entity: not Copyable`.
 fn param_negates_copyable(mcx: &MoveCtx<'_>, param_entity: Entity) -> bool {
-    if mcx.copyable.is_some() {
-        return mcx.cx.query.query(TypeParamCopyRequirement {
+    mcx.copyable.is_some()
+        && mcx.cx.query.query(TypeParamCopyRequirement {
             param: param_entity,
             context: mcx.cx.entity,
             root: mcx.cx.root,
-        }) == CopyRequirement::MayBeNonCopyable;
-    }
-
-    let mut seen: HashSet<Entity> = HashSet::new();
-    let mut current = Some(mcx.cx.entity);
-    while let Some(ent) = current {
-        if !seen.insert(ent) {
-            break;
-        }
-        if let Some(wc) = mcx.cx.query.get::<AstWhereClause>(ent) {
-            for c in &wc.0 {
-                let WhereConstraint::NegativeBound {
-                    subject, protocol, ..
-                } = c
-                else {
-                    continue;
-                };
-                if resolves_to_entity(mcx.cx, subject, ent) != Some(param_entity) {
-                    continue;
-                }
-                if ast_last_segment_is_copyable(protocol) {
-                    return true;
-                }
-            }
-        }
-        current = mcx.cx.query.parent_of(ent);
-    }
-    false
-}
-
-fn ast_last_segment_is_copyable(ast_ty: &AstType) -> bool {
-    let AstType::Named { segments, .. } = ast_ty else {
-        return false;
-    };
-    segments.last().is_some_and(|s| s.name == "Copyable")
-}
-
-fn resolves_to_entity(cx: &BodyContext<'_>, ast_ty: &AstType, context: Entity) -> Option<Entity> {
-    let AstType::Named { segments, .. } = ast_ty else {
-        return None;
-    };
-    let seg_names: Vec<String> = segments.iter().map(|s| s.name.clone()).collect();
-    match cx.query.query(ResolveTypePath {
-        segments: seg_names,
-        context,
-        root: cx.root,
-    }) {
-        TypeResolution::Found(e) => Some(e),
-        _ => None,
-    }
+        }) == CopyRequirement::MayBeNonCopyable
 }
 
 // ===== CFG join =====

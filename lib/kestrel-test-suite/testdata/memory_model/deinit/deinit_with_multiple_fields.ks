@@ -3,6 +3,9 @@
 
 module Test
 
+@builtin(.Copyable)
+protocol Copyable {}
+
 struct Connection: not Copyable {
     var host: lang.str
     var port: lang.i64

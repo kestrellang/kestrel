@@ -95,13 +95,10 @@ fn walk_entity(
     }
 
     // The entity is the context, so an extension's declared params resolve.
-    // `not P` names only a language marker (Copyable, Static, Sized), which
-    // its own check validates and which resolves without std.
     if let Some(conformances) = cx.query.get::<Conformances>(entity) {
         for item in &conformances.0 {
-            if let ConformanceItem::Positive(ty, ..) = item {
-                check_ast_type(cx, ty, entity, diags);
-            }
+            let (ConformanceItem::Positive(ty, ..) | ConformanceItem::Negative(ty, _)) = item;
+            check_ast_type(cx, ty, entity, diags);
         }
     }
     for &child in cx.query.children_of(entity) {

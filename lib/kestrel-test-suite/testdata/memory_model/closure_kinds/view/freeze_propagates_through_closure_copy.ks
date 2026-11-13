@@ -7,6 +7,9 @@
 // wider-scoped `g` therefore extends the freeze through `g`" — E507.
 module Test
 
+@builtin(.Copyable)
+protocol Copyable {}
+
 struct Res: not Copyable {
     var v: lang.i64
 }

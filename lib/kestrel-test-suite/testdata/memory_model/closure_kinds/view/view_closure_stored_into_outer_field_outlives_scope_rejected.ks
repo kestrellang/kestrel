@@ -9,6 +9,9 @@
 // view-closure field itself is also E626 (docs/design/closure-fields.md).
 module Test
 
+@builtin(.Copyable)
+protocol Copyable {}
+
 struct Res: not Copyable {
     var v: lang.i64
 }

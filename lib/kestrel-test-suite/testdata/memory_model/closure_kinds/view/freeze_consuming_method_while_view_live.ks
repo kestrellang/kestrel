@@ -7,6 +7,9 @@
 // rejected with E507 while a view-kind closure still captures the receiver.
 module Test
 
+@builtin(.Copyable)
+protocol Copyable {}
+
 struct Res: not Copyable {
     var v: lang.i64
 

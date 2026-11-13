@@ -2,10 +2,10 @@
 // stdlib: true
 // expect-exit: 0
 
-// A declared extension param must stay free when the target's own args are
-// concrete. Today `U` in `extend[U] Box[Bool]` is bound to the target's
-// first arg (`Bool`), so `tagAs(seven)` fails with "expected Bool got
-// Int64". The same happened with the old implicit form.
+// A declared extension param stays free when the target's own args are
+// concrete. `U` in `extend[U] Box[Bool]` used to be bound to the target's
+// first arg (`Bool`), so `tagAs(seven)` failed with "expected Bool got
+// Int64". The old implicit form did the same.
 
 module Test
 
