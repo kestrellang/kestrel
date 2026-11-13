@@ -343,6 +343,16 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
                 instantiate_entity_with_args(ctx, *entity, explicit_type_args, span);
             // Record type arg vars so MIR lowering can retrieve the resolved types
             if !type_arg_vars.is_empty() {
+                // Name the slots by the entity's own params, so an
+                // uninferred one is E105 (`f()` for `func f[T]()`). Slots
+                // that aren't the entity's own (a type param's `A.make()`)
+                // stay unnamed and unreported, as before.
+                if let Some(tp) = ctx.query_ctx.get::<TypeParams>(*entity)
+                    && tp.0.len() == type_arg_vars.len()
+                {
+                    let params = tp.0.iter().map(|&p| Some(p)).collect();
+                    ctx.type_arg_params.insert(id, params);
+                }
                 ctx.record_type_args(id, type_arg_vars, span.clone());
             }
             // Track type parameter references — invalid unless consumed by MethodCall/Call

@@ -1,5 +1,6 @@
 // test: diagnostics
 // stdlib: false
+// include: ../try_operator/try_prelude.ks
 
 module Test
 struct Error {

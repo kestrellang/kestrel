@@ -3,7 +3,9 @@ module Prelude
 
 @builtin(.ControlFlowEnum)
 public enum ControlFlow[C, B] {
+    @builtin(.ControlFlowContinueCase)
     case Continue(C)
+    @builtin(.ControlFlowBreakCase)
     case Break(B)
 }
 

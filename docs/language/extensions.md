@@ -245,11 +245,46 @@ extend[T] Int64: ArrayIndex[T] {
 
 A few notes:
 
-- **Only for params the target doesn't bind.** In `extend Box[T]`, `T` is already Box's parameter; declare only the extra ones, as in `extend[E] Result[T, HttpError]: FromResidual[E]`.
-- **Undeclared names are types.** In `extend Int64: Reads[V]`, `V` names a type in scope. There is no implicit introduction, so a struct named `V` is never shadowed.
+- **Target args bind by position.** A name in a target argument slot binds the target's parameter *at that position*, whatever the parameter is called: `extend [U]` binds Array's element type as `U`, and `extend Pair[B, A]` binds Pair's first parameter as `B`. A name that already names a type in scope is that type instead (`extend Pair[T, lang.i64]` above).
+- **Declaring a target arg is allowed and changes nothing.** `extend[T] Holder[T]` means exactly `extend Holder[T]`: a declared name that appears as a target arg is that target parameter, not a second one. Declaring it is the way to bind a target arg whose name would otherwise resolve to a type in scope.
+- **Extra params are what declaration is for.** Params the target doesn't bind, such as `T` above or `E` in `extend[E] Result[T, HttpError]: FromResidual[E]`, must be declared.
+- **Undeclared names in the conformance are types.** In `extend Int64: Reads[V]`, `V` names a type in scope. Only target arg slots bind implicitly, so a struct named `V` is never shadowed by a protocol argument.
 - **Constraints on declared parameters** ride in the where clause: `extend[T] Int64: ArrayIndex[T] where T: Hashable`.
 
 The qualified-binding form `type ArrayIndex[T].Output = T` (rather than bare `type Output = T`) ties the binding to a specific protocol — important when one type conforms to multiple protocols that each define an `Output`. The `T` on the right-hand side refers to the extension's declared parameter.
+
+### Blanket Conformances
+
+A conformance can be given to every type that conforms to some protocol, rather than to one nominal type. Write it as a protocol extension with a conformance list:
+
+```kestrel
+protocol Shape {
+    func area() -> Int64
+}
+
+protocol Describe[T] {
+    static func make(s s: Self, t t: T) -> Int64
+}
+
+// Every `Shape` conforms to `Describe[T]`, for every `T: Tag`.
+extend[T] Shape: Describe[T] where T: Tag {
+    static func make(s s: Self, t t: T) -> Int64 { s.area() }
+}
+```
+
+Any `Sq: Shape` now satisfies `Sq: Describe[X]` for a tagged `X`, both at a direct call (`Sq.make(...)`) and in a generic bound (`where I: Describe[X]`). The where clause may hold negative bounds too (`T: not Static`); the stdlib's `extend[V] SeqRange: ViewIndex[V] where V: TextView, V: not Static` is one.
+
+The same conformance can also be spelled on a type parameter, which reads more naturally when the conforming type needs a name of its own:
+
+```kestrel
+extend[T, R] R: Describe[T] where R: Shape, R: Copyable {
+    static func make(s s: R, t t: T) -> Int64 { s.area() + R.unit().area() - 1 }
+}
+```
+
+`extend[R] R: P where R: Q` means `extend Q: P`. `R` is another name for `Self` everywhere in the extension, in signatures (`s: R`, `-> R`), static paths (`R.unit()`) and further bounds (`R: Copyable` becomes `Self: Copyable`). The first protocol the where clause bounds `R` by becomes the extended protocol; every other bound on `R` stays as a bound on `Self`.
+
+A declared parameter that the conforming type's members can't determine is reported where it is used: calling a blanket method whose extra parameter appears nowhere in the call gives E105 ("cannot infer a type parameter of this call") at that call.
 
 ## Conditional Conformance
 

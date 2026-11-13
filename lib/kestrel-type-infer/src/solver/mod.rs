@@ -73,20 +73,20 @@ pub(crate) fn report_unresolved_type_params(ctx: &mut InferCtx<'_>) {
         .collect();
 
     for (expr, tvs, span) in entries {
-        // Map each TyVar back to its originating TypeParameter entity
-        // via the resolved callee's `TypeParams` component. Without a
-        // resolution (e.g. the call errored upstream) we can't name
-        // the param, so skip — the upstream error already covers it.
-        let Some(&callee) = ctx.resolutions.get(&expr) else {
-            continue;
-        };
+        // The param each slot stands for: recorded with the slots, or the
+        // resolved callee's own `TypeParams`. Neither (the call errored
+        // upstream): skip — the upstream error already covers it.
         let params: Vec<Option<Entity>> = match ctx.type_arg_params.get(&expr) {
             Some(slots) => slots.clone(),
-            None => ctx
-                .query_ctx
-                .get::<TypeParams>(callee)
-                .map(|tp| tp.0.iter().map(|&p| Some(p)).collect())
-                .unwrap_or_default(),
+            None => {
+                let Some(&callee) = ctx.resolutions.get(&expr) else {
+                    continue;
+                };
+                ctx.query_ctx
+                    .get::<TypeParams>(callee)
+                    .map(|tp| tp.0.iter().map(|&p| Some(p)).collect())
+                    .unwrap_or_default()
+            },
         };
 
         for (i, &tv) in tvs.iter().enumerate() {
