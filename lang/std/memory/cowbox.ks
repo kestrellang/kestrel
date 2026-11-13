@@ -3,13 +3,13 @@
 module std.memory
 
 import std.core.(Bool, Cloneable, Copyable, Indirection, MutableIndirection, Sized, Static)
-import std.memory.(ExistentialBox, RcBox, Allocator, GlobalAllocator)
+import std.memory.(Box, RcBox, Allocator, GlobalAllocator)
 import std.core.(Defaultable)
 
 /// Copy-on-write wrapper around `RcBox[T, A]`: value semantics on the heap.
 ///
-/// Copies share storage until one of them writes. `value` is the payload
-/// in place: reading borrows it, and writing forks a shared box first.
+/// Copies share storage until one of them writes. `value` is the boxed
+/// value in place: reading borrows it, and writing forks a shared box first.
 ///
 /// # Examples
 ///
@@ -51,7 +51,7 @@ public struct CowBox[T, A = GlobalAllocator]: Cloneable where T: Cloneable, T: n
     /// COW barrier — makes the storage uniquely owned, cloning it if shared.
     ///
     /// The fork clones the heap value in place (`RcBox.fork`), so a
-    /// shared box is deep-copied exactly once and an unsized payload works.
+    /// shared box is deep-copied exactly once and an unsized value works.
     /// Every write (`value`'s `mutating ref`) goes through here.
     ///
     /// Always inlined: every `Array`/`Dictionary` write runs it, and the
@@ -70,13 +70,13 @@ public struct CowBox[T, A = GlobalAllocator]: Cloneable where T: Cloneable, T: n
         self.inner = self.inner.fork()
     }
 
-    /// Pointer to the payload on the heap. Internal plumbing for the
+    /// Pointer to the value on the heap. Internal plumbing for the
     /// accessors below; writing through it skips the fork.
     internal func valuePtr() -> Pointer[T] {
         self.inner.valuePtr()
     }
 
-    /// The payload, in place. Reading borrows the shared storage; writing
+    /// The boxed value, in place. Reading borrows the shared storage; writing
     /// (`c.value.len = 0`, a `mutating` argument, a mutating method) forks a
     /// shared box first, so other copies never see the change.
     public var value: T {
@@ -101,8 +101,8 @@ public struct CowBox[T, A = GlobalAllocator]: Cloneable where T: Cloneable, T: n
 // its `mutating ref`, which runs the COW barrier first — so `cow.field = v`
 // forks a shared box exactly like `cow.value.field = v` does.
 //
-// The write barrier forks by cloning the payload into fresh storage
-// (`RcBox.fork`), which works for an unsized payload too: an
+// The write barrier forks by cloning the value into fresh storage
+// (`RcBox.fork`), which works for an unsized value too: an
 // existential's table carries its size and clone.
 extend CowBox[T, A]: Indirection {
     type Target = T
@@ -118,6 +118,6 @@ extend CowBox[T, A] where A: Defaultable {
 }
 
 // `any[CowBox] P`: the `init(consuming:)` above is the witness.
-extend CowBox[T, A]: ExistentialBox where A: Defaultable {}
+extend CowBox[T, A]: Box where A: Defaultable {}
 
 extend CowBox[T, A]: MutableIndirection where T: Cloneable {}

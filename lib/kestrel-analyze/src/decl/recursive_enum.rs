@@ -40,7 +40,7 @@
 //! **Labels:**
 //! - Primary: the enum declaration
 //!   - Span source: `util::entity_span` on the enum entity
-//!   - Message: "boxing a recursive case needs `std.memory.OwnedBox`"
+//!   - Message: "boxing a recursive case needs `std.memory.IndirectBox`"
 //!
 //! **Notes:** (none)
 //!
@@ -152,7 +152,7 @@ fn check_indirect(cx: &DeclContext<'_>, cases: &[RecursiveCase]) -> Vec<AnalyzeD
         )];
     }
     let owned_box = cx.query.query(ResolveBuiltin {
-        builtin: Builtin::OwnedBox,
+        builtin: Builtin::IndirectBox,
         root: cx.root,
     });
     if owned_box.is_none() {
@@ -160,7 +160,7 @@ fn check_indirect(cx: &DeclContext<'_>, cases: &[RecursiveCase]) -> Vec<AnalyzeD
             &DESCRIPTORS[2],
             enum_span,
             "indirect enums require the standard library".into(),
-            "boxing a recursive case needs `std.memory.OwnedBox`",
+            "boxing a recursive case needs `std.memory.IndirectBox`",
             vec![],
         )];
     }

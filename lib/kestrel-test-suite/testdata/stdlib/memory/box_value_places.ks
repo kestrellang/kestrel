@@ -5,8 +5,8 @@
 
 // Every box exposes its payload as `.value`. On the value-semantic boxes
 // (`CowBox`, `OwnedBox`) it is an in-place place: a write forks a shared
-// `CowBox` first. On the shared `RcBox` `.value` is read-only and writes go
-// through `mutatingValue`, which every handle sees.
+// `CowBox` first. On the shared `RcBox` a write through `.value` needs a `var`
+// handle and lands in the shared storage, so every handle sees it.
 module Test
 
 struct P: Cloneable {
@@ -26,9 +26,9 @@ func main() -> lang.i64 {
     let r = &c.value;
     println("cow c \(r.x) \(c.value.y) d \(d.value.x) \(d.value.y)");
 
-    let s: RcBox[P] = RcBox(P(x: 1, y: 2));
+    var s: RcBox[P] = RcBox(P(x: 1, y: 2));
     let t = s;
-    s.mutatingValue.x = 5;
+    s.value.x = 5;
     println("rc s \(s.value.x) t \(t.value.x)");
 
     var o: OwnedBox[P] = OwnedBox(P(x: 3, y: 4));

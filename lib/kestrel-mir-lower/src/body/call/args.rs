@@ -220,7 +220,10 @@ impl OssaBodyCtx<'_, '_> {
         let Some(index) = f.type_params.iter().position(|p| p.entity == tp) else {
             return false;
         };
-        matches!(self.ctx.module.ty_arena.get(type_args[index]), MirTy::Ref { .. })
+        matches!(
+            self.ctx.module.ty_arena.get(type_args[index]),
+            MirTy::Ref { .. }
+        )
     }
 
     /// An argument for a type param instantiated at a ref: the argument IS

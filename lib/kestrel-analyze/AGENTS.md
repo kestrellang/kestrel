@@ -224,6 +224,7 @@ Current allocations:
   — was double-allocated with conformance_completeness's receiver-kind
   check; resolved 2026-07 by moving that check to E477.
 - E469: `wrong_parameter_convention` (compilation/conformance_completeness.rs) — a witness parameter's `consuming`/`mutating`/plain convention must match the requirement's exactly (2026-10-28; receivers are E477).
+- E470: `invalid_box_binding` (decl/box_binding.rs) — a `std.memory.box_bindings` feature alias whose box misses the protocols in `Builtin::box_binding_bound` (2026-11, box consolidation).
 - E406, E407, E409: indirect enums (decl/recursive_enum.rs, with E429) —
   `indirect_enum_requires_stdlib`, `indirect_polymorphic_recursion`,
   `indirect_without_recursion` (warning).

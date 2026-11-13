@@ -211,7 +211,7 @@ Mutability is exact: `&mutating T` does not inherit conformances declared for `&
   // xs is now [11, 12, 13]
   ```
 - **`Array(at: i)`** — the labeled `at:` subscript lends elements via `ref`/`mutating ref` accessors.
-- **Box `.value`** — every box lends its payload as a place. On `CowBox` and `OwnedBox` (value semantics) `.value` has `ref` and `mutating ref` accessors: `&c.value` borrows, `c.value.len += 1` writes in place, and a shared `CowBox` forks first. On `RcBox` (shared) `.value` is a read-only `&T`, and writes go through `mutatingValue`, which every handle sees and which works on a `let` handle.
+- **Box `.value`** — every box lends its payload as a place. On `CowBox` and `OwnedBox` (value semantics) `.value` has `ref` and `mutating ref` accessors: `&c.value` borrows, `c.value.len += 1` writes in place, and a shared `CowBox` forks first. On `RcBox` (shared) a write through `.value` needs a `var` handle and lands in the shared storage, so every handle sees it; `sharedMutRef()` writes through a `let` handle.
 - **`Pointer.value` / `Pointer.mutatingValue`** — the low-level bridge from raw pointers to references. Pointer-derived references are *your* contract: the compiler does not verify them.
 
 ## The Escape Rule (E494) — No Lifetimes

@@ -272,14 +272,11 @@ fn describe(cx: &BodyContext<'_>, ty: &ResolvedTy) -> String {
                 .first()
                 .filter(|a| matches!(a, ResolvedTy::RawExistential { .. }))
             {
-                let default_box = cx.query.query(ResolveBuiltin {
-                    builtin: Builtin::DefaultBoxType,
+                // `AnyBox` denotes its alias target: the box struct itself.
+                let is_default = cx.query.query(ResolveBuiltin {
+                    builtin: Builtin::AnyBox,
                     root: cx.root,
-                });
-                // `DefaultBox` is an alias of the default box struct.
-                let is_default = default_box.is_some_and(|alias| {
-                    alias == *entity || alias_target(cx, alias) == Some(*entity)
-                });
+                }) == Some(*entity);
                 return if is_default {
                     format!("any {}", describe_bounds(cx, raw))
                 } else {
@@ -290,16 +287,5 @@ fn describe(cx: &BodyContext<'_>, ty: &ResolvedTy) -> String {
         },
         ResolvedTy::Param { entity } => name_of(cx, *entity),
         _ => "?".into(),
-    }
-}
-
-/// The struct an alias names (`DefaultBox[T] = RcBox[T]`).
-fn alias_target(cx: &BodyContext<'_>, alias: Entity) -> Option<Entity> {
-    match cx.query.query(kestrel_hir_lower::LowerTypeAnnotation {
-        entity: alias,
-        root: cx.root,
-    })? {
-        kestrel_hir::ty::HirTy::Struct { entity, .. } => Some(entity),
-        _ => None,
     }
 }
