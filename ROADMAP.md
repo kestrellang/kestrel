@@ -74,9 +74,9 @@ Parser rewrite, symbol-mangling refactor, the deferred-resolution inference engi
 
 ---
 
-# Preview 2: Types & Expressiveness (0.16 → 0.22)
+# Preview 2: Types & Expressiveness (0.16 → 0.20)
 
-This preview rounds out the type system surface — opaque and existential types, attribute-driven derives, expression sugar that's been deferred, the property model (lazy / observed / `mutating get`), conditional conformance, and the class runtime. Each version is a 3-week train cycle. 0.16 has shipped; development is on 0.17.
+This preview rounds out the type system surface — opaque and existential types, attribute-driven derives, expression sugar that's been deferred, the property model (lazy / observed / `mutating get`), and conditional conformance. The class runtime, originally planned here, moved to Preview 3 (see below). Each version is a 3-week train cycle. 0.16 has shipped; development is on 0.17.
 
 ## 0.16 — Opaque types & language gaps *(shipped)*
 
@@ -111,17 +111,11 @@ Lazy properties (`lazy let expensive = compute()`), property observers (`willSet
 
 > **`mutating get` matters more than it looks.** It lets a getter modify `self` (value types only); the call site requires a `var` receiver. This unblocks insert-on-read APIs like `Dictionary.subscript(key:inserting:)`, which was removed in 0.13's stdlib because without `mutating get` the documented "insert default on miss" contract couldn't be honored. Keep an eye on what other APIs become expressible once this lands.
 
-## 0.20 — Standard library & polish
+## 0.20 — Standard library & refinements (Preview 2 milestone)
 
-Standard-library expansion and depth, compiler-speed work, stdlib speedups, and language refinements informed by 0.16 → 0.19 usage.
+Standard-library depth and speedups, compiler-speed work, and the bug fixes and rough edges from 0.16 → 0.19 usage. Stabilization of the Preview 2 surface area: a written list of what is stable and what stays unstable, and the open-issue backlog triaged into Preview 2 blockers and later work. Documentation polish.
 
-## 0.21 — Class runtime
-
-Class declarations with reference semantics, reference counting with control blocks, `===` identity, RTTI via extended vtables, `@weak` / `@unowned` reference attributes, and `@final` classes.
-
-## 0.22 — Refinements (Preview 2 milestone)
-
-Bug fixes and rough edges from 0.16 → 0.21 usage. Class runtime hardening informed by real-world adoption. Documentation and stdlib polish. Stabilization of the Preview 2 surface area.
+Small features that are independent of the class design also land here: `sealed` protocols (exhaustive matching over a closed set of conformers) and a `TypeId` value exposing the type identity that `as?` / `is` already compare.
 
 ---
 
@@ -129,7 +123,9 @@ Bug fixes and rough edges from 0.16 → 0.21 usage. Class runtime hardening info
 
 Built on an effects-lite architecture: async, yield, and throw are modeled as capabilities provided by handlers. The internal design is compatible with the `using` / `given` generalization in Preview 4, and prepares the ground for full algebraic effects in 3.0.
 
-The shape of the work: generators (`generator` / `yield`, CPS / state-machine lowering, lazy sequences), then async / await built on the same state-machine infrastructure (executor, runtime, `Future` type), then atomics and a memory model for concurrent access (`send` / `sync` capabilities for thread safety). Structured concurrency (task groups, cancellation), async iteration (async generators and async sequences), and async stdlib APIs sit on top of all of that. Closing out the preview: actors or a refined concurrency model, multithreading primitives, and concurrency testing/debugging tools.
+The shape of the work: generators (`generator` / `yield`, CPS / state-machine lowering, lazy sequences), then the class runtime, then async / await built on the same state-machine infrastructure (executor, runtime, `Future` type), then atomics and a memory model for concurrent access (`send` / `sync` capabilities for thread safety). Structured concurrency (task groups, cancellation), async iteration (async generators and async sequences), and async stdlib APIs sit on top of all of that. Closing out the preview: actors or a refined concurrency model, multithreading primitives, and concurrency testing/debugging tools.
+
+**Class runtime** (moved from Preview 2). Class declarations with reference semantics over the `Shared` box binding, `===` identity, and weak references. Classes are designed alongside atomics and the `send` / `sync` rules because both decide how shared objects behave across threads, and actors build on them. Open questions being worked through: inheritance (current direction: classes are always final; shared state comes from protocols with stored fields, built on embedding), how references into class storage stay sound, and weak-reference layout (inline count vs side table).
 
 ---
 
@@ -137,7 +133,7 @@ The shape of the work: generators (`generator` / `yield`, CPS / state-machine lo
 
 Implicits land here: `using` / `given` implicit parameters, with `GlobalAllocator` migrating to `given Allocator`, and async context (executors, cancellation tokens) migrating to `using`. The effect-lite generalization carries implicit propagation, handler blocks, and effect inference — a stepping-stone to 3.0's algebraic effects.
 
-The rest of the preview is shaped by real-world usage: language features informed by what 0.16 → 0.22 made awkward, the standard library's final shape and depth, and ecosystem tooling.
+The rest of the preview is shaped by real-world usage: language features informed by what 0.16 → 0.20 made awkward, the standard library's final shape and depth, and ecosystem tooling.
 
 ---
 
