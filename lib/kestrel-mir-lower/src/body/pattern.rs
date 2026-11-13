@@ -86,9 +86,8 @@ impl OssaBodyCtx<'_, '_> {
         // ref-typed scrutinee (ret_borrow call result) is copied out and its
         // borrow ends here, BEFORE the decision tree's branch terminators
         // (a live ref at the first Branch would be a false E497). A named
-        // binding scrutinee copies too but its borrow stays — and it had
-        // better be the binding's LAST use, or the branch terminator
-        // reports the binding E497 (bindings never cross blocks).
+        // binding scrutinee is not copied: its borrow threads through the
+        // arms as a @guaranteed block param.
         if self.ref_results.contains(&val) {
             // A ref call result (`match xs(i)`, `xs(1) is A`, an `any P`
             // element) is pinned as an address so no view reaches the
@@ -106,10 +105,12 @@ impl OssaBodyCtx<'_, '_> {
             if !self.ref_binding_vals.contains_key(&val) && (!copyable || !has_guard) {
                 return (self.pin_view_address(val), true);
             }
-            // A named ref binding with a non-copyable pointee can't be
-            // copied out: it matches through the view itself, like a
-            // borrowed parameter.
-            if !copyable {
+            // A named ref binding matches through the view itself, like a
+            // borrowed parameter: arms copy only the payloads they bind.
+            // Copying it out first cloned the whole referent, so
+            // `let x = &xs(i); match x` cost more than `match xs(i)`. The
+            // binding's borrow keeps the referent frozen across a guard.
+            if self.ref_binding_vals.contains_key(&val) {
                 return (val, false);
             }
             let owned = self.emit_copy_value(val);
@@ -1344,6 +1345,23 @@ impl OssaBodyCtx<'_, '_> {
         }
     }
 
+    /// An @owned scrutinee's component of type `ty` is moved out rather than
+    /// borrow-extract-copied when copying it would be wrong or wasteful:
+    /// NotCopyable (no clone shim, copy is illegal), Cloneable (the copy would
+    /// redundantly clone an already-owned temporary — bug #180), or
+    /// mono-dependent (pre-mono Bitwise but may resolve to move-only).
+    ///
+    /// `needs_drop` catches the Cloneable case for types whose clone is only
+    /// derived structurally later (the clone-shim pass): pre-mono a plain
+    /// `struct Box { var s: String }` still reports `Bitwise`, so without it
+    /// `try` and `match f() { .Ok(b) => .. }` clone every struct payload (an
+    /// AST node's whole subtree) and then drop the original.
+    fn payload_moves_out(&self, ty: TyId) -> bool {
+        !self.is_copy_type(ty)
+            || self.copy_behavior_is_mono_dependent(ty)
+            || kestrel_mir::ty_query::needs_drop(&self.ctx.module.ty_arena, &self.ctx.module, ty)
+    }
+
     /// True if applying `path` to a value of `root_ty` extracts a component
     /// that an @owned scrutinee must **move out** (via `emit_moveout`) rather
     /// than borrow-extract-copy. That holds when a step's type either:
@@ -1379,14 +1397,7 @@ impl OssaBodyCtx<'_, '_> {
                     if matches!(self.ctx.module.ty_arena.get(field_ty), MirTy::Ref { .. }) {
                         return false;
                     }
-                    // Move out any non-bitwise-Copyable payload: NotCopyable
-                    // (no clone shim, copy is illegal), Cloneable (borrow-
-                    // extract-copy would redundantly clone an already-owned
-                    // temporary — bug #180), or mono-dependent (pre-mono
-                    // Bitwise but may resolve to move-only post-mono).
-                    if !self.is_copy_type(field_ty)
-                        || self.copy_behavior_is_mono_dependent(field_ty)
-                    {
+                    if self.payload_moves_out(field_ty) {
                         return true;
                     }
                     current_ty = field_ty;
@@ -1411,9 +1422,7 @@ impl OssaBodyCtx<'_, '_> {
                     if matches!(self.ctx.module.ty_arena.get(field_ty), MirTy::Ref { .. }) {
                         return false;
                     }
-                    if !self.is_copy_type(field_ty)
-                        || self.copy_behavior_is_mono_dependent(field_ty)
-                    {
+                    if self.payload_moves_out(field_ty) {
                         return true;
                     }
                     current_ty = field_ty;

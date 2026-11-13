@@ -4329,8 +4329,13 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
     /// value, never the place — and the copy is the ref's single use, so
     /// its borrow ends here. Mirrors binding decay in `lower_stmt` and the
     /// arm decay in `capture_arm_exit`. Non-ref values pass through.
+    ///
+    /// A named binding counts too: its name in a block it was threaded
+    /// into (a match arm, an `if` body) is a fresh param registered only in
+    /// `ref_binding_vals`, and passing that borrow through wrote it into
+    /// the buffer uncopied (`match m { .A(_) => f([m]) }`: OSSA ICE).
     pub fn decay_if_ref(&mut self, value: ValueId) -> ValueId {
-        if self.ref_results.contains(&value) {
+        if self.ref_results.contains(&value) || self.ref_binding_vals.contains_key(&value) {
             let owned = self.emit_copy_value(value);
             self.end_ref_if_single_use(value);
             owned

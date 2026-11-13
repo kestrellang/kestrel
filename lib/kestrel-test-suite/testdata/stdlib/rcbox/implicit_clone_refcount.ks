@@ -50,9 +50,11 @@ func main() -> lang.i64 {
     // ... and each call reads the CURRENT count through its view.
     if f() != 1 { return 31 }
 
-    // --- 6. Copy chain: a -> b -> g ---
+    // --- 6. Last use moves: a -> b -> g ---
+    // `b` is never read again, so `let g = b` moves it instead of cloning:
+    // the count stays 3 (a, c, g share the box).
     let g = b;
-    if a.refCount != 4 { return 40 }
+    if a.refCount != 3 { return 40 }
     if g.value != 42 { return 41 }
 
     0
