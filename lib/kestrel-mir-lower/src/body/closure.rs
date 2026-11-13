@@ -180,9 +180,9 @@ impl OssaBodyCtx<'_, '_> {
         let is_view = fn_kind.is_view();
         // Boxed (owning) tier: the env is an OWNED struct moved into a box at
         // creation; the closure value carries the handle plus the type-erased
-        // retain/release shims. `escaping` boxes into the SHARED binding
-        // (`@builtin(.SharedBox)`), `consuming` into the UNIQUE one
-        // (`@builtin(.UniqueBox)`). A module with no such binding (a
+        // retain/release shims. `escaping` boxes into the
+        // `@builtin(.ClosureBox)` binding, `consuming` into
+        // `@builtin(.ConsumingClosureBox)` as `Optional[E]`. A module with no such binding (a
         // `stdlib: false` test) falls back to the historical stack env —
         // unsound to return, but the escape check still rejects that, so
         // nothing silently miscompiles.
@@ -211,7 +211,8 @@ impl OssaBodyCtx<'_, '_> {
                 // Boxed tier (both owning kinds): EVERY field is BY VALUE — the
                 // environment owns its snapshots (bit-copy / clone / move per
                 // the D4 owning table) and is destroyed exactly once, by the
-                // shared box's last release or the unique box's `destroy()`.
+                // shared box's last release, or the consuming box's drop when
+                // the closure was never called.
                 let field_ty = if boxed {
                     cap_ty
                 } else if is_view || !self.captures_by_value(cap_ty) {
@@ -284,7 +285,7 @@ impl OssaBodyCtx<'_, '_> {
         // Resolved once and reused for the body prologue, the creation site and
         // the shims, so all three agree on the same binding instantiation.
         let binding = match (boxed, env_named_ty) {
-            (true, Some(env_named)) if unique => self.resolve_unique_box_binding(env_named),
+            (true, Some(env_named)) if unique => self.resolve_consuming_box_binding(env_named),
             (true, Some(env_named)) => self.resolve_box_binding(env_named),
             _ => None,
         };
@@ -407,9 +408,9 @@ impl OssaBodyCtx<'_, '_> {
             // allowed to move captures out": each slot is now an ordinary local
             // with its own move/drop state, so moving one out and dropping the
             // rest is the existing partial-move machinery, not a special case.
-            // The (now empty) block is reclaimed by the value's release shim.
+            // The box (now holding `.None`) is freed by the value's release shim.
             let binding = b;
-            let env = self.emit_unique_take(binding, env_val, env_named);
+            let env = self.emit_consuming_take(binding, env_val, env_named);
             let fields = self.emit_destructure_struct(env, &slot_tys);
             for (i, slot) in slots.iter().enumerate() {
                 // Each capture lives in a frame slot (like a `var`), so writes
@@ -611,6 +612,12 @@ impl OssaBodyCtx<'_, '_> {
                     .map(|(i, &v)| (FieldIdx::new(i), v))
                     .collect();
                 let env = self.emit_struct(env_named, fields);
+                // A consuming box holds `.Some(env)` until its one call.
+                let env = if unique {
+                    self.emit_once_payload(b, env)
+                } else {
+                    env
+                };
                 let handle = self.emit_box_env(b, env);
                 let type_params = self
                     .ctx
@@ -620,7 +627,7 @@ impl OssaBodyCtx<'_, '_> {
                     .map(|f| f.type_params.clone())
                     .unwrap_or_default();
                 let shims = if unique {
-                    super::closure_box::synthesize_unique_env_shims(
+                    super::closure_box::synthesize_consuming_env_shims(
                         self.ctx,
                         b,
                         &closure_name,

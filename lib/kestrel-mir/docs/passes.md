@@ -152,7 +152,7 @@ call %shim(%handle)                      // consuming
 
 All actual semantics — allocate, retain, release, destroy the captures —
 live in per-environment shims synthesized by `kestrel-mir-lower` against the
-`@builtin(.SharedBox)` / `@builtin(.UniqueBox)` binding, so swapping the
+`@builtin(.ClosureBox)` / `@builtin(.ConsumingClosureBox)` binding, so swapping the
 binding retargets everything. Only the two-word load and the indirect call
 are compiler-emitted. A capture-free value carries a null handle and no-op
 shims, so no null check is needed (post-mono block splitting is
@@ -175,7 +175,7 @@ plus a droppable env double-frees; `Clone` without drop leaks:
 |------|------|------|
 | `Normal` / `Mutating` (view) | `Bitwise` | no |
 | `Escaping` (shared box) | `Clone(Cloneable)` | yes (release) |
-| `Consuming` (unique box) | `None` (move-only) | yes (release) |
+| `Consuming` (single-owner box) | `None` (move-only) | yes (release) |
 
 The six sites: `ty_query::copy_behavior`, `ty_query::needs_drop`,
 `expand::ty_needs_drop`, `audit::mono_needs_drop`,

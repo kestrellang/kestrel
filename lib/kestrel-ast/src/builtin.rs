@@ -374,9 +374,8 @@ pub enum Builtin {
     AnyBox,
     /// `IndirectBox[T]` — a boxed recursive `indirect enum` case.
     IndirectBox,
-    /// `ConsumingClosureBox[T]` — `consuming` closure environments. A shared
-    /// release would double-free the capture slots a one-shot body already
-    /// moved out (docs/plans/closure-kinds/closure-kinds-plan.md D5).
+    /// `ConsumingClosureBox[T]` — `consuming` closure environments, boxed as
+    /// `Optional[E]` so the one call can take `E` out and leave `.None`.
     ConsumingClosureBox,
 
     // ===== Requirements / members the compiler calls by tag =====
@@ -388,20 +387,13 @@ pub enum Builtin {
     BoxInit,
     /// `SharedBox.sharedMutRef()` — mutable access through a shared handle.
     SharedBoxSharedMutRef,
-    /// `UniqueBox.init(consuming value:)`.
-    UniqueBoxInit,
-    /// `UniqueBox.takeValue()` — moves the payload out (once).
-    UniqueBoxTakeValue,
     /// `ConsumingIndirection.takeValue()` — moves an indirect enum payload out of its box.
     ConsumingIndirectionTakeValue,
     /// `Pointer.init(to:)` — a pointer to a value, tracked for dangling-reference checks.
     PointerToInit,
-    /// `UniqueBox.destroy()` — the box's single reclamation point.
-    UniqueBoxDestroy,
-    /// `Indirection.pointeeRef()` — the member peel's read accessor.
-    IndirectionPointeeRef,
-    /// `MutableIndirection.pointeeMutRef()` — the member peel's write accessor.
-    MutableIndirectionPointeeMutRef,
+    /// `MutableIndirection.valueMutRef()` — the value in place, for a
+    /// consuming closure's call to take its environment out.
+    MutableIndirectionValueMutRef,
 
     // ===== Associated types the compiler projects by tag =====
     /// `Indirection.Target` — the type a member peel reaches.
@@ -655,13 +647,9 @@ impl Builtin {
             Self::ConsumingIndirectionConsumeValue => "ConsumingIndirectionConsumeValue",
             Self::BoxInit => "BoxInit",
             Self::SharedBoxSharedMutRef => "SharedBoxSharedMutRef",
-            Self::UniqueBoxInit => "UniqueBoxInit",
-            Self::UniqueBoxTakeValue => "UniqueBoxTakeValue",
             Self::ConsumingIndirectionTakeValue => "ConsumingIndirectionTakeValue",
             Self::PointerToInit => "PointerToInit",
-            Self::UniqueBoxDestroy => "UniqueBoxDestroy",
-            Self::IndirectionPointeeRef => "IndirectionPointeeRef",
-            Self::MutableIndirectionPointeeMutRef => "MutableIndirectionPointeeMutRef",
+            Self::MutableIndirectionValueMutRef => "MutableIndirectionValueMutRef",
             Self::IndirectionTarget => "IndirectionTarget",
             Self::ArrayLiteralElement => "ArrayLiteralElement",
             Self::DictionaryLiteralKey => "DictionaryLiteralKey",
@@ -925,13 +913,9 @@ impl Builtin {
             "ConsumingIndirectionConsumeValue" => Some(Self::ConsumingIndirectionConsumeValue),
             "BoxInit" => Some(Self::BoxInit),
             "SharedBoxSharedMutRef" => Some(Self::SharedBoxSharedMutRef),
-            "UniqueBoxInit" => Some(Self::UniqueBoxInit),
-            "UniqueBoxTakeValue" => Some(Self::UniqueBoxTakeValue),
             "ConsumingIndirectionTakeValue" => Some(Self::ConsumingIndirectionTakeValue),
             "PointerToInit" => Some(Self::PointerToInit),
-            "UniqueBoxDestroy" => Some(Self::UniqueBoxDestroy),
-            "IndirectionPointeeRef" => Some(Self::IndirectionPointeeRef),
-            "MutableIndirectionPointeeMutRef" => Some(Self::MutableIndirectionPointeeMutRef),
+            "MutableIndirectionValueMutRef" => Some(Self::MutableIndirectionValueMutRef),
             "IndirectionTarget" => Some(Self::IndirectionTarget),
             "ArrayLiteralElement" => Some(Self::ArrayLiteralElement),
             "DictionaryLiteralKey" => Some(Self::DictionaryLiteralKey),
@@ -1000,9 +984,9 @@ impl Builtin {
             Self::IndirectBox => &[Self::Box, Self::ConsumingIndirection],
             // The suggested single-owner box must actually consume.
             Self::OwnedBox => &[Self::Box, Self::ConsumingIndirection],
-            // Still the bespoke `UniqueBox` (tag-called members, no
-            // protocols) until consuming closures move onto `Owned`.
-            Self::ConsumingClosureBox => &[],
+            // The one call swaps the `Optional[E]` payload to `.None` in
+            // place; the box's ordinary drop then frees whatever is left.
+            Self::ConsumingClosureBox => &[Self::Box, Self::MutableIndirection],
             _ => return None,
         })
     }
@@ -1015,7 +999,9 @@ impl Builtin {
             Self::ControlFlowContinueCase => BuiltinKind::EnumCase,
             Self::PointerToInit => BuiltinKind::Function,
             Self::ArrayMatchableRest => BuiltinKind::TypeAlias,
-            Self::ConsumingIndirectionTakeValue => BuiltinKind::Function,
+            Self::ConsumingIndirectionTakeValue | Self::MutableIndirectionValueMutRef => {
+                BuiltinKind::Function
+            },
             // Copy/Clone
             Self::Copyable => BuiltinKind::Protocol {
                 implicit_conformance: true,
@@ -1237,17 +1223,12 @@ impl Builtin {
             Self::BooleanConditionalBoolValue
             | Self::ConsumingIndirectionConsumeValue
             | Self::BoxInit
-            | Self::SharedBoxSharedMutRef
-            | Self::IndirectionPointeeRef
-            | Self::MutableIndirectionPointeeMutRef => BuiltinKind::ProtocolMethod,
+            | Self::SharedBoxSharedMutRef => BuiltinKind::ProtocolMethod,
             Self::IndirectionTarget
             | Self::ArrayLiteralElement
             | Self::DictionaryLiteralKey
             | Self::DictionaryLiteralValue
             | Self::ArrayMatchableElement => BuiltinKind::TypeAlias,
-            Self::UniqueBoxInit | Self::UniqueBoxTakeValue | Self::UniqueBoxDestroy => {
-                BuiltinKind::Function
-            },
             Self::ExitCode => BuiltinKind::Struct,
 
             // Indirection: non-marker protocol with a required `value` place;

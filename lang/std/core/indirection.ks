@@ -61,6 +61,13 @@ public protocol ConsumingIndirection: MutableIndirection {
     consuming func consumeValue[R](body: (Pointer[Target]) -> R) -> R where R: not Copyable, R: not Static
 }
 
+extend MutableIndirection {
+    /// The value in place, as a method: what a `consuming` closure's call
+    /// uses to take its environment out of the box (`box_bindings.ks`).
+    @builtin(.MutableIndirectionValueMutRef)
+    public mutating func valueMutRef() -> &mutating Target { self.value }
+}
+
 extend ConsumingIndirection where Target: Sized {
     /// Ends the box and hands its value back: `consumeValue` with a body
     /// that moves the value out. Boxed `indirect enum` cases are unboxed

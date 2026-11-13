@@ -17,17 +17,17 @@ client. The other clients — classes, `any` existentials, `indirect enum`
 payloads — remain future work, and the `CowBox` generalization is **deferred**
 (see [Stdlib Changes](#stdlib-changes)).
 
-**Sibling added during implementation: `UniqueBox`.** The consuming tier needs
-the opposite contract — one owner, no refcount, payload movable *out* — so it
-does not use a shared box at all. `@builtin(.UniqueBox)` →
-`std.memory.UniqueBox[T]` is a single allocation holding a liveness word plus
-the payload, with `takeValue()` (move the payload out, mark the block empty)
-and `destroy()` (drop the payload if still present, then free). It is not a
-`SharedBox` conformer and imposes none of this document's constraints; see
-[the plan's D5](../plans/closure-kinds/closure-kinds-plan.md) for why reusing
-`RcBox` with a pinned count of 1 was rejected (its release runs
-`dropInPlace` on the whole environment, double-freeing slots the one-shot body
-moved out).
+**The consuming tier boxes `Optional[E]`.** A `consuming` closure's call
+takes its environment out, but the caller still releases the closure value
+afterwards (the uniform rule that lets an `escaping` value pass as a
+`consuming` one). The box therefore holds `Optional[E]`: the call swaps it for
+`.None` through `MutableIndirection.valueMutRef()`, and the release is the
+box's ordinary drop, which drops `E` only if the closure was never called. That
+needs nothing beyond `Box` and `MutableIndirection`, so the binding points at
+`Owned` like any other feature. (It replaced a bespoke `UniqueBox` with a
+liveness word and tag-called `takeValue`/`destroy`; see
+[the plan's D5](../plans/closure-kinds/closure-kinds-plan.md) for why a box
+whose release drops the whole environment cannot serve directly.)
 
 Several language features need the same thing: a value moved to the heap,
 owned collectively by any number of handles, destroyed exactly once when the
@@ -128,7 +128,7 @@ public type Shared[T] = RcBox[T]                   // role: shared ownership
 @builtin(.ClassBox)            public type ClassBox[T]            = Shared[T]
 @builtin(.AnyBox)              public type AnyBox[T]              = Shared[T]
 @builtin(.IndirectBox)         public type IndirectBox[T]         = Owned[T]
-@builtin(.ConsumingClosureBox) public type ConsumingClosureBox[T] = UniqueBox[T]
+@builtin(.ConsumingClosureBox) public type ConsumingClosureBox[T] = Owned[T]
 ```
 
 - **Role aliases** (`Shared`, `Owned`) name the box std uses for a kind of
@@ -141,9 +141,9 @@ public type Shared[T] = RcBox[T]                   // role: shared ownership
   touches it only through protocol requirements (`BoxInit`,
   `SharedBoxSharedMutRef`, `ConsumingIndirectionConsumeValue`), never by name
   or shape. Indirect-enum unboxing calls `takeValue()`, an extension on
-  `ConsumingIndirection` built on `consumeValue`, through the witness table.
-  `ConsumingClosureBox` still uses `UniqueBox`'s own member tags until
-  consuming closures move off it.
+  `ConsumingIndirection` built on `consumeValue`, and a consuming closure's
+  call reaches its environment through `valueMutRef()`, an extension on
+  `MutableIndirection`; both go through the witness table.
 - Each feature tag carries the protocols its box must provide
   (`Builtin::box_binding_bound`), checked at the alias by **E470**:
 
@@ -152,7 +152,7 @@ public type Shared[T] = RcBox[T]                   // role: shared ownership
 | `ClosureBox`, `ClassBox` | `SharedBox` | aliases share and mutate state; `===` |
 | `AnyBox` | `Box` | `init(consuming:)` and the peel |
 | `IndirectBox`, `Owned` | `Box`, `ConsumingIndirection` | matching moves the payload out |
-| `ConsumingClosureBox` | (none yet) | bespoke `UniqueBox` |
+| `ConsumingClosureBox` | `Box`, `MutableIndirection` | the call swaps `Optional[E]` to `.None` in place |
 
 **Overriding.** Bindings are global: std decides them, users do not. Users
 pick a box per site instead: `any[B] P` today, and a per-declaration
@@ -182,7 +182,7 @@ names and prose.
 | class (future) | `ClassBox` → `Shared` | synthesized storage struct | reference | the above + `isIdentical` for `===` |
 | `any P` (**shipped**, 0.17) | `AnyBox` → `Shared` | the concrete `T` | reference — copies share the value | `init`, `clone`, drop, `value` |
 | `indirect enum` (**shipped**, 0.19) | `IndirectBox` → `Owned` | a recursive case's whole payload | **value** — one owner per case; a copy clones the payload | `init`, `clone`, drop, `takeValue`; reads project the box pointer in place |
-| `consuming` closure (**shipped**) | `ConsumingClosureBox` → `UniqueBox` | synthesized environment struct | one owner, taken once | `UniqueBox` `init`, `takeValue`, `destroy` |
+| `consuming` closure (**shipped**) | `ConsumingClosureBox` → `Owned` | `Optional` of the synthesized environment struct | one owner, taken once | `init`, drop, `valueMutRef` |
 
 ### Escaping closures
 

@@ -508,10 +508,10 @@ than matching variants:
 
 `Consuming` is boxed but **not** shared: a unique one-shot owner has no
 duplication operation at all, so its copy behavior is `None` (move-only),
-never `Clone`. The two owning kinds also use different containers —
-`@builtin(.SharedBox)` vs `@builtin(.UniqueBox)` — because a shared box's
-release drops the *whole* environment, which would double-free the slots a
-one-shot body already moved out.
+never `Clone`. The two owning kinds also use different bindings —
+`@builtin(.ClosureBox)` vs `@builtin(.ConsumingClosureBox)` — and the
+consuming one holds `Optional[E]`, so the one call can take the environment
+out and the release drops only what is left.
 
 Layout follows from `is_boxed()` alone:
 

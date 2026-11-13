@@ -25,8 +25,10 @@ Generic helpers the boxes call (`Layout.of`, `Pointer.cast`, …) must relax
 `Static` (and `Sized`, where they don't need a size) too, or a box over a
 non-`Static` payload fails to type-check.
 
-## `UniqueBox` is not a general box
+## No box is compiler-only
 
-`UniqueBox` is the compiler-internal handle for `consuming` closures. It has
-no `deinit` on purpose: dropping the handle must not free the block. For a
-user-facing single-owner box, use `OwnedBox`.
+Every box the compiler instantiates is picked in `box_bindings.ks` and used
+only through its protocols (`consuming` closures box `Optional[E]` in the
+`Owned` box rather than needing a box of their own). Don't add a box with
+tag-called members for one feature; give the feature a binding and a bound
+in `Builtin::box_binding_bound` instead.

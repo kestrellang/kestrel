@@ -73,9 +73,9 @@ copied, cloned, moved or dropped, and the value stays frame-bound (E494).
 (bit-copy a Copyable capture, `clone()` a Cloneable one, move a
 non-Copyable one) and lives on the heap, so the value may leave the frame.
 `closure_box.rs` resolves the box entity through `ResolveBuiltin`
-(`Builtin::SharedBox` for `escaping`, `Builtin::UniqueBox` for
-`consuming`), then finds every member it needs **by requirement name**
-(`init`, `sharedMutRef`, `takeValue`, `destroy`) — never by a hard-coded
+(`Builtin::ClosureBox` for `escaping`, `Builtin::ConsumingClosureBox` for
+`consuming`), then reaches every member it needs **through its protocols**
+(`init`, `sharedMutRef`, `valueMutRef`) — never by a hard-coded
 `RcBox` reference — and peels the handle type through its single-field
 wrappers to the raw machine pointer that becomes word 1 of the closure
 value. Swapping the lang binding retargets every boxing site.
@@ -85,7 +85,7 @@ The two owning kinds differ in how the body reaches the environment:
 | Kind | Box | Body prologue | Capture binding |
 |------|-----|---------------|-----------------|
 | `escaping` | shared | `sharedMutRef()` borrows the payload in place | field ADDRESS inside the shared storage — state persists across calls and aliases observe it |
-| `consuming` | unique | `takeValue()` moves the whole env into the frame | per-capture `@owned` locals, so the one-shot body may move a capture out while the rest drop normally |
+| `consuming` | single owner, holding `Optional[E]` | `valueMutRef()` swaps the env out for `.None` and moves it into the frame | per-capture `@owned` locals, so the one-shot body may move a capture out while the rest drop normally |
 
 **Prologue invariant: leave NO tracked ref behind.** `sharedMutRef()` is a
 ret-borrow call, so its result is a scope-tracked single-use reference. The

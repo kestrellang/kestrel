@@ -47,8 +47,9 @@ public type AnyBox[T] = Shared[T]
 @builtin(.IndirectBox)
 public type IndirectBox[T] = Owned[T]
 
-/// `consuming` closure environments, taken out (once) when the closure is
-/// called. Still the compiler-internal `UniqueBox` until consuming closures
-/// move onto `Owned`.
+/// `consuming` closure environments. Needs `Box` and `MutableIndirection`:
+/// the environment is boxed as `Optional[E]`, the one call swaps it out for
+/// `.None` in place, and the box's ordinary drop frees what is left, so a
+/// closure that is never called still drops its captures.
 @builtin(.ConsumingClosureBox)
-public type ConsumingClosureBox[T] = UniqueBox[T]
+public type ConsumingClosureBox[T] = Owned[T]
