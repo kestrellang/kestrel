@@ -1,6 +1,6 @@
 # References, slices and views
 
-Full reference: `docs/language/references.md`. Design: `docs/plans/indirection/`.
+Full reference: the References page at https://kestrel-lang.com/docs.
 
 ## Taking inputs: pick the parameter type
 

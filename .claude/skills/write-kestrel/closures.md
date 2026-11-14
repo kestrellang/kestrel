@@ -1,6 +1,6 @@
 # Closures
 
-Full reference: `docs/language/closures.md`.
+Full reference: the Closures page at https://kestrel-lang.com/docs.
 
 ```kestrel
 let add = { (a: Int64, b: Int64) in a + b };

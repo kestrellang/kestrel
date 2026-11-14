@@ -1,7 +1,7 @@
 # Types
 
-Full reference: `docs/language/types.md`, `generics.md`, `protocols.md`,
-`existentials.md`, `extensions.md`, `derive.md`, `string-interpolation.md`.
+Full reference: the Types, Generics, Protocols, Existentials, Extensions and
+String Interpolation pages at https://kestrel-lang.com/docs.
 
 ## Primitives and sugar
 
@@ -64,7 +64,7 @@ extend Drawable { func redraw() { self.draw(); } } // default implementation
 
 Operators come from protocols (`Addable`, `Equatable`'s `isEqual(to:)`,
 `Comparable`'s `compare`, …): conform and the operator works. See
-"Operator Protocols" in `docs/language/protocols.md`.
+"Operator Protocols" on the Protocols page.
 
 ## Generics and implicit bounds
 
@@ -129,4 +129,4 @@ match consuming o as? Rect { .Ok(r) => …, .Err(back) => … }   // needs any[O
   happen through `clone()`, which the compiler inserts. `@derive(Cloneable)`
   writes it.
 - `not Copyable` types move. `deinit { … }` runs once, when the owner drops.
-- Memory model in depth: `docs/memory-model/`.
+- Copy and drop rules in depth: https://kestrel-lang.com/docs.

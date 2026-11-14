@@ -17,12 +17,14 @@ This file is the core. Go deeper in the side files:
 | Closure kinds (`mutating` / `consuming` / `escaping`), captures, E624/E507 | [closures.md](closures.md) |
 | Primitives, sugar, strings, existentials, `not Copyable` / `not Static` / `not Sized`, extensions, derive | [types.md](types.md) |
 | Which std module has what, common call shapes (files, processes, time, collections) | [stdlib.md](stdlib.md) |
-| Exact signatures of any std item | `docs/stdlib/<module>.md` (generated, authoritative) |
-| Full language reference | `docs/language/` (one page per feature) |
-| Naming and API-shape rules | `docs/NAMING_CONVENTIONS.md` |
+| Exact signatures of any std item | the std source the compiler loads (below), or https://kestrel-lang.com/reference/stdlib |
+| Full language reference | https://kestrel-lang.com/docs |
 
-Don't trust a remembered API spelling: grep `lang/std` or `docs/stdlib/` before
-using a std method you haven't seen in this session. The std is renamed often.
+**Check the std before you call it.** It is renamed between releases, so don't
+trust a remembered spelling. `kestrel build --verbose file.ks` prints
+`Loading stdlib from <dir>`; grep that directory (`rg 'func readText' <dir>`).
+It is normally `<toolchain>/lib/std` next to the `kestrel` binary, or
+`$KESTREL_STD` when set.
 
 ## Program skeleton
 
@@ -42,8 +44,7 @@ func main() -> Int64 {             // exit code; `()`, `!`, `ExitCode` and `T th
 - `@main` marks the entry point; the name `main` alone is not special.
 - Every public std declaration is auto-imported, including `File`, `Process`
   and `Duration`. Write `import std.x.(A, B)` only to be explicit, and
-  `import M as Alias` / `import M.(A as B)` to rename. Code inside `lang/std`
-  imports explicitly.
+  `import M as Alias` / `import M.(A as B)` to rename.
 - Build and run: `kestrel build file.ks -o out && ./out`. `-O 2` builds with LLVM.
 
 ## The rules that bite first
@@ -134,7 +135,7 @@ func main() -> Int64 {
 - Structs copy by default. `struct File: not Copyable { deinit { … } }` makes
   a move-only RAII type; using it after a move is E500.
 - `@derive(Equatable, Hashable, Cloneable, Comparable)` writes the boilerplate
-  (see `docs/language/derive.md`). Structs with `String`/`Array` fields are
+  (`Equatable`, `Hashable`, `Cloneable`, `Comparable`, `Defaultable`, `Formattable`). Structs with `String`/`Array` fields are
   `Cloneable`, not `Copyable`.
 - **A hand-written `clone()` must clone each heap field.** Inside `clone()`,
   `self` is a bitwise copy, so `func clone() -> T { self }` aliases the buffers
@@ -268,7 +269,7 @@ Failable members (`var first?: T`, `subscript(checked i: Int64)? -> T`) return
 
 ## Style
 
-Follow `docs/NAMING_CONVENTIONS.md`. The rules you'll use most:
+The std's naming rules; match them so your APIs read like the std:
 
 - `PascalCase` types, `camelCase` everything else, no abbreviations in public names.
 - Mutating verb vs. non-mutating participle: `sort()` / `sorted()`, `trim` / `trimmed()`.
@@ -294,5 +295,6 @@ Follow `docs/NAMING_CONVENTIONS.md`. The rules you'll use most:
 Every ```` ```kestrel ```` block in these files that starts with a `module`
 line is a whole program and must compile and run on the current compiler.
 Fragments (no `module` line) are illustrations. When a std API or rule
-changes, fix it here and in the matching side file, and link to
-`docs/language/` or `docs/stdlib/` instead of copying long API lists.
+changes, fix it here and in the matching side file. The skill is used
+outside the Kestrel repo, so never point at repo paths: link the website or
+tell the reader how to find the installed std, and don't copy long API lists.
