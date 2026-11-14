@@ -119,8 +119,7 @@ impl HirBody {
                 continue;
             };
             // Arm 0 is the `Some($o)` lang-case pattern by construction.
-            let Some(HirPat::Variant { args, .. }) =
-                arms.first().map(|a| &self.pats[a.pattern])
+            let Some(HirPat::Variant { args, .. }) = arms.first().map(|a| &self.pats[a.pattern])
             else {
                 continue;
             };
