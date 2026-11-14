@@ -6,6 +6,7 @@ import http.method.(HttpMethod)
 import http.content.(Text)
 import http.status.(StatusCode)
 import std.network.(TcpListener)
+import std.time.(Duration)
 
 // ============================================================================
 // ENDPOINTS
@@ -242,7 +243,11 @@ public struct App[Ctx]: Cloneable {
 
     /// Serves requests on `port` until accepting fails. Each connection
     /// handles one request (`Connection: close`).
-    public func listen(port: UInt16) -> () throws ServerError {
+    ///
+    /// Connections are served one at a time, so a client that stalls
+    /// would hold up every other client. A read or write on a connection
+    /// that waits longer than `idleTimeout` drops that connection instead.
+    public func listen(port: UInt16, idleTimeout idleTimeout: Duration = Duration.seconds(10)) -> () throws ServerError {
         var listener = try TcpListener.bind(port: port);
         println("Perch listening on port \(port)");
         loop {
@@ -252,8 +257,13 @@ public struct App[Ctx]: Cloneable {
             match listener.accept() {
                 .Ok((stream, _)) => {
                     var stream = stream;
+                    // Without a timeout we would wait on this client forever.
+                    if stream.setReadTimeout(.Some(idleTimeout)).isErr { continue }
+                    if stream.setWriteTimeout(.Some(idleTimeout)).isErr { continue }
                     let response = match parseHttpRequest(stream) {
                         .Ok(request) => self.respond(to: request),
+                        // The client went quiet: drop it without a response.
+                        .Err(e) if e.kind == .WouldBlock => continue,
                         .Err(_) => Response(StatusCode.badRequest(), Text("Bad Request"))
                     };
                     // A client that hung up mid-response is its problem, not the server's.

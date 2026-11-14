@@ -81,3 +81,8 @@ socket. `tests/run.sh` builds and runs `tests/checks.ks`.
 
 Middleware runs only for matched routes, so `Logger` doesn't log 404s.
 `Path[T]` reads the route's first `:param`; take `Path[(A, B)]` for two.
+
+`listen` serves one connection at a time. A connection whose read or write
+waits longer than `idleTimeout` (10 seconds by default) is dropped without a
+response, so a silent client can't hold up the others:
+`try app.listen(8080, idleTimeout: Duration.seconds(5))`.
