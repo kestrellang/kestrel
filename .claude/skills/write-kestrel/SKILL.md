@@ -1,606 +1,298 @@
 ---
 name: write-kestrel
-description: Quick reference for writing Kestrel source code — syntax, semantics, idioms, and the label/access-mode rules that bite first-time writers. Use when writing or editing `.ks` files, when the user asks "how do I write X in Kestrel?", when drafting stdlib modules, or any time the task involves producing Kestrel code rather than modifying the compiler. Skip for compiler-internals work (Rust code in `lib/`), which is covered by `kestrel-pipeline` / `debug-kestrel`.
+description: Quick reference for writing Kestrel source code — program skeleton, syntax, labels and access modes, references and slices, closures, protocols and generics, and where things live in the stdlib. Use when writing or editing `.ks` files, when the user asks "how do I write X in Kestrel?", when drafting stdlib or package code, or any time the task produces Kestrel code rather than compiler Rust. For compiler internals (Rust in `lib/`) use `kestrel-pipeline` / `debug`; for test files use `write-tests`.
 ---
 
-# Kestrel Language Quick Reference
+# Writing Kestrel
 
-## Overview
+Statically typed, copy-by-default value semantics, explicit access modes
+(borrowing / `mutating` / `consuming`), protocol-based generics (monomorphized),
+second-class references, RAII. Statements end in `;`.
 
-Statically-typed language with copy-by-default value semantics, explicit parameter access modes (borrowing, mutating, consuming), protocol-based polymorphism, monomorphized generics, and RAII resource management. Semicolons are required after statements.
+This file is the core. Go deeper in the side files:
 
-## Variables
+| Need | Read |
+|---|---|
+| `&T`, `&Slice[T]`, `&StringSlice`, views, `Indirection`, decay | [references.md](references.md) |
+| Closure kinds (`mutating` / `consuming` / `escaping`), captures, E624/E507 | [closures.md](closures.md) |
+| Primitives, sugar, strings, existentials, `not Copyable` / `not Static` / `not Sized`, extensions, derive | [types.md](types.md) |
+| Which std module has what, common call shapes (files, processes, time, collections) | [stdlib.md](stdlib.md) |
+| Exact signatures of any std item | `docs/stdlib/<module>.md` (generated, authoritative) |
+| Full language reference | `docs/language/` (one page per feature) |
+| Naming and API-shape rules | `docs/NAMING_CONVENTIONS.md` |
+
+Don't trust a remembered API spelling: grep `lang/std` or `docs/stdlib/` before
+using a std method you haven't seen in this session. The std is renamed often.
+
+## Program skeleton
 
 ```kestrel
-let x: Int64 = 42;        // immutable
-let message = "Hello";     // type inferred
-var count: Int32 = 0;      // mutable
-count = count + 1;
+module Hello
+
+@main
+func main() -> Int64 {             // exit code; `()`, `!`, `ExitCode` and `T throws E` also work
+    let name = "world";
+    println("hello, \(name)");
+    0
+}
 ```
 
-## Functions
+- **Every file that declares anything starts with a `module` line** (E414).
+  Without it, its names leak into other modules and the std stops compiling.
+- `@main` marks the entry point; the name `main` alone is not special.
+- Every public std declaration is auto-imported, including `File`, `Process`
+  and `Duration`. Write `import std.x.(A, B)` only to be explicit, and
+  `import M as Alias` / `import M.(A as B)` to rename. Code inside `lang/std`
+  imports explicitly.
+- Build and run: `kestrel build file.ks -o out && ./out`. `-O 2` builds with LLVM.
 
-Methods do NOT declare `self` — it's implicit.
+## The rules that bite first
+
+1. **Single-name params are positional.** `func add(x: Int64, y: Int64)` is
+   called `add(1, 2)`; `add(x: 1, y: 2)` is E113 "'x' is the parameter's name,
+   not an argument label". Add an external label to require one:
+   `func move(to target: Point)` → `move(to: p)`. There is no `_` label.
+   This applies to std too: `File.readText(path)`, `File.writeText(path, text)`,
+   `Environment.variable("HOME")`.
+2. **Memberwise inits do take labels**: `Point(x: 1, y: 2)`.
+3. **Subscripts and calls both use parens**: `xs(0)`, `dict("k")`, `grid(row: 1, col: 2)`.
+   Square brackets are only for type arguments: `Array[Int64]`, `largest[T]`.
+4. **Logical operators are words**: `and`, `or`, `not`. `!x` is bitwise not;
+   `!` as a type is Never.
+5. **Optional patterns are `some x` and `null`**, not `.Some(x)` / `.None`.
+   `null` is also the empty value: `let n: String? = null;`.
+6. **Enum cases are separated by whitespace, not `;`**: `enum D { case A case B }`.
+7. **Protocol requirements have no trailing `;`.**
+8. **Methods don't declare `self`.** `mutating func` / `consuming func` set
+   the receiver's mode; `static func` has none.
+9. **A mutating call needs a `var`** (a `let` receiver or argument is E203).
+10. **A bare protocol is not a type**: write `any P` (boxed) or `some P` (opaque) — E144.
+
+## Variables and functions
 
 ```kestrel
-func add(x: Int64, y: Int64) -> Int64 { x + y }
-func add(x: Int64, y: Int64) -> Int64 = x + y   // expression-bodied
+let x: Int64 = 42;             // immutable
+var count = 0;                 // mutable, inferred Int64
+count += 1;
+
+func add(x: Int64, y: Int64) -> Int64 { x + y }        // last expression is the result
+func double(x: Int64) -> Int64 = x * 2                  // expression body
+func send(to recipient: String, retries: Int64 = 3) { } // label + default
+func reset(mutating p: Point) { p.x = 0; }              // caller passes a var
+func close(consuming f: File) { }                       // takes ownership
 func identity[T](value: T) -> T = value
-func compare[T](a: T, b: T) -> Bool where T: Comparable { }
+func maxOf[T](a: T, b: T) -> T where T: Comparable { if a > b { a } else { b } }
 ```
 
-## Parameter Labels
+Access mode order in a parameter: `mode label name: Type`
+(`func offset(mutating point p: Point, by delta: Int64)`).
 
-Single-name params are positional (no label at call site — unlike Swift). Add an external label before the internal name to require it.
-
-```kestrel
-func add(x: Int64, y: Int64) -> Int64 { x + y }
-add(1, 2)                                        // positional
-
-func send(to recipient: String) { }
-send(to: "alice@example.com")                     // labeled
-
-// Overloading by label
-func move(to destination: Point) { }
-func move(by offset: Point) { }
-```
-
-Order with access modes: `accessMode externalLabel internalName: Type`
+## Structs and enums
 
 ```kestrel
-func offset(mutating point p: Point, by delta: Int64) {
-    p.x = p.x + delta;
-}
-offset(point: myPoint, by: 5)
-```
+module Shapes
 
-## Parameter Access Modes
+struct Point: Equatable {
+    var x: Int64
+    var y: Int64
 
-```kestrel
-func read(p: Point) -> Int64 { p.x }             // borrowing (default, read-only)
-func reset(mutating p: Point) { p.x = 0; }       // mutating (caller must pass var)
-func consume(consuming f: File) { }               // consuming (takes ownership)
-```
-
-## Structs
-
-```kestrel
-struct Point {
-    var x: Int64;
-    var y: Int64;
-
-    // Instance method (self is implicit)
     func sum() -> Int64 { self.x + self.y }
-
-    // Mutating method
-    mutating func offset(by: Int64) { self.x = self.x + by; }
-
-    // Static method
+    mutating func offset(by delta: Int64) { self.x += delta; }
     static func origin() -> Point { Point(x: 0, y: 0) }
-
-    // RAII cleanup
-    deinit { }
+    func isEqual(to other: Point) -> Bool { self.x == other.x and self.y == other.y }
 }
-```
-
-### Initializers
-
-```kestrel
-// No custom init → memberwise (labels = field names)
-let p = Point(x: 10, y: 20);
-
-// Custom init without labels → positional
-init(x: Int64, y: Int64) { self.x = x; self.y = y; }
-let p = Point(1, 2);
-
-// Custom init with labels → labeled
-init(atX x: Int64, atY y: Int64) { self.x = x; self.y = y; }
-let p = Point(atX: 5, atY: 10);
-```
-
-### Copy vs Move
-
-```kestrel
-let p2 = p1;  // COPIED — both valid (default)
-
-struct File: not Copyable { var handle: Int64; }
-let f2 = f1;  // MOVED — f1 invalid
-```
-
-### Writing `clone()`
-
-Inside a `clone()` body, **`self` is a bitwise copy**. The compiler deliberately
-suppresses clone-insertion there (otherwise `clone()` would call itself forever),
-so returning `self` — or a payload bound out of `self` — **aliases** any heap field
-(`String`, `Array`, `Dictionary`, `Rc`, …) instead of duplicating it. Both the
-original and the "copy" then free the same buffer → double-free / use-after-free.
-Deep-clone every heap payload explicitly:
-
-```kestrel
-// WRONG — `{ self }` bit-copies, aliasing the String; double-free on drop
-enum Token: Cloneable {
-    case Plain
-    case Literal(String)
-    func clone() -> Token { self }
-}
-
-// RIGHT — clone each heap payload; bare `self` is fine only for payload-less cases
-enum Token: Cloneable {
-    case Plain
-    case Literal(String)
-    func clone() -> Token {
-        match self { .Literal(s) => .Literal(s.clone()), _ => self }
-    }
-}
-```
-
-Same rule for structs: `func clone() -> Box { self }` aliases the fields — instead
-build a fresh value and `.clone()` each heap field. (Types that *don't* hand-write
-`clone()` get correct compiler-synthesized cloning; the footgun is specific to a
-hand-written body that returns `self`.)
-
-## Enums
-
-```kestrel
-enum Direction { case North case South case East case West }  // inline cases: NO `;` separator
-let d: Direction = .North;
 
 enum Shape {
-    case Circle(radius: Float64)              // labeled
-    case Rectangle(width: Float64, height: Float64)
-    case Point
+    case Circle(radius: Float64)
+    case Square(side: Float64)
+
+    var area: Float64 {
+        match self {
+            .Circle(radius: r) => 3.14159 * r * r,
+            .Square(side: s) => s * s
+        }
+    }
 }
-let s = Shape.Circle(radius: 5.0);
 
-enum Option[T] { case Some(T) case None }    // positional (cases separated by whitespace, not `;`)
-let opt = Option.Some(42);
+indirect enum Tree {                     // recursive payloads are boxed
+    case Leaf(Int64)
+    case Node(left: Tree, right: Tree)
+}
 
-indirect enum Tree[T] {                        // recursive
-    case Leaf(value: T)
-    case Node(left: Tree[T], right: Tree[T])
+@main
+func main() -> Int64 {
+    var p = Point(x: 1, y: 2);
+    p.offset(by: 3);
+    println(p.sum());
+    println(Shape.Square(side: 2.0).area);
+    0
 }
 ```
 
-## Pattern Matching
+- No custom `init` → a memberwise init labeled by field names. A custom
+  `init(x: Int64, y: Int64)` is positional; `init(atX x: Int64)` is labeled.
+- Structs copy by default. `struct File: not Copyable { deinit { … } }` makes
+  a move-only RAII type; using it after a move is E500.
+- `@derive(Equatable, Hashable, Cloneable, Comparable)` writes the boilerplate
+  (see `docs/language/derive.md`). Structs with `String`/`Array` fields are
+  `Cloneable`, not `Copyable`.
+- **A hand-written `clone()` must clone each heap field.** Inside `clone()`,
+  `self` is a bitwise copy, so `func clone() -> T { self }` aliases the buffers
+  and double-frees. Prefer `@derive(Cloneable)`.
+
+## Pattern matching and control flow
 
 ```kestrel
-match value {
-    0 => "Zero",
-    1..<10 => "Small",                         // exclusive range
-    1..=10 => "Small",                         // inclusive range
-    .Circle(radius: r) => r,                   // destructure
-    some x if x > 10 => x,                    // guard
-    null => "Absent",                          // Optional's empty case
-    _ => "Other"
+match value {                             // arms from several types, for illustration
+    0 => "zero",
+    1..<10 => "small",
+    .Circle(radius: r) if r > 10.0 => "big circle",
+    some x => "present",
+    null => "absent",
+    _ => "other"
 }
 
-if let some val = optional { }                 // if-let
-guard let some val = optional else { return; } // guard-let
-while let some item = iter.next() { }          // while-let
-guard let null = lookup(key) else { return; }  // require absence
-guard let .Ok(some id) = fetch() else { return; } // nests anywhere
-guard let some .Str(raw) = json.value(for: "k") else { return; } // and takes nested patterns
-```
+if let some v = dict("key") { }
+guard let some first = xs.first else { return 0; }
+guard let .Ok(text) = File.readText(path) else { return 1; }
+while let some line = lines.next() { }
 
-**Optional patterns: write `some x` and `null`, not `.Some(x)` / `.None`.** `some` takes any
-nested pattern (`some .Str(s)`, `some (a, b)`, `some _`). `null` is also the empty-Optional
-value: `let name: String? = null;`.
-
-## Control Flow
-
-```kestrel
-if x > 0 { } else if x < 0 { } else { }
-
-guard x > 0 else { return; }
-
-while condition { }
-
+for x in xs { }
+for i in 0..<n { }
+outer: for row in grid { for cell in row { if cell == 0 { break outer; } } }
 loop { if done { break; } }
-
-// Labeled loops
-outer: loop { while true { break outer; } }
-
-// For-in
-for elem in collection { }
-for i in 0..<10 { }
-for i in 0..=9 { }
 ```
 
-## Closures
+`match` arms are separated by `,`; a `match` used as a statement ends in `;`.
+An `is` match (`c is Circle => …`) is never exhaustive, so add `_`.
+
+## Collections
 
 ```kestrel
-let add = { (a: Int64, b: Int64) in a + b };
-let double: (Int64) -> Int64 = { it * 2 };     // single param → `it`
-numbers.map { it * 2 }                          // trailing closure
+let xs = [3, 1, 2];                       // Array[Int64]
+let ages: [String: Int64] = ["ana": 31];  // Dictionary
+let first = xs(0);                        // panics out of bounds
+let maybe = xs(checked: 5);               // Optional
+let middle = xs(1..<3);                   // &Slice[Int64], no copy
+let head = xs.first ?? 0;                 // first / last / isEmpty / count are properties
+let evens = xs.filter(where: { it % 2 == 0 });
+let doubled = xs.map { it * 2 };          // Slice.map takes its closure positionally
+let total = xs.iter().fold(from: 0, by: { acc, x in acc + x });
+let big = xs.iter().find(where: { it > 1 });
+let sorted = xs.sorted(by: { a, b in a < b });
+var names: Array[String] = [];
+names.append("ana");
+var d: [String: Int64] = [:];
+d("bob") = 40;                            // insert or overwrite
 ```
 
-### Closure Kinds
+Lazy iterator adapters label their closure: `iter().map(as:)`,
+`iter().filter(where:)`. `Slice` methods (`map`, `filter`, `sorted`, …) are
+eager and return `Array`. If a trailing closure fails with "wrong label",
+spell the label.
 
-A function type may carry a **kind** prefix. The kind decides how the closure holds its
-captures, how it can be called, and whether it can leave the frame. Kinds are spelled
-**on types only — never on a literal**; a literal is built for whatever kind its expected
-type asks for.
+## Errors
 
-```kestrel
-(Int64) -> Int64             // normal (default) — read-only VIEWS of the frame
-mutating (Int64) -> ()       // &mutating views — assignments write back to the caller
-consuming () -> File         // owns its captures; called exactly once; may move them out
-escaping () -> Int64         // owns snapshots in a shared heap env; may outlive the frame
-```
-
-| kind | captures | callable | copy class | can leave frame |
-|---|---|---|---|---|
-| normal | views (see later writes) | many times, from `let` | Copyable | no (E494) |
-| `mutating` | `&mutating` views | many times, needs `var` | `not Copyable` | no |
-| `consuming` | owned; body may move them **out** | exactly once | `not Copyable` | yes |
-| `escaping` | owned snapshots, **shared** | many times, from `let` | Cloneable (clone = retain) | yes |
-
-Which to reach for: **normal** for predicates/transforms/visitors — the default and ~86% of
-the stdlib; **`mutating`** when the callback writes back into caller variables (`forEach`);
-**`escaping`** when the callee stores or returns the callback (lazy adapters, struct fields);
-**`consuming`** for a one-shot hand-off that transfers a resource.
-
-A kind goes anywhere a function type goes — params, return types, `let` annotations, struct
-fields, protocol requirements, type aliases. `escaping` is a contextual keyword (still usable
-as an identifier); `mutating`/`consuming` are reserved.
+`T throws E` is `Result[T, E]`. `throw` returns the error; a bare success
+value is promoted to `.Ok` in return and tail position.
 
 ```kestrel
-func each(mutating action: mutating (Int64) -> ()) { }        // kind + matching access mode
-func store(consuming f: escaping () -> Int64) -> Holder { }
-func makeCounter(start: Int64) -> escaping () -> Int64 {
-    var count = start;
-    { count = count + 1; count }                               // literal built as escaping
+module Parse
+
+enum ParseError { case Empty case Bad(String) }
+
+func parse(text: &StringSlice) -> Int64 throws ParseError {
+    if text.isEmpty { throw ParseError.Empty; }
+    guard let some n = Int64(parsing: text) else { throw .Bad(text.toOwned()); }
+    n
 }
-struct Button { let onClick: escaping () -> Int64 }            // storable long-term
-let b2 = b; (b2.onClick)();                                    // shares one environment
-```
 
-### Capture Semantics per Kind
+func twice(text: &StringSlice) -> Int64 throws ParseError {
+    let n = try parse(text);              // propagate the error
+    n * 2
+}
 
-Normal/`mutating` capture **views** — later writes are visible. `escaping`/`consuming`
-capture **owned snapshots** at creation (bit-copy Copyable, `clone()` Cloneable, **move**
-non-Copyable → source dead, E500 on later use).
-
-```kestrel
-var x = 10;
-let f = { x };                            // view
-x = 20;
-f()                                        // 20  — NOT a snapshot
-
-var y = 10;
-let g: escaping () -> Int64 = { y };      // snapshot of 10
-y = 20;
-g()                                        // 10
-```
-
-`escaping` closures have **reference semantics**: `clone`/copy retains one shared heap
-environment, so aliases see each other's mutations, and the captures drop once at last
-release. Refcounting does not collect **strong cycles** — a cycle of escaping environments
-leaks and its captures are never deinitialized.
-
-### Passing Rules (the ones that bite)
-
-| have ↓ \ expected → | normal | `mutating` | `consuming` | `escaping` |
-|---|---|---|---|---|
-| normal | ✓ | ✓ (adapter) | ✗ E624 | ✗ E624 |
-| `mutating` | ✗ | ✓ | ✗ | ✗ |
-| `consuming` | ✗ | ✗ | ✓ | ✗ |
-| `escaping` | ✓ (view) | ✗ E624 | ✓ | ✓ |
-
-- A closure **literal** adapts automatically — the expected type retrofits the kind, trailing
-  closures included. An already-bound closure **value** does not: `let scale = { x * f };
-  iter.map(as: scale)` is **E624**. Fix by annotating the expected kind where the closure is
-  created: `let scale: escaping (Int64) -> Int64 = { x * f };` (it is then built with owned
-  captures) — never by re-annotating the existing value.
-- A `mutating`-kind value must be held in `var` to be called; calling one held in `let` is the
-  **E203** family, not E624.
-- Kind and access mode must pair: `mutating` kind on a `mutating` param, `consuming` kind on a
-  `consuming` param, else **E625**. The kind is independent of a *param's own* convention
-  inside the type — `(mutating T) -> R` is still a normal closure.
-- Named/capture-free functions satisfy every kind.
-
-### The Freeze Rule (view kinds)
-
-While a live normal/`mutating` closure views a place, that place is frozen against
-**destruction** — it cannot be moved, passed to a `consuming` param, or `deinit`ed (**E507**).
-Plain reassignment stays legal. A view-carrying value also cannot be stored into a
-longer-lived binding than its captures (E507 "cannot outlive").
-
-```kestrel
-let r = Res(v: 3);
-let f = { r.v };        // views r
-sink(r);                // ERROR E507 — consuming a frozen place
-```
-
-```kestrel
-var g: () -> lang.i64 = { 0 };
-if cond {
-    let r = Res(v: 9);
-    g = { r.v };        // ERROR E507 — the view would outlive `r`
+@main
+func main() -> Int64 {
+    match twice("21") {
+        .Ok(v) => println(v),
+        .Err(.Empty) => println("empty"),
+        .Err(_) => println("bad")
+    };
+    0
 }
 ```
 
-Assigning to a capture in a **normal** body is **E603** (including through a field,
-`c.n = 5`) — the fix is a `mutating` expected type. Moving a capture out is E506 except in a
-`consuming` body. Returning/storing a view closure is **E494**; the fix-it is an owning kind
-in the expected type.
+`try` covers the whole postfix chain after it (`try a.b().c()`) and also works
+on `Optional`. To fall back instead of propagating, drop the `try`:
+`mayFail(n) ?? 0` (a `Result` coalesces like an `Optional`).
 
-## Types
-
-### Primitives
-
-- Integers: `Int8`, `Int16`, `Int32`, `Int64` / `UInt8`, `UInt16`, `UInt32`, `UInt64`
-- Floats: `Float16`, `Float32`, `Float64`
-- Boolean: `Bool`
-- String: `String`
-- Unit: `()`
-- Never: `!`
-
-### Type Operators (sugar)
-
-- `T?` → `Optional[T]`
-- `[T]` → `Array[T]`
-- `[K: V]` → `Dictionary[K, V]`
-- `T throws E` → `Result[T, E]`
+## Protocols, generics, extensions (short)
 
 ```kestrel
-let name: String? = null;
-let nums: [Int64] = [1, 2, 3];
-let ages: [String: Int64] = [:];
-func parse(input: String) -> Int64 throws ParseError { }
+protocol Describe { func describe() -> String }
+extend Point: Describe { func describe() -> String { "(\(self.x), \(self.y))" } }
+extend Describe { func shout() -> String { self.describe().uppercased() } }   // default method
+
+func show[T](value: T) -> String where T: Describe { value.describe() }
+func showAny(value: any Describe) -> String { value.describe() }              // boxed
+extend Box[T] where T: Equatable { }                                          // conditional
+extend[T] Int64: Reads[T] { }       // params the target doesn't bind are declared on `extend`
 ```
 
-### Composite Types
+Generic parameters are implicitly `Copyable`, `Static` and `Sized`; relax
+with `where T: not Copyable` etc. Details and existential boxes are in
+[types.md](types.md).
+
+## Properties and subscripts
 
 ```kestrel
-(Int64, String)             // tuple
-[Int64]                     // array
-(Int64, Int64) -> Int64     // function type (normal kind)
-escaping () -> Int64        // kinded function type — see Closure Kinds
-lang.ptr[Int64]             // pointer (unsafe)
-```
-
-### Type Aliases
-
-```kestrel
-type ID = String;
-type Handler = (Int64) -> Bool;
-type Pair[T] = (T, T);
-```
-
-### String Forms
-
-| Form | Multi-line? | Escapes? | Interpolation? |
-|---|---|---|---|
-| `"..."` | no | yes | yes |
-| `"""\n...\n"""` | **yes** (Swift-style indent strip from closing `"""` column) | yes | yes |
-| `#"..."#` | no | no | no |
-| `#"""\n...\n"""#` | yes | no | no |
-| `##"..."##`, `##"""\n...\n"""##`, etc. | escalate pound count to embed `"#`, `"##`, etc. literally | no | no |
-
-Multi-line cooked rules: the opening `"""` must be followed immediately by `\n`; the closing `"""` must be on its own line (only whitespace before it). The closing line's indentation column defines the strip prefix — every content line must start with at least that whitespace, otherwise E704.
-
-`#`-prefixed forms are **fully raw** — no escapes, no interpolation, no `\#(...)` escalator. Use them for embedded source (regex, HTML, CSS, JSON, JS) where backslashes and quotes shouldn't be touched. Pick the smallest pound count whose closer (`"#`, `"##`, …) doesn't appear in the body.
-
-```kestrel
-let html  = ##"<a href="/x" class="big">"##;     // single-line raw
-let regex = #"\d{3}-\d{4}"#;                     // single-line raw
-let block = """
-    line one
-    line two
-    """;                                          // multi-line cooked → "line one\nline two"
-let css   = ##"""
-*{box-sizing:border-box}
-"""##;                                            // multi-line raw
-```
-
-### String Interpolation
-
-```kestrel
-let greeting = "Hello, \(name)!";
-let info = "\(name) is \(age) years old";
-let padded = "Value: \(age:>5)";       // right-align, width 5
-let hex = "Code: \(code:08x)";         // zero-pad, width 8, hex
-let debug = "\(value:?)";              // debug format
-```
-
-Format specifiers: `>` right-align, `<` left-align, `^` center, `0` zero-pad, `x`/`X` hex, `b` binary, `o` octal, `.n` precision. Interpolation works in both single-line and multi-line cooked strings (`"..."` and `"""..."""`); raw forms (`#"..."#` etc.) do **not** support interpolation.
-
-## Protocols
-
-```kestrel
-protocol Drawable {
-    func draw();
-    mutating func reset();
-    static func default() -> Self;
-}
-
-protocol Container { type Element; func get() -> Element; }
-```
-
-### Conformance
-
-```kestrel
-struct Circle: Drawable { }                    // direct
-extend Circle: Hashable { func hash() -> Int64 { 0 } }  // via extension
-extend Drawable { func redraw() { self.draw(); } }       // default impl
-```
-
-### Existentials (`any P`)
-
-```kestrel
-let shapes: Array[any Shape] = [Circle(r: 1), Square(side: 2)];  // boxed automatically
-let owned: any[OwnedBox] Shape = Circle(r: 3);   // explicit box
-let both: any Shape and Printable = Circle(r: 1); // composition
-func sum(xs: any Iterator[Item = Int64]) -> Int64 { … } // pinned associated type
-
-if let some c = s as? Circle { … }               // as? borrows: Optional[&Circle]
-match consuming o as? Circle { .Ok(c) => …, .Err(back) => … }  // needs any[OwnedBox]
-if s is Circle { … }                              // typed like `true`
-match s { c is Circle => c.r, is Rect { w, .. } => w, _ => 0 }
-```
-
-- A bare protocol is **not** a type: `let s: Shape` is E144 — write `any Shape` or `some Shape`.
-- **The box is part of the type.** `any P` is `RcBox` (copies *share* the payload — a `mutating` call is visible through every copy); `any[CowBox] P` forks on write (needs `P: Cloneable`); `any[OwnedBox] P` is single-owner and the only one that allows `consuming` requirements and `consuming as?`. `any P` and `any[OwnedBox] P` don't convert into each other.
-- Not callable through `any P`: static/init requirements, generic ones, ones using `Self` as a parameter/return (`==`), ones mentioning an unpinned associated type.
-- An `is` match is never exhaustive — always add `_`. An `is` binding borrows (`var c is T` is E153).
-
-## Generics
-
-```kestrel
-struct Box[T] { var value: T; }
-struct Pair[A, B] { var first: A; var second: B; }
-struct SortedList[T] where T: Comparable { var items: [T]; }
-struct Container[T] where T: not Copyable { var value: T; }
-```
-
-## Extensions
-
-```kestrel
-extend Point { func distance(other: Point) -> Float64 { } }
-extend Point: Hashable { func hash() -> Int64 { } }
-extend Box[T] where T: Equatable { func equals(other: Box[T]) -> Bool { } }
-extend Box[Int64] { func doubled() -> Int64 { self.value * 2 } }
-```
-
-## Computed Properties & Subscripts
-
-```kestrel
-struct Rectangle {
-    var width: Float64;
-    var height: Float64;
-    var area: Float64 { self.width * self.height }       // getter shorthand
-    var diagonal: Float64 {
-        get { sqrt(self.width * self.width + self.height * self.height) }
-        set { }                                           // newValue is implicit
+struct Rect {
+    var w: Float64
+    var h: Float64
+    var area: Float64 { self.w * self.h }              // computed, getter shorthand
+    lazy var label: String = "rect"                    // computed once, on first read
+    var scale: Float64 = 1.0 {
+        didSet { println("scale is now \(self.scale)"); }
     }
-    static var zero: Rectangle { Rectangle(width: 0.0, height: 0.0) }
-}
-
-struct Grid {
-    subscript(row r: Int64, col c: Int64) -> Int64 {
-        get { self.data(r * width + c) }
-        set { self.data(r * width + c) = newValue; }
+    subscript(index: Int64) -> Float64 {
+        get { if index == 0 { self.w } else { self.h } }
+        set { if index == 0 { self.w = newValue; } else { self.h = newValue; } }
     }
 }
-let val = grid(row: 0, col: 1);
 ```
 
-## Error Handling
-
-```kestrel
-// Using Result sugar
-func read() -> String throws FileError {
-    if success { return data; }
-    throw FileError.NotFound;
-}
-
-// Try operator (propagates errors)
-func process() -> Data throws Error {
-    let content = try readFile();
-    return parse(content);
-}
-
-// Try with default
-let value = try someOperation() ?? defaultValue;
-```
-
-## Modules and Imports
-
-```kestrel
-module MyApp.Utils
-
-import std.collections.Array
-import std.files as Files
-import Library.(Item1, Item2)
-import ModuleA.(Widget as WidgetA)
-public import internal.types.Core   // re-export
-```
-
-Visibility: `public`, `internal` (default), `fileprivate`, `private`.
-
-## Common Patterns
-
-```kestrel
-struct Config { static func default() -> Config { } }                // factory
-struct Builder {
-    mutating func set(value: Int64) { }
-    consuming func build() -> Product { }
-}
-struct Connection: not Copyable { deinit { self.close(); } }         // RAII
-```
+Failable members (`var first?: T`, `subscript(checked i: Int64)? -> T`) return
+`Optional`. `ref` / `mutating ref` accessors lend in place
+(see [references.md](references.md)).
 
 ## Style
 
-- **Naming**: `PascalCase` types/protocols/enums; `camelCase` functions/methods/variables; `SCREAMING_SNAKE_CASE` constants. No abbreviations in public APIs — `count`, `pointer`, `address`, not `cnt`, `ptr`, `addr`.
-- **Mutability**: prefer `let`; `var` only when the binding mutates.
-- **Integers**: use type annotations (`let x: Int32 = 42`) not constructors (`Int32(intLiteral: 42)`).
-- **Self**: `self` = borrowing; `mutating self` = modify fields; `consuming self` = take ownership.
+Follow `docs/NAMING_CONVENTIONS.md`. The rules you'll use most:
 
-## Idioms
-
-- **Mutating = verb, non-mutating = past participle.**
-  ```kestrel
-  sort() / sorted()       reverse() / reversed()
-  trim() / trimmed()      formUnion(with:) / union(with:)
-  ```
-- **`to*` converts (allocates), `as*` views (no copy).**
-  ```kestrel
-  toArray()       // new value
-  asSlice()       // cheap reinterpretation
-  ```
-- **Prefer enums over booleans** at call sites.
-  ```kestrel
-  sort(order: .ascending)     // good
-  sort(ascending: true)       // bad — opaque
-  ```
-- **Properties = state, methods = actions.** `count`, `isEmpty`, `capacity` are properties everywhere. `collect()`, `fold()`, `iter()` are methods.
-- **Closure labels are standardized:** predicates `matching:`, key extractors `byKey:`, combining `combining:`, mapping `mapping:`.
-  ```kestrel
-  filter(matching: { it > 0 })
-  sort(byKey: { it.name })
-  fold(from: 0, combining: { a + b })
-  ```
-- **Labels are prepositions** — `with:`, `from:`, `by:`, `of:`, `at:`. Not bare nouns like `predicate:` or `action:`.
-- **Prefer `for` over `while` for iteration.** Use `for elem in collection`, `for i in 0..<n`.
-- **Avoid indexing strings.** Use views and iterators; prefer utf8 operations when possible.
-- **Prefer early returns.** Use `guard` for preconditions instead of deep nesting.
-  ```kestrel
-  guard x > 0 else { return; }
-  ```
-
-## Label Rules Summary
-
-| Declaration              | Call Site                |
-| ------------------------ | ------------------------ |
-| `func foo(x: Int64)`     | `foo(42)`                |
-| `func foo(label x: Int64)` | `foo(label: 42)`      |
-| `init(x: Int64)`         | `Type(42)`               |
-| `init(label x: Int64)`   | `Type(label: 42)`        |
-| Memberwise (no init)     | `Type(fieldName: value)` |
-| `case Foo(label: Type)`  | `.Foo(label: value)`     |
-| `case Foo(Type)`         | `.Foo(value)`            |
+- `PascalCase` types, `camelCase` everything else, no abbreviations in public names.
+- Mutating verb vs. non-mutating participle: `sort()` / `sorted()`, `trim` / `trimmed()`.
+- Properties for state (`count`, `isEmpty`, `first`), methods for work (`iter()`, `collect()`).
+- Labels are prepositions: `where:`, `by:`, `from:`, `of:`, `at:`, `as:`, `byKey:`.
+- `to*` converts and allocates (`toOwned()`, `toArray()`); `as*` views (`asSlice()`).
+- Prefer `guard` and early returns over nesting; `for` over `while`.
 
 ## Gotchas
 
-- Single-name params have **no external label** — `foo(42)` not `foo(x: 42)`. Unlike Swift.
-- Memberwise inits **do** require labels matching field names.
-- `_` label syntax (`func foo(_ x: Int64)`) is NOT supported — use single-name param.
-- Outside stdlib: do NOT `import std.*` — public stdlib types are auto-imported.
-- `as`, `get`, `set`, `protocol` are keywords — can't be param names/labels.
-- Subscripts use `dict(key)` not `dict[key]` — brackets are for type parameters only.
-- Enum cases are separated by **whitespace/newlines, not `;`** — `enum D { case A case B }` parses, `enum D { case A; case B }` is a parse error. (Statement semicolons inside bodies are still required.)
-- Protocol requirements take **no trailing `;`** — `func matches(other: Self) -> Bool`, not `... -> Bool;`.
-- `let _ = expr;` needs a semicolon when it's the only statement in a void body.
-- Structs with `String`/`Array`/`Dictionary` fields need explicit `Cloneable` conformance.
-- Inside a hand-written `clone()`, `self` is a **bitwise copy** — deep-clone heap fields explicitly; `clone() { self }` aliases them → double-free. (See *Writing `clone()`*.)
-- Multi-line method chaining (`.foo()\n.bar()`) **parses fine** (verified 2026-07 by compiling+running). The real chaining constraint: **a trailing closure only binds to an unlabeled closure param** — `iter().filter { it > 0 }` fails with "wrong label: expected 'where', got '_'"; write `filter(where: { it > 0 })`. `map` takes its closure positionally so `xs.map { it * 2 }` works, but `filter` is labeled on both Array and Iterator (`filter(where: { it % 2 == 0 })`), as are most adapters (`where:`, `as:`, `by:`) — when a trailing closure fails with a label error, spell the label.
-- `it` **works inside string-interpolation holes** — `map { "x \(it)" }` is fine (fixed 2026-07-17; older compilers errored "undefined name 'it'").
-- Normal/`mutating` closures that **capture** can't escape the defining function (E494) — return or store them by writing `escaping`/`consuming` in the expected type. Capture-free closures escape freely.
-- Normal closures capture **views**: they see writes made after creation. For a snapshot, use an `escaping`/`consuming` expected type.
-- Kinds live **on function types only** — there is no `{ mutating () in … }` literal syntax, and no capture lists.
-- Stdlib kinds: `Iterator.forEach`/`tryForEach`, `Optional.inspect`, `Result.inspect`/`inspectErr` take `mutating` closures; the lazy builders (`Iterator.map`/`filter`/`filterMap`/`flatMap`/`scan`/`takeWhile`/`skipWhile`/`inspect`/`intersperseWith`, `ArraySlice.split(where:)`, `Str.split(where:)`) and the adapter/view inits take `escaping`. Everything else is normal.
-- Calling a closure held in a **field** from outside the type needs parens — `(h.action)()`; inside the type `self.predicate(x)` works directly.
-- `F.Type` metatype syntax is not yet supported.
-- `!` is the Never type, not `Never`.
-- `!` on a value is **bitwise** not; logical negation is `not` (`if not done { … }`, `if not (a or b)`). `Bool` has no `!`.
+- `get`, `set`, `as`, `protocol` are keywords; they can't be parameter names.
+- `let _ = expr;` needs its `;` even as the only statement in a body.
+- A closure stored in a field is called with parens outside the type: `(h.action)()`.
+- Normal closures that capture can't be returned or stored (E494). Write an
+  `escaping` (or `consuming`) function type where the closure is expected.
+- A reference to a slice can't cross an `if`/`match` merge (E497). Bind it
+  before the branch, or make each arm produce an owned value.
+- `F.Type` metatypes and `async` don't exist yet.
+- String length: `s.bytes.count` (O(1)) or `s.chars.count` (O(n)). There's no `s.count`.
+
+## Maintaining this skill
+
+Every ```` ```kestrel ```` block in these files that starts with a `module`
+line is a whole program and must compile and run on the current compiler.
+Fragments (no `module` line) are illustrations. When a std API or rule
+changes, fix it here and in the matching side file, and link to
+`docs/language/` or `docs/stdlib/` instead of copying long API lists.
