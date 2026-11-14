@@ -4,6 +4,7 @@
 module talon.sqlite.value
 
 import talon.sqlite.error.(SqliteError)
+import uuid.(UUID)
 
 /// A dynamically-typed SQLite value.
 public enum SqliteValue: Cloneable {
@@ -41,6 +42,12 @@ extend Float64: Bindable {
 
 extend String: Bindable {
     public func toSqliteValue() -> SqliteValue = .Text(self)
+}
+
+/// A UUID binds as TEXT in its hyphenated form, the usual column type
+/// for UUID primary keys.
+extend UUID: Bindable {
+    public func toSqliteValue() -> SqliteValue = .Text("\(self)")
 }
 
 /// Types that can be extracted from a SQLite column value.
@@ -82,6 +89,22 @@ extend String: FromSqliteValue {
             .Text(v) => v,
             .Null => throw SqliteError.Error("unexpected null for String column"),
             _ => throw SqliteError.Error("expected text column")
+        }
+    }
+}
+
+/// Reads a TEXT column holding a hyphenated UUID, as `Bindable` writes it.
+extend UUID: FromSqliteValue {
+    public static func fromSqliteValue(value: SqliteValue) -> UUID throws SqliteError {
+        match value {
+            .Text(v) => {
+                guard let .Some(id) = UUID(from: v) else {
+                    throw SqliteError.Error("invalid UUID in text column")
+                }
+                .Ok(id)
+            },
+            .Null => throw SqliteError.Error("unexpected null for UUID column"),
+            _ => throw SqliteError.Error("expected text column for UUID")
         }
     }
 }

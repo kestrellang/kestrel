@@ -25,7 +25,7 @@ talon-sqlite = { path = "../../lang/talon-sqlite" }
 - **SQL** - parameterized query built by string interpolation (see below)
 - **Row** / **FromRow** - `row.read[T](at: index)` typed column access; conform your structs to `FromRow`
 - **SqliteValue** - `.Integer(Int64)`, `.Real(Float64)`, `.Text(String)`, `.Null`
-- **Bindable** / **FromSqliteValue** - conversion protocols; `Int64`, `Float64`, `String` conform, plus `Optional[T]` for nullable columns on the read side
+- **Bindable** / **FromSqliteValue** - conversion protocols; `Int64`, `Float64`, `String` and `UUID` (stored as TEXT) conform, plus `Optional[T]` for nullable columns on the read side
 - **SqliteError** - `.Error(String)`
 
 ## Injection-Safe SQL
