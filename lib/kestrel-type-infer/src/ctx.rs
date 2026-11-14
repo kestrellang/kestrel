@@ -764,11 +764,13 @@ impl<'a> InferCtx<'a> {
         {
             return;
         }
-        let requirement = self.query_ctx.query(kestrel_semantics::TypeParamStaticRequirement {
-            param,
-            context,
-            root: self.root,
-        });
+        let requirement = self
+            .query_ctx
+            .query(kestrel_semantics::TypeParamStaticRequirement {
+                param,
+                context,
+                root: self.root,
+            });
         if requirement == kestrel_semantics::StaticRequirement::MayBeNonStatic {
             self.ref_admitting_vars.push(tv);
         }
@@ -777,7 +779,9 @@ impl<'a> InferCtx<'a> {
     /// Whether `tv` instantiates a `not Static` type param.
     pub(crate) fn admits_ref(&self, tv: TyVar) -> bool {
         let tv = self.resolve(tv);
-        self.ref_admitting_vars.iter().any(|&v| self.resolve(v) == tv)
+        self.ref_admitting_vars
+            .iter()
+            .any(|&v| self.resolve(v) == tv)
     }
 
     /// Allocate a fresh type variable with a literal marker.
