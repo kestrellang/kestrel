@@ -17,6 +17,10 @@ This file is the core. Go deeper in the side files:
 | Closure kinds (`mutating` / `consuming` / `escaping`), captures, E624/E507 | [closures.md](closures.md) |
 | Primitives, sugar, strings, existentials, `not Copyable` / `not Static` / `not Sized`, extensions, derive | [types.md](types.md) |
 | Which std module has what, common call shapes (files, processes, time, collections) | [stdlib.md](stdlib.md) |
+| Copy vs clone vs move, `consuming`, partial moves, `deinit`, move-only generics | [ownership.md](ownership.md) |
+| Pattern forms: or, struct, array/rest, ranges, `@` bindings, if-let chains | [patterns.md](patterns.md) |
+| Packages, `flock.toml`, dependencies, imports across packages | [flock.md](flock.md) |
+| An error code (`E113`, `E497`, …) and its usual fix | [diagnostics.md](diagnostics.md) |
 | Exact signatures of any std item | the std source the compiler loads (below), or https://kestrel-lang.com/reference/stdlib |
 | Full language reference | https://kestrel-lang.com/docs |
 
