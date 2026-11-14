@@ -667,15 +667,23 @@ pub(super) fn declares_identity_instantiation(
             entity,
             root: ctx.root,
         });
-    insts.iter().filter(|(p, ..)| *p == protocol).any(|(_, source, ast_args)| {
-        let args =
-            kestrel_hir_lower::conformance_protocol_args(ctx.query_ctx, ctx.root, protocol, *source, ast_args);
-        match args.as_slice() {
-            [HirTy::SelfType(..)] => true,
-            [HirTy::Struct { entity: e, .. } | HirTy::Enum { entity: e, .. }] => *e == entity,
-            _ => false,
-        }
-    })
+    insts
+        .iter()
+        .filter(|(p, ..)| *p == protocol)
+        .any(|(_, source, ast_args)| {
+            let args = kestrel_hir_lower::conformance_protocol_args(
+                ctx.query_ctx,
+                ctx.root,
+                protocol,
+                *source,
+                ast_args,
+            );
+            match args.as_slice() {
+                [HirTy::SelfType(..)] => true,
+                [HirTy::Struct { entity: e, .. } | HirTy::Enum { entity: e, .. }] => *e == entity,
+                _ => false,
+            }
+        })
 }
 
 /// Outcome of [`unify_bound_protocol_args`] when no contradiction was found.
