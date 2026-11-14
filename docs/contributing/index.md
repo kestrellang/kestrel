@@ -32,6 +32,8 @@ kestrel/
 │   ├── kestrel-type-infer/             # Constraint-based inference
 │   ├── kestrel-semantics/              # Higher-level semantic queries
 │   ├── kestrel-copy-fold/              # Copyable/Cloneable/NotCopyable decision kernel
+│   ├── kestrel-entail/                 # Where-clause entailment kernel
+│   ├── kestrel-structural/             # Static / Sized rules
 │   ├── kestrel-analyze/                # Roslyn-style analyzers
 │   ├── kestrel-pattern-matching/       # Exhaustiveness checking
 │   ├── kestrel-mir/                    # MIR types, passes, mono, layout, mangling

@@ -17,7 +17,7 @@ A new variant must be mirrored in **three** files — miss any and the build fai
 
 2. **`lib/kestrel-type-infer/src/result.rs`** — `describe_error()` match arm (short one-liner used as the `detail` string).
 
-3. **`lib/kestrel-compiler-driver/src/lib.rs`** — both `describe()` (short name) and `format_error()` (debug-log string).
+3. **`lib/kestrel-compiler-driver/src/lib.rs`** — both `error_variant_name()` (short name) and `format_error()` (debug-log string).
 
 ## Reporting diagnostics from the solver
 

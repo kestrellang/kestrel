@@ -14,7 +14,7 @@
 //! that dominates it), which is why `check_operands_defined` pools definitions
 //! across every block. Enforcing the claimed contract was measured against the
 //! suite and rejects the stdlib outright (audit finding F34, and the
-//! "Corrections" section of `docs/fragility-audit.md`).
+//! "Corrections" section of `docs/fragility/audit.md`).
 //!
 //! The consequence is a real hole: leaks are caught, but a value consumed in
 //! two *different* blocks is invisible, because `owned` starts empty in each.

@@ -2,6 +2,18 @@
 
 Kestrel uses a file-based module system where each file declares its module path and explicitly imports symbols from other modules. This system provides clear namespace management and explicit dependency tracking.
 
+## On this page
+
+- [Module Declarations](#module-declarations)
+- [Import Statements](#import-statements)
+- [Visibility and Access Control](#visibility-and-access-control)
+- [Name Resolution](#name-resolution)
+- [Examples](#examples)
+- [Common Errors](#common-errors)
+- [Grammar](#grammar)
+- [Design Rationale](#design-rationale)
+- [Related](#related)
+
 ## Module Declarations
 
 Every Kestrel source file must declare its module path using the `module` keyword. A file that declares anything without one is an error (E414). A file holding only comments, such as a package's doc-only `main.ks`, needs none.
@@ -105,6 +117,10 @@ Import only specific symbols from a module using selective import syntax:
 ```kestrel
 import ModuleName.(Item1, Item2, Item3)
 ```
+
+Every public std item is imported automatically, so std imports like the ones
+below are optional; they only matter for renaming or for documenting what a
+file uses. Items from other packages always need an import.
 
 Examples:
 

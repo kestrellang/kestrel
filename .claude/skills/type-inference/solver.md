@@ -161,19 +161,12 @@ path is for HIR-lower / decl-level analyzers. Solver errors flow through
 `InferError` → `diagnostic.rs` match arm → user-facing diagnostic. See
 `lib/kestrel-type-infer/AGENTS.md`.
 
-## Adding an `InferError` variant (do not skip any file)
+## Adding an `InferError` variant
 
-Three files must be touched. Non-exhaustive-match errors only surface on a
-dependent crate rebuild, which is slow to discover.
-
-1. `lib/kestrel-type-infer/src/error.rs` — variant + `span()` arm.
-2. `lib/kestrel-type-infer/src/result.rs` — `describe_error()` arm (the
-   user-facing message).
-3. `lib/kestrel-compiler-driver/src/lib.rs` — `error_variant_name()` and
-   `format_error()` arms.
-
-Then `rg 'InferError::' lib` for any other exhaustive match that the build
-flags.
+Follow the checklist at the top of `lib/kestrel-type-infer/AGENTS.md` (three
+files: `error.rs` for the variant, `span`, `code` and `render`; `result.rs`
+for `describe_error`; the compiler driver for `error_variant_name` and
+`format_error`). It is the single source for that list.
 
 ## Adding a `Constraint` variant
 

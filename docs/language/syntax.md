@@ -39,8 +39,9 @@ func move(to point: Point, duration seconds: Float64) {
 }
 // Called as: move(to: Point(0, 0), duration: 1.5)
 
-// Function with no external label (using underscore) - (Future)
-// func split(_ string: String, by separator: Char) { ... }
+// A single-name parameter has no external label
+func split(string: String, by separator: Char) { ... }
+// Called as: split("a,b", by: ',')
 ```
 
 ## Structs
@@ -253,12 +254,12 @@ button.setActions(
 ## Modules and Imports
 
 ```kestrel
-// Module declaration
-module my_app.utils;
+// Module declaration (required first line, no semicolon)
+module my_app.utils
 
-// Imports
-import std.collections.Map;
-import std.files as Files; // Renaming
+// The std is imported automatically. Other packages need an import:
+import util.lib.(greeting)
+import util.lib.(greeting as hello) // Renaming
 ```
 
 ## Access Control
@@ -357,8 +358,7 @@ Semicolons are **required** after:
 - Struct/enum field declarations: `var x: Int;`
 - Expression statements: `doSomething();`
 - Assignment statements: `count = count + 1;`
-- Module declarations: `module my_app.utils;`
-- Import statements: `import std.files;`
+- Module declarations and imports take no semicolon: `module my_app.utils`, `import util.lib.(greeting)`.
 
 ### Optional/Omitted Semicolons
 

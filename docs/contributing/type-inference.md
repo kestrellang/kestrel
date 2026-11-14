@@ -149,7 +149,7 @@ Nominal types (`Struct`, `Enum`, `Protocol`, `TypeAlias`) carry `type_args: Vec<
 
 ### 2. `Self` substitution
 
-Inside a method body, `TyKind::SelfType` means the method's containing type (with its own type parameters still abstract). `substitute_self(replacement)` recursively replaces `SelfType` throughout a type and rewrites naked associated types (`Item`) into qualified form (`Self.Item`).
+Inside a protocol or protocol extension, `Self` is `TyKind::SelfType { entity }`, allocated by `self_type_ty` (`ctx.rs`). It behaves like the protocol type for associated-type and conformance lookups, and stays distinct in the output so MIR sees `MirTy::SelfType`. In a concrete type's methods, `Self` is that type itself.
 
 ### 3. Type alias expansion
 
@@ -161,7 +161,7 @@ Inside a method body, `TyKind::SelfType` means the method's containing type (wit
 
 - **Via `Associated` constraint** during solving: the solver asks the semantics layer for the concrete associated type once `container` is concrete.
 - **Via `WhereClausesOf`**: a `where T.Item = Int64` clause on the enclosing entity directly equates the projection, so subsequent uses of `T.Item` unify with `Int64` without querying protocols.
-- **Via `substitute_self`** when entering a method body: naked `Item` inside a protocol becomes `Self.Item`, which then resolves as above.
+- **Via `Self`** inside a protocol: `Self.Item` resolves against `SelfType` the same way.
 
 ## Literal flow (`let x: Int? = 5`)
 

@@ -2,6 +2,16 @@
 
 Subscripts provide a way to access elements of a collection, list, or sequence using call-like syntax. They are similar to computed properties but accept parameters, enabling indexed or keyed access patterns.
 
+## On this page
+
+- [Syntax](#syntax)
+- [Rules](#rules)
+- [Where Allowed](#where-allowed)
+- [Not Supported](#not-supported)
+- [Examples](#examples)
+- [Grammar](#grammar)
+- [Implementation Notes](#implementation-notes)
+
 ## Syntax
 
 ### Getter-Only (Shorthand)
@@ -236,30 +246,19 @@ set { self.data(index: index) = newValue }
 set(value) { self.data(index: index) = value }  // NOT VALID
 ```
 
-### No Implicit Labels
+### Labels follow the function rule
 
-**Unlike functions, subscripts do NOT have implicit argument labels.** The parameter name does not automatically become an external label.
-
-```kestrel
-// Declaration
-public subscript(index: Int) -> T { ... }
-
-// Calling - requires explicit label
-array(index: 0)  // CORRECT
-
-// This will NOT work
-array(0)  // ERROR: parameter must be labeled
-```
-
-To enable unlabeled calls, you must use `_` as the explicit label:
+Subscript parameters are labeled the same way function parameters are. A
+parameter with one name is positional; a parameter with two names takes the
+first as its label.
 
 ```kestrel
-// Declaration with wildcard label
-public subscript(_ index: Int) -> T { ... }
-
-// Now unlabeled calls work
-array(0)  // CORRECT
+public subscript(index: Int) -> T { ... }        // called as array(0)
+public subscript(safe index: Int) -> T? { ... }  // called as array(safe: 0)
 ```
+
+Writing a label for a single-name parameter, as in `array(index: 0)`, is an
+error (E113).
 
 ### Overloading
 
@@ -271,23 +270,22 @@ Subscripts can be overloaded by:
 ```kestrel
 struct Array[T] {
     // By index (unlabeled)
-    public subscript(_ index: Int) -> T { ... }
+    public subscript(index: Int) -> T { ... }
 
     // By range (unlabeled)
-    public subscript(_ range: Range[Int]) -> Slice[T] { ... }
+    public subscript(range: Range[Int]) -> Slice[T] { ... }
 
     // Safe access with label
     public subscript(safe index: Int) -> Optional[T] { ... }
 }
 ```
 
-### No Default Parameter Values
+### Default Parameter Values
 
-Subscript parameters cannot have default values:
+Subscript parameters can have defaults, like function parameters:
 
 ```kestrel
-// NOT supported
-public subscript(index: Int = 0) -> T { ... }  // NOT VALID
+subscript(index: Int = 0) -> T { get { ... } }   // c() reads index 0
 ```
 
 ## Where Allowed
@@ -326,7 +324,7 @@ enum JSON {
         }
     }
 
-    public subscript(_ index: Int) -> Optional[JSON] {
+    public subscript(index: Int) -> Optional[JSON] {
         match self {
             .Array(let arr) => arr(safe: index),
             _ => .None
@@ -335,11 +333,11 @@ enum JSON {
 }
 
 extend String {
-    public subscript(_ index: Int) -> Optional[Char] {
+    public subscript(index: Int) -> Optional[Char] {
         self.char(at: index)
     }
 
-    public subscript(_ range: Range[Int]) -> Optional[StringSlice] {
+    public subscript(range: Range[Int]) -> Optional[StringSlice] {
         self.slice(range: range)
     }
 }
@@ -351,9 +349,7 @@ The following features are intentionally not included:
 
 - **Split visibility** (`public private(set)`) - getter and setter share visibility
 - **Explicit setter parameter names** (`set(value)`) - always uses `newValue`
-- **Default parameter values** - all parameters must be provided
 - **Variadic parameters** - subscripts require fixed parameter counts
-- **Implicit argument labels** - parameter names do not become labels automatically
 
 ## Examples
 
@@ -365,7 +361,7 @@ struct Array[T] {
     private var count: Int
 
     // Default subscript - unlabeled, panics on out of bounds
-    public subscript(_ index: Int) -> T {
+    public subscript(index: Int) -> T {
         get {
             if index < 0 or index >= self.count {
                 panic("Array index out of bounds")
@@ -399,7 +395,7 @@ struct Array[T] {
 ```kestrel
 struct Dictionary[K, V] where K: Hashable {
     // Key access - unlabeled
-    public subscript(_ key: K) -> Optional[V] {
+    public subscript(key: K) -> Optional[V] {
         get { self.get(key: key) }
         set {
             match newValue {
@@ -410,7 +406,7 @@ struct Dictionary[K, V] where K: Hashable {
     }
 
     // Default value access
-    public subscript(_ key: K, default defaultValue: V) -> V {
+    public subscript(key: K, default defaultValue: V) -> V {
         get {
             match self.get(key: key) {
                 .Some(let value) => value,
@@ -464,11 +460,11 @@ protocol Indexable {
     type Element
     type Index
 
-    subscript(_ index: Index) -> Element { get }
+    subscript(index: Index) -> Element { get }
 }
 
 protocol MutableIndexable: Indexable {
-    subscript(_ index: Index) -> Element { get set }
+    subscript(index: Index) -> Element { get set }
 }
 
 struct Vector[T]: MutableIndexable {
@@ -477,7 +473,7 @@ struct Vector[T]: MutableIndexable {
 
     private var data: Array[T]
 
-    public subscript(_ index: Int) -> T {
+    public subscript(index: Int) -> T {
         get { self.data(index) }
         set { self.data(index) = newValue }
     }
@@ -486,30 +482,21 @@ struct Vector[T]: MutableIndexable {
 
 ### Slice and Range Access
 
-```kestrel
-struct Array[T] {
-    // Range subscript - unlabeled
-    public subscript(_ range: Range[Int]) -> ArraySlice[T] {
-        ArraySlice(array: self, start: range.start, end: range.end)
-    }
+A range subscript lends a view into the collection instead of copying it. The
+std's index subscript is generic over `SliceIndex`, which both `Int64` and
+every range type conform to, so one declaration serves `xs(2)` and `xs(1..<3)`:
 
-    // Safe range subscript
-    public subscript(safe range: Range[Int]) -> Optional[ArraySlice[T]] {
-        if range.start >= 0 and range.end <= self.count {
-            .Some(ArraySlice(array: self, start: range.start, end: range.end))
-        } else {
-            .None
-        }
-    }
+```kestrel
+struct Slice[T] {
+    // xs(2) → &T, xs(1..<3) → &Slice[T]; traps when out of bounds
+    public subscript[I](index: I) -> I.SliceOutput where I: SliceIndex[T] { ... }
+    // xs(within: 1..<10) clamps the range to the valid part instead
+    public subscript[R](within range: R) -> Slice[T] where R: SeqRange { ... }
 }
 ```
 
-Usage:
-```kestrel
-let array = [1, 2, 3, 4, 5]
-let slice = array(1..4)        // unlabeled subscript with _
-let safe = array(safe: 0..10)  // labeled subscript
-```
+A slice is unsized, so callers hold it as `&Slice[T]`. See
+[references.md](references.md).
 
 ## Grammar
 
@@ -571,7 +558,7 @@ The parser must:
 ### Call Site Transformation
 
 At the call site, subscript access is transformed:
-- `array(index: 0)` → getter call with `(index: 0)`
-- `array(index: 0) = value` → setter call with `(index: 0)` and `newValue = value`
+- `array(0)` → getter call with `index = 0`
+- `array(0) = value` → setter call with `index = 0` and `newValue = value`
 - `array(safe: 0)` → labeled getter call with `(safe: 0)`
-- `array(0)` → only works if subscript declared with `_` label: `subscript(_ index: Int)`
+- `array(0)` → a subscript whose parameter has a single name: `subscript(index: Int)`

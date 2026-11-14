@@ -22,16 +22,13 @@ Kept current with the compiler. Start here.
 
 ## Historical & Design Material
 
-Point-in-time documents — design explorations, implementation plans, and
-snapshots that informed the compiler as it was built. They are **not**
+Point-in-time documents: design explorations, implementation plans, audits and
+notes that informed the compiler as it was built. They are **not**
 current-behavior references and may contradict what the compiler does today.
 
+- **[Design](design/)** — design documents the code cites (bidirectional typing, API sketches)
 - **[Plans](plans/)** — per-feature implementation plans (see the [index](plans/index.md) for shipped/unshipped status)
-- **[Design](design/)** — API design sketches (e.g. datetime)
+- **[Fragility audit](fragility/audit.md)** — the fragility findings tracker, with per-finding folders under [fragility/](fragility/)
 - **[Refactor](refactor/)** — MIR rewrite report
 - **[References Prototype](references-prototype/)** — pre-implementation exploration of `&T` (the shipped design lives in [language/references.md](language/references.md))
-- **[0.16 Scope](scope_0.16.md)** — scoping notes for the 0.16 cycle (0.16 has shipped)
-- **[Blog Drafts](BLOG.md)**
-- **[Future Ideas](FUTURE_IDEAS.md)** / **[Future Architecture Ideas](FUTURE_ARCH_IDEAS.md)** / **[Future Effects](future_effects.md)** — speculative direction notes
-- **[Bug Hunt](bughunt.md)** — bug-hunt session notes
-- **[New Collections](new-collections.md)** — collection-design exploration
+- **[Archive](archive/)** — blog drafts, future-idea notes, bug-hunt and fuzzing reports

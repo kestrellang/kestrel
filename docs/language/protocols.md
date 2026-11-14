@@ -2,6 +2,26 @@
 
 Protocols define a set of requirements (methods, properties, and associated types) that a type must fulfill to conform to the protocol. They enable polymorphism and generic programming in Kestrel.
 
+## On this page
+
+- [Declaration Syntax](#declaration-syntax)
+- [Method Requirements](#method-requirements)
+- [Associated Types](#associated-types)
+- [Generic Protocols](#generic-protocols)
+- [Protocol Inheritance](#protocol-inheritance)
+- [Conformance](#conformance)
+- [Extensions](#extensions)
+- [Protocol Extensions](#protocol-extensions)
+- [Built-in Protocols](#built-in-protocols)
+- [The Self Type](#the-self-type)
+- [Validation Rules](#validation-rules)
+- [Type-Directed Conformance](#type-directed-conformance)
+- [Errors](#errors)
+- [Grammar](#grammar)
+- [Examples](#examples)
+- [Best Practices](#best-practices)
+- [See Also](#see-also)
+
 ## Declaration Syntax
 
 ### Basic Protocol

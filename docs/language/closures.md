@@ -15,6 +15,35 @@ Plain `(T) -> U` is right for the vast majority of closures. The keywords appear
 
 For the full semantics (drop order, provenance, the exact freeze algorithm), see [the memory model's closure chapter](../memory-model/closures.md).
 
+## On this page
+
+- [Basic Syntax](#basic-syntax)
+- [Implicit `it` Parameter](#implicit-it-parameter)
+- [Trailing Closure Syntax](#trailing-closure-syntax)
+- [Closures Over References](#closures-over-references)
+- [Placeholders](#placeholders)
+- [Multi-Statement Closures](#multi-statement-closures)
+- [The Four Kinds](#the-four-kinds)
+- [Capture Semantics](#capture-semantics)
+- [`mutating`: Writing Back](#mutating-writing-back)
+- [`escaping`: Closures That Outlive the Frame](#escaping-closures-that-outlive-the-frame)
+- [`consuming`: One-Shot Hand-Off](#consuming-one-shot-hand-off)
+- [Capture-Free Closures Satisfy Every Kind](#capture-free-closures-satisfy-every-kind)
+- [Passing Closures Around](#passing-closures-around)
+- [Parameter Conventions](#parameter-conventions)
+- [`return` Inside a Closure](#return-inside-a-closure)
+- [Type Inference](#type-inference)
+- [Closures as Values](#closures-as-values)
+- [Nested Closures](#nested-closures)
+- [Immediate Invocation](#immediate-invocation)
+- [Type Checking](#type-checking)
+- [Higher-Order Functions](#higher-order-functions)
+- [Common Patterns](#common-patterns)
+- [Grammar](#grammar)
+- [Diagnostics You May Hit](#diagnostics-you-may-hit)
+- [Limitations](#limitations)
+- [See Also](#see-also)
+
 ## Basic Syntax
 
 ### No Parameters
@@ -1048,7 +1077,7 @@ func applyTwice(f: (Int64) -> Int64, x: Int64) -> Int64 {
 applyTwice({ (x) in x + 10 }, 22)  // 42
 ```
 
-That split is the stdlib's rule of thumb too: eager operations (`fold`, `sorted(by:)`, `any(where:)`, `find(where:)`) take normal closures; lazy builders that store the callback (`Iterator.map`, `filter`, `filterMap`, `scan`, `Str.split(where:)`) take `escaping` ones.
+That split is the stdlib's rule of thumb too: eager operations (`fold`, `sorted(by:)`, `any(where:)`, `find(where:)`) take normal closures; lazy builders that store the callback (`Iterator.map`, `filter`, `filterMap`, `scan`, `StringSlice.split(where:)`, `Slice.split(where:)`) take `escaping` ones.
 
 ## Common Patterns
 

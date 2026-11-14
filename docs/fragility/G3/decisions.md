@@ -70,7 +70,7 @@ forwarded like any other parameter and variant (f) now returns `307`.
 
 ### 2a. `self` is not a keyword — the addendum's claim was wrong
 
-`docs/fragility-audit-addendum.md:203` asserted the `p.name != "self"` twin was
+`docs/fragility/audit-addendum.md:203` asserted the `p.name != "self"` twin was
 "safe only because `self` is reserved". It is not reserved. The lexer and parser
 accept `self` as a parameter name, and `func combine(self: Int64, x: Int64)`
 compiles end to end. That sentence has been corrected in place.

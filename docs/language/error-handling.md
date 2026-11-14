@@ -42,7 +42,7 @@ func checked(n: Int64) -> Int64 throws ParseError {
 }
 ```
 
-Because the return type really is `Result[Int64, ParseError]`, **success values must be wrapped**: the tail expression (or a `return`) produces `.Ok(value)`. A bare `n * 2` in tail position is a type mismatch. (One exception: an annotated binding promotes a bare success value — `let r: Int64 throws MyError = 42;` produces `.Ok(42)`.)
+Because the return type really is `Result[Int64, ParseError]`, success values become `.Ok(value)`. You can write `.Ok(n * 2)`, or let the compiler promote a bare value: a tail expression or `return` of type `Int64` is wrapped in `.Ok` automatically, and so is the initializer of an annotated binding (`let r: Int64 throws MyError = 42;` produces `.Ok(42)`).
 
 Callers see a plain `Result` and may `match` it, query it, or `try` it:
 

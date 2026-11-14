@@ -2,6 +2,23 @@
 
 Functions are fundamental building blocks in Kestrel. They encapsulate reusable logic and can be standalone (module-level) or associated with types (methods).
 
+## On this page
+
+- [Declaration Syntax](#declaration-syntax)
+- [Parameters](#parameters)
+- [Generic Functions](#generic-functions)
+- [Function Overloading](#function-overloading)
+- [Methods](#methods)
+- [Pipe](#pipe)
+- [Nested Functions](#nested-functions)
+- [Extern Functions (C FFI)](#extern-functions-c-ffi)
+- [Exported Functions](#exported-functions)
+- [Visibility](#visibility)
+- [Grammar](#grammar)
+- [Examples](#examples)
+- [Common Patterns](#common-patterns)
+- [See Also](#see-also)
+
 ## Declaration Syntax
 
 ### Basic Functions

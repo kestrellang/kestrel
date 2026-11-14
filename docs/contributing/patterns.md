@@ -1,6 +1,6 @@
 # Kestrel Code Patterns
 
-Conventions and idioms used throughout the lib codebase. Follow these by default; when you deviate, the deviation itself should be the point.
+Conventions and idioms used throughout the compiler codebase. Follow these by default; when you deviate, the deviation itself should be the point.
 
 ## Naming
 
@@ -161,9 +161,9 @@ See `lib/kestrel-test-suite/AGENTS.md` and [Workflows](workflows.md) for the tes
 
 1. **Mutating the world outside `kestrel-ast-builder`.** Only the builder writes components. Everything downstream is queries.
 2. **Forgetting to register an analyzer.** Without a line in `default_analyzers`, your analyzer exists but never runs.
-3. **Adding an `InferError` in only one place.** New variants touch **five** files — see `lib/kestrel-type-infer/AGENTS.md`. The build won't catch you until a dependent crate is recompiled.
+3. **Adding an `InferError` in only one place.** New variants touch **three** files — see `lib/kestrel-type-infer/AGENTS.md`. The build won't catch you until a dependent crate is recompiled.
 4. **Emitting a diagnostic from the solver via accumulate.** Use `report_error` so cascades get absorbed by `TyKind::Error`.
-5. **Dispatching method calls without going through the funnel.** Method and protocol dispatch is routed through `emit_method_dispatch`; bypassing it is how you grow a second source of truth.
+5. **Dispatching method calls without going through the funnel.** Method and protocol calls lower through `lower_method_call_expr` / `lower_protocol_call_expr` in `lib/kestrel-mir-lower/src/body/call/mod.rs`; bypassing them is how you grow a second source of truth.
 6. **Building on the dollar-suffixed name in MIR.** The mangler strips `$` disambiguators; if you're reading entity names elsewhere, decide explicitly whether you want the raw or the user-visible form.
 7. **Panicking on missing components.** Return an empty result and let upstream diagnose the real problem.
 

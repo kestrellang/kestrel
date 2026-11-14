@@ -104,8 +104,9 @@ func invokeRun(
     frameworks frameworks: Array[String],
     release release: Bool
 ) -> () throws FlockError {
-    // `mktemp -t flock-run` works on both macOS and Linux.
-    let tempPath = shellOutput("mktemp -t flock-run");
+    // An explicit template works on both macOS and GNU mktemp; GNU's `-t`
+    // rejects a template without `XXX`.
+    let tempPath = shellOutput("mktemp \"${TMPDIR:-/tmp}/flock-run.XXXXXX\"");
     if tempPath.bytes.count == 0 {
         throw FlockError.IoError("failed to create temp file for run")
     }

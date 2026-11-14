@@ -2,7 +2,7 @@
 
 ## 0. The decision: G16 is deliberately NOT fixed yet
 
-**G16 stays open and unfixed, and `docs/fragility-audit.md` should keep its
+**G16 stays open and unfixed, and `docs/fragility/audit.md` should keep its
 unchecked box.**
 
 Fixing G16 in isolation converts **six false errors into six silent
