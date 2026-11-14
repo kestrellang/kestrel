@@ -1,6 +1,6 @@
 ---
 name: fuzz
-description: Stress-test a Kestrel language feature by generating many edge-case programs, compiling and running them, and reporting what breaks. Use when the user says "fuzz X", "stress test X", "try to break X", or wants exhaustive edge-case coverage of a feature. Generates `.ks` files in `./temp/fuzz/`, runs them through the `kestrel` CLI, and produces a structured pass/fail report.
+description: Stress-test a Kestrel language feature by generating many edge-case programs, building and running them, and reporting what breaks. Use for "fuzz X", "stress test X" or "try to break X".
 ---
 
 # Fuzz — Feature Stress Tester

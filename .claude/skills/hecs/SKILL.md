@@ -1,11 +1,11 @@
 ---
 name: hecs
-description: Reference for the hECS (Hierarchical Entity Component System) architecture used by the lib Kestrel compiler — entities, components, queries, and the Salsa-style memoization model. Use when answering "why is it structured this way?", "what's a component vs a query?", "where should this new fact live?", "why are struct/enum unified as Nominal?", or when designing a new query/analyzer and you need to follow the existing conventions. Historical migration notes (now completed) also live here for rationale.
+description: The compiler's hECS architecture (entities, components, memoized queries) and why it is built that way. Use for "should this be a component or a query?", "where should this fact live?", or when designing a new query or analyzer.
 ---
 
 # hECS
 
-The lib compiler is built on **hECS** — Hierarchical Entity Component System — combined with Salsa-style memoized queries. The migration from the lib1 symbol-tree architecture is complete; this skill is the **reference** for how the model works now and *why* it was built this way.
+The compiler is built on **hECS** — Hierarchical Entity Component System — combined with Salsa-style memoized queries. The migration from the old symbol-tree compiler ("lib1") is complete; this skill is the **reference** for how the model works now and *why* it was built this way.
 
 ## The model in one paragraph
 

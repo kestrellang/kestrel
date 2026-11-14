@@ -1,6 +1,6 @@
 ---
 name: write-tests
-description: Write tests for a Kestrel compiler feature. Use when the user asks to add a test, write tests for a feature, cover a bug with a regression test, or when a diagnostic/behavior change needs testdata updates. Covers the lib `.ks` testdata format (`diagnostics` and `execution` kinds), the `// ERROR:` and `// WARN:` annotation styles, where to place files under `lib/kestrel-test-suite/testdata/`, and how to run the tests via the `triage` skill (never `cargo test` directly).
+description: 'Write `.ks` tests for a compiler feature or bug: the `diagnostics` and `execution` kinds, `// ERROR:` and `// WARN:` annotations, where files go under `lib/kestrel-test-suite/testdata/`, and running them through triage.'
 ---
 
 # Writing Kestrel Tests (lib)

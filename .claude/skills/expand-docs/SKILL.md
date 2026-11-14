@@ -1,6 +1,6 @@
 ---
 name: expand-docs
-description: Expand the `///` doc comments in a Kestrel stdlib `.ks` file to the project's full doc-comment formula — high-level summary, detail paragraph, optional `# Safety` / `# Errors` sections, fenced `# Examples`, struct/enum-level `# Examples` / `# Representation` / `# Memory Model` / `# Guarantees` sections, and `@name` tags on every `init` and `subscript`. Use when the user asks to "expand docs", "fill in doc comments", "document this stdlib file", or otherwise wants every public item in a `.ks` source file brought up to the stdlib documentation standard.
+description: 'Bring the `///` doc comments in a Kestrel stdlib `.ks` file up to the stdlib standard: summary, detail, Safety/Errors sections, fenced Examples, and `@name` tags on inits and subscripts. Use for "expand docs" or "document this stdlib file".'
 ---
 
 # Expand Stdlib Doc Comments

@@ -1,6 +1,6 @@
 ---
 name: stdlib-docs
-description: Regenerate the Kestrel stdlib reference. Runs `kestrel-doc` against `lang/std`, writes JSON to `external/kestrel-website/public/stdlib/` (consumed by the website) and markdown to `docs/stdlib/` (consumed by Context7). Use when the user says "regenerate stdlib docs", "update the stdlib reference", "rebuild the docs", or after editing a `.ks` file under `lang/std/` whose `///` doc comments changed.
+description: 'Regenerate the stdlib reference with `kestrel-doc`: markdown in `docs/stdlib/` and, when the website checkout exists, JSON for the site. Use after changing public items or `///` comments under `lang/std/`.'
 ---
 
 # stdlib-docs

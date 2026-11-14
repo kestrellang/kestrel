@@ -1,6 +1,6 @@
 ---
 name: write-kestrel
-description: Quick reference for writing Kestrel source code — program skeleton, syntax, labels and access modes, references and slices, closures, protocols and generics, and where things live in the stdlib. Use when writing or editing `.ks` files, when the user asks "how do I write X in Kestrel?", when drafting stdlib or package code, or any time the task produces Kestrel code rather than compiler Rust. For compiler internals (Rust in `lib/`) use `kestrel-pipeline` / `debug`; for test files use `write-tests`.
+description: 'How to write Kestrel code that compiles today: program skeleton, syntax, labels, references and slices, closures, ownership, patterns, protocols, the std, flock packages, and fixes for common errors. Use whenever you write or edit `.ks` files.'
 ---
 
 # Writing Kestrel

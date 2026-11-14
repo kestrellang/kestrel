@@ -1,9 +1,9 @@
 ---
 name: debug
-description: Structured protocol for debugging the lib Kestrel compiler — failing tests, diagnostic mismatches, inference cascades, MIR/codegen bugs, SIGSEGV or stack corruption, and intermittent flakes. Prevents speculative fix spirals by enforcing a reproduce → diagnose → one-hypothesis → fix → verify loop, with a hard stop after 3 failed attempts. Use when a triage run fails, when a `.ks` behaves unexpectedly, when the compiler crashes, or when you need to trace why a specific transformation produced the wrong output. Covers the `kestrel dump` CLI, `ktrace!`, LLDB, and the project-wide "no `eprintln!`, no test-cajoling" rules.
+description: 'Step-by-step protocol for debugging the Kestrel compiler: failing tests, wrong diagnostics, inference cascades, MIR or codegen bugs, crashes and flakes. Reproduce, diagnose, one hypothesis, fix, verify, and stop after 3 failed tries.'
 ---
 
-# Debugging the lib Kestrel Compiler
+# Debugging the Kestrel compiler
 
 Structured debugging protocol. Read this top-to-bottom before touching code —
 the order matters. Skipping steps produces the speculative-fix spirals this

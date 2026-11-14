@@ -1,9 +1,9 @@
 ---
 name: feature
-description: End-to-end workflow for adding a new language feature to the lib Kestrel compiler. Use when the user says "add feature X", "implement X in the compiler", or otherwise asks for a non-trivial language change that spans multiple pipeline stages (lexer → parser → AST → name-res → HIR → type-infer → MIR/codegen) and wants it done with design/plan/test gates. For single-stage tweaks or bug fixes, use the `change` skill instead. For writing the `.ks` testdata, use `write-tests`; for writing Kestrel source examples, use `write-kestrel`. For tracing "where does X live in the pipeline?", use `kestrel-pipeline`.
+description: End-to-end workflow for adding a new language feature that spans several compiler stages (parser through codegen), with design, plan and test gates. For a change to one existing behavior, use `change` instead.
 ---
 
-# Adding a Feature to the lib Kestrel Compiler
+# Adding a feature to the Kestrel compiler
 
 A staged workflow with **confirmation gates** at each phase. The point of the
 gates is to avoid writing 800 lines of code against a design the user didn't want.

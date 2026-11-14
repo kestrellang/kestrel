@@ -1,21 +1,19 @@
 # Patterns — CST → HIR → infer → MIR
 
-Covers every `Pat` syntax kind and `HirPat` (12). Verify before citing —
+Covers every `Pat` syntax kind and `HirPat`. Verify before citing —
 pipeline maps go stale.
 
 Top-level dispatch anchors:
 
 - HIR lowering switch: `lib/kestrel-hir-lower/src/pat.rs` (`lower_pat_inner` →
   `lower_pat_node`)
-- Inference gen switch: `lib/kestrel-type-infer/src/generate.rs:607` (`gen_pat`, takes
+- Inference gen switch: `lib/kestrel-type-infer/src/generate.rs` (`gen_pat`, takes
   a `scrutinee_tv: TyVar` and a `source: MatchSource`)
-- MIR lowering: patterns are consumed inside `lower_match` at
-  `lib/kestrel-mir-lower/src/body_lower.rs:3319`; there is no stand-alone
-  pattern-lowering dispatch.
+- MIR: `pattern.rs` `lower_match`: the decision tree tests this pattern and binds its locals with SSA extractions (`StructExtract`, `TupleExtract`, `EnumPayload`, `Discriminant`).
 
 Patterns never appear in MIR directly — they're compiled into a decision tree by the
-`kestrel-pattern-matching` crate, then lowered as `Switch` terminators + binding
-assignments.
+`kestrel-pattern-matching` crate, then lowered as switch/branch terminators plus SSA extractions for the
+bindings.
 
 ---
 
@@ -30,8 +28,8 @@ node and every binding identifier is recorded in the body's `BodySourceMap`.
 - Surface: `_`.
 - CST: `_`.
 - HIR lowering: `pat.rs` `lower_pat_node` → `HirPat::Wildcard { span }` (1:1).
-- Type-infer: `generate.rs:615-617` — no constraint.
-- MIR: consumed by decision tree as "matches anything"; emits no binding.
+- Type-infer: `generate.rs` — no constraint.
+- MIR: `pattern.rs` `lower_match`: the decision tree tests this pattern and binds its locals with SSA extractions (`StructExtract`, `TupleExtract`, `EnumPayload`, `Discriminant`).
 - Gotchas: `let _ = expr;` routes through the complex-pattern path in
   `lower_let_stmt` (not simple binding) because `WildcardPattern` is not
   `BindingPattern`.
@@ -46,9 +44,8 @@ node and every binding identifier is recorded in the body's `BodySourceMap`.
   allowed in every position; `kestrel_hir::body::pat_borrows` is the one walk that finds
   them (place mode, E210, E499 on a `let` of a temporary). A binder
   whose name the parser could not find → `HirPat::Error`.
-- Type-infer: `generate.rs:619-622` — `ctx.local_types.insert(local, scrutinee_tv)`.
-- MIR: decision tree emits an `Assign` to `Place::local(binding)` with the matched
-  value.
+- Type-infer: `generate.rs` — `ctx.local_types.insert(local, scrutinee_tv)`.
+- MIR: `pattern.rs` `lower_match`: the decision tree tests this pattern and binds its locals with SSA extractions (`StructExtract`, `TupleExtract`, `EnumPayload`, `Discriminant`).
 - Gotchas: `var x` binding sets `is_mut` on the local; `x` alone does not — parameter
   label rules don't apply here, these are binding names.
 
@@ -61,18 +58,18 @@ node and every binding identifier is recorded in the body's `BodySourceMap`.
 - HIR lowering: `pat.rs` `lower_pat_node`. More than one `..` → E317. Splits at the first rest into
   `prefix` / `suffix` (a second rest lowers to an error inside the suffix) and emits
   `HirPat::Tuple { prefix, has_rest, suffix, span }`.
-- Type-infer: `generate.rs:629-668`:
+- Type-infer: `generate.rs`:
   - `has_rest` → emit `Constraint::TupleRestPat { scrutinee, prefix_tys, suffix_tys }`.
     Deferred until scrutinee is a concrete tuple.
   - no rest → build a fresh tuple TyVar of the pattern's arity and `ctx.equal` against
     the scrutinee. Arity-mismatch is suppressed when the scrutinee already resolved to
     a different-arity tuple (so analyzers E111 / E314 report instead).
   - Recurses into each sub-pattern.
-- Solver: `solve_tuple_rest_pat` (2401) for `has_rest`; `solve_equal` (817) for the
+- Solver: `solve_tuple_rest_pat` for `has_rest`; `solve_equal` for the
   fixed-arity equate.
-- MIR: decision tree.
-- Gotchas: see `cascading_infer_errors.md` for why arity-mismatch is suppressed here
-  (ImplicitPat + TupleRestPat arg poisoning fixes).
+- MIR: `pattern.rs` `lower_match`: the decision tree tests this pattern and binds its locals with SSA extractions (`StructExtract`, `TupleExtract`, `EnumPayload`, `Discriminant`).
+- Gotchas: arity mismatches are suppressed here so ImplicitPat and TupleRestPat
+  arg poisoning doesn't cascade into extra errors.
 
 ### `LiteralPattern`
 
@@ -80,12 +77,10 @@ node and every binding identifier is recorded in the body's `BodySourceMap`.
 - CST: one `int` / `float` / `string` / `bool` / `char` token.
 - HIR lowering: `pat.rs` `lower_pat_node` — `lower_lit_pat` converts the token to a `HirLiteral` (strings and
   chars through the shared escape table, errors as data). Emits `HirPat::Literal { value, span }`.
-- Type-infer: `generate.rs:624-627` — `literal_to_tyvar(value)` + `ctx.equal(lit_tv,
+- Type-infer: `generate.rs` — `literal_to_tyvar(value)` + `ctx.equal(lit_tv,
   scrutinee_tv)`.
 - Solver: `solve_equal`.
-- MIR: decision-tree equality check; see `match_int64_aggregate_ptr_bug.md` for a
-  historical bug where Int64 / UInt64 literal patterns compared the scrutinee pointer
-  instead of the value.
+- MIR: `pattern.rs` `lower_match`: the decision tree tests this pattern and binds its locals with SSA extractions (`StructExtract`, `TupleExtract`, `EnumPayload`, `Discriminant`).
 
 ### `RangePattern`
 
@@ -94,9 +89,9 @@ node and every binding identifier is recorded in the body's `BodySourceMap`.
 - HIR lowering: `pat.rs` `lower_range_pat`. Lowers bounds to `HirLiteral`s and validates
   integer / char ranges (`start <= end`, `<` for exclusive) — E318 otherwise. Emits
   `HirPat::Range { start, end, inclusive, span }`.
-- Type-infer: `generate.rs:694-697` — **deferred, no constraint**. Range patterns are
+- Type-infer: `generate.rs` — **deferred, no constraint**. Range patterns are
   validated later (not yet fully wired to infer the scrutinee type from the range).
-- MIR: decision-tree range check.
+- MIR: `pattern.rs` `lower_match`: the decision tree tests this pattern and binds its locals with SSA extractions (`StructExtract`, `TupleExtract`, `EnumPayload`, `Discriminant`).
 - Gotchas: the pattern does not currently constrain the scrutinee type — so
   `match x { 1..5 => ... }` with `x: String` won't produce a type mismatch from the
   pattern itself, only from the scrutinee's other uses.
@@ -112,13 +107,13 @@ node and every binding identifier is recorded in the body's `BodySourceMap`.
   - anything else (found but not EnumCase, not found, ambiguous) or a missing name →
     `HirPat::ImplicitVariant { name, args, span }` — left for type inference to
     resolve against the scrutinee type.
-- Type-infer: `Variant` → `gen_variant_pat` (`generate.rs:671`); `ImplicitVariant` →
-  `gen_implicit_variant_pat` + `Constraint::ImplicitPat` (`generate.rs:675`).
-- Solver: `solve_implicit_pat` (2293).
-- MIR: decision-tree variant discriminant check + payload bindings.
+- Type-infer: `Variant` → `gen_variant_pat` (`generate.rs`); `ImplicitVariant` →
+  `gen_implicit_variant_pat` + `Constraint::ImplicitPat` (`generate.rs`).
+- Solver: `solve_implicit_pat`.
+- MIR: `pattern.rs` `lower_match`: the decision tree tests this pattern and binds its locals with SSA extractions (`StructExtract`, `TupleExtract`, `EnumPayload`, `Discriminant`).
 - Gotchas: the name resolution is just `ResolveValuePath(case_name)` — a single
-  segment. Qualified cases like `MyEnum.caseA` don't currently parse as an EnumPattern
-  (see `lower_enum_pattern` at 1522 — it only grabs the first Identifier token).
+  segment. Qualified cases like `MyEnum.caseA` don't parse as a pattern today
+  (E800 `expected =>`); write `.caseA`.
 
 ### `StructPattern`
 
@@ -130,9 +125,9 @@ node and every binding identifier is recorded in the body's `BodySourceMap`.
   - Not found (or no name) → `HirPat::Error { span }`.
   Shorthand fields (`{ x }`) synthesize a `HirPat::Binding` for `x` (not recorded as a
   named declaration in the source map — the token is also the field name).
-- Type-infer: `generate.rs:679-685` — `gen_struct_pat` (elsewhere in generate.rs). Must
+- Type-infer: `generate.rs` — `gen_struct_pat` (elsewhere in generate.rs). Must
   equate scrutinee with `Named(entity, fresh_args)` and recurse into each field.
-- MIR: decision-tree field projections.
+- MIR: `pattern.rs` `lower_match`: the decision tree tests this pattern and binds its locals with SSA extractions (`StructExtract`, `TupleExtract`, `EnumPayload`, `Discriminant`).
 - Gotchas: shorthand `{ x }` binds `x` to the field value — the HIR pat has a
   `HirStructPatField { field_name: "x", pattern: Some(HirPat::Binding(x_local)) }`.
   This is NOT an empty pattern.
@@ -144,13 +139,12 @@ node and every binding identifier is recorded in the body's `BodySourceMap`.
 - HIR lowering: `pat.rs` `lower_pat_node`. Lowers prefix, defines the rest binding (named `..name` →
   `Some(Some(local))`, inheriting an outer `var`; bare `..` → `Some(None)`; none →
   `None`), lowers suffix. Emits `HirPat::Array { prefix, rest, suffix, span }`.
-- Type-infer: `generate.rs:710-770`. Handles both `Array[T]` and `Slice[T]`
+- Type-infer: `generate.rs`. Handles both `Array[T]` and `Slice[T]`
   scrutinees — if already resolved to `Slice[T]`, reuses the element type; otherwise
   emits `Array[elem_tv]` equate. Equates each prefix/suffix element pattern against
   `elem_tv`. Named rest binding → `Slice[elem_tv]` local.
 - Solver: `solve_equal` + `solve_member` (for underlying element projection).
-- MIR: decision-tree length check + element projections. See MEMORY
-  `array_rest_pattern_port.md` — MIR witness-call port still TODO.
+- MIR: `pattern.rs` `lower_match`: the decision tree tests this pattern and binds its locals with SSA extractions (`StructExtract`, `TupleExtract`, `EnumPayload`, `Discriminant`).
 
 ### `AtPattern`
 
@@ -159,9 +153,9 @@ node and every binding identifier is recorded in the body's `BodySourceMap`.
 - HIR lowering: `pat.rs` `lower_pat_node`. **Nested `@` is invalid** — E319, and the subpattern is replaced by
   `HirPat::Error` so exhaustiveness skips the arm instead of seeing an irrefutable
   `@`-over-wildcard. Otherwise `HirPat::At { binding: local, subpattern, span }`.
-- Type-infer: `generate.rs:700-708` — bind local to scrutinee TyVar, recurse into
+- Type-infer: `generate.rs` — bind local to scrutinee TyVar, recurse into
   subpattern with the same scrutinee.
-- MIR: decision-tree runs the subpattern; the binding gets an `Assign` on match.
+- MIR: `pattern.rs` `lower_match`: the decision tree tests this pattern and binds its locals with SSA extractions (`StructExtract`, `TupleExtract`, `EnumPayload`, `Discriminant`).
 
 ### `OrPattern`
 
@@ -170,9 +164,9 @@ node and every binding identifier is recorded in the body's `BodySourceMap`.
 - HIR lowering: `pat.rs` `lower_pat_node` — lowers the first alternative, then every later alternative
   **reuses** the locals it bound (`set_or_reuse`, #187), so all alternatives and the arm
   body share one local per name; emits `HirPat::Or { alternatives, span }`.
-- Type-infer: `generate.rs:688-691` — `gen_pat(alt, scrutinee_tv, source)` for each
+- Type-infer: `generate.rs` — `gen_pat(alt, scrutinee_tv, source)` for each
   alternative. Each alt constrains the same scrutinee.
-- MIR: decision-tree union of each alternative's decision.
+- MIR: `pattern.rs` `lower_match`: the decision tree tests this pattern and binds its locals with SSA extractions (`StructExtract`, `TupleExtract`, `EnumPayload`, `Discriminant`).
 - Gotchas: all alternatives must bind **the same** locals with the same types — not
   currently enforced by the HIR lowering.
 
@@ -191,14 +185,14 @@ node and every binding identifier is recorded in the body's `BodySourceMap`.
 - Surface: none — parse error recovery.
 - CST: a missing pattern child, `ErrorPattern`, or any unrecognised kind.
 - HIR lowering: `PatSrc::Error(span)` / the `_` arm of `lower_pat_node` → `HirPat::Error { span }`.
-- Type-infer: `generate.rs:773` — swallowed (no constraint, no binding).
-- MIR: decision-tree treats as unreachable.
+- Type-infer: `generate.rs` — swallowed (no constraint, no binding).
+- MIR: `pattern.rs` `lower_match`: the decision tree tests this pattern and binds its locals with SSA extractions (`StructExtract`, `TupleExtract`, `EnumPayload`, `Discriminant`).
 
 ---
 
-## HirPat variants (12)
+## HirPat variants
 
-Enum: `lib/kestrel-hir/src/body.rs:260`. Header comment says "10 variants" — stale,
+Enum: `lib/kestrel-hir/src/body.rs`. Header comment says "10 variants" — stale,
 actually 12.
 
 ### HirPat::Wildcard
@@ -206,8 +200,8 @@ actually 12.
 - Produced by: `WildcardPattern` (`pat.rs`). Also synthesized in
   `lower_if_conditions` as the catch-all for let-condition desugaring
   (`expr.rs`).
-- Type-infer: `generate.rs:615-617`.
-- MIR: nothing emitted; decision tree absorbs.
+- Type-infer: `generate.rs`.
+- MIR: `pattern.rs` `lower_match`: the decision tree tests this pattern and binds its locals with SSA extractions (`StructExtract`, `TupleExtract`, `EnumPayload`, `Discriminant`).
 
 ### HirPat::Binding
 
@@ -215,31 +209,31 @@ actually 12.
   (`pat.rs` / `pat.rs` for ParamPattern); closure param binding
   (`expr.rs` via HirClosureParam — the HirClosureParam's `pattern` field
   may point at a `HirPat::Binding` in the desugared cases); try-expr / unwrap
-  bindings (`desugar.rs` for `$try_value`, `549-552` for `$try_early`,
-  `649-653` for `$unwrap`).
-- Type-infer: `generate.rs:619-622` — bind local to scrutinee.
-- MIR: `Assign` to `Place::local(binding)`.
+  bindings (`desugar.rs` for `$try_value`, for `$try_early`,
+  for `$unwrap`).
+- Type-infer: `generate.rs` — bind local to scrutinee.
+- MIR: `pattern.rs` `lower_match`: the decision tree tests this pattern and binds its locals with SSA extractions (`StructExtract`, `TupleExtract`, `EnumPayload`, `Discriminant`).
 
 ### HirPat::Tuple
 
 - Produced by: `TuplePattern` (`pat.rs`). Also from `ParamPattern::Tuple`
   (`pat.rs`) — a fn/closure param written as `(a, b): (Int, Int)`.
-- Type-infer: `generate.rs:629-668` (see TuplePattern entry).
+- Type-infer: `generate.rs` (see TuplePattern entry).
 
 ### HirPat::Literal
 
 - Produced by: `LiteralPattern` (`pat.rs`).
-- Type-infer: `generate.rs:624-627`.
+- Type-infer: `generate.rs`.
 
 ### HirPat::Range
 
 - Produced by: `RangePattern` (`pat.rs`).
-- Type-infer: `generate.rs:694-697` — no constraint yet.
+- Type-infer: `generate.rs` — no constraint yet.
 
 ### HirPat::Variant
 
 - Produced by: `EnumPattern` that resolved to a `Def(EnumCase)` (`pat.rs`).
-- Type-infer: `generate.rs:671-672` → `gen_variant_pat` — binds payload TyVars to the
+- Type-infer: `generate.rs` → `gen_variant_pat` — binds payload TyVars to the
   case's declared payload types (substituted with scrutinee's type args) and equates
   scrutinee with the enum's `Named`.
 - Gotchas: a qualified `Some(x)` resolves to `Variant(stdOptional.Some, ...)` if it
@@ -253,28 +247,28 @@ actually 12.
   - for-loop `.Some(pattern)` / `.None` arms (`desugar.rs`).
   - try-expr `.Continue($value)` / `.Break($early)` arms (`desugar.rs`).
   - unwrap `.Some($v)` / `.None` arms (`desugar.rs`).
-- Type-infer: `generate.rs:675-676` → `gen_implicit_variant_pat` +
+- Type-infer: `generate.rs` → `gen_implicit_variant_pat` +
   `Constraint::ImplicitPat`.
-- Solver: `solve_implicit_pat` (2293) — resolves `.Name` against the scrutinee type's
+- Solver: `solve_implicit_pat` — resolves `.Name` against the scrutinee type's
   enum cases.
 
 ### HirPat::Struct
 
 - Produced by: `StructPattern` with resolvable type (`pat.rs`) or
   `ParamPattern::Struct` (`pat.rs`).
-- Type-infer: `generate.rs:679-685` → `gen_struct_pat`.
+- Type-infer: `generate.rs` → `gen_struct_pat`.
 
 ### HirPat::Array
 
 - Produced by: `ArrayPattern` (`pat.rs`). The `rest:
   Option<Option<LocalId>>` encodes: `None` (no rest), `Some(None)` (bare rest),
   `Some(Some(local))` (named rest bound to `Slice[T]`).
-- Type-infer: `generate.rs:710-770` (see ArrayPattern entry).
+- Type-infer: `generate.rs` (see ArrayPattern entry).
 
 ### HirPat::Or
 
 - Produced by: `OrPattern` (`pat.rs`).
-- Type-infer: `generate.rs:688-691` — recurse over alternatives with same
+- Type-infer: `generate.rs` — recurse over alternatives with same
   `scrutinee_tv`.
 
 ### HirPat::At
@@ -282,14 +276,14 @@ actually 12.
 - Produced by: `AtPattern` (`pat.rs`). Note: nested `@` emits
   `HirPat::At { binding, subpattern: HirPat::Error, .. }` (`pat.rs`) so
   arm-body references still resolve but exhaustiveness skips the arm.
-- Type-infer: `generate.rs:700-708` — bind local, recurse.
+- Type-infer: `generate.rs` — bind local, recurse.
 
 ### HirPat::Error
 
 - Produced by: `RestPattern` standalone (`pat.rs`), `malformed pattern`
   (`pat.rs`), nested-`@` subpattern replacement (`pat.rs`), unresolved struct
   name (`pat.rs` and `pat.rs`).
-- Type-infer: `generate.rs:773` — swallow (no constraint).
+- Type-infer: `generate.rs` — swallow (no constraint).
 - Gotchas: `HirPat::Error` is a concrete variant — analyzers and the decision-tree
   builder must handle it.
 
@@ -299,27 +293,26 @@ actually 12.
 
 ### `HirLiteral` (used in `HirPat::Literal` and `HirPat::Range`)
 
-Enum: `lib/kestrel-hir/src/body.rs:334`.
+Enum: `lib/kestrel-hir/src/body.rs`.
 
 Variants: `Integer(i64)`, `Float(f64)`, `String { value, escape_errors }`, `Char(u32)`,
 `Bool(bool)`, `Null`.
 
 Parse helpers in `lib/kestrel-hir-lower/src/pat.rs`:
 
-- `parse_int` (501) — handles `0x` / `0o` / `0b` radix; falls back to `u64` for values
-  above `i64::MAX` so `UInt64.maxValue` round-trips. See MEMORY
-  `integer_literal_overflow_silent_zero.md`.
-- `parse_float` (518).
-- `parse_char` (524) / `parse_char_validated` (535) — `\n\r\t\\\'\"\0\xNN\u{...}`.
+- `parse_int` — handles `0x` / `0o` / `0b` radix; falls back to `u64` for values
+  above `i64::MAX` so `UInt64.maxValue` round-trips.
+- `parse_float`.
+- `parse_char` / `parse_char_validated` — `\n\r\t\\\'\"\0\xNN\u{...}`.
 
 ### `HirPatArg`
 
-`body.rs:441` — `{ label: Option<String>, pattern: HirPatId }`. Used by `Variant` and
+`body.rs` — `{ label: Option<String>, pattern: HirPatId }`. Used by `Variant` and
 `ImplicitVariant` payloads.
 
 ### `HirStructPatField`
 
-`body.rs:448` — `{ field_name: String, pattern: Option<HirPatId> }`. `pattern: None`
+`body.rs` — `{ field_name: String, pattern: Option<HirPatId> }`. `pattern: None`
 never appears in HIR — shorthand `{ x }` is expanded to
 `Some(HirPat::Binding(x_local))` during lowering (`pat.rs`).
 
@@ -327,8 +320,4 @@ never appears in HIR — shorthand `{ x }` is expanded to
 
 ## Cross-references
 
-- `MatchSource` values control pattern-analyzer gating — see `desugarings.md` and
-  `match_pattern_analyzer.md`.
-- Cascading pattern-infer errors (TupleRestPat / ImplicitPat arg poisoning) —
-  `cascading_infer_errors.md`.
-- Array rest MIR port status — `array_rest_pattern_port.md`.
+- `MatchSource` values control pattern-analyzer gating — see `desugarings.md`.

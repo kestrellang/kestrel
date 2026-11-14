@@ -1,9 +1,9 @@
 ---
 name: change
-description: Make a targeted behavioral change to an existing lib Kestrel compiler feature, keeping tests and docs in sync. Use when the user asks to change how an existing feature behaves — tweak a diagnostic, adjust inference for a case, modify lowering, fix a semantic bug — especially when the change spans one or two pipeline stages and doesn't need a full design doc. For brand-new features spanning many stages, use `feature` instead. For pure bug hunts with no known fix, use `debug-kestrel` / `debug-test`. For writing the test files, defer to `write-tests`.
+description: Make a targeted change to how an existing compiler feature behaves (a diagnostic, an inference case, a lowering, a semantic bug), keeping tests and docs in sync. For a new multi-stage feature, use `feature`.
 ---
 
-# Making a Semantic Change in the lib Compiler
+# Making a Semantic Change in the Compiler
 
 Scope: one behavior of one existing feature, touching one or two pipeline stages.
 If the change needs a design doc, it belongs in the `feature` skill instead.
