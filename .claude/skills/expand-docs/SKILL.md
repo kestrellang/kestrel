@@ -107,8 +107,9 @@ something awkward.
   the line is a one-liner showing a return value. The result
   comment goes after the semicolon:
   ```
-  /// [1, 2, 3].first();  // Some(1)
-  /// [].first();         // None
+  /// let xs = [1, 2, 3];
+  /// xs.first;        // Some(1)
+  /// xs.contains(2);  // true
   ```
 - For panicking calls, show the call and label the panic:
   ```

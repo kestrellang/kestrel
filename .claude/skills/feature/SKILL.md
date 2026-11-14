@@ -128,14 +128,16 @@ Files: `lib/kestrel-syntax-tree/src/...`
 - [ ] Add `SyntaxKind` variant(s).
 
 ### Phase 3 — Parser
-Files: `lib/kestrel-parser/src/...`
+Files: `lib/kestrel-parser/src/grammar/` (`exprs.rs`, `blocks.rs`, `items.rs`,
+`patterns.rs`, `types.rs`, …)
 - [ ] Parse rule for the new shape.
 - [ ] Wire into the existing declaration / expression / statement dispatcher
       so the parser actually reaches it.
 - [ ] **Statement-like expressions.** If the new expression can stand alone as
       a statement without a trailing semicolon (like `if`, `while`, `loop`,
-      `for`, `match`), add its variant to `is_statement_like_expr()` in
-      `kestrel-parser/src/block/mod.rs`. Forgetting this produces confusing
+      `for`, `match`), add its keyword to `at_stmt_like` / `stmt_like` in
+      `grammar/exprs.rs` and its node kind to `is_stmt_like` in
+      `grammar/blocks.rs`. Forgetting this produces confusing
       "expected semicolon" errors on the preceding expression:
       ```
       for i in range {
@@ -145,10 +147,9 @@ Files: `lib/kestrel-parser/src/...`
       ```
 - [ ] **Sub-expressions followed by `{`.** If the new form contains a
       sub-expression that sits directly before a `{` block (like `range` in
-      `for i in range { body }`), parse that sub-expression with a
-      trailing-closure-less parser such as `condition_binary`. The full
-      `expr_parser` will eat the `{` as a trailing-closure argument. See
-      `for_expr` in `kestrel-parser/src/expr/mod.rs`.
+      `for i in range { body }`), parse it with `cond_expr` (in
+      `grammar/exprs.rs`), which uses `at_cond_trailing_closure` so the `{`
+      is read as the body rather than a trailing closure.
 
 ### Phase 4 — Declaration (ECS) builder
 Files: `lib/kestrel-ast-builder/src/builders/<feature>.rs` (+ `mod.rs`,

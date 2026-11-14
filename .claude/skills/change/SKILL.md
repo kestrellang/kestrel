@@ -42,9 +42,9 @@ questions) to find:
    pipeline position / core types change. `docs/language/{feature}.md` for
    user-visible semantics. `.claude/skills/write-kestrel/SKILL.md` if a
    syntax/idiom/gotcha shifts.
-4. **Memory** — check `/Users/dino/.claude/projects/-Users-dino-Documents-Projects-kestrel/memory/`
-   for prior decisions about this feature. A lot of lib inference/MIR
-   history is captured there.
+4. **Memory** — if your Claude memory has notes on this feature (it's
+   per-machine, so cloud sessions usually won't), check them for prior
+   decisions.
 
 Present findings before proposing a plan.
 

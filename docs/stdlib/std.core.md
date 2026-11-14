@@ -748,16 +748,6 @@ non-positive count and so produces nothing.
 
 _Defined in `lang/std/core/range.ks`._
 
-### Implements `SliceIndex`
-
-#### typealias `SliceOutput`
-
-```kestrel
-type SliceOutput = Slice[T]
-```
-
-_Defined in `lang/std/collections/slice.ks`._
-
 ### Implements `SeqRange`
 
 #### field `endBound`
@@ -787,30 +777,6 @@ public func inclusiveBounds() -> ClosedRange[T] where T: Steppable, T: Comparabl
 ```
 
 _Defined in `lang/std/numeric/random.ks`._
-
-### Implements `ViewIndex`
-
-_Conditional: `where V: TextView`._
-
-#### typealias `Output`
-
-```kestrel
-type Output = V where V: TextView
-```
-
-_Defined in `lang/std/text/views.ks`._
-
-### Implements `ViewWrappable`
-
-_Conditional: `where V: TextView`._
-
-#### typealias `WrappedOutput`
-
-```kestrel
-type WrappedOutput = V where V: TextView
-```
-
-_Defined in `lang/std/text/views.ks`._
 
 ## protocol `ClosedRangeConstructible`
 
@@ -2684,16 +2650,6 @@ independent iterators — `Range` is value-typed.
 
 _Defined in `lang/std/core/range.ks`._
 
-### Implements `SliceIndex`
-
-#### typealias `SliceOutput`
-
-```kestrel
-type SliceOutput = Slice[T]
-```
-
-_Defined in `lang/std/collections/slice.ks`._
-
 ### Implements `SeqRange`
 
 #### field `endBound`
@@ -2723,30 +2679,6 @@ public func inclusiveBounds() -> ClosedRange[T] where T: Steppable, T: Comparabl
 ```
 
 _Defined in `lang/std/numeric/random.ks`._
-
-### Implements `ViewIndex`
-
-_Conditional: `where V: TextView`._
-
-#### typealias `Output`
-
-```kestrel
-type Output = V where V: TextView
-```
-
-_Defined in `lang/std/text/views.ks`._
-
-### Implements `ViewWrappable`
-
-_Conditional: `where V: TextView`._
-
-#### typealias `WrappedOutput`
-
-```kestrel
-type WrappedOutput = V where V: TextView
-```
-
-_Defined in `lang/std/text/views.ks`._
 
 ## protocol `RangeConstructible`
 
@@ -2878,16 +2810,6 @@ Returns a fresh infinite iterator starting at `start`.
 
 _Defined in `lang/std/core/range.ks`._
 
-### Implements `SliceIndex`
-
-#### typealias `SliceOutput`
-
-```kestrel
-type SliceOutput = Slice[T]
-```
-
-_Defined in `lang/std/collections/slice.ks`._
-
 ### Implements `SeqRange`
 
 #### field `endBound`
@@ -2905,30 +2827,6 @@ public var startBound: RangeBound { get }
 ```
 
 _Defined in `lang/std/collections/slice_methods.ks`._
-
-### Implements `ViewIndex`
-
-_Conditional: `where V: TextView`._
-
-#### typealias `Output`
-
-```kestrel
-type Output = V where V: TextView
-```
-
-_Defined in `lang/std/text/views.ks`._
-
-### Implements `ViewWrappable`
-
-_Conditional: `where V: TextView`._
-
-#### typealias `WrappedOutput`
-
-```kestrel
-type WrappedOutput = V where V: TextView
-```
-
-_Defined in `lang/std/text/views.ks`._
 
 ## protocol `RangeFromConstructible`
 
@@ -3181,16 +3079,6 @@ Structural equality.
 
 _Defined in `lang/std/core/range.ks`._
 
-### Implements `SliceIndex`
-
-#### typealias `SliceOutput`
-
-```kestrel
-type SliceOutput = Slice[T]
-```
-
-_Defined in `lang/std/collections/slice.ks`._
-
 ### Implements `SeqRange`
 
 #### field `endBound`
@@ -3208,30 +3096,6 @@ public var startBound: RangeBound { get }
 ```
 
 _Defined in `lang/std/collections/slice_methods.ks`._
-
-### Implements `ViewIndex`
-
-_Conditional: `where V: TextView`._
-
-#### typealias `Output`
-
-```kestrel
-type Output = V where V: TextView
-```
-
-_Defined in `lang/std/text/views.ks`._
-
-### Implements `ViewWrappable`
-
-_Conditional: `where V: TextView`._
-
-#### typealias `WrappedOutput`
-
-```kestrel
-type WrappedOutput = V where V: TextView
-```
-
-_Defined in `lang/std/text/views.ks`._
 
 ## protocol `RangeThroughConstructible`
 
@@ -3330,16 +3194,6 @@ Structural equality.
 
 _Defined in `lang/std/core/range.ks`._
 
-### Implements `SliceIndex`
-
-#### typealias `SliceOutput`
-
-```kestrel
-type SliceOutput = Slice[T]
-```
-
-_Defined in `lang/std/collections/slice.ks`._
-
 ### Implements `SeqRange`
 
 #### field `endBound`
@@ -3357,30 +3211,6 @@ public var startBound: RangeBound { get }
 ```
 
 _Defined in `lang/std/collections/slice_methods.ks`._
-
-### Implements `ViewIndex`
-
-_Conditional: `where V: TextView`._
-
-#### typealias `Output`
-
-```kestrel
-type Output = V where V: TextView
-```
-
-_Defined in `lang/std/text/views.ks`._
-
-### Implements `ViewWrappable`
-
-_Conditional: `where V: TextView`._
-
-#### typealias `WrappedOutput`
-
-```kestrel
-type WrappedOutput = V where V: TextView
-```
-
-_Defined in `lang/std/text/views.ks`._
 
 ## protocol `RangeUpToConstructible`
 

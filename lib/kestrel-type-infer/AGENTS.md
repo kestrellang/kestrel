@@ -175,8 +175,8 @@ later, in MIR, as a crash or a type confusion.
 
 `gen_expr` inserts every such expression into `ctx.type_param_defs`. Each
 consuming site removes its child (`generate.rs`: callee, receiver, field base).
-Anything left at the end of `generate_body` is reported as
-`InferError::TypeParamAsValue`.
+Anything left when the body finishes is reported as
+`InferError::TypeParamAsValue` by `emit_type_param_value_errors` in `generate.rs`.
 
 When you add a new expression form that names a type, **register it in
 `type_param_defs`**, and make every legitimate parent remove it. Skip a type
@@ -211,7 +211,7 @@ Reuse it; don't write a second candidate gatherer.
 
 `resolve_static_member` (`src/resolve.rs`) takes its candidates from
 `TypeMembersByName` and applies the same rule as name resolution
-(`resolve_extension_static_method` in kestrel-name-res): direct and
+(`resolve_extension_static_member` in kestrel-name-res): direct and
 own-extension members compete equally, and a protocol-extension default joins
 them only when its label signature is still free. Static members named through
 a type reach the solver as `MethodCall` / `Field` / owned `ImplicitMember`

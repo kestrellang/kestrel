@@ -11,6 +11,8 @@ Two outputs, one source of truth:
 
 Both come from the same `kestrel-doc` walk over `lang/std`. Always regenerate both together so the two surfaces stay in sync.
 
+**`external/` is gitignored**, so a fresh clone or cloud session has no `external/kestrel-website/`. If it's missing, regenerate the markdown only (`--format markdown`, see Variants) and say that the website JSON wasn't updated.
+
 ## Default move
 
 ```bash
@@ -34,7 +36,7 @@ Skip for purely internal (non-`public`) stdlib edits — they don't affect the r
 
 1. Check `git status` — both `external/kestrel-website/public/stdlib/` and `docs/stdlib/` should show changes.
 2. Skim one or two changed `.md` files to confirm the formatting renders sensibly (signatures fenced, `# Examples` demoted under item heading).
-3. Commit both trees together. They're a coupled pair; never commit one without the other.
+3. Commit `docs/stdlib/` in this repo. The website JSON is committed in the `kestrel-website` checkout, not here, since `external/` is gitignored.
 
 ## Variants
 

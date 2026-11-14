@@ -18,7 +18,7 @@ match/branch tree synthesized here.
 Adding (or fixing) an operator means: define a `Protocol` + method in the
 stdlib with `@builtin(.XOperatorProtocol)` / `@builtin(.XOperatorMethod)`
 (model on `lang/std/core/coalesce.ks`), register the two `Builtin` variants in
-`kestrel-hir/src/builtin.rs` (enum + `name()` + `from_str` + `kind()`), add a
+`kestrel-ast/src/builtin.rs` (enum + `name()` + `from_attribute_name()` + `kind()`), add a
 row to the relevant lookup table in `kestrel-hir/src/body.rs`, and route the
 syntax kind through the matching `desugar_*` helper. The conformance carries
 the behavior; the lowerer only emits the call.

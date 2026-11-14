@@ -11,8 +11,8 @@ protocol exists to prevent.
 
 ## Step 0 — Check known patterns
 
-Read `/Users/dino/.claude/projects/-Users-dino-Documents-Projects-kestrel/memory/DEBUG.md`
-and see if the current symptom matches a known pattern. If it does, apply the
+If your Claude memory has a `DEBUG.md` (it's per-machine, so cloud sessions
+usually won't), read it and see if the current symptom matches a known pattern. If it does, apply the
 known fix directly and go to **Verify**. Don't re-derive a solved problem.
 
 High-leverage patterns you'll often find there:
@@ -90,7 +90,10 @@ authoritative list):
 ```
 kestrel dump tokens repro.ks        # lexer output
 kestrel dump cst repro.ks           # concrete syntax tree
-kestrel dump mir repro.ks           # MIR after HIR lowering + all passes
+kestrel dump mir repro.ks           # MIR (OSSA) at the verify stage
+kestrel dump mir -s all repro.ks    # every MIR stage: raw, drop-fix, thunk, drop-shim,
+                                    #   clone-shim, layout, verify, mono, copy-prop, expand
+kestrel dump mir -f name repro.ks   # only functions whose name contains `name`
 kestrel dump cranelift repro.ks     # Cranelift IR (CLIF), pre-optimization
 kestrel dump llvm repro.ks          # LLVM IR, post-optimization (-O0 for unoptimized)
 kestrel dump diagnostics repro.ks   # all accumulated diagnostics
@@ -119,10 +122,8 @@ KESTREL_DEBUG=all <repro command>
 
 `ktrace!` takes the category as its first argument — `ktrace!("infer", "…")` —
 and output is gated on `KESTREL_DEBUG` naming that category. Categories are
-free-form strings picked at the call site; those in use today are `infer`,
-`solver`, `hir-lower`, `copyable`, `static-wf`, `ref-gate`, `op-shape`,
-`dangle`, `arm-decay`, `clone-shim`, `copy-prop`, `take-alias`, `audit-dup`,
-`instantiation`, `llvm-verify`, `lsp-verify`. Prefer an existing one over minting a new category for
+free-form strings picked at the call site; list the ones in use with
+`rg -oUN --no-filename -r '$1' 'ktrace!\(\s*"([^"]+)"' lib | sort -u`. Prefer an existing one over minting a new category for
 a single session. Project rule from `CLAUDE.md`: **don't use `eprintln!` /
 `println!` or any other flags for debugging**. Add `ktrace!` to the compiler
 source instead. Clean them up later (Step 6), or leave them if they'd help the
@@ -210,7 +211,7 @@ things worse.
 ## Step 6 — Record outcomes
 
 When the debugging session ends, update
-`/Users/dino/.claude/projects/-Users-dino-Documents-Projects-kestrel/memory/DEBUG.md`:
+`DEBUG.md` in your Claude memory, if you have one:
 
 - **Bug fixed:** add an entry to *Successful Fixes* with the root cause, the
   fix, and the tool/technique that diagnosed it. One paragraph each.

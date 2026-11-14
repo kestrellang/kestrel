@@ -33,36 +33,38 @@ returns a `TypedBody`.
 
 ## Solver entry points (anchors)
 
-Current as of 2026-04-24 — re-grep if the file shifted.
+The solver is `lib/kestrel-type-infer/src/solver/` (one file per constraint
+family). Line numbers drift, so this table names files only: grep for `fn <name>`.
 
-| Fn | solver/ line | Note |
+The per-body driver is `finish_body` in `obligations.rs`: fixpoint → literal and
+ref-decay defaults → fixpoint → type-param defaults → held literal defaults →
+never fallback → `report_unsolved`.
+
+| Fn | File | Note |
 |---|---|---|
-| `solve` (public entry) | 24 | Fixpoint → literal defaults → fixpoint → never fallback → report_unsolved |
-| `fixpoint` | 330 | Loops `solve_round` until no progress |
-| `solve_round` | 343 | Drains `ctx.constraints`, dispatches each via `try_solve`, re-queues `Deferred` |
-| `try_solve` (dispatch) | 589 | Match on `Constraint` variant |
-| `solve_reduce` | 899 | Type-alias/assoc reduction |
-| `solve_equal` | 1000 | Bare structural equality |
-| `solve_coerce` | 1155 | Equal → fallback to `FromValue` promotion |
-| `solve_conforms` | 1329 | Defer if ty unresolved; else ask resolver |
-| `solve_associated` | 1352 | `Container.Name`, checks `where_clause_assoc_subs` first |
-| `solve_call` | 1504 | Callee-type-dispatched (Function vs Named) |
-| `solve_overloaded_call` | 1632 | Score candidates, pick, emit as resolved call |
-| `emit_resolved_call` | 1710 | Shared emitter for `Call` / `OverloadedCall` resolved result |
-| `solve_member` | 1955 | The big one: resolve + instantiate + emit where clauses + equate args/return |
-| `solve_implicit` | 2432 | `.Name(args)` against expected type |
-| `solve_implicit_pat` | 2543 | Same but for patterns (poisons pat args on mismatch) |
-| `solve_tuple_rest_pat` | 2651 | `[a, ...rest, b]` binding types |
-| `solve_tuple_index` | 730 | `tup.0` projection |
-| `apply_literal_defaults` | 2862 | Between fixpoint phases — converts remaining `Unresolved { literal: Some(_) }` to the builtin default type |
-| `default_never_fallback` | 117 | Last resort: unused generic TyVars → Never |
-| `report_unsolved` | 370 | Phase-4 diagnostic reporting for anything still Unresolved |
-| `poison_if_unresolved` | 206 | Helper: bind an unresolved TyVar to `TyKind::Error` (skips literals — they carry info) |
-| `poison_unresolved_type_args` | 220 | Recursive: poison inner Unresolved args of a `Named` |
-| `report_and_poison` | 1072 | Combined report-error-then-poison. **Only** used in phase 4 (see `pitfalls.md`) |
-| `kind_to_tyvar` / `kind_to_tyvar_sub` | 2954, 2960 | `TyKind` → `TyVar`, with optional substitution for where-clause lowering |
-| `lower_hir_ty_sub` | 3077 | HIR type → TyVar, honors `where_clause_assoc_subs` |
-| `lower_hir_ty_plain` | 3203 | HIR type → TyVar, NO sub map — used where subs would create self-loops |
+| `fixpoint` | `mod.rs` | Loops `solve_round` until no progress |
+| `solve_round` | `mod.rs` | Drains `ctx.constraints`, dispatches each via `try_solve`, re-queues `Deferred` |
+| `try_solve` | `mod.rs` | Match on `Constraint` variant |
+| `solve_reduce` | `assoc.rs` | Type-alias/assoc reduction |
+| `solve_equal` | `equality.rs` | Bare structural equality |
+| `solve_coerce` | `equality.rs` | Equal → fallback to `FromValue` promotion |
+| `solve_conforms` | `conformance.rs` | Defer if ty unresolved; else ask resolver |
+| `solve_associated` | `assoc.rs` | `Container.Name`, checks `where_clause_assoc_subs` first |
+| `solve_call` | `call.rs` | Callee-type-dispatched (Function vs Named) |
+| `solve_overloaded_call` | `call.rs` | Score candidates, pick, emit as resolved call |
+| `emit_resolved_call` | `call.rs` | Shared emitter for `Call` / `OverloadedCall` resolved result |
+| `solve_member` | `member.rs` | The big one: resolve + instantiate + emit where clauses + equate args/return |
+| `solve_implicit` | `member.rs` | `.Name(args)` against expected type |
+| `solve_implicit_pat` | `member.rs` | Same but for patterns (poisons pat args on mismatch) |
+| `solve_tuple_rest_pat` | `member.rs` | `[a, ...rest, b]` binding types |
+| `solve_tuple_index` | `member.rs` | `tup.0` projection |
+| `apply_literal_defaults` | `defaults.rs` | Between fixpoint phases — converts remaining `Unresolved { literal: Some(_) }` to the builtin default type |
+| `default_never_fallback` | `mod.rs` | Last resort: unused generic TyVars → Never |
+| `report_unsolved` | `mod.rs` | Phase-4 diagnostic reporting for anything still Unresolved |
+| `poison_if_unresolved` | `mod.rs` | Helper: bind an unresolved TyVar to `TyKind::Error` (skips literals — they carry info) |
+| `poison_unresolved_type_args` | `mod.rs` | Recursive: poison inner Unresolved args of a `Named` |
+| `report_and_poison` | `equality.rs` | Combined report-error-then-poison. **Only** used in phase 4 (see `pitfalls.md`) |
+| `lower_hir_ty_sub` | `lower.rs` | HIR type → TyVar, honors `where_clause_assoc_subs` |
 
 ## Generation entry points
 
@@ -161,16 +163,17 @@ path is for HIR-lower / decl-level analyzers. Solver errors flow through
 
 ## Adding an `InferError` variant (do not skip any file)
 
-5 files must be touched — non-exhaustive-match errors only surface on a
+Three files must be touched. Non-exhaustive-match errors only surface on a
 dependent crate rebuild, which is slow to discover.
 
 1. `lib/kestrel-type-infer/src/error.rs` — variant + `span()` arm.
-2. `lib/kestrel-type-infer/src/result.rs` — `describe_error()` arm.
-3. `lib/kestrel-compiler/src/diagnostic.rs` — user-facing `Diagnostic` arm.
-4. `lib/kestrel-analyze/src/body/type_check.rs` — `format_error()` arm
-   (message + label text).
-5. `lib/kestrel-compiler-driver/src/lib.rs` — both `describe()` and
-   `format_error()`.
+2. `lib/kestrel-type-infer/src/result.rs` — `describe_error()` arm (the
+   user-facing message).
+3. `lib/kestrel-compiler-driver/src/lib.rs` — `error_variant_name()` and
+   `format_error()` arms.
+
+Then `rg 'InferError::' lib` for any other exhaustive match that the build
+flags.
 
 ## Adding a `Constraint` variant
 

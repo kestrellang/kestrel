@@ -59,10 +59,10 @@ Each file is a standalone Kestrel program:
 ```kestrel
 module FuzzTest
 
-import std.num.Int64
-// ... other imports as needed
+// The std is auto-imported; only packages need an `import`.
 
-func main() -> lang.i64 {
+@main
+func main() -> Int64 {
     // Test logic here
     // Return 0 for success, non-zero for failure
     0
@@ -116,7 +116,7 @@ func main() -> lang.i64 {
 Use this execution loop in bash:
 
 ```bash
-cd /Users/dino/Documents/Projects/kestrel
+cd "$(git rev-parse --show-toplevel)"
 mkdir -p temp/fuzz/<feature>/out
 RESULTS_FILE="temp/fuzz/<feature>/results.txt"
 echo "Fuzz results for <feature> — $(date)" > "$RESULTS_FILE"

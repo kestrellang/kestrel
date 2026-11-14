@@ -4970,6 +4970,40 @@ The lower end.
 
 _Defined in `lang/std/collections/slice_methods.ks`._
 
+### Implements `SliceIndex`
+
+#### typealias `SliceOutput`
+
+```kestrel
+type SliceOutput = Slice[T]
+```
+
+_Defined in `lang/std/collections/slice.ks`._
+
+### Implements `ViewIndex`
+
+_Conditional: `where V: TextView, V: not Static`._
+
+#### typealias `Output`
+
+```kestrel
+type Output = V where V: TextView, V: not Static
+```
+
+_Defined in `lang/std/text/views.ks`._
+
+### Implements `ViewWrappable`
+
+_Conditional: `where V: TextView, V: not Static`._
+
+#### typealias `WrappedOutput`
+
+```kestrel
+type WrappedOutput = V where V: TextView, V: not Static
+```
+
+_Defined in `lang/std/text/views.ks`._
+
 ## struct `Set`
 
 ```kestrel

@@ -1,7 +1,6 @@
 # Solver pitfalls — symptom-indexed
 
-Each entry: observable symptom → root cause → what to check/change → memory
-cross-ref. If you land here from a real failure, the rule is: **verify the
+Each entry: observable symptom → root cause → what to check/change. If you land here from a real failure, the rule is: **verify the
 cause before applying the fix**. Solver pitfalls look nearly identical across
 different bugs.
 
@@ -39,7 +38,7 @@ markers (`Unresolved { literal: Some(_) }`). Those carry real info —
 legitimate downstream mismatches (e.g. `if c { true } else { 42 }` returning
 `i64`).
 
-**Cross-ref**: `memory/cascading_infer_errors.md` (2026-04-23, -18 failures).
+
 
 ---
 
@@ -69,7 +68,7 @@ errors.
 `wrong_literal_type`, `default_type_mismatch`,
 `wrong_type_for_associated_value`, `wrong_type_multiple_params`.
 
-**Cross-ref**: `memory/solver_poison_overreach.md`.
+
 
 ---
 
@@ -87,10 +86,9 @@ back, and `solve_equal(tv, tv)` → `unify(tv, tv)` is a trivial no-op.
 **Fix**: In `solve_associated`, compare the subs lookup result to
 `ctx.resolve(result)`. If identical, skip the sub and directly build a
 concrete `Named` type via `ctx.named(entity, vec![])`. Applies to both the
-entity-keyed lookup and the name-based fallback. `lower_hir_ty_plain` exists
-for exactly this case — it does NOT consult `where_clause_assoc_subs`.
+entity-keyed lookup and the name-based fallback.
 
-**Cross-ref**: `memory/solve_associated_self_ref.md`.
+
 
 ---
 
@@ -117,7 +115,7 @@ Names in the clause are resolved in `entity`'s own scope via
 `context` parameter — the entity IS the context. `WorldResolver::body_owner`
 is named with `body_` prefix to make the constraint obvious at call sites.
 
-**Cross-ref**: `memory/where_clauses_of_query.md`.
+
 
 ---
 
@@ -130,7 +128,7 @@ same witness; values get truncated in codegen.
 type args. All instances of a generic protocol shared one witness.
 
 **Fix**: include type args in the witness instantiation key. Don't dedupe
-by protocol entity. **Cross-ref**: `memory/witness_instantiation_collapse.md`.
+by protocol entity.
 
 ---
 
@@ -144,7 +142,7 @@ matching `name`.
 
 **Fix**: score all name-matching children by label set + arity, pick best
 match (same algorithm as instance-method overload resolution).
-**Cross-ref**: `memory/static_overload_first_match_truncation.md`.
+
 
 ---
 
@@ -162,7 +160,7 @@ monomorphization time it's still abstract.
 `Associated { container: Self_tv, name: "Item", result }` and bind `result`
 to the concrete Item (derived from the impl's `where Item = X` or the
 conforming struct's associated type).
-**Cross-ref**: `memory/self_item_leaked_to_mir.md`.
+
 
 ---
 
@@ -232,9 +230,8 @@ cascades).
 
 When you diagnose a new recurring trap:
 
-1. Add an entry here with the same shape: symptom → cause → fix → memory link.
-2. If the pattern is novel enough to warrant its own memory file, write it to
-   `/Users/dino/.claude/projects/-Users-dino-Documents-Projects-kestrel/memory/`
+1. Add an entry here with the same shape: symptom → cause → fix.
+2. If the pattern is novel enough to warrant its own memory file, save it to your Claude memory
    and link it from `MEMORY.md` (one-line index entry, under 150 chars).
 3. Keep each entry short: the goal is a fast lookup from symptom, not a
    tutorial on the subsystem.

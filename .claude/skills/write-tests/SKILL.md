@@ -71,10 +71,9 @@ The harness compiles the program, runs it, and checks the process exit code.
 
 module Test
 
-import std.num.Int64
-
-func main() -> lang.i64 {
-    if 2 + 2 != 4 { return 1 }
+@main
+func main() -> Int64 {
+    if 2 + 2 != 4 { return 1; }
     0
 }
 ```
@@ -122,7 +121,9 @@ included.** An unannotated warning fails the test as "unexpected warning", so
 adding a new warning-level analyzer can break existing tests: grep testdata for
 files that would trigger it. (Diagnostics coming from the stdlib are not
 counted; only those located in the test file.) `// ERROR(E123)` matches by code
-for errors; there is no code form for warnings.
+for errors, and `// ERROR(E123): message` matches the code and a message
+substring together (prefer it: the code pins the diagnostic, the message pins
+the case). There is no code form for warnings.
 
 **Post-monomorphization warnings (E508) are checked in `execution` tests.** They
 only exist once the program is built, so a `diagnostics` test never sees them.

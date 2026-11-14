@@ -96,7 +96,7 @@ git rev-parse HEAD
 ```
 
 and report it with the result. If `pwd` is under `.claude/worktrees/`, you are
-probably on `main` and **173 commits behind** — stop and move.
+probably on `main`, which is far behind the working branch. Stop and move.
 
 Then build fresh, because a stale `target/` is the same bug one layer down:
 

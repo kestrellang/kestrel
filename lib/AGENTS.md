@@ -142,7 +142,7 @@ or silently the wrong method — `try` once segfaulted this way).
 | Analyzer | `util::protocol_call_method(cx, expr)` |
 | Assoc types | name-res `AssociatedTypeBinding` — the only lookup |
 
-- A new requirement tag needs arms in all 4 tables in `kestrel-hir/src/builtin.rs`.
+- A new requirement tag needs arms in all 4 tables in `kestrel-ast/src/builtin.rs`.
 - An **init** requirement (`Interpolatable.init`, `init(interpolation:)`)
   produces `Self` (its declared return is `()`), and MIR must call it with the
   init convention (`emit_init_call`: out-pointer `self` first), not as a plain call.

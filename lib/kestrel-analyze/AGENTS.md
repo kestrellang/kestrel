@@ -377,9 +377,9 @@ Current allocations:
 - E508: `observable_drop_unmarked` — NOT an analyzer: emitted after monomorphization by `kestrel-compiler` (`record_mono_warnings`, from `kestrel_mir::passes::copy_lifetime::unmarked_observable_drops`), where every call is resolved so the deinit call walk is exact (it sees `println → … → write`). WARNING: a `Cloneable` struct/enum not `@observabledrop` (and containing nothing that is) whose `deinit` reaches an `@extern` other than the C allocator / `mem*` functions. Only appears at build time; tested through execution tests' `// WARN:` annotations. Design: `docs/plans/observable_drop/observable_drop-design.md`
 - E512: `borrowed_param_copies_view` (body/view_conversion.rs) — WARNING (Performance): a borrowed parameter naming an owned type (`x: String`) was given a view (`&StringSlice`) and type-infer converted it through `DecaysFrom`, copying it. Reads `ResolvedPromotion::borrowed_view`, set by the solver from `view_args`; the analyzer never re-derives which args converted. The note suggests a `&View` parameter.
 - E615: `main_not_free_function` (compilation/entry_point.rs) — `@main` must be a free (module-level) function
-- E616: `invalid_main_return_type` (compilation/entry_point.rs) — `@main` must return `()` or a `lang` primitive integer (i8/i16/i32/i64), not a stdlib `IntN` struct
+- E616: `invalid_main_return_type` (compilation/entry_point.rs) — `@main` must return `()`, `!`, a `lang` primitive integer, or a type conforming to `Exitable` (`ExitCode`, the stdlib `IntN`/`UIntN` structs, user conformers)
 - E617: `multiple_main` (compilation/entry_point.rs) — more than one `@main` in the build
-- E618: `missing_main` (compilation/entry_point.rs) — executable build with no `@main`; gated on `CompilationContext::is_executable` (set by the driver's `analyze_all(is_executable)`), so it fires only for `kestrel build` / execution tests, never for libraries / `kestrel check` / LSP / diagnostics tests
+- E618: `missing_main` (compilation/entry_point.rs) — executable build with no `@main`; gated on `CompilationContext::is_executable` (set by the driver's `analyze_all(is_executable)`), so it fires only for `kestrel build` / execution tests, never for libraries / LSP / diagnostics tests
 - E619: `duplicate_read_provider` (decl/place_accessor.rs) — `get` + `ref` on one subscript/computed property (stage-1.5 place accessors)
 - E620: `duplicate_write_provider` (decl/place_accessor.rs) — `set` + `mutating ref` on one member
 - E621: `ref_accessor_in_protocol` (decl/place_accessor.rs) — a protocol may REQUIRE `ref` / `mutating ref` (bodyless clauses, witnessed through `value.ref` / `value.mutref` witness slots); a protocol EXTENSION may give their default bodies (bound as the witness when the conformer has none, `find_accessor_among` by labels); rejected are ref bodies in the protocol itself, bodyless clauses in an extension, and `modifying` accessors in either
@@ -402,7 +402,7 @@ Current allocations:
 
 - Analyzers are **stateless ZSTs** — no fields, no mutable state
 - Use `cx.query` to read ECS components (`NodeKind`, `Name`, `Callable`, `TypeAnnotation`, etc.)
-- A `CompilationCheck` may gate on `cx.is_executable` (true only when building a binary) for whole-program requirements that must not fire on libraries / `kestrel check` / the LSP — e.g. the entry-point requirement E618. Module entities carry **no `DeclSpan`** (and no `FileId`), so anchor whole-program diagnostics on a declaration's span, not a module's.
+- A `CompilationCheck` may gate on `cx.is_executable` (true only when building a binary) for whole-program requirements that must not fire on libraries / the LSP — e.g. the entry-point requirement E618. Module entities carry **no `DeclSpan`** (and no `FileId`), so anchor whole-program diagnostics on a declaration's span, not a module's.
 - Use `cx.hir` to iterate the HIR body, `cx.typed` for resolved types
 - Return `Vec<AnalyzeDiagnostic>` — the framework handles accumulation and memoization
 - Select descriptors **by code**, never by position: `descriptor("E210").id`,
