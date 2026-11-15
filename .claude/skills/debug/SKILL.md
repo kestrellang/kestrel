@@ -101,6 +101,8 @@ kestrel dump diagnostics repro.ks   # all accumulated diagnostics
 
 Dumps go to stdout; diagnostics to stderr. Capture with
 `kestrel dump mir repro.ks > out.txt`.
+For what each MIR stage does and which layer a wrong stage points at, see
+the `mir` skill.
 
 > **Not available today**: `ast`, `hir`, `types`, `asm` dumps. The `TODO` in
 > `src/main.rs` tracks them. If you reach for one and it's missing, the

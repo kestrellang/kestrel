@@ -73,7 +73,7 @@ single variant:
 - MIR patterns / match: `lib/kestrel-mir-lower/src/body/pattern.rs` (`lower_match`)
 
 MIR is OSSA: SSA values (`ValueId`) and blocks with params, no places or
-rvalues. `kestrel dump mir -s all f.ks` prints every pass stage.
+rvalues. The `mir` skill covers the IR, the passes and mono. `kestrel dump mir -s all f.ks` prints every pass stage.
 
 Solver per-constraint fns (all in `solver/`): `solve_equal`, `solve_coerce`,
 `solve_conforms`, `solve_associated`, `solve_call`,
