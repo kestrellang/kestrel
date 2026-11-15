@@ -72,6 +72,8 @@ Additional docs cover specific subsystems in depth. Each crate chooses topics ba
 
 ### Current Documentation Map
 
+In pipeline order. Every crate has a `docs/architecture.md`.
+
 | Crate | Docs |
 |-------|------|
 | `kestrel-span` | architecture |
@@ -82,12 +84,28 @@ Additional docs cover specific subsystems in depth. Each crate chooses topics ba
 | `kestrel-ast` | architecture, ast-types |
 | `kestrel-hecs` | architecture, snapshots |
 | `kestrel-ast-builder` | architecture, components, entity-mapping |
-| `kestrel-name-res` | architecture, scope, visibility, resolution, extensions |
-| `kestrel-hir` | architecture, expressions, desugaring, types-and-resolution |
+| `kestrel-name-res` | architecture, extensions, resolution, scope, visibility |
+| `kestrel-hir` | architecture, desugaring, expressions, types-and-resolution |
 | `kestrel-hir-lower` | architecture, design |
 | `kestrel-type-infer` | architecture, design |
-| `kestrel-compiler` | architecture |
+| `kestrel-entail` | architecture |
+| `kestrel-structural` | architecture |
+| `kestrel-copy-fold` | architecture |
+| `kestrel-semantics` | architecture |
+| `kestrel-analyze` | architecture, design |
+| `kestrel-pattern-matching` | architecture |
+| `kestrel-mir-lower` | architecture |
+| `kestrel-mir` | architecture, codegen, design-rationale, ir, lowering, ownership, passes |
+| `kestrel-codegen` | architecture |
+| `kestrel-codegen-cranelift` | architecture |
+| `kestrel-codegen-llvm` | architecture |
 | `kestrel-target` | architecture |
+| `kestrel-compiler` | architecture |
+| `kestrel-compiler-driver` | architecture |
+| `kestrel-reporting` | architecture |
+| `kestrel-doc` | architecture |
+| `kestrel-lsp` | architecture |
+| `kestrel-test-suite` | architecture |
 
 ## Writing Guidelines
 
