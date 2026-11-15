@@ -526,8 +526,8 @@ members and `lazy` properties.
 
 | Code | Message | Explanation |
 |---|---|---|
-| E619 | duplicate read provider: this member declares more than one of \`get\`, \`modifying get\`, \`ref\` and \`modifying ref\` | Reads need exactly one provider. |
-| E620 | duplicate write provider: this member declares both \`set\` and \`mutating ref\` | Writes need exactly one provider. A failable member may declare both: `mutating ref` serves `&mutating` binders, `set` serves plain `=`. |
+| E619 | duplicate read provider: this member declares more than one of \`get\`, \`modifying get\`, \`ref\` and \`modifying ref\` | Reads need exactly one provider. Also reported as "\`get\` is written more than once on this member" when one read clause is repeated. |
+| E620 | duplicate write provider: this member declares both \`set\` and \`mutating ref\` | Writes need exactly one provider. A failable member may declare both: `mutating ref` serves `&mutating` binders, `set` serves plain `=`. Also reported when a write clause or observer (`set`, `didSet`, …) is written twice. |
 | E621 | a protocol requires \`ref\` / \`mutating ref\` with bodyless clauses, and only a protocol extension gives their bodies; \`modifying\` accessors are not allowed in either | A protocol requires a place with bodyless clauses (`var value: T { ref mutating ref }`), and a protocol extension may give default bodies (`extend P { var value: T { ref { … } } }`). A body in the protocol itself, a bodyless clause in an extension, and `modifying` accessors are rejected. |
 | E622 | this member has a write provider but no read provider | A `set`/`mutating ref` without a read provider; add one. |
 | E636 | \`modifying\` accessors need an instance receiver | A static member or global has no `self` to modify; use a plain `get` / `ref`. |

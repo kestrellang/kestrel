@@ -344,6 +344,17 @@ pub struct DeclaredAccessors {
     pub mutating_ref: bool,
     pub will_set: bool,
     pub did_set: bool,
+    /// An accessor clause written twice (E619 for a read clause, E620 for a
+    /// write clause or observer). The bools above can't show it.
+    pub repeated: Option<RepeatedClause>,
+}
+
+/// A repeated accessor clause: its keyword as written, and whether it is a
+/// write-side clause (`set`, `mutating ref`, `willSet`, `didSet`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct RepeatedClause {
+    pub keyword: &'static str,
+    pub writes: bool,
 }
 
 impl DeclaredAccessors {

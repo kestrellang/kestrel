@@ -10,11 +10,12 @@
 //! ## Diagnostics
 //!
 //! ### E619 -- `duplicate_read_provider` (Error, Correctness)
-//! `get { }` and `ref { }` on one member.
+//! `get { }` and `ref { }` on one member, or one read clause written twice.
 //!
 //! ### E620 -- `duplicate_write_provider` (Error, Correctness)
 //! `set { }` and `mutating ref { }` on one member, unless it is failable:
-//! there the two do different jobs (see E637).
+//! there the two do different jobs (see E637). Also a write clause or an
+//! observer written twice.
 //!
 //! ### E621 -- `ref_accessor_in_protocol` (Error, Correctness)
 //! A `modifying` accessor on a protocol or protocol-extension member, a
@@ -127,6 +128,24 @@ impl DeclCheck for PlaceAccessorAnalyzer {
             .get::<DeclaredAccessors>(cx.entity)
             .copied()
             .unwrap_or_default();
+        // E619 / E620: a clause written twice. Only the first would run, so
+        // the second was silently ignored.
+        if let Some(rep) = declared.repeated {
+            let code = if rep.writes { "E620" } else { "E619" };
+            let diag = AnalyzeDiagnostic {
+                descriptor_id: descriptor(code).id,
+                severity: descriptor(code).default_severity,
+                message: format!("`{}` is written more than once on this member", rep.keyword),
+                labels: vec![DiagLabel {
+                    span: util::entity_span(cx.query, cx.entity),
+                    message: "keep one".into(),
+                    is_primary: true,
+                }],
+                notes: vec![],
+            };
+            return vec![diag];
+        }
+
         // A malformed `lazy` (a plain stored field) and observers (a
         // stored property's synthesized setter) are checked by their own
         // analyzers; the provider checks below don't apply to them.
