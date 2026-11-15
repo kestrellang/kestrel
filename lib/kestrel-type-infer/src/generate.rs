@@ -1522,6 +1522,8 @@ fn mark_sugar_primary(
         SugarKind::TypeTest | SugarKind::Cast | SugarKind::ConsumingCast => {},
         // Plain calls and closures: their own constraints report errors.
         SugarKind::Pipe | SugarKind::Placeholder => {},
+        // `throw`'s `Return` carries its own `.Err` member resolution.
+        SugarKind::Throw => {},
         SugarKind::OptionalChain => {
             // inner is `Match { scrutinee: chainBorrow/chainTake pcall, source: OptionalChain }`,
             // later binds nested in the `.Some` arm. Poison every bind's call so a
@@ -2459,7 +2461,7 @@ fn gen_block(ctx: &mut InferCtx<'_>, hir: &HirBody, block: &HirBlock) -> TyVar {
 /// redundant tail-return type-mismatch so E001 (`missing_return`) labels
 /// the fault on its own.
 fn tail_is_exhaustive(hir: &HirBody, id: HirExprId) -> bool {
-    match &hir.exprs[id] {
+    match &hir.exprs[hir.peel_throw(id)] {
         HirExpr::Return { .. } | HirExpr::Break { .. } | HirExpr::Continue { .. } => true,
         HirExpr::If {
             then_body,
@@ -2497,7 +2499,7 @@ fn block_diverges(hir: &HirBody, stmts: &[HirStmtId]) -> bool {
     };
     if let HirStmt::Expr { expr, .. } = &hir.stmts[last_id] {
         matches!(
-            hir.exprs[*expr],
+            hir.exprs[hir.peel_throw(*expr)],
             HirExpr::Return { .. } | HirExpr::Break { .. } | HirExpr::Continue { .. }
         )
     } else {

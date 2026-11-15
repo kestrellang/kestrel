@@ -41,7 +41,7 @@ unsafe p.write(42);
 let r = unsafe &p.value;
 ```
 
-The **`unsafe` block** covers several statements. Like `loop { … }`, it is a keyword-led block, not a closure, and its value is its last expression:
+The **`unsafe` block** covers several statements. Like `loop { … }`, it is a keyword-led block, not a closure, and its value is its last expression. It is a scope of its own: a local declared in it is dropped at its `}`.
 
 ```kestrel
 let sum = unsafe {

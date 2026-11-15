@@ -466,6 +466,10 @@ fn check_expr_for_param_assign(
         } => {
             check_expr_for_param_assign(cx, *val, param_locals, diags);
         },
+        // Sugar is transparent (`throw`, `+=`, `try`, …).
+        HirExpr::Sugar { inner, .. } => {
+            check_expr_for_param_assign(cx, *inner, param_locals, diags)
+        },
         HirExpr::Field { base, .. } | HirExpr::TupleIndex { base, .. } => {
             check_expr_for_param_assign(cx, *base, param_locals, diags);
         },
@@ -625,6 +629,8 @@ fn walk_for_capture_assign(
         HirExpr::Return { value: Some(v), .. } => {
             walk_for_capture_assign(cx, *v, capture_set, diags);
         },
+        // Sugar is transparent (`throw`, `+=`, `try`, …).
+        HirExpr::Sugar { inner, .. } => walk_for_capture_assign(cx, *inner, capture_set, diags),
         HirExpr::Closure { .. } => {}, // nested closure has own scope
         _ => {},
     }

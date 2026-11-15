@@ -314,6 +314,9 @@ pub(crate) struct LetSyntax {
     pub pat: PatSrc,
     pub ty: Option<AstType>,
     pub value: Option<SyntaxNode>,
+    /// `=` was written but the parser found no initializer after it (already
+    /// reported): the value lowers to `HirExpr::Error`, not to "no value".
+    pub value_missing: bool,
 }
 
 pub(crate) fn let_syntax(node: &SyntaxNode, span: &Span, file_id: usize) -> LetSyntax {
@@ -338,6 +341,7 @@ pub(crate) fn let_syntax(node: &SyntaxNode, span: &Span, file_id: usize) -> LetS
             .children()
             .find(|c| c.kind().is_type())
             .and_then(|c| ast_type_from_cst(&c, file_id)),
+        value_missing: seen_equals && value.is_none(),
         value,
     }
 }

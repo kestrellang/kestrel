@@ -145,7 +145,7 @@ This is the most important *coherence* decision. Kestrel will have **two surface
 
 ### Grounding on the collision (verified)
 - `mutating` is already three-way overloaded: receiver modifier (`mutating func`), param access mode (`mutating x:`), and function-type param marker (`(mutating T) -> R`). Adding `&mutating T` is a fourth role.
-- `is_label_keyword()` **excludes** `Token::Mutating` and `Token::Consuming` (lexer:749-794) — this must be preserved so `mutating`/`consuming` can't be parsed as labels.
+- The parser's `is_label_keyword` (`kestrel-parser/src/grammar/mod.rs`) **excludes** `mutating` and `consuming`; this must be preserved so `mutating`/`consuming` can't be parsed as labels.
 - The function-type position is where the two surfaces can *visually collide*: `(mutating Grid) -> R` (existing Design B) vs `(&mutating Grid) -> R` (new). The emitter must keep them distinct CST shapes.
 
 ### Options for reconciliation

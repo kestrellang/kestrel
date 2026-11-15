@@ -167,6 +167,8 @@ pub(crate) fn kind_spelling(kind: SyntaxKind) -> &'static str {
         K::Return => "return",
         K::Throw => "throw",
         K::Try => "try",
+        K::Unsafe => "unsafe",
+        K::Is => "is",
         K::Throws => "throws",
         K::Static => "static",
         K::Struct => "struct",

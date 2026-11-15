@@ -4046,6 +4046,17 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
     // ================================================================
 
     pub fn set_terminator(&mut self, kind: TerminatorKind) {
+        // A block ends once. Code lowered at an exit (a call to a `-> !`
+        // function) can end it first; the later terminator is dead, and
+        // writing it would silently replace the real one.
+        if self.is_terminated() {
+            kestrel_debug::ktrace!(
+                "mir-terminated",
+                "skip {:?}: block already terminated",
+                kind
+            );
+            return;
+        }
         self.drain_deferred_borrows();
         // Values this terminator forwards as block args. A NAMED binding
         // borrow among them is THREADED (references "1.75"): verify Check 4
@@ -5880,6 +5891,36 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
             return v;
         }
         self.lower_expr(tail)
+    }
+
+    /// Lower a block that is its own drop scope (`unsafe { }`): its locals
+    /// drop at its `}`, and its value (with anything still live-tracked)
+    /// moves to the enclosing frame.
+    pub fn lower_scoped_block(&mut self, block: &HirBlock) -> ValueId {
+        self.push_scope();
+        let value = self.lower_hir_block(block);
+        if self.is_terminated() {
+            self.pop_scope();
+            return value;
+        }
+        let mut keep = vec![value];
+        keep.extend(self.tracker.values());
+        self.destroy_scope_except(&keep);
+        // A guarded destroy in the exit renames threaded values.
+        let value = self.resolve_value(value);
+        let survivors = self
+            .scope_stack
+            .pop()
+            .map(|f| f.entries)
+            .unwrap_or_default();
+        if let Some(top) = self.scope_stack.last_mut() {
+            top.entries.extend(
+                survivors
+                    .into_iter()
+                    .filter(|e| matches!(e, ScopeEntry::Owned(_))),
+            );
+        }
+        value
     }
 
     /// Is `tail` a bare local declared by a `let`/`var` in `block` itself,

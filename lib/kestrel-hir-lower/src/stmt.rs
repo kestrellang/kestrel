@@ -179,6 +179,9 @@ impl LowerCtx<'_> {
                     Some(borrow)
                 }
             },
+            None if syn.value_missing => {
+                Some(self.alloc_expr(HirExpr::Error { span: span.clone() }))
+            },
             None => syn.value.as_ref().map(|v| self.lower_expr(v)),
         };
 
@@ -312,6 +315,7 @@ impl LowerCtx<'_> {
                 tail_expr: None,
             },
             span: span.clone(),
+            own_scope: false,
         });
         self.alloc_stmt(HirStmt::Expr {
             expr: block_expr,

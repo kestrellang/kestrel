@@ -209,7 +209,7 @@ fn expr_state(cx: &BodyContext<'_>, id: HirExprId) -> ReturnState {
     // three-way `ReturnState` distinguishes "returns a value" from "leaves
     // abnormally", which a `bool` cannot express. Only the leaf fallback below
     // is shared (G12).
-    match &cx.hir.exprs[id] {
+    match &cx.hir.exprs[cx.hir.peel_throw(id)] {
         HirExpr::Return { .. } => return ReturnState::Returns,
         HirExpr::Break { .. } | HirExpr::Continue { .. } => return ReturnState::Diverges,
 

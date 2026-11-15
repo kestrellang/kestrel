@@ -650,6 +650,11 @@ impl OssaBodyCtx<'_, '_> {
             // === Closure — delegate to closure module (stubbed until Phase E) ===
             HirExpr::Closure { params, body, .. } => self.lower_closure_expr(expr_id, params, body),
 
+            HirExpr::Block {
+                body,
+                own_scope: true,
+                ..
+            } => self.lower_scoped_block(body),
             HirExpr::Block { body, .. } => self.lower_hir_block(body),
 
             HirExpr::Sugar { inner, .. } => self.lower_expr(*inner),
