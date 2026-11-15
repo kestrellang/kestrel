@@ -227,10 +227,11 @@ This is useful for:
 
 ### Visibility Levels
 
-Kestrel has three visibility levels:
+Kestrel has four visibility levels:
 
 - **`public`**: Accessible from any module
-- **`internal`**: Accessible only within the same module (default)
+- **`internal`**: Accessible within the same top-level module and its submodules (default)
+- **`fileprivate`**: Accessible only within the same file
 - **`private`**: Accessible only within the declaring type
 
 ### Public Symbols

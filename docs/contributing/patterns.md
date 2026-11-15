@@ -148,7 +148,7 @@ let clauses = ctx.query(WhereClausesOf { entity: fn_entity, root });
 
 ## Stdlib source (`lang/std/`)
 
-Module path matches directory structure (`std.collections`, `std.core`, …). Public API uses `public`; internal state is `private`. Mutating methods are marked `mutating`. COW types (`String`, `Array`) call `makeUnique()` before `grow()` in mutating methods.
+Module path matches directory structure (`std.collections`, `std.core`, …). Public API uses `public`; internal state is `private`. Copy-on-write types keep their buffer in a `CowBox` and write through its `mutating ref`, which forks shared storage first. The `write-std` skill has the full conventions.
 
 ## Test patterns
 
