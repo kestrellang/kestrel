@@ -5568,7 +5568,28 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
                 // Field addr through the base's var address (not a shallow
                 // copy) so the writeback's setter mutates the real storage.
                 let wb_mark = self.pending_writebacks.len();
-                let recv_addr = self.write_place_addr(*base)?;
+                let Some(recv_addr) = self.write_place_addr(*base) else {
+                    // No address, but the base is a place VIEW (a named
+                    // `&mutating` binding, a `mutating` param): the field
+                    // view of its borrow IS the place. Without this,
+                    // `s.xs(1) += 1` fell back to the READ accessor and
+                    // wrote into storage another copy shared, skipping the
+                    // copy-on-write fork.
+                    let place =
+                        self.lower_place(*base, place::FieldViews::Forbid, place::Access::Write)?;
+                    let place::PlaceRepr::View(v) = place.repr else {
+                        return None;
+                    };
+                    let base_arg = self.prepare_call_arg(v, ParamConvention::MutBorrow);
+                    let view = self.emit_struct_extract(base_arg.value, field_idx, field_ty);
+                    return Some((
+                        CallArg {
+                            value: view,
+                            convention: ParamConvention::MutBorrow,
+                        },
+                        field_ty,
+                    ));
+                };
                 let field_addr = self.emit_field_addr(recv_addr, base_ty, field_idx);
                 let borrow = self.mut_borrow_write_addr(field_addr, field_ty, wb_mark);
                 Some((

@@ -232,7 +232,7 @@ Kestrel has four visibility levels:
 - **`public`**: Accessible from any module
 - **`internal`**: Accessible within the same top-level module and its submodules (default)
 - **`fileprivate`**: Accessible only within the same file
-- **`private`**: Accessible only within the declaring type
+- **`private`**: Accessible only within the declaring type; at the top level, only within the same file
 
 ### Public Symbols
 

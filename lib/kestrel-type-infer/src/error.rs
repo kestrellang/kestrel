@@ -357,16 +357,6 @@ pub fn describe_fn_kind(kind: kestrel_ast::FnTypeKind) -> String {
     }
 }
 
-/// Spelling of a visibility keyword in a diagnostic.
-fn vis_label(v: &Vis) -> &'static str {
-    match v {
-        Vis::Public => "public",
-        Vis::Internal => "internal",
-        Vis::Fileprivate => "fileprivate",
-        Vis::Private => "private",
-    }
-}
-
 /// The "why" note for E624 — names the property of the source kind that the
 /// expected slot needs and the source cannot supply. Mirrors the rejected
 /// cells of the passing table in docs/design/closures.md.
@@ -493,7 +483,7 @@ impl InferError {
                 name, visibility, ..
             } => detailed(format!(
                 "member '{name}' is {} and not accessible from this scope",
-                vis_label(visibility)
+                visibility.keyword()
             )),
 
             Self::SugarOnlyMember { name, protocol, .. } => labeled(

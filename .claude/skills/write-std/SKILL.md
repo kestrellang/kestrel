@@ -40,11 +40,11 @@ needs no `cargo build`. Build the compiler only when you change Rust.
 |---|---|
 | `public` | Every module. **Every public std item is auto-imported into user code**, so a new public name can collide with a user's own; pick it with care |
 | `internal` (the default) | Everything under the same top-level module, which for the std is all of `std`, not just its own module |
-| `fileprivate` | Members: the same file |
-| `private` | Members: the declaring type |
+| `fileprivate` | The same file |
+| `private` | Members: the declaring type. Top level: the same file |
 
-Top-level `private` and `fileprivate` functions and types are not
-file-scoped yet; another file of the same module can still use them.
+A top-level `private` declaration is file-scoped, like `fileprivate`. A helper
+shared by several files of a module must be `internal`.
 `@doc(.Hidden)` keeps a public item out of the docs and completion when it has
 to be public only for the compiler or another std module.
 

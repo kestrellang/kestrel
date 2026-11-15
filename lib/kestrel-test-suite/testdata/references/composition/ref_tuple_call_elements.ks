@@ -1,4 +1,5 @@
 // test: execution
+// expect-stdout: ok
 // stdlib: true
 
 // A tuple literal whose `&T` slots are pinned by the return type keeps the
@@ -41,5 +42,3 @@ func main() {
     }
     print("ok");
 }
-
-// CHECK: ok

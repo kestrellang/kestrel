@@ -46,33 +46,40 @@ impl QueryFn for IsVisibleFrom {
 }
 
 impl IsVisibleFrom {
+    /// Whether `context` is in the target's file; a derived member counts as
+    /// written in its type's file.
+    fn same_file(&self, ctx: &QueryContext<'_>, context: Entity) -> bool {
+        let target_file = find_file_id(ctx, derived_context(ctx, self.target));
+        let context_file = find_file_id(ctx, context);
+        match (target_file, context_file) {
+            (Some(t), Some(c)) => t == c,
+            // If no file info, fall back to parent scope check
+            _ => {
+                let Some(scope) = ctx.parent_of(self.target) else {
+                    return true;
+                };
+                is_ancestor_of(ctx, scope, context)
+            },
+        }
+    }
+
     fn visible(&self, ctx: &QueryContext<'_>, context: Entity) -> bool {
         match effective_vis(ctx, self.target) {
             Vis::Public => true,
             Vis::Private => {
-                // Visible within the parent scope and all its descendants.
-                // A derived member's scope is the type, like its context.
                 let Some(scope) = ctx.parent_of(self.target) else {
                     return true;
                 };
+                // A top-level `private` declaration is file-scoped: its
+                // parent is a module, and a module spans files.
+                if ctx.get::<NodeKind>(scope) == Some(&NodeKind::Module) {
+                    return self.same_file(ctx, context);
+                }
+                // Visible within the parent scope and all its descendants.
+                // A derived member's scope is the type, like its context.
                 is_ancestor_of(ctx, derived_context(ctx, scope), context)
             },
-            Vis::Fileprivate => {
-                // Visible within the same file; a derived member counts as
-                // written in its type's file.
-                let target_file = find_file_id(ctx, derived_context(ctx, self.target));
-                let context_file = find_file_id(ctx, context);
-                match (target_file, context_file) {
-                    (Some(t), Some(c)) => t == c,
-                    // If no file info, fall back to parent scope check
-                    _ => {
-                        let Some(scope) = ctx.parent_of(self.target) else {
-                            return true;
-                        };
-                        is_ancestor_of(ctx, scope, context)
-                    },
-                }
-            },
+            Vis::Fileprivate => self.same_file(ctx, context),
             Vis::Internal => {
                 // Visible within the same top-level module subtree
                 match (
@@ -332,4 +339,14 @@ mod tests {
         });
         assert_eq!(visible.len(), 1);
     }
+}
+
+/// Whether `target` is a `private` or `fileprivate` declaration hidden from
+/// `context`. The cheap `Vis` read keeps the query off the hot path: every
+/// other declaration a scope lists is visible inside it.
+pub fn is_file_scoped_hidden(ctx: &QueryContext<'_>, target: Entity, context: Entity) -> bool {
+    matches!(
+        ctx.get::<Vis>(target),
+        Some(Vis::Private | Vis::Fileprivate)
+    ) && !ctx.query(IsVisibleFrom { target, context })
 }

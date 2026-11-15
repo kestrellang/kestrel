@@ -10,7 +10,7 @@ use std::collections::HashSet;
 
 use crate::extensions::{ExtensionLhsParams, ExtensionTargetEntity};
 use crate::scope::ScopeFor;
-use crate::visibility::VisibleChildrenByName;
+use crate::visibility::{VisibleChildrenByName, is_file_scoped_hidden};
 
 // ===== NameResolution =====
 
@@ -68,11 +68,18 @@ impl QueryFn for ResolveName {
                 return check_ambiguity(ctx, entities.clone());
             }
 
-            // 2. Local declarations
-            if let Some(entities) = scope.declarations.get(&self.name)
-                && !entities.is_empty()
-            {
-                return check_ambiguity(ctx, entities.clone());
+            // 2. Local declarations. A module scope lists every file's
+            // declarations, so drop the file-scoped ones another file wrote
+            // (`HiddenDeclaration` explains the miss).
+            if let Some(entities) = scope.declarations.get(&self.name) {
+                let visible: Vec<Entity> = entities
+                    .iter()
+                    .copied()
+                    .filter(|&e| !is_file_scoped_hidden(ctx, e, self.context))
+                    .collect();
+                if !visible.is_empty() {
+                    return check_ambiguity(ctx, visible);
+                }
             }
 
             // 3. Wildcard imports: check each wildcard source module
@@ -139,6 +146,42 @@ impl QueryFn for ResolveName {
                 Some(parent) => current = parent,
                 None => return NameResolution::NotFound,
             }
+        }
+    }
+}
+
+// ===== HiddenDeclaration =====
+
+/// Query: the nearest declaration named `name` that `ResolveName` skipped
+/// because it is `private` / `fileprivate` to another file. Asked only after
+/// a lookup fails, so the error can say "is fileprivate" instead of
+/// "undefined".
+#[derive(Clone, PartialEq, Eq, Hash)]
+pub struct HiddenDeclaration {
+    pub name: String,
+    pub context: Entity,
+    pub root: Entity,
+}
+
+impl QueryFn for HiddenDeclaration {
+    type Output = Option<Entity>;
+
+    fn execute(&self, ctx: &QueryContext<'_>) -> Option<Entity> {
+        let mut current = self.context;
+        loop {
+            let scope = ctx.query(ScopeFor {
+                entity: current,
+                root: self.root,
+            });
+            if let Some(hidden) = scope.declarations.get(&self.name).and_then(|entities| {
+                entities
+                    .iter()
+                    .copied()
+                    .find(|&e| is_file_scoped_hidden(ctx, e, self.context))
+            }) {
+                return Some(hidden);
+            }
+            current = scope.parent?;
         }
     }
 }

@@ -168,6 +168,18 @@ pub enum Vis {
     Fileprivate,
 }
 
+impl Vis {
+    /// The keyword as written, for diagnostics.
+    pub fn keyword(&self) -> &'static str {
+        match self {
+            Vis::Public => "public",
+            Vis::Internal => "internal",
+            Vis::Fileprivate => "fileprivate",
+            Vis::Private => "private",
+        }
+    }
+}
+
 // ===== Capability components (orthogonal axes) =====
 
 /// Marker: this entity IS a type (can appear in type positions).

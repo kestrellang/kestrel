@@ -1,4 +1,5 @@
 // test: execution
+// expect-stdout: 2 3 6
 // stdlib: true
 
 // Destructuring a tuple of `&Slice[T]` binds each element as a ref. The
@@ -18,5 +19,3 @@ func main() {
     let (a, b) = t;
     print("\(a.count) \(b.count) \(a(0) + b(2))");
 }
-
-// CHECK: 2 3 6

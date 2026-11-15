@@ -812,6 +812,14 @@ impl LowerCtx<'_> {
                 self.alloc_expr(HirExpr::Error { span: span.clone() })
             },
             ValueResolution::NotFound(ref seg) => {
+                if let [only] = segments
+                    && let Some(diag) = crate::ty::hidden_declaration_error(
+                        self.ctx, &only.name, self.owner, self.root, span,
+                    )
+                {
+                    self.ctx.accumulate(diag);
+                    return self.alloc_expr(HirExpr::Error { span: span.clone() });
+                }
                 let path_name = segments
                     .iter()
                     .map(|s| s.name.as_str())
