@@ -13,6 +13,7 @@ drift, so match on the code.
 | E102 | `no member 'count' on type 'String…'` | Calling a member that doesn't exist, often a remembered name | Grep the std for the real one (here: `s.bytes.count`) |
 | E104 | `implicit member '.B' not found` | `.Case` shorthand naming a case the expected type lacks | Check the case name and that the expected type is the enum you think |
 | E476 | `cannot find type 'Float16' in this scope` | Type name doesn't exist or isn't imported (deps need an `import`) | Fix the name or add `import pkg.module.(Type)` |
+| E476 | `cannot find type 'T' in this scope` | An extension of a generic type that doesn't name its parameters: `extend Ring where T: Equatable` | Name them: `extend Ring[T] where T: Equatable { … }` |
 | E414 | `this file has no \`module\` declaration` | Missing first line. Often followed by hundreds of std errors. | Add `module Name` at the top and rebuild before reading the rest |
 | E144 | `protocol 'P' cannot be used as a type` | `func g(p: P)` | `p: any P` (boxed) or `p: some P` (opaque) |
 
@@ -40,7 +41,7 @@ drift, so match on the code.
 
 | Code | Message | Usual cause | Fix |
 |---|---|---|---|
-| E488 | ``a borrow expression is only allowed as a `let` initializer`` | Writing `f(&x)` | Drop the `&`; arguments borrow by signature |
+| E488 | ``a borrow expression is only allowed as a `let` initializer`` | Writing `f(&x)` or `reset(&mutating r)` (often followed by E205) | Drop the `&`: pass `reset(r)` with `r` a `var`; arguments borrow by signature |
 | E497 | `a reference cannot stay live across a control-flow merge` | A slice or ref result from `if`/`match` arms, or a ref crossing a loop | Bind it before the branch, or make each arm return an owned value (`String`, `Array`) |
 | E493 | `ambiguous borrow source for the returned reference` | A ref-returning function where the compiler can't tell which param the result borrows | Return from a single param on a straight line, or return an owned value |
 | E512 (warning) | `passing a 'StringSlice' to a borrowed 'String' parameter copies it` | A `String` param fed a slice | Change the param to `&StringSlice` |

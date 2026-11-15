@@ -28,10 +28,26 @@ Before you start, skim the target crate's `docs/architecture.md` — lib require
 one per crate (see `lib/AGENTS.md`). `kestrel-pipeline` is faster for "which
 file owns variant X?".
 
+## Phase 0 — Does it already exist?
+
+Before anything else, check the feature isn't already built under another
+name. Search for what it **does**, not for the spelling you were given:
+
+- `docs/language/` for the behavior (the user docs describe shipped features);
+- the grammar (`lib/kestrel-syntax-tree/kestrel.ungram`) and `git log -S'<keyword>'`
+  for related syntax;
+- `lib/kestrel-test-suite/testdata/` for tests of the behavior.
+
+The roadmap and plan docs can lag behind the code. If the behavior already
+exists (`mutating get` shipped as `modifying get`, for example), **stop**:
+report what exists, how it's spelled and where it's tested, and let the user
+decide whether anything should change. A second spelling or a rename is a
+language decision, not an implementation detail.
+
 ## Phase 1 — Brainstorm
 
-Launch an Explore subagent to gather context; do not go it alone. The Explore
-agent should return:
+Gather context, with an Explore subagent if you can spawn one (otherwise
+search yourself). Come back with:
 
 - **Similar features** already implemented — what pattern should this feature mirror?
 - **Touched crates and files** — which pipeline stages need changes?
@@ -50,6 +66,11 @@ more than one reasonable answer.
 > **Gate 1 — design direction.** The user confirms the shape before you write
 > a design doc. If they redirect, re-run Explore on the new framing rather than
 > bolting changes onto a stale picture.
+>
+> **No one to answer?** (an unattended run, a subagent) Don't approve your own
+> gates. Write the open questions and your recommended answers into the design
+> doc, stop there, and report. Gates exist because the user owns the language's
+> shape.
 
 ## Phase 2 — Design document
 
@@ -242,8 +263,9 @@ House rules (pulled from `CLAUDE.md` and memory):
 
 After tests are green:
 
-1. **User-facing docs.** Write `docs/language/{feature}.md` describing the
-   feature for Kestrel users (syntax, semantics, examples, gotchas).
+1. **User-facing docs.** If an existing page in `docs/language/` covers the
+   area, extend it; otherwise write `docs/language/{feature}.md` (syntax,
+   semantics, examples, gotchas). One fact, one page.
 2. **Crate architecture docs.** Update `docs/architecture.md` in any crate
    whose pipeline position, core types, or module map changed. Topic docs
    (`docs/<topic>.md`) get a new entry if the feature warrants a deep dive.

@@ -107,9 +107,9 @@ Designs: [attributes](docs/plans/attributes/attributes-design.md) · [existentia
 
 ## 0.19 — Properties & conditional conformance
 
-Lazy properties (`lazy let expensive = compute()`), property observers (`willSet` / `didSet`), `mutating get` on computed properties and subscripts, and conditional conformance (`Box[T]: Copyable where T: Copyable`).
+*(Implemented on nightly.)* Lazy properties (`lazy let expensive = compute()`), property observers (`willSet` / `didSet`), a getter that may modify `self`, and conditional conformance (`Box[T]: Copyable where T: Copyable`).
 
-> **`mutating get` matters more than it looks.** It lets a getter modify `self` (value types only); the call site requires a `var` receiver. This unblocks insert-on-read APIs like `Dictionary.subscript(key:inserting:)`, which was removed in 0.13's stdlib because without `mutating get` the documented "insert default on miss" contract couldn't be honored. Keep an eye on what other APIs become expressible once this lands.
+> **The self-modifying getter is spelled `modifying get`** (and `modifying ref`), settled in the stdlib API review; this roadmap first called it `mutating get`. It lets a getter modify `self` (value types only); the call site requires a `var` receiver (E203). See [computed properties](docs/language/computed-properties.md). It unblocks insert-on-read APIs like `Dictionary.subscript(key:inserting:)`, which was removed in 0.13's stdlib and hasn't been added back yet.
 
 ## 0.20 — Standard library & polish
 
