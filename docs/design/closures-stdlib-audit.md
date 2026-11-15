@@ -87,7 +87,7 @@ All remaining callbacks stay normal. This includes:
 - searches and predicates;
 - sort comparators and key functions;
 - fold/reduce callbacks;
-- short-circuit thunks;
+- short-circuit thunks are the exception: `and`/`or` take a `mutating` thunk, because it runs at most once, immediately, and a right side such as `seen.insert(x)` mutates a capture;
 - `Pointer.with` and `Pointer.withMut`;
 - `CowBox.modify` and `RcBox.modify`.
 

@@ -355,7 +355,7 @@ g()              // 8 — same views as f
 
 A view over an immutable `let` is indistinguishable from a snapshot, so most existing code is unaffected. The difference only shows when the captured place is written afterwards.
 
-Normal captures are **read-only**. Assigning to one — including a projection like `c.n = 5` — is E603:
+Normal captures are **read-only**. Writing one is E603, whether it is an assignment (including a projection like `c.n = 5`), `+=`, a `mutating` method such as `append`, or passing it to a `mutating` parameter:
 
 ```kestrel
 var total: Int64 = 0;

@@ -24,7 +24,7 @@ public protocol And[Other = Self] {
     /// Returns `self and other()`. The closure runs only if needed.
     @sugarOnly
     @builtin(.LogicalAndOperatorMethod)
-    func logicalAnd(other: () -> Other) -> Output
+    func logicalAnd(mutating other: mutating () -> Other) -> Output
 }
 
 /// Raw protocol backing the `or` keyword operator.
@@ -38,7 +38,7 @@ public protocol Or[Other = Self] {
     /// Returns `self or other()`. The closure runs only if needed.
     @sugarOnly
     @builtin(.LogicalOrOperatorMethod)
-    func logicalOr(other: () -> Other) -> Output
+    func logicalOr(mutating other: mutating () -> Other) -> Output
 }
 
 /// Raw protocol backing the `not` keyword operator.

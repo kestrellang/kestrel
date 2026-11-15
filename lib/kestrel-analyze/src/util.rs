@@ -467,42 +467,7 @@ fn declares_requirement(
 /// inference settled on; a tagged desugaring names its own; only an untagged
 /// call (no stdlib tag) is matched by written name AND call-site labels.
 pub fn protocol_call_method(cx: &BodyContext<'_>, expr: HirExprId) -> Option<Entity> {
-    let HirExpr::ProtocolCall {
-        protocol,
-        method,
-        requirement,
-        args,
-        ..
-    } = &cx.hir.exprs[expr]
-    else {
-        return None;
-    };
-    if let Some(builtin) = cx.typed.chain_requirement(expr) {
-        return cx.query.query(kestrel_name_res::ResolveBuiltin {
-            builtin,
-            root: cx.root,
-        });
-    }
-    if let Some(requirement) = requirement {
-        return Some(*requirement);
-    }
-    let labels: Vec<Option<String>> = args.iter().map(|a| a.label.clone()).collect();
-    children_named_of_kind(
-        cx.query,
-        *protocol,
-        method.as_str_or_empty(),
-        NodeKind::Function,
+    kestrel_type_infer::mutating_use::protocol_call_method(
+        cx.query, cx.typed, cx.hir, cx.root, expr,
     )
-    .into_iter()
-    .find(|&c| {
-        cx.query
-            .get::<kestrel_ast_builder::Callable>(c)
-            .is_some_and(|callable| {
-                callable
-                    .params
-                    .iter()
-                    .map(|p| p.label.clone())
-                    .eq(labels.iter().cloned())
-            })
-    })
 }
