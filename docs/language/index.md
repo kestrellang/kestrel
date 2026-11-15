@@ -21,6 +21,7 @@ Welcome to the Kestrel programming language documentation.
 - **[Pattern Matching](pattern-matching.md)** - Destructuring and matching
 - **[References](references.md)** - Borrowed references (`&T`)
 - **[Existentials](existentials.md)** - `any Protocol` values and their boxes
+- **[Indirection](indirection.md)** - Wrappers that act like their target: member and argument peel, `DecaysFrom`
 - **[Unsafe](unsafe.md)** - `unsafe func`, `unsafe` expressions and blocks, unsafe protocols
 - **[Error Handling](error-handling.md)** - `Result`, `throws`, and `try`
 - **[Optional Chaining](optional-chaining.md)** - `a?.b`, mutation through `?.`, and the `OptionalChain` protocol
