@@ -169,7 +169,7 @@ public struct PasswordHash {
 
     /// Runs the scheme's KDF.
     static func derive(password: String, salt: Salt, scheme: PasswordScheme, length: Int64) -> SymmetricKey throws CryptoError {
-        let input = password.asByteSlice();
+        let input = password.bytes;
         match scheme {
             .Argon2id(memory: m, iterations: t, parallelism: p) =>
                 Argon2id.deriveKey(input, salt: salt.bytes, memory: m, iterations: t, parallelism: p, length: length),

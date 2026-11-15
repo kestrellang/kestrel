@@ -12,7 +12,7 @@ func main() -> lang.i64 {
     var a = match UdpSocket.bind(to: any) { .Ok(s) => s, .Err(_) => return 1 };
     var b = match UdpSocket.bind(to: any) { .Ok(s) => s, .Err(_) => return 2 };
     let bAddress = b.localAddress().unwrap();
-    let ping = "ping".asByteSlice();
+    let ping = "ping".bytes;
     match a.send(unsafe Slice.lend(start: ping.pointer, count: ping.count), to: bAddress) {
         .Ok(n) => if n != 4 { return 3 },
         .Err(_) => return 4

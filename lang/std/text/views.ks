@@ -9,7 +9,8 @@ import std.iter.(Iterator, Iterable)
 import std.text.(Char, Grapheme, decodeUtf8, String, StringSlice, LineIndex, Formattable, Formatter, FormatOptions)
 import std.text.unicode.(GraphemeBreakProperty, graphemeBreakProperty, shouldBreakBetween)
 import std.memory.(Pointer, UnsafeSlice)
-import std.collections.(Array, SeqRange, RangeBound)
+import std.collections.(Array, SeqRange, RangeBound, Slice)
+import std.core.(Indirection)
 import std.ffi.(memmem)
 
 // ============================================================================
@@ -75,6 +76,10 @@ public struct BytesIterator: Iterator {
 /// perform byte-level operations (substring searches, hashing) without
 /// paying the cost of UTF-8 decoding. For code-point or grapheme
 /// iteration, see `CharsView` / `GraphemesView`.
+///
+/// It also passes wherever a `&Slice[UInt8]` is expected (a hasher, a
+/// socket, a digest), peeling to the bytes through `Indirection` without a
+/// copy: `SHA256.hash(s.bytes)`.
 ///
 /// # Examples
 ///
@@ -2614,5 +2619,14 @@ public struct SplitWhereView: Iterable, Cloneable {
             result.append(segment.toOwned())
         }
         result
+    }
+}
+
+/// `BytesView` lends its bytes as a `Slice[UInt8]`, so `s.bytes` passes
+/// wherever a `&Slice[UInt8]` is expected.
+extend BytesView: Indirection {
+    type Target = Slice[UInt8]
+    public var value: Slice[UInt8] {
+        ref { self.slice._byteSlice() }
     }
 }

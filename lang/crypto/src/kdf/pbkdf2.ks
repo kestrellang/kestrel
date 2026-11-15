@@ -13,7 +13,7 @@ import crypto.mac.(HMAC)
 ///
 /// ```
 /// let key = try PBKDF2[SHA256].deriveKey(
-///     password.asByteSlice(),
+///     password.bytes,
 ///     salt: salt,
 ///     iterations: 100000,
 ///     length: 32

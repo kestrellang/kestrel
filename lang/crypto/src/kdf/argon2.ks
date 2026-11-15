@@ -15,7 +15,7 @@ import crypto.key.(SymmetricKey)
 /// # Examples
 ///
 /// ```
-/// let key = try Argon2id.deriveKey(password.asByteSlice(), salt: salt, memory: 19456, iterations: 2, parallelism: 1, length: 32);
+/// let key = try Argon2id.deriveKey(password.bytes, salt: salt, memory: 19456, iterations: 2, parallelism: 1, length: 32);
 /// ```
 public struct Argon2id {
     /// Throws `.InvalidParameter` unless `parallelism` is 1–16777215 and

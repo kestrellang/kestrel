@@ -36,7 +36,7 @@ public struct Cursor: Readable, Seekable, Cloneable {
     /// @name From Text
     /// Reads the UTF-8 bytes of `text`, starting at the first.
     public init(text text: String) {
-        let raw = text.asByteSlice();
+        let raw = text._byteSlice();
         self.data = unsafe Slice.lend(start: raw.pointer, count: raw.count).toOwned();
         self.offset = 0;
     }

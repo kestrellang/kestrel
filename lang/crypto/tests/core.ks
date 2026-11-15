@@ -62,7 +62,7 @@ func main() {
     let tag = HMAC[SHA256].authenticate(bytes("what do ya want for nothing?"), using: SymmetricKey(bytes: bytes("Jefe")));
     check("hmac-sha256 rfc4231#2", tag.hexString, "5bdcc146bf60754e6a042426089575c75a003f089d2739839dec58b964ec3843");
     // RFC 6070-style PBKDF2-HMAC-SHA256 (c=1, dkLen=32)
-    let pk = PBKDF2[SHA256].deriveKey("password".asByteSlice(), salt: bytes("salt"), iterations: 1, length: 32).expect("pbkdf2");
+    let pk = PBKDF2[SHA256].deriveKey("password".bytes, salt: bytes("salt"), iterations: 1, length: 32).expect("pbkdf2");
     check("pbkdf2-sha256 c=1", hex(pk.bytes), "120fb6cffcf8b32c43e7225256c4f837a86548c92ccc35480805987cb70be17b");
     // RFC 5869 A.1
     var ikm: [UInt8] = []; for _ in 0..<22 { ikm.append(0x0b); }
@@ -150,7 +150,7 @@ func main() {
     // --- #1 / #5 ---
     check("generic H.hash", genericHex[SHA256](abc), "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
     check("hash UnsafeSlice input", SHA256.hash(abc.asSlice()).hexString, "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
-    check("hash string bytes", SHA256.hash("abc".asByteSlice()).hexString, "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
+    check("hash string bytes", SHA256.hash("abc".bytes).hexString, "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
     let s1 = ChaCha20Poly1305.seal(msg, using: key).expect("s1");
     let s2 = ChaCha20Poly1305.seal(msg, using: key).expect("s2");
     check("default nonce fresh per call", "\(s1.nonce == s2.nonce)", "false");

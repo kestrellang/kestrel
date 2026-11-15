@@ -338,15 +338,15 @@ Public APIs use the safe slice types. `UnsafeSlice` only appears in APIs that ar
 
 - **Read-only parameters** take `&Slice[T]`. An `Array` or `UnsafeSlice` argument peels to it through `Indirection`, so callers pass an `Array`, a `Slice`, a sub-slice or an array literal without copying.
 - **Protocol requirements** take `Slice[T]`. A generic requirement can't be called through `any P` (E145), so `any Hasher` and `any Writable` need the concrete type.
-- **Returned views** are `&Slice[T]` (or `&mutating Slice[T]`), borrowed from the receiver: `asSlice()`, `prefix(n)`, `drop(first:)`, `asByteSlice()`.
+- **Returned views** are `&Slice[T]` (or `&mutating Slice[T]`), borrowed from the receiver: `asSlice()`, `prefix(n)`, `drop(first:)`. A view type with its own API (`String.bytes`) conforms to `Indirection` with a `Slice` target instead, so it still passes wherever a `&Slice` is expected.
 
 ```
 // Good
 func append(contentsOf other: &Slice[T])
 protocol Writable { mutating func write(from bytes: Slice[UInt8]) -> … }
-func asByteSlice() -> &Slice[UInt8]
+func asSlice() -> &Slice[T]
 
 // Bad
 func append(contentsOf other: UnsafeSlice[T])
-func asByteSlice() -> UnsafeSlice[UInt8]
+func asSlice() -> UnsafeSlice[T]
 ```
