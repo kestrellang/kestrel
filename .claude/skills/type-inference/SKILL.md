@@ -1,6 +1,6 @@
 ---
 name: type-inference
-description: Internals of the lib type-infer crate — the constraint solver, unification, member resolution, literal defaults, error recovery, and the pitfalls they hide. Use when debugging "could not infer type", "type mismatch", "ambiguous member", where-clause bugs, protocol-conformance wrong answers, associated-type resolution, literal-default surprises, or any solver-crate change. Also use when adding a new `Constraint` variant, `InferError` variant, or extending `TypeResolver`. For "where does this source construct live?" routing, use `kestrel-pipeline` instead.
+description: 'Internals of the type-infer crate: the constraint solver, unification, member resolution, literal defaults and error recovery. Use for "could not infer type", type mismatches, where-clause or associated-type bugs, or changes to the solver.'
 ---
 
 # type-inference

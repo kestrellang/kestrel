@@ -76,7 +76,7 @@ Parser rewrite, symbol-mangling refactor, the deferred-resolution inference engi
 
 # Preview 2: Types & Expressiveness (0.16 → 0.22)
 
-This preview rounds out the type system surface — opaque and existential types, attribute-driven derives, expression sugar that's been deferred, the property model (lazy / observed / `mutating get`), conditional conformance, and the class runtime. Each version is a 3-week train cycle. 0.16 has shipped; development is on 0.17.
+This preview rounds out the type system surface — opaque and existential types, attribute-driven derives, expression sugar that's been deferred, the property model (lazy / observed / `mutating get`), conditional conformance, and the class runtime. Each version is a 3-week train cycle. 0.17 is the latest release (`v0.17.0`); nightly is at 0.20.
 
 ## 0.16 — Opaque types & language gaps *(shipped)*
 
@@ -89,7 +89,7 @@ Beyond the original scope, this cycle also landed:
 - **A second backend** — LLVM 18 codegen, used for optimized builds (`-O1`, `-O2`); Cranelift builds `-O0`.
 - **Optimized builds & tool installs** — `kestrel build -O 0|1|2`, and `flock install`, which builds optimized binaries into `~/.flock/bin` by default.
 
-## 0.17 — Boxing & existentials
+## 0.17 — Boxing & existentials *(shipped)*
 
 Existential types (`any Protocol`) — boxed via `GlobalAllocator`, with vtables carrying drop / size / align plus the protocol methods. `any P` is non-Copyable; `Cloneable` is conditional on `P: Cloneable`. Escaping closures get the same boxing treatment when a closure outlives its frame. `indirect case` enum variants heap-box their payloads via the same allocator.
 
@@ -107,9 +107,9 @@ Designs: [attributes](docs/plans/attributes/attributes-design.md) · [existentia
 
 ## 0.19 — Properties & conditional conformance
 
-Lazy properties (`lazy let expensive = compute()`), property observers (`willSet` / `didSet`), `mutating get` on computed properties and subscripts, and conditional conformance (`Box[T]: Copyable where T: Copyable`).
+*(Implemented on nightly.)* Lazy properties (`lazy let expensive = compute()`), property observers (`willSet` / `didSet`), a getter that may modify `self`, and conditional conformance (`Box[T]: Copyable where T: Copyable`).
 
-> **`mutating get` matters more than it looks.** It lets a getter modify `self` (value types only); the call site requires a `var` receiver. This unblocks insert-on-read APIs like `Dictionary.subscript(key:inserting:)`, which was removed in 0.13's stdlib because without `mutating get` the documented "insert default on miss" contract couldn't be honored. Keep an eye on what other APIs become expressible once this lands.
+> **The self-modifying getter is spelled `modifying get`** (and `modifying ref`), settled in the stdlib API review; this roadmap first called it `mutating get`. It lets a getter modify `self` (value types only); the call site requires a `var` receiver (E203). See [computed properties](docs/language/computed-properties.md). It unblocks insert-on-read APIs like `Dictionary.subscript(key:inserting:)`, which was removed in 0.13's stdlib and hasn't been added back yet.
 
 ## 0.20 — Standard library & polish
 

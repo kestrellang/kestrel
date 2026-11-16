@@ -1,9 +1,9 @@
 ---
 name: feature
-description: End-to-end workflow for adding a new language feature to the lib Kestrel compiler. Use when the user says "add feature X", "implement X in the compiler", or otherwise asks for a non-trivial language change that spans multiple pipeline stages (lexer → parser → AST → name-res → HIR → type-infer → MIR/codegen) and wants it done with design/plan/test gates. For single-stage tweaks or bug fixes, use the `change` skill instead. For writing the `.ks` testdata, use `write-tests`; for writing Kestrel source examples, use `write-kestrel`. For tracing "where does X live in the pipeline?", use `kestrel-pipeline`.
+description: End-to-end workflow for adding a new language feature that spans several compiler stages (parser through codegen), with design, plan and test gates. For a change to one existing behavior, use `change` instead.
 ---
 
-# Adding a Feature to the lib Kestrel Compiler
+# Adding a feature to the Kestrel compiler
 
 A staged workflow with **confirmation gates** at each phase. The point of the
 gates is to avoid writing 800 lines of code against a design the user didn't want.
@@ -28,10 +28,26 @@ Before you start, skim the target crate's `docs/architecture.md` — lib require
 one per crate (see `lib/AGENTS.md`). `kestrel-pipeline` is faster for "which
 file owns variant X?".
 
+## Phase 0 — Does it already exist?
+
+Before anything else, check the feature isn't already built under another
+name. Search for what it **does**, not for the spelling you were given:
+
+- `docs/language/` for the behavior (the user docs describe shipped features);
+- the grammar (`lib/kestrel-syntax-tree/kestrel.ungram`) and `git log -S'<keyword>'`
+  for related syntax;
+- `lib/kestrel-test-suite/testdata/` for tests of the behavior.
+
+The roadmap and plan docs can lag behind the code. If the behavior already
+exists (`mutating get` shipped as `modifying get`, for example), **stop**:
+report what exists, how it's spelled and where it's tested, and let the user
+decide whether anything should change. A second spelling or a rename is a
+language decision, not an implementation detail.
+
 ## Phase 1 — Brainstorm
 
-Launch an Explore subagent to gather context; do not go it alone. The Explore
-agent should return:
+Gather context, with an Explore subagent if you can spawn one (otherwise
+search yourself). Come back with:
 
 - **Similar features** already implemented — what pattern should this feature mirror?
 - **Touched crates and files** — which pipeline stages need changes?
@@ -50,6 +66,17 @@ more than one reasonable answer.
 > **Gate 1 — design direction.** The user confirms the shape before you write
 > a design doc. If they redirect, re-run Explore on the new framing rather than
 > bolting changes onto a stale picture.
+>
+> **No one to answer?** (an unattended run, a subagent) Don't approve your own
+> gates. Write the open questions and your recommended answers into the design
+> doc's "Open questions" section (mark it unresolved), stop there, and report.
+> Gates exist because the user owns the language's shape. The same applies to
+> the AGENTS.md "ask first" rule: list the patterns you'd add in your report
+> instead of adding them.
+>
+> **Small feature?** Gates 2 and 3 can be one review: write the design and the
+> plan, then ask once. Do this when the semantics are settled and the plan is
+> mostly mechanical.
 
 ## Phase 2 — Design document
 
@@ -72,6 +99,9 @@ One paragraph: what it does, why it's needed.
 - Copy vs move, access modes, visibility implications
 
 ## Pipeline impact
+Name the file and function for each change, from reading the code, not from
+memory. An unchecked row is a guess; a plan built on it repeats the guess.
+
 | Stage | Change |
 |-------|--------|
 | Lexer | New tokens? |
@@ -114,6 +144,9 @@ don't apply (most features don't touch every stage).
 ## Phases
 
 ### Phase 0 — Tests (fail first)
+Once Gate 2 settles the semantics, these tests can be written right away, as
+CLAUDE.md asks ("if something doesn't work yet, add a test"). Put them in their
+own commit so a change of plan at Gate 3 can drop them.
 - [ ] Diagnostic `.ks` files under `testdata/diagnostics/<feature>/` or the
       most specific category (e.g. `expressions/<feature>/`)
 - [ ] Execution `.ks` files with `// expect-exit: 0`
@@ -128,14 +161,22 @@ Files: `lib/kestrel-syntax-tree/src/...`
 - [ ] Add `SyntaxKind` variant(s).
 
 ### Phase 3 — Parser
-Files: `lib/kestrel-parser/src/...`
+Files: `lib/kestrel-parser/src/grammar/` (`exprs.rs`, `blocks.rs`, `items.rs`,
+`patterns.rs`, `types.rs`, …)
 - [ ] Parse rule for the new shape.
 - [ ] Wire into the existing declaration / expression / statement dispatcher
       so the parser actually reaches it.
+- [ ] **A new keyword** has a checklist in kestrel-parser's AGENTS.md
+      ("Adding a keyword"): label keywords, `kind_spelling`,
+      `at_stmt_boundary`, dispatch, EBNF.
+- [ ] **A new statement** (not an expression: `let`, `guard`, `deinit x;`) is
+      a `block_items` arm in `grammar/blocks.rs`. The two lists below are for
+      expressions only.
 - [ ] **Statement-like expressions.** If the new expression can stand alone as
       a statement without a trailing semicolon (like `if`, `while`, `loop`,
-      `for`, `match`), add its variant to `is_statement_like_expr()` in
-      `kestrel-parser/src/block/mod.rs`. Forgetting this produces confusing
+      `for`, `match`), add its keyword to `at_stmt_like` / `stmt_like` in
+      `grammar/exprs.rs` and its node kind to `is_stmt_like` in
+      `grammar/blocks.rs`. Forgetting this produces confusing
       "expected semicolon" errors on the preceding expression:
       ```
       for i in range {
@@ -145,10 +186,9 @@ Files: `lib/kestrel-parser/src/...`
       ```
 - [ ] **Sub-expressions followed by `{`.** If the new form contains a
       sub-expression that sits directly before a `{` block (like `range` in
-      `for i in range { body }`), parse that sub-expression with a
-      trailing-closure-less parser such as `condition_binary`. The full
-      `expr_parser` will eat the `{` as a trailing-closure argument. See
-      `for_expr` in `kestrel-parser/src/expr/mod.rs`.
+      `for i in range { body }`), parse it with `cond_expr` (in
+      `grammar/exprs.rs`), which uses `at_cond_trailing_closure` so the `{`
+      is read as the body rather than a trailing closure.
 
 ### Phase 4 — Declaration (ECS) builder
 Files: `lib/kestrel-ast-builder/src/builders/<feature>.rs` (+ `mod.rs`,
@@ -167,6 +207,9 @@ Files: `lib/kestrel-name-res/src/...`
 - [ ] Update auto-import / std-import rules only if explicitly part of the design.
 
 ### Phase 6 — HIR lowering
+A new `HirStmt`/`HirExpr` variant: also give an arm to every walk that ends in
+`_ => {}` (see kestrel-hir's AGENTS.md). The compiler won't list those.
+
 Files: `lib/kestrel-hir-lower/src/{syntax,expr,stmt,pat,ty,desugar}.rs`
 - [ ] `HirExpr` / `HirStmt` / `HirPat` variant — or desugar to existing ones
       (prefer desugar when the semantics overlap with an existing construct).
@@ -197,7 +240,8 @@ Files: `lib/kestrel-analyze/src/decl/<feature>.rs` or `.../body/<feature>.rs`
       well-formed. Type checking, pattern validation, and any other semantic
       correctness checks are analyzer passes. Keeping the split clean makes
       validation logic independently testable and keeps the lowerer focused
-      on tree construction.
+      on tree construction. (E010–E012 are emitted in HIR lowering; they
+      predate the rule and are not a precedent.)
 
 ### Phase 9 — MIR lowering / codegen
 Files: `lib/kestrel-mir-lower/src/...`, `lib/kestrel-codegen-cranelift/src/...`
@@ -241,8 +285,9 @@ House rules (pulled from `CLAUDE.md` and memory):
 
 After tests are green:
 
-1. **User-facing docs.** Write `docs/language/{feature}.md` describing the
-   feature for Kestrel users (syntax, semantics, examples, gotchas).
+1. **User-facing docs.** If an existing page in `docs/language/` covers the
+   area, extend it; otherwise write `docs/language/{feature}.md` (syntax,
+   semantics, examples, gotchas). One fact, one page.
 2. **Crate architecture docs.** Update `docs/architecture.md` in any crate
    whose pipeline position, core types, or module map changed. Topic docs
    (`docs/<topic>.md`) get a new entry if the feature warrants a deep dive.
@@ -257,7 +302,7 @@ After tests are green:
 
 - **`change`** — behavioral tweak to an existing feature (one pipeline stage,
   maybe two). Skip brainstorm and design; go straight to the change.
-- **`debug-kestrel` / `debug-test`** — diagnosing a failure, not adding a
+- **`debug`** — diagnosing a failure, not adding a
   feature.
 - **`write-tests`** — writing `.ks` testdata (this skill tells you *what* to
   test; that skill tells you *how* to encode it).

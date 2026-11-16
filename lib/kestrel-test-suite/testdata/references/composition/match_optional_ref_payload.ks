@@ -1,4 +1,5 @@
 // test: execution
+// expect-stdout: ok
 // backends: cranelift,llvm
 // stdlib: true
 
@@ -27,5 +28,3 @@ func main() {
     }
     print("ok");
 }
-
-// CHECK: ok

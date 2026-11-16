@@ -1,6 +1,6 @@
 ---
 name: write-tests
-description: Write tests for a Kestrel compiler feature. Use when the user asks to add a test, write tests for a feature, cover a bug with a regression test, or when a diagnostic/behavior change needs testdata updates. Covers the lib `.ks` testdata format (`diagnostics` and `execution` kinds), the `// ERROR:` and `// WARN:` annotation styles, where to place files under `lib/kestrel-test-suite/testdata/`, and how to run the tests via the `triage` skill (never `cargo test` directly).
+description: 'Write `.ks` tests for a compiler feature or bug: the `diagnostics` and `execution` kinds, `// ERROR:` and `// WARN:` annotations, where files go under `lib/kestrel-test-suite/testdata/`, and running them through triage.'
 ---
 
 # Writing Kestrel Tests (lib)
@@ -22,7 +22,11 @@ module <Name>
 ...
 ```
 
-- `// test:` — either `diagnostics` or `execution`. Required.
+- `// test:` — `diagnostics`, `execution` or `mir`. Required. An unknown
+  kind silently runs as `diagnostics`. `mir` compiles the file and compares
+  the lowered MIR against a snapshot (`mir-filter` / `mir-snapshot` headers,
+  `lib/kestrel-test-suite/src/mir_snapshot.rs`); use it only when the shape
+  of the MIR is the thing under test.
 - `// stdlib:` — `false` for unit-like diagnostic tests that don't need stdlib
   (faster, fewer moving parts); `true` when the test uses stdlib types
   (`Int64`, `String`, `Array`, `Char`, etc.). Required.
@@ -71,10 +75,9 @@ The harness compiles the program, runs it, and checks the process exit code.
 
 module Test
 
-import std.num.Int64
-
-func main() -> lang.i64 {
-    if 2 + 2 != 4 { return 1 }
+@main
+func main() -> Int64 {
+    if 2 + 2 != 4 { return 1; }
     0
 }
 ```
@@ -122,7 +125,9 @@ included.** An unannotated warning fails the test as "unexpected warning", so
 adding a new warning-level analyzer can break existing tests: grep testdata for
 files that would trigger it. (Diagnostics coming from the stdlib are not
 counted; only those located in the test file.) `// ERROR(E123)` matches by code
-for errors; there is no code form for warnings.
+for errors, and `// ERROR(E123): message` matches the code and a message
+substring together (prefer it: the code pins the diagnostic, the message pins
+the case). There is no code form for warnings.
 
 **Post-monomorphization warnings (E508) are checked in `execution` tests.** They
 only exist once the program is built, so a `diagnostics` test never sees them.
@@ -197,7 +202,9 @@ No `mod.rs` update is needed — the harness discovers files by walking
 ## What not to do
 
 - Don't write Rust test code under `tests/` — the harness runs `.ks` files. New
-  Rust tests are almost never the right answer for feature coverage.
+  Rust tests are almost never the right answer for feature coverage. The
+  exception is a pure syntax check (tree shape, recovery) in
+  `lib/kestrel-parser/tests/`.
 - Don't test the same diagnostic message twice across files. One canonical
   reproduction is enough; additional cases should cover *different* trigger
   paths.

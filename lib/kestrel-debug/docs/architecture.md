@@ -37,13 +37,12 @@ The `if` guard prevents format string evaluation when disabled, so there is no r
 
 ## Debug Categories
 
-| Category | Used By | Traces |
-|----------|---------|--------|
-| `infer` | kestrel-type-infer | Constraint generation and solving |
-| `hir-lower` | kestrel-hir-lower | Path resolution, name lookups, AST transformations |
-| `name-res` | kestrel-name-res | Scope construction, resolution queries |
-| `solver` | kestrel-type-infer | Fixpoint iteration, constraint processing |
-| `unify` | kestrel-type-infer | Type unification and substitution |
+Categories are free-form string literals chosen at each call site; there is
+no registry. List the ones in use:
+
+```bash
+rg -oUN --no-filename -r '$1' 'ktrace!\(\s*"([^"]+)"' lib | sort -u
+```
 
 ## Module Map
 

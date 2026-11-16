@@ -110,6 +110,7 @@ impl LowerCtx<'_> {
         let expr = self.alloc_expr(HirExpr::Block {
             body,
             span: span.clone(),
+            own_scope: false,
         });
         self.alloc_stmt(HirStmt::Expr { expr, span })
     }

@@ -1,4 +1,5 @@
 // test: execution
+// expect-stdout: 6
 // stdlib: true
 
 // `Deque.asSlices()` lends its two contiguous runs as `&Slice[T]` in place:
@@ -32,5 +33,3 @@ func main() {
     if front(0) != 0 { fatalError("wrapped front does not start at the head") }
     print("\(total(front) + total(back))");
 }
-
-// CHECK: 6

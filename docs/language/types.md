@@ -4,6 +4,27 @@ Kestrel has a static type system with primitive types, composite types, and user
 
 > **Note**: Features marked as *(Future)* are planned but not yet fully implemented.
 
+## On this page
+
+- [Primitive Types](#primitive-types)
+- [Tuple Types](#tuple-types)
+- [Array Types](#array-types)
+- [Dictionary Types](#dictionary-types)
+- [Function Types](#function-types)
+- [Optional Types](#optional-types)
+- [Reference Types](#reference-types)
+- [Pointer Types](#pointer-types)
+- [Type Aliases](#type-aliases)
+- [Nominal Types](#nominal-types)
+- [Generic Type Parameters](#generic-type-parameters)
+- [The Self Type](#the-self-type)
+- [Type Inference](#type-inference)
+- [Type Conversion](#type-conversion)
+- [Grammar](#grammar)
+- [Examples](#examples)
+- [Type Categories Summary](#type-categories-summary)
+- [Best Practices](#best-practices)
+
 ## Primitive Types
 
 The user-facing primitive types are defined by the standard library and are always in scope — no import needed. (Internally they wrap compiler primitives in the `lang` namespace, such as `lang.i64`; you should never need to name those directly.)

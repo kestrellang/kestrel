@@ -115,7 +115,7 @@ and frees the box; `&mutating` bindings write into the box in place:
 
 ```kestrel
 extend Tree {
-    mutating func insert(_ v: Int64) {
+    mutating func insert(v: Int64) {
         match self {
             .Leaf => { self = .Node(.Leaf, v, .Leaf); },
             .Node(&mutating l, x, &mutating r) => if v < x { l.insert(v) } else { r.insert(v) }

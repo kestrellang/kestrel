@@ -46,7 +46,7 @@ All mangled symbols start with `_K0` — `K` identifies Kestrel, `0` is the vers
 
 ## Path encoding
 
-Entity names in MIR are dot-separated qualified names (`"std.collections.Array.append"`), built by `qualified_name` in `lib/kestrel-mir-lower/src/name.rs` from the entity's parent chain (nameless `init` / `subscript` / `deinit` entities contribute fixed segments; extensions inject the extended type's path segments). The mangler splits on `.` and encodes each segment as a length-prefixed ident.
+Entity names in MIR are dot-separated qualified names (`"std.collections.Array.append"`), built by `qualified_name` in `lib/kestrel-ast-builder/src/qualified_name.rs` from the entity's parent chain (nameless `init` / `subscript` / `deinit` entities contribute fixed segments; extensions inject the extended type's path segments). The mangler splits on `.` and encodes each segment as a length-prefixed ident.
 
 ```
 "main"                   → 4_main

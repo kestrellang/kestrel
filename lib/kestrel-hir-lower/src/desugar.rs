@@ -386,6 +386,7 @@ impl LowerCtx<'_> {
         let body_expr = self.alloc_expr(HirExpr::Block {
             body: lowered_body,
             span: span.clone(),
+            own_scope: false,
         });
 
         let wildcard_pat = self.alloc_pat(HirPat::Wildcard { span: span.clone() });
@@ -452,6 +453,7 @@ impl LowerCtx<'_> {
             this.alloc_expr(HirExpr::Block {
                 body: lowered_body,
                 span: span.clone(),
+                own_scope: false,
             })
         };
         let mut on_fail = |this: &mut Self| {
@@ -615,6 +617,7 @@ impl LowerCtx<'_> {
         let body_expr = self.alloc_expr(HirExpr::Block {
             body: lowered_for_body,
             span: span.clone(),
+            own_scope: false,
         });
 
         // .None => break
@@ -668,6 +671,7 @@ impl LowerCtx<'_> {
                 tail_expr: Some(loop_expr),
             },
             span: span.clone(),
+            own_scope: false,
         });
 
         // Mark the desugared subtree with a Sugar wrapper so post-typing
@@ -829,7 +833,7 @@ impl LowerCtx<'_> {
         })
     }
 
-    /// Desugar `throw value` → `return .Err(value)`
+    /// Desugar `throw value` → `Sugar { Throw, return .Err(value) }`
     ///
     /// If `value` already lowered to `HirExpr::Error` (e.g. parser recovered
     /// from `throw\n}`), short-circuit to `HirExpr::Error` so inference
@@ -846,8 +850,13 @@ impl LowerCtx<'_> {
         let err_wrap =
             self.lang_case_value(Builtin::ResultErrCase, Some(lowered_value), "`throw`", span);
 
-        self.alloc_expr(HirExpr::Return {
+        let ret = self.alloc_expr(HirExpr::Return {
             value: Some(err_wrap),
+            span: span.clone(),
+        });
+        self.alloc_expr(HirExpr::Sugar {
+            kind: SugarKind::Throw,
+            inner: ret,
             span: span.clone(),
         })
     }
@@ -1044,6 +1053,7 @@ impl LowerCtx<'_> {
                 tail_expr: Some(build_call),
             },
             span: span.clone(),
+            own_scope: false,
         });
 
         self.alloc_expr(HirExpr::Sugar {

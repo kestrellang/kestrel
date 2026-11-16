@@ -46,11 +46,18 @@
 //! `consuming`/`escaping` own their captures, so all three lift the check
 //! (docs/design/closures.md, Diagnostics table).
 //!
-//! **Message:** "cannot assign to captured variable '{name}'"
+//! Every write the capture plan records (`CapturedPlace::writes`, from
+//! `kestrel_type_infer::mutating_use`) is reported: `=`, `+=`, a `mutating`
+//! method or argument, a `modifying` read, and writes in a nested `mutating`
+//! closure. A nested owning closure writes its own copy and is not one.
+//!
+//! **Message:** "cannot assign to captured variable '{name}'" (an assignment
+//! target) or "cannot mutate captured variable '{name}'" (any other write)
 //!
 //! **Labels:**
-//! - Primary: the assignment target
-//!   - Span source: `util::expr_span` on the assignment target `HirExprId`
+//! - Primary: the written place
+//!   - Span source: `util::expr_span` on the write's `HirExprId` (assignment
+//!     target, `mutating` receiver or argument)
 //!   - Message: "captured variables are immutable in closures"
 //!
 //! **Notes:**
@@ -164,9 +171,23 @@ impl BodyCheck for ClosureAnalyzer {
             root: cx.root,
         });
 
+        // E603 reads the capture plan's writes (`CapturedPlace::writes`),
+        // which come from `kestrel_type_infer::mutating_use` — so `=`, `+=`,
+        // a `mutating` method and a `mutating` argument are one rule.
+        let assign_targets: HashSet<HirExprId> = cx
+            .hir
+            .exprs
+            .iter()
+            .filter_map(|(_, e)| match e {
+                HirExpr::Assign { target, .. } => Some(*target),
+                _ => None,
+            })
+            .collect();
+        let mut reported: HashSet<HirExprId> = HashSet::new();
+
         // Walk all expressions looking for closures
         for (expr_id, expr) in cx.hir.exprs.iter() {
-            let HirExpr::Closure { params, body, .. } = expr else {
+            let HirExpr::Closure { params, .. } = expr else {
                 continue;
             };
 
@@ -270,9 +291,16 @@ impl BodyCheck for ClosureAnalyzer {
             // `escaping` owns its captures, so both lift the error; `consuming`
             // owns them too. An expected normal type is never silently
             // upgraded — the fix-it note points at the `mutating` spelling.
-            if !captures.is_empty() && closure_kind_of(cx, expr_id) == FnTypeKind::Normal {
-                let capture_set: HashSet<LocalId> = captures.iter().copied().collect();
-                check_capture_assignments(cx, body, &capture_set, &mut diags);
+            if closure_kind_of(cx, expr_id) == FnTypeKind::Normal {
+                for cp in capture_plan.get(expr_id) {
+                    for &site in &cp.writes {
+                        // A write inside a nested normal closure is in both
+                        // plans; report it once.
+                        if reported.insert(site) {
+                            diags.push(captured_write_diag(cx, cp.key.root, site, &assign_targets));
+                        }
+                    }
+                }
             }
 
             // NOTE: the capturing-closure escape check (formerly E605, a
@@ -466,6 +494,10 @@ fn check_expr_for_param_assign(
         } => {
             check_expr_for_param_assign(cx, *val, param_locals, diags);
         },
+        // Sugar is transparent (`throw`, `+=`, `try`, …).
+        HirExpr::Sugar { inner, .. } => {
+            check_expr_for_param_assign(cx, *inner, param_locals, diags)
+        },
         HirExpr::Field { base, .. } | HirExpr::TupleIndex { base, .. } => {
             check_expr_for_param_assign(cx, *base, param_locals, diags);
         },
@@ -503,129 +535,35 @@ fn check_block_for_param_assign(
     }
 }
 
-/// Walk a closure body looking for assignments to captured variables (E603).
-fn check_capture_assignments(
+/// E603 at one write of a captured place in a normal closure.
+fn captured_write_diag(
     cx: &BodyContext<'_>,
-    block: &HirBlock,
-    capture_set: &HashSet<LocalId>,
-    diags: &mut Vec<AnalyzeDiagnostic>,
-) {
-    for &stmt_id in &block.stmts {
-        match &cx.hir.stmts[stmt_id] {
-            HirStmt::Expr { expr, .. } => {
-                walk_for_capture_assign(cx, *expr, capture_set, diags);
-            },
-            HirStmt::Let { value: Some(v), .. } => {
-                walk_for_capture_assign(cx, *v, capture_set, diags);
-            },
-            _ => {},
-        }
-    }
-    if let Some(tail) = block.tail_expr {
-        walk_for_capture_assign(cx, tail, capture_set, diags);
-    }
-}
-
-/// The root local of an assignment TARGET place (`c`, `c.n`, `c.n.0`), or
-/// `None` when the target is not a place chain (a subscript/getter write, an
-/// error node). Deliberately mirrors `place_key_of`'s walk without needing the
-/// field resolutions — E603 only cares about the root.
-fn assign_target_root(cx: &BodyContext<'_>, target: HirExprId) -> Option<LocalId> {
-    match &cx.hir.exprs[target] {
-        HirExpr::Local(local, _) => Some(*local),
-        HirExpr::Field { base, .. } | HirExpr::TupleIndex { base, .. } => {
-            assign_target_root(cx, *base)
-        },
-        HirExpr::Sugar { inner, .. } => assign_target_root(cx, *inner),
-        _ => None,
-    }
-}
-
-fn walk_for_capture_assign(
-    cx: &BodyContext<'_>,
-    id: HirExprId,
-    capture_set: &HashSet<LocalId>,
-    diags: &mut Vec<AnalyzeDiagnostic>,
-) {
-    match &cx.hir.exprs[id] {
-        HirExpr::Assign { target, value, .. } => {
-            // ANY place rooted at a capture, not just the bare local. A view
-            // env binds the capture's ADDRESS, so `c.n = 5` writes straight
-            // back through the view — and a normal closure's captures are
-            // read-only by design (the copy-soundness argument in
-            // docs/design/closures.md §"Normal: read-only views" depends on
-            // nobody writing through a shared view). Matching only
-            // `HirExpr::Local` let every projected write slip past.
-            if let Some(local_id) = assign_target_root(cx, *target)
-                && capture_set.contains(&local_id)
-            {
-                let name = cx.hir.locals[local_id].name.clone();
-                diags.push(AnalyzeDiagnostic {
-                    descriptor_id: DESCRIPTORS[3].id,
-                    severity: DESCRIPTORS[3].default_severity,
-                    message: format!("cannot assign to captured variable '{}'", name),
-                    labels: vec![DiagLabel {
-                        span: util::expr_span(cx.hir, *target),
-                        message: "captured variables are immutable in closures".into(),
-                        is_primary: true,
-                    }],
-                    // Fix-it (design: "E603 ... with a fix-it suggesting
-                    // `mutating`/`escaping`"). A normal closure captures
-                    // read-only views; the expected TYPE is what selects a
-                    // writable tier — there is no kind-on-literal spelling.
-                    notes: vec![
-                        "a normal closure captures read-only views; give it a `mutating` \
-                         expected type (e.g. `mutating () -> ()`) to write back to the \
-                         original, or fold the value and return it instead"
-                            .to_string(),
-                    ],
-                });
-            }
-            walk_for_capture_assign(cx, *value, capture_set, diags);
-        },
-        HirExpr::If {
-            condition,
-            then_body,
-            else_body,
-            ..
-        } => {
-            walk_for_capture_assign(cx, *condition, capture_set, diags);
-            check_capture_assignments(cx, then_body, capture_set, diags);
-            if let Some(eb) = else_body {
-                check_capture_assignments(cx, eb, capture_set, diags);
-            }
-        },
-        HirExpr::Loop { body, .. } | HirExpr::Block { body, .. } => {
-            check_capture_assignments(cx, body, capture_set, diags);
-        },
-        HirExpr::Match {
-            scrutinee, arms, ..
-        } => {
-            walk_for_capture_assign(cx, *scrutinee, capture_set, diags);
-            for arm in arms {
-                if let Some(g) = arm.guard {
-                    walk_for_capture_assign(cx, g, capture_set, diags);
-                }
-                walk_for_capture_assign(cx, arm.body, capture_set, diags);
-            }
-        },
-        HirExpr::Call { callee, args, .. } => {
-            walk_for_capture_assign(cx, *callee, capture_set, diags);
-            for arg in args {
-                walk_for_capture_assign(cx, arg.value, capture_set, diags);
-            }
-        },
-        HirExpr::MethodCall { receiver, args, .. }
-        | HirExpr::ProtocolCall { receiver, args, .. } => {
-            walk_for_capture_assign(cx, *receiver, capture_set, diags);
-            for arg in args {
-                walk_for_capture_assign(cx, arg.value, capture_set, diags);
-            }
-        },
-        HirExpr::Return { value: Some(v), .. } => {
-            walk_for_capture_assign(cx, *v, capture_set, diags);
-        },
-        HirExpr::Closure { .. } => {}, // nested closure has own scope
-        _ => {},
+    root: LocalId,
+    site: HirExprId,
+    assign_targets: &HashSet<HirExprId>,
+) -> AnalyzeDiagnostic {
+    let name = &cx.hir.locals[root].name;
+    let message = if assign_targets.contains(&site) {
+        format!("cannot assign to captured variable '{name}'")
+    } else {
+        format!("cannot mutate captured variable '{name}'")
+    };
+    AnalyzeDiagnostic {
+        descriptor_id: DESCRIPTORS[3].id,
+        severity: DESCRIPTORS[3].default_severity,
+        message,
+        labels: vec![DiagLabel {
+            span: util::expr_span(cx.hir, site),
+            message: "captured variables are immutable in closures".into(),
+            is_primary: true,
+        }],
+        // A normal closure captures read-only views; the expected TYPE is
+        // what selects a writable tier — there is no kind-on-literal spelling.
+        notes: vec![
+            "a normal closure captures read-only views; give it a `mutating` \
+             expected type (e.g. `mutating () -> ()`) to write back to the \
+             original, or fold the value and return it instead"
+                .to_string(),
+        ],
     }
 }

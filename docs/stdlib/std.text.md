@@ -7126,6 +7126,23 @@ public func clone() -> WordsView
 
 _Defined in `lang/std/text/views.ks`._
 
+## function `_formatSpecOptions`
+
+```kestrel
+public func _formatSpecOptions(Bool, Int64, Bool, Int64, Int64, Char, Int64, Bool, Int64, Bool, Int64, Bool) -> FormatOptions
+```
+
+The `FormatOptions` a `{value:spec}` format specifier spells.
+
+The compiler parses each specifier and builds its options through this
+function, so it never names `FormatOptions`' fields or cases itself.
+`width` / `precision` apply only when their `has` flag is set.
+`alignment`, `sign` and `floatStyle` arrive as codes: alignment 0 left,
+1 right, 2 center; sign 0 negative-only, 1 always, 2 space; float style
+0 auto, 1 fixed, 2 scientific, 3 scientific uppercase, 4 percent.
+
+_Defined in `lang/std/text/format.ks`._
+
 ## function `decodeUtf8`
 
 ```kestrel

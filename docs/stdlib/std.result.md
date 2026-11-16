@@ -45,7 +45,7 @@ _Defined in `lang/std/result/optional.ks`._
 #### function `andThen`
 
 ```kestrel
-public consuming func andThen[U]((T) -> Optional[U]) -> Optional[U]
+public consuming func andThen[U]((T) -> Optional[U]) -> Optional[U] where U: not Static
 ```
 
 Monadic bind — apply a transform that itself returns an
@@ -66,7 +66,7 @@ _Defined in `lang/std/result/optional.ks`._
 #### function `andValue`
 
 ```kestrel
-public consuming func andValue[U](consuming Optional[U]) -> Optional[U]
+public consuming func andValue[U](consuming Optional[U]) -> Optional[U] where U: not Static
 ```
 
 Returns `other` when `self` is `Some`, otherwise `None`. `other` is
@@ -156,7 +156,7 @@ _Defined in `lang/std/result/optional.ks`._
 #### function `flatten`
 
 ```kestrel
-public consuming func flatten[U]() -> Optional[U] where T == Optional[U]
+public consuming func flatten[U]() -> Optional[U] where T == Optional[U], U: not Static
 ```
 
 Collapses an `Optional[Optional[T]]` one level. Available only
@@ -265,7 +265,7 @@ _Defined in `lang/std/result/optional.ks`._
 #### function `map`
 
 ```kestrel
-public consuming func map[U]((T) -> U) -> Optional[U]
+public consuming func map[U]((T) -> U) -> Optional[U] where U: not Static
 ```
 
 Functor map — applies `transform` to the wrapped value, leaving
@@ -502,7 +502,7 @@ _Defined in `lang/std/result/optional.ks`._
 #### function `zip`
 
 ```kestrel
-public consuming func zip[U](with: consuming Optional[U]) -> Optional[(T, U)]
+public consuming func zip[U](with: consuming Optional[U]) -> Optional[(T, U)] where U: not Static
 ```
 
 Pairs two optionals into an optional tuple. `Some` only when both
@@ -642,6 +642,16 @@ _Defined in `lang/std/result/optional.ks`._
 
 ### Implements `ForceUnwrap`
 
+#### function `forceUnwrap`
+
+```kestrel
+public consuming func forceUnwrap() -> T
+```
+
+Returns the wrapped value, trapping on `.None`. Backs `value!`.
+
+_Defined in `lang/std/result/optional.ks`._
+
 ### Implements `FromResidual`
 
 ### Implements `FromValue`
@@ -770,7 +780,7 @@ _Defined in `lang/std/result/result.ks`._
 #### function `andThen`
 
 ```kestrel
-public consuming func andThen[U]((T) -> Result[U, E]) -> Result[U, E]
+public consuming func andThen[U]((T) -> Result[U, E]) -> Result[U, E] where U: not Static
 ```
 
 Chains a fallible step onto an `Ok` branch, without nesting:
@@ -781,7 +791,7 @@ _Defined in `lang/std/result/result.ks`._
 #### function `andValue`
 
 ```kestrel
-public consuming func andValue[U](consuming Result[U, E]) -> Result[U, E]
+public consuming func andValue[U](consuming Result[U, E]) -> Result[U, E] where U: not Static
 ```
 
 Returns `other` when `self` is `Ok`, otherwise propagates the
@@ -851,7 +861,7 @@ _Defined in `lang/std/result/result.ks`._
 #### function `flatten`
 
 ```kestrel
-public consuming func flatten[U]() -> Result[U, E] where T == Result[U, E]
+public consuming func flatten[U]() -> Result[U, E] where T == Result[U, E], U: not Static
 ```
 
 Collapses a `Result[Result[T, E], E]` one level. Available only
@@ -990,7 +1000,7 @@ _Defined in `lang/std/result/result.ks`._
 #### function `map`
 
 ```kestrel
-public consuming func map[U]((T) -> U) -> Result[U, E]
+public consuming func map[U]((T) -> U) -> Result[U, E] where U: not Static
 ```
 
 Functor map on the success branch. `.Err` passes through unchanged.

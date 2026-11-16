@@ -4,8 +4,9 @@
 //! A `let` binding, temporary value, or immutable field cannot be passed to a
 //! `mutating` parameter since the callee would modify it.
 //!
-//! Walks all Call/MethodCall/ProtocolCall expressions, looks up the callee's
-//! `Callable` component, and classifies each argument's mutability.
+//! Walks every call and `modifying` member read, takes the operands it uses
+//! mutably from `kestrel_type_infer::mutating_use` (the same fact closure
+//! capture planning and E603 read), and classifies each one's mutability.
 //!
 //! ## Diagnostics
 //!
@@ -17,7 +18,7 @@ use crate::context::BodyContext;
 use crate::diagnostic::*;
 use crate::traits::{AnalyzerId, BodyCheck, Describe};
 use crate::util;
-use kestrel_ast_builder::{Callable, MutatingRead, NodeKind, ReceiverKind, Settable};
+use kestrel_ast_builder::{NodeKind, Settable};
 use kestrel_hir::body::*;
 use kestrel_type_infer::result::ResolvedTy;
 
@@ -114,28 +115,12 @@ impl BodyCheck for AccessModeAnalyzer {
 
         for (expr_id, expr) in cx.hir.exprs.iter() {
             match expr {
-                HirExpr::Call { callee, args, .. } => {
+                HirExpr::Call { callee, .. } => {
                     check_mutating_kind_call(cx, *callee, &mut diags);
-                    check_modifying_read(cx, expr_id, *callee, "subscript", &mut diags);
-                    // Resolve callee entity from typed resolutions
-                    let callee_entity = match &cx.hir.exprs[*callee] {
-                        HirExpr::Def(entity, _, _) => Some(*entity),
-                        _ => cx.typed.resolutions.get(callee).copied(),
-                    };
-                    if let Some(entity) = callee_entity {
-                        check_call_args(cx, entity, args, None, &mut diags);
-                    }
+                    check_mutating_operands(cx, expr_id, "subscript", &mut diags);
                 },
-                HirExpr::MethodCall { receiver, args, .. } => {
-                    // Method resolution stored on the MethodCall expr itself
-                    if let Some(&entity) = cx.typed.resolutions.get(&expr_id) {
-                        check_call_args(cx, entity, args, Some(*receiver), &mut diags);
-                    }
-                },
-                HirExpr::ProtocolCall { receiver, args, .. } => {
-                    if let Some(method_entity) = crate::util::protocol_call_method(cx, expr_id) {
-                        check_call_args(cx, method_entity, args, Some(*receiver), &mut diags);
-                    }
+                HirExpr::MethodCall { .. } | HirExpr::ProtocolCall { .. } => {
+                    check_mutating_operands(cx, expr_id, "", &mut diags);
                 },
                 HirExpr::Borrow {
                     inner,
@@ -146,9 +131,9 @@ impl BodyCheck for AccessModeAnalyzer {
                 },
                 // A read of a `modifying` member (`c.next`, `c(i)`) mutates
                 // the receiver. Method-call-shaped reads (`x.items(i)`) are
-                // covered by `check_call_args` through the Callable receiver.
-                HirExpr::Field { base, name, .. } => {
-                    check_modifying_read(cx, expr_id, *base, name.as_str_or_empty(), &mut diags);
+                // covered through the Callable's `mutating` receiver.
+                HirExpr::Field { name, .. } => {
+                    check_mutating_operands(cx, expr_id, name.as_str_or_empty(), &mut diags);
                 },
 
                 HirExpr::Match {
@@ -297,60 +282,23 @@ fn check_borrow_init(
     }
 }
 
-/// Check arguments against the callee's parameter access modes.
-fn check_call_args(
+/// Check each operand `expr_id` uses mutably (`kestrel_type_infer::mutating_use`,
+/// the same fact closure capture planning reads) is a place it may mutate.
+/// `member` names a `modifying` member for its message.
+fn check_mutating_operands(
     cx: &BodyContext<'_>,
-    callee: kestrel_hecs::Entity,
-    args: &[HirCallArg],
-    receiver: Option<HirExprId>,
+    expr_id: HirExprId,
+    member: &str,
     diags: &mut Vec<AnalyzeDiagnostic>,
 ) {
-    let Some(callable) = cx.query.get::<Callable>(callee) else {
-        return;
-    };
-
-    // Check receiver for mutating methods. Unlike argument position, a
-    // receiver that is a temporary (call result, literal, if-expr, etc.) is
-    // an owned mutable place — the caller owns it for the duration of the
-    // call chain, so mutating it is fine. Only reject when the receiver is a
-    // *named* immutable place (let binding or let field).
-    if let (Some(recv_id), Some(recv_kind)) = (receiver, &callable.receiver)
-        && matches!(recv_kind, ReceiverKind::Mutating)
-    {
-        check_mutating_receiver(cx, recv_id, diags);
-    }
-
-    // Check each argument against its corresponding parameter.
-    // Only check mutating params (is_mut && !is_consuming).
-    // Consuming params accept any argument (they take ownership).
-    for (i, arg) in args.iter().enumerate() {
-        if let Some(param) = callable.params.get(i)
-            && param.is_mut
-            && !param.is_consuming
-            && !arg_is_closure_value(cx, arg.value)
-        {
-            check_mutating_arg(cx, arg.value, diags);
+    use kestrel_type_infer::mutating_use::{MutatingOperand, mutating_operands};
+    for (op, how) in mutating_operands(cx.query, cx.typed, cx.hir, cx.root, expr_id) {
+        match how {
+            MutatingOperand::Receiver => check_mutating_receiver(cx, op, diags),
+            MutatingOperand::Arg => check_mutating_arg(cx, op, diags),
+            MutatingOperand::ModifyingBase => check_modifying_read(cx, op, member, diags),
         }
     }
-}
-
-/// Is this argument a CLOSURE value?
-///
-/// A `mutating` convention on a closure-typed parameter does not mean "the
-/// callee writes back into the caller's binding" — it declares that the callee
-/// calls the closure EXCLUSIVELY, which is the convention a `mutating`-kind
-/// closure type requires (docs/design/closures.md, "Passing: What Fits Where";
-/// the pairing itself is E625). The mutable place such a call needs is the
-/// closure's own environment — views into the caller's frame — not the
-/// argument expression, so a literal (a temporary) and a `let`-bound normal
-/// closure adapted to `mutating` both pass. Non-exclusive *calls* of a
-/// mutating-kind closure are still an E203-family mutating use of the callee
-/// binding; that is a different site.
-fn arg_is_closure_value(cx: &BodyContext<'_>, arg_id: HirExprId) -> bool {
-    matches!(
-        cx.typed.expr_types.get(&arg_id),
-        Some(ResolvedTy::Function { .. })
-    )
 }
 
 /// Is `expr` a direct reference to one of the function's own parameters?
@@ -496,22 +444,10 @@ fn check_mutating_receiver(
 /// (temporaries are fine: the caller owns them).
 fn check_modifying_read(
     cx: &BodyContext<'_>,
-    expr_id: HirExprId,
     base: HirExprId,
     member_name: &str,
     diags: &mut Vec<AnalyzeDiagnostic>,
 ) {
-    let Some(&member) = cx.typed.resolutions.get(&expr_id) else {
-        return;
-    };
-    if !cx.query.has::<MutatingRead>(member)
-        || !matches!(
-            cx.query.get::<NodeKind>(member),
-            Some(NodeKind::Field | NodeKind::Subscript)
-        )
-    {
-        return;
-    }
     let span = util::expr_span(cx.hir, base);
     let (code, what) = match classify_mutability(cx, base) {
         MutClass::Mutable | MutClass::Temporary => return,

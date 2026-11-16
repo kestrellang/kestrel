@@ -193,10 +193,13 @@ fn var_decl(p: &mut Parser<'_>) {
     if p.eat(K::Colon) {
         ty(p);
     }
-    if p.eat(K::Equals) {
-        exprs::expr(p);
+    // A missing initializer is already reported (E803); when a statement
+    // keyword follows (`let x = deinit y;`), the absent `;` is part of that
+    // one mistake, not a second.
+    let missing_init = p.eat(K::Equals) && exprs::expr(p).is_none();
+    if !(missing_init && at_stmt_boundary(p)) {
+        expect_closer(p, K::Semicolon);
     }
-    expect_closer(p, K::Semicolon);
     m.complete(p, K::VariableDeclaration);
     s.complete(p, K::Statement);
 }

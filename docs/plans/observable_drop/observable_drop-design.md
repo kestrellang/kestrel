@@ -98,7 +98,7 @@ type's lifetimes alone. Lowercase single word, matching `@fileconstant`.
   user types get the optimization by default; the lint covers the flipped
   failure direction.
 - *Name?* `@observabledrop`. "Effect" is reserved for `throws`/`yields`/`async`
-  (`docs/future_effects.md`).
+  (`docs/archive/future_effects.md`).
 - *Could an "original is still alive" check replace the attribute?* No: the
   wins come from mutating the original while a copy exists, which is exactly
   when the original can let go of the shared box.

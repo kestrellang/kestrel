@@ -20,6 +20,7 @@ pub mod entailment;
 pub mod error;
 mod existential;
 pub mod generate;
+pub mod mutating_use;
 pub mod obligations;
 pub mod opaque;
 mod optional_chain;

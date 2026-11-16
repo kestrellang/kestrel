@@ -14,19 +14,19 @@
 
 ## How It Works
 
-Snapshot splits the world into two categories:
+Snapshot clones everything that describes the world's state:
 
-**Cloned** (structural data):
-- `entities` — entity metadata (liveness, change revision)
-- `components` — all typed component columns (via `clone_box()`)
-- `hierarchy` — parent/child relationships
-- `changes` — change tracking state and fingerprints
+- `entities`: entity metadata (liveness, change revision)
+- `components`: all typed component columns (via `clone_box()`)
+- `hierarchy`: parent/child relationships
+- `changes`: change tracking state
+- `queries`: every memo, so a test reuses the std's cached query results
+- `accumulators`: the values those memos filed
 
-**Fresh** (rebuilt lazily):
-- `queries` — empty `QueryStorage`, repopulates on first query call
-- `accumulators` — empty `AccumulatorStore`, repopulates during queries
-
-Query caches are intentionally dropped because they contain type-erased memoized results tied to the original world's execution history. Since the snapshot's entity data is identical, queries re-execute once on first access and then memoize normally.
+Memos and accumulated values travel together. A memo that verifies as a cache
+hit in the snapshot never re-files its values, so a snapshot that dropped them
+would silently lose every cached query's diagnostics (audit F21). Despawned
+entities are swept first.
 
 The snapshot keeps the same `revision` counter so `begin_revision()` advances naturally.
 
@@ -73,7 +73,7 @@ This works because `T: Component` requires `Clone`. The manual `Clone` impl on `
 
 ## Design Notes
 
-**"Clone for now" approach.** The current implementation does a full deep clone of all structural data. This is simple and correct. The `snapshot()` API is designed so that a future **layered/COW world** implementation could replace the clone with a cheap reference-counted layer without changing callers.
+**"Clone for now" approach.** The current implementation does a full deep clone, memos included. This is simple and correct. The `snapshot()` API is designed so that a future **layered/COW world** implementation could replace the clone with a cheap reference-counted layer without changing callers.
 
 **Performance.** Clone cost is proportional to entity count and total component data. For stdlib-sized worlds (~thousands of entities), this is fast enough. If it becomes a bottleneck, the layered approach would share unchanged data via `Arc`.
 

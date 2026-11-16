@@ -2,6 +2,16 @@
 
 Computed properties provide a way to define properties whose values are calculated rather than stored. They use getter and setter blocks to compute values on access and optionally respond to value changes.
 
+## On this page
+
+- [Syntax](#syntax)
+- [Rules](#rules)
+- [Where Allowed](#where-allowed)
+- [Not Supported](#not-supported)
+- [Examples](#examples)
+- [Grammar](#grammar)
+- [Implementation Notes](#implementation-notes)
+
 ## Syntax
 
 ### Getter-Only (Shorthand)

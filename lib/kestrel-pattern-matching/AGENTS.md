@@ -33,10 +33,12 @@ invariant.
 
 ## Range handling
 
-Range arms (`IntRange`, `CharRange`) and integer/char literals all
-participate in interval-coverage tracking. `extract_int_range` /
-`extract_char_range` normalize them to `(start, end)` tuples that feed
-`range_covered_by_union_*`.
+Range arms and integer/char literals become interval constructors
+(`flatten_range` in `flat_pat.rs`). Because ranges can overlap, `split.rs`
+cuts each column's literals and ranges into disjoint pieces before
+specializing, so `Constructor::matches` (containment) is exact for both the
+decision tree and the usefulness check. `ranges_overlap` in `usefulness.rs`
+drives the overlap diagnostics.
 
 Rules:
 - Open bounds (`None`) widen to the type's extremum (`i64::MIN`/`MAX`,
@@ -45,8 +47,8 @@ Rules:
   syntactically valid but semantically empty, and should be flagged by a
   future bounds-validation pass, not silently coerced to "vacuously
   covered."
-- Guarded arms don't contribute to `prior_*_ranges` — a guard can fail
-  at runtime so the arm doesn't actually cover its interval.
+- Guarded arms don't count toward coverage — a guard can fail at runtime
+  so the arm doesn't actually cover its interval.
 
 ## Deduplication invariants
 

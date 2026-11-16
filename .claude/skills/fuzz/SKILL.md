@@ -1,6 +1,6 @@
 ---
 name: fuzz
-description: Stress-test a Kestrel language feature by generating many edge-case programs, compiling and running them, and reporting what breaks. Use when the user says "fuzz X", "stress test X", "try to break X", or wants exhaustive edge-case coverage of a feature. Generates `.ks` files in `./temp/fuzz/`, runs them through the `kestrel` CLI, and produces a structured pass/fail report.
+description: Stress-test a Kestrel language feature by generating many edge-case programs, building and running them, and reporting what breaks. Use for "fuzz X", "stress test X" or "try to break X".
 ---
 
 # Fuzz — Feature Stress Tester
@@ -59,10 +59,10 @@ Each file is a standalone Kestrel program:
 ```kestrel
 module FuzzTest
 
-import std.num.Int64
-// ... other imports as needed
+// The std is auto-imported; only packages need an `import`.
 
-func main() -> lang.i64 {
+@main
+func main() -> Int64 {
     // Test logic here
     // Return 0 for success, non-zero for failure
     0
@@ -116,7 +116,7 @@ func main() -> lang.i64 {
 Use this execution loop in bash:
 
 ```bash
-cd /Users/dino/Documents/Projects/kestrel
+cd "$(git rev-parse --show-toplevel)"
 mkdir -p temp/fuzz/<feature>/out
 RESULTS_FILE="temp/fuzz/<feature>/results.txt"
 echo "Fuzz results for <feature> — $(date)" > "$RESULTS_FILE"

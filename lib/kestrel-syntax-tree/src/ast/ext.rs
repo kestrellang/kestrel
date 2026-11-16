@@ -255,6 +255,19 @@ impl PropertyAccessors {
             })
     }
 
+    /// The first accessor clause written a second time (`get {} get {}`).
+    /// The per-kind accessors above return the first clause of a kind, so a
+    /// repeat is otherwise invisible.
+    pub fn repeated_clause(&self) -> Option<AccessorClause> {
+        let mut seen: Vec<SyntaxKind> = Vec::new();
+        self.accessor_clauses().find(|c| {
+            let kind = c.syntax().kind();
+            let repeated = seen.contains(&kind);
+            seen.push(kind);
+            repeated
+        })
+    }
+
     /// Declares `willSet` and/or `didSet` observers.
     pub fn has_observers(&self) -> bool {
         self.will_set().is_some() || self.did_set().is_some()

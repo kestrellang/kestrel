@@ -9,7 +9,11 @@
 //! Consumed by:
 //! - MIR lowering (`kestrel-mir-lower`): env-struct fields, parent-side
 //!   projection, and body rewriting (read the env value for `self.cap`).
-//! - `kestrel-analyze` `ClosureAnalyzer` (E603): the captured-root set.
+//! - `kestrel-analyze` `ClosureAnalyzer` (E603): each place's `writes`.
+//!
+//! A write is any mutating use (`crate::mutating_use`), not just `=`: `+=`,
+//! a `mutating` method, a `mutating` argument and a `modifying` read all make
+//! a `Write` capture.
 //!
 //! The analysis follows RFC 2229 ("disjoint closure captures"): it records the
 //! *maximal* place each access touches, then reduces per root local to the
@@ -29,7 +33,8 @@ use kestrel_hir::res::LocalId;
 use kestrel_hir_lower::LowerBody;
 
 use crate::InferBody;
-use crate::result::TypedBody;
+use crate::result::{ResolvedTy, TypedBody};
+use kestrel_ast::FnTypeKind;
 
 // ===== Capture-plan data model =====
 
@@ -92,6 +97,10 @@ pub struct CapturedPlace {
     /// lowering walks its HIR chain to resolve field indices and the
     /// projected type. Not part of place identity.
     pub repr: HirExprId,
+    /// Every expression that writes this place or a sub-place, in source
+    /// order (an assignment target, a `mutating` receiver or argument). E603
+    /// reports each one in a normal closure.
+    pub writes: Vec<HirExprId>,
 }
 
 /// Per-body capture plan: each closure `HirExprId` → its captured places,
@@ -157,7 +166,7 @@ impl QueryFn for ClosureCaptures {
         let mut map = HashMap::default();
         for (expr_id, expr) in hir.exprs.iter() {
             if let HirExpr::Closure { params, body, .. } = expr {
-                let places = analyze_closure(query_ctx, &typed, &hir, params, body);
+                let places = analyze_closure(query_ctx, self.root, &typed, &hir, params, body);
                 map.insert(expr_id, places);
             }
         }
@@ -341,6 +350,17 @@ pub fn place_key_of(
     }
 }
 
+/// The local a field / tuple-index chain roots at (`c` for `c.n.0`), whether
+/// or not every link is a capturable stored field.
+fn chain_root(hir: &kestrel_hir::body::HirBody, expr_id: HirExprId) -> Option<LocalId> {
+    match &hir.exprs[expr_id] {
+        HirExpr::Local(local, _) => Some(*local),
+        HirExpr::Field { base, .. } | HirExpr::TupleIndex { base, .. } => chain_root(hir, *base),
+        HirExpr::Sugar { inner, .. } => chain_root(hir, *inner),
+        _ => None,
+    }
+}
+
 // ===== Per-closure analysis =====
 
 /// A raw recorded place use, before disjoint-prefix reduction.
@@ -352,6 +372,7 @@ struct RawUse {
 
 fn analyze_closure(
     world: &QueryContext<'_>,
+    root: Entity,
     typed: &TypedBody,
     hir: &kestrel_hir::body::HirBody,
     params: &[HirClosureParam],
@@ -369,10 +390,12 @@ fn analyze_closure(
 
     let mut rec = Recorder {
         world,
+        root,
         typed,
         hir,
         internal: &internal,
         uses: Vec::new(),
+        in_owning: false,
     };
     rec.walk_block(body, false);
     reduce(rec.uses)
@@ -390,7 +413,8 @@ fn reduce(uses: Vec<RawUse>) -> Vec<CapturedPlace> {
     for (root, group) in by_root {
         // Whole-local use collapses everything for this root.
         if let Some(whole) = group.iter().find(|u| u.key.is_whole()) {
-            let write = group.iter().any(|u| u.write);
+            let writes = write_sites(group.iter().filter(|u| u.write));
+            let write = !writes.is_empty();
             out.push(CapturedPlace {
                 key: PlaceKey::whole(root),
                 kind: if write {
@@ -399,6 +423,7 @@ fn reduce(uses: Vec<RawUse>) -> Vec<CapturedPlace> {
                     CaptureKind::Read
                 },
                 repr: whole.repr,
+                writes,
             });
             continue;
         }
@@ -415,7 +440,12 @@ fn reduce(uses: Vec<RawUse>) -> Vec<CapturedPlace> {
                 continue;
             }
             // Write-ness propagates from any use at or below this kept prefix.
-            let write = group.iter().any(|v| u.key.is_prefix_of(&v.key) && v.write);
+            let writes = write_sites(
+                group
+                    .iter()
+                    .filter(|v| u.key.is_prefix_of(&v.key) && v.write),
+            );
+            let write = !writes.is_empty();
             kept.entry(u.key.path.clone()).or_insert(CapturedPlace {
                 key: u.key.clone(),
                 kind: if write {
@@ -424,6 +454,7 @@ fn reduce(uses: Vec<RawUse>) -> Vec<CapturedPlace> {
                     CaptureKind::Read
                 },
                 repr: u.repr,
+                writes,
             });
         }
         out.extend(kept.into_values());
@@ -434,6 +465,14 @@ fn reduce(uses: Vec<RawUse>) -> Vec<CapturedPlace> {
     out
 }
 
+/// The write expressions of `uses`, deduplicated, in source (id) order.
+fn write_sites<'a>(uses: impl Iterator<Item = &'a RawUse>) -> Vec<HirExprId> {
+    let mut sites: Vec<HirExprId> = uses.map(|u| u.repr).collect();
+    sites.sort_by_key(|e| e.raw());
+    sites.dedup();
+    sites
+}
+
 fn prefix_of(a: &[ProjElem], b: &[ProjElem]) -> bool {
     a.len() <= b.len() && a.iter().zip(b).all(|(x, y)| x == y)
 }
@@ -442,10 +481,14 @@ fn prefix_of(a: &[ProjElem], b: &[ProjElem]) -> bool {
 
 struct Recorder<'a> {
     world: &'a QueryContext<'a>,
+    root: Entity,
     typed: &'a TypedBody,
     hir: &'a kestrel_hir::body::HirBody,
     internal: &'a HashSet<LocalId>,
     uses: Vec<RawUse>,
+    /// Inside a nested owning (`consuming`/`escaping`) closure: it writes its
+    /// own copy, so for this closure its writes are reads of the source.
+    in_owning: bool,
 }
 
 impl Recorder<'_> {
@@ -461,6 +504,7 @@ impl Recorder<'_> {
         } else {
             key
         };
+        let write = write && !self.in_owning;
         self.uses.push(RawUse { key, repr, write });
     }
 
@@ -499,6 +543,34 @@ impl Recorder<'_> {
         }
     }
 
+    /// Record `expr_id` as written: its place, or — when it is no capturable
+    /// place (it crosses an observed field) — the whole local its field chain
+    /// roots at. Anything else (a temporary, a call result) is walked as read.
+    fn record_write(&mut self, expr_id: HirExprId, force_whole: bool) {
+        let key = self
+            .place_key(expr_id)
+            .or_else(|| chain_root(self.hir, expr_id).map(PlaceKey::whole));
+        match key {
+            Some(key) => self.record(key, expr_id, true, force_whole),
+            None => self.walk_expr(expr_id, force_whole),
+        }
+    }
+
+    /// Walk a call's (or `modifying` read's) operands: the ones it uses
+    /// mutably are writes (`crate::mutating_use`), the rest are reads.
+    fn walk_operands(&mut self, expr_id: HirExprId, operands: &[HirExprId], force_whole: bool) {
+        let mutated = crate::mutating_use::mutating_operands(
+            self.world, self.typed, self.hir, self.root, expr_id,
+        );
+        for &op in operands {
+            if mutated.iter().any(|(m, _)| *m == op) {
+                self.record_write(op, force_whole);
+            } else {
+                self.walk_expr(op, force_whole);
+            }
+        }
+    }
+
     /// The capturable place an expression names, if any.
     fn place_key(&self, expr_id: HirExprId) -> Option<PlaceKey> {
         if self.crosses_observed(expr_id) {
@@ -518,29 +590,33 @@ impl Recorder<'_> {
         match &self.hir.exprs[expr_id] {
             HirExpr::Assign { target, value, .. } => {
                 // A write to a place rooted at a capture needs by-ref capture.
-                if let Some(key) = self.place_key(*target) {
-                    self.record(key, *target, true, force_whole);
-                } else {
-                    self.walk_expr(*target, force_whole);
-                }
+                self.record_write(*target, force_whole);
                 self.walk_expr(*value, force_whole);
             },
             HirExpr::Closure { body, .. } => {
                 // Nested closure: its uses of our roots force whole-local.
+                let owning = matches!(
+                    self.typed.expr_types.get(&expr_id),
+                    Some(ResolvedTy::Function { kind, .. })
+                        if matches!(kind, FnTypeKind::Consuming | FnTypeKind::Escaping)
+                );
+                let outer = self.in_owning;
+                self.in_owning |= owning;
                 self.walk_block(body, true);
+                self.in_owning = outer;
             },
             HirExpr::Call { callee, args, .. } => {
-                self.walk_expr(*callee, force_whole);
-                for arg in args {
-                    self.walk_expr(arg.value, force_whole);
-                }
+                let ops: Vec<HirExprId> = std::iter::once(*callee)
+                    .chain(args.iter().map(|a| a.value))
+                    .collect();
+                self.walk_operands(expr_id, &ops, force_whole);
             },
             HirExpr::MethodCall { receiver, args, .. }
             | HirExpr::ProtocolCall { receiver, args, .. } => {
-                self.walk_expr(*receiver, force_whole);
-                for arg in args {
-                    self.walk_expr(arg.value, force_whole);
-                }
+                let ops: Vec<HirExprId> = std::iter::once(*receiver)
+                    .chain(args.iter().map(|a| a.value))
+                    .collect();
+                self.walk_operands(expr_id, &ops, force_whole);
             },
             HirExpr::If {
                 condition,
@@ -600,9 +676,8 @@ impl Recorder<'_> {
             // place (a getter, computed property, …) still uses its base — so
             // the base must be captured (e.g. `self.count` getter → capture
             // whole `self`).
-            HirExpr::Field { base, .. } | HirExpr::TupleIndex { base, .. } => {
-                self.walk_expr(*base, force_whole);
-            },
+            HirExpr::Field { base, .. } => self.walk_operands(expr_id, &[*base], force_whole),
+            HirExpr::TupleIndex { base, .. } => self.walk_expr(*base, force_whole),
             // Leaves and place-chain heads already handled above.
             _ => {},
         }

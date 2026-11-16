@@ -129,6 +129,7 @@ impl LowerCtx<'_> {
                 tail_expr: Some(tail),
             },
             span: span.clone(),
+            own_scope: false,
         });
 
         let lookup = self.alloc_expr(HirExpr::Match {

@@ -2,6 +2,23 @@
 
 Extensions add methods, computed properties, subscripts, and protocol conformances to existing types without modifying the original type definition. They enable retroactive modeling - adding capabilities to types after they're defined, including types from other modules or the standard library.
 
+## On this page
+
+- [Syntax](#syntax)
+- [Adding Members](#adding-members)
+- [Generic Extensions](#generic-extensions)
+- [Conditional Conformance](#conditional-conformance)
+- [Extension Specialization](#extension-specialization)
+- [Multiple Extensions](#multiple-extensions)
+- [Protocol Extensions](#protocol-extensions)
+- [Visibility](#visibility)
+- [Using `Self`](#using-self)
+- [Limitations](#limitations)
+- [Where Allowed](#where-allowed)
+- [Examples](#examples)
+- [Grammar](#grammar)
+- [Implementation Notes](#implementation-notes)
+
 ## Syntax
 
 ### Basic Extension

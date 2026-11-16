@@ -76,7 +76,7 @@ which target params its LHS binds. The rule is about member lookup by name.
 
 When candidates from several sources collide, the rule (shipped in
 `kestrel_type_infer::resolve_member`, mirrored in
-`resolve_extension_static_method`) is: `Direct` and `Extension` candidates
+`resolve_extension_static_member` in `src/resolve_value.rs`) is: `Direct` and `Extension` candidates
 compete equally, and a `ProtocolExtension` default joins the set only if its
 **label signature** is not already taken. A type's own `tag()` therefore wins
 over `extend SomeProtocol { static func tag() }` without the two becoming

@@ -64,14 +64,20 @@ hir_type_copy_semantics       instance-level fold over the gating args:
 
 ## Key Design Decisions
 
-- **Cycle guard**: `NominalCopySemantics` on a recursive type would re-enter itself, and the query framework panics on re-entry. A thread-local in-progress stack (side-channel state, invisible to dependency tracking) lets callers detect the cycle first and fall back to `Copyable` on self-reference.
-- **`not Copyable` name fallback**: when the `Copyable` builtin entity isn't registered (stdlib-less test fixtures), a last-segment string match keeps `struct H: not Copyable {}` non-copyable. `ResolveBuiltin` is the source of truth — don't extend the string-match pattern.
+- **Recursive types use cycle recovery.** `NominalCopySemantics` on a recursive type re-enters itself. It declares `CycleMode::Fixpoint` starting at `Copyable`, and the framework descends the lattice to the fixpoint. Sizedness does the same. Don't add a side-channel in-progress stack.
+- **No name fallback.** `Copyable` and the other builtin protocols are found only through `ResolveBuiltin`. A fixture without the std has no `Copyable`, so `: not Copyable` there means nothing.
 
 ## Module Map
 
 | File | Responsibility |
 |------|----------------|
-| `src/lib.rs` | Query keys, data types, and helper functions |
+| `src/lib.rs` | Conformance and copy-semantics queries, data types and helpers |
+| `src/copy_shape.rs` | The front-end copy rule over one shared type shape (`CopyShape`) |
+| `src/staticness.rs` | `Static`: no reference reachable through stored data |
+| `src/sizedness.rs` | `Sized`: everything but raw existentials and unsized tails |
+| `src/existential.rs` | Which requirements are callable through `any P` |
+| `src/recursive_enum.rs` | Which enum cases reach their own enum by value (E429, `indirect` boxing) |
+| `src/ref_sources.rs` | Which arguments a call's ref-carrying result can borrow from |
 
 ## Dependencies
 

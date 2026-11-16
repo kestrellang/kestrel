@@ -40,7 +40,7 @@
 >    entry filed off `S`, exactly the clause's shape). The witness's one hit is
 >    `UNJUSTIFIED` and involves no equality clause at all: it is a `Bound`
 >    (`A.Item: Show`) entry for `ProducerA.Item` handed to `ProducerB.Item`.
->    Numbers: `docs/fragility-audit.md` G25 entry.
+>    Numbers: `docs/fragility/audit.md` G25 entry.
 >
 > Consequence for the sequence: before folding variants, the cheaper candidate
 > is to make the existing `TypeEquality` registration resolve its lhs (and to

@@ -92,12 +92,12 @@ public struct Bool:
     /// Short-circuiting `and`: `other` runs only when `self` is `true`.
     /// The closure form is what the `and` keyword lowers into; users
     /// typically write `a and b` rather than calling this directly.
-    public func logicalAnd(other: () -> Bool) -> Bool {
+    public func logicalAnd(mutating other: mutating () -> Bool) -> Bool {
         if self.value { other() } else { Bool(boolLiteral: false) }
     }
 
     /// Short-circuiting `or`: `other` runs only when `self` is `false`.
-    public func logicalOr(other: () -> Bool) -> Bool {
+    public func logicalOr(mutating other: mutating () -> Bool) -> Bool {
         if self.value { Bool(boolLiteral: true) } else { other() }
     }
 

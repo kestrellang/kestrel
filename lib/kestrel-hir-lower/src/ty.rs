@@ -88,6 +88,40 @@ fn reject_bare_protocol(ctx: &QueryContext<'_>, ty: HirTy, segments: &[PathSegme
     HirTy::Error(span.clone())
 }
 
+/// E115 for a bare name that failed only because the declaration it names
+/// is `private` / `fileprivate` to another file of the module. `None` when
+/// nothing was hidden: the caller reports its own "not found".
+pub(crate) fn hidden_declaration_error(
+    ctx: &QueryContext<'_>,
+    name: &str,
+    owner: Entity,
+    root: Entity,
+    span: &Span,
+) -> Option<Diagnostic<usize>> {
+    let hidden = ctx.query(kestrel_name_res::HiddenDeclaration {
+        name: name.to_string(),
+        context: owner,
+        root,
+    })?;
+    let vis = kestrel_name_res::effective_vis(ctx, hidden);
+    let mut labels = vec![
+        Label::primary(span.file_id, span.range())
+            .with_message(format!("{} to another file", vis.keyword())),
+    ];
+    if let Some(decl) = ctx.get::<kestrel_ast_builder::DeclSpan>(hidden) {
+        labels.push(Label::secondary(decl.0.file_id, decl.0.range()).with_message("declared here"));
+    }
+    Some(
+        Diagnostic::error()
+            .with_code("E115")
+            .with_message(format!(
+                "'{name}' is {} and not accessible from this scope",
+                vis.keyword()
+            ))
+            .with_labels(labels),
+    )
+}
+
 /// Resolve a type path to its `HirTy`, reporting an unknown or non-type
 /// name. Shared by value positions and protocol bounds.
 fn lower_named_type(
@@ -124,6 +158,13 @@ fn lower_named_type(
                     }
                 },
                 TypeResolution::NotFound(ref seg) => {
+                    if let [segment] = segments
+                        && let Some(diag) =
+                            hidden_declaration_error(ctx, &segment.name, owner, root, span)
+                    {
+                        ctx.accumulate(diag);
+                        return HirTy::Error(span.clone());
+                    }
                     let type_name = segments
                         .iter()
                         .map(|s| s.name.as_str())

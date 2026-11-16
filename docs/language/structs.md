@@ -2,6 +2,23 @@
 
 Structs are value types that encapsulate state and behavior. They are the primary way to define custom data types in Kestrel.
 
+## On this page
+
+- [Declaration Syntax](#declaration-syntax)
+- [Fields (Stored Properties)](#fields-stored-properties)
+- [Computed Properties](#computed-properties)
+- [Initializers](#initializers)
+- [Deinitializers and RAII](#deinitializers-and-raii)
+- [Instance Methods](#instance-methods)
+- [Static Methods and Properties](#static-methods-and-properties)
+- [Protocol Conformance](#protocol-conformance)
+- [Generic Structs](#generic-structs)
+- [Copy Semantics](#copy-semantics)
+- [Non-Copyable Structs](#non-copyable-structs)
+- [Examples](#examples)
+- [Grammar](#grammar)
+- [Implementation Notes](#implementation-notes)
+
 ## Declaration Syntax
 
 ### Basic Struct

@@ -32,6 +32,8 @@ kestrel/
 │   ├── kestrel-type-infer/             # Constraint-based inference
 │   ├── kestrel-semantics/              # Higher-level semantic queries
 │   ├── kestrel-copy-fold/              # Copyable/Cloneable/NotCopyable decision kernel
+│   ├── kestrel-entail/                 # Where-clause entailment kernel
+│   ├── kestrel-structural/             # Static / Sized rules
 │   ├── kestrel-analyze/                # Roslyn-style analyzers
 │   ├── kestrel-pattern-matching/       # Exhaustiveness checking
 │   ├── kestrel-mir/                    # MIR types, passes, mono, layout, mangling
@@ -96,7 +98,7 @@ KESTREL_DEBUG=infer,solver triage <pattern>
 KESTREL_DEBUG=all triage <pattern>
 ```
 
-Categories are free-form strings chosen at each call site. In use today: `infer`, `solver`, `hir-lower`, `copyable`, `static-wf`, `ref-gate`, `op-shape`, `dangle`, `arm-decay`. When you need to trace something new, add `ktrace!` calls — not `eprintln!`/`println!` — so the output stays filterable.
+Categories are free-form strings chosen at each call site. List the ones in use with `rg -oUN --no-filename -r '$1' 'ktrace!\(\s*"([^"]+)"' lib | sort -u`. When you need to trace something new, add `ktrace!` calls (not `eprintln!` or `println!`) so the output stays filterable.
 
 ## Asking for help
 

@@ -112,25 +112,30 @@ To report the error from the solver, call `ctx.report_error(InferError::YourVari
 
 ## Adding a stdlib method
 
-The standard library is Kestrel source in `lang/std/`, one module per directory.
+The standard library is Kestrel source in `lang/std/`, one module per
+directory. The `write-std` skill has the conventions; the short version:
 
-1. **Implement the method** in the appropriate `.ks` file. Match the patterns in the surrounding code — visibility, mutating annotations, COW conventions.
-2. **Add an execution test** under `lib/kestrel-test-suite/testdata/stdlib/<type>/<test_name>.ks` (see `testdata/stdlib/array/access_operations.ks` for a real example):
+1. **Implement the method** in the right `.ks` file, following the code around
+   it (visibility, `mutating`, the copy-on-write pattern).
+2. **Add an execution test** under
+   `lib/kestrel-test-suite/testdata/stdlib/<type>/<test_name>.ks`:
    ```kestrel
    // test: execution
    // stdlib: true
 
-   module Main
+   module Test
 
    @main
-   func main() -> lang.i64 {
-       var arr = std.collections.Array[std.numeric.Int64]()
-       arr.append(5)
-       if arr.count != 1 { return 1 }
+   func main() -> Int64 {
+       var xs = [1, 2];
+       xs.append(5);
+       if xs.count != 3 { return 1; }
+       if xs(2) != 5 { return 2; }
        0
    }
    ```
-   The kind must be spelled `execution` — unknown kinds (e.g. `runs`) silently fall back to `diagnostics`. Non-zero exit codes surface as test failures; each check returns a unique non-zero value so a regression points at the exact assertion.
+   The kind must be spelled `execution`: unknown kinds silently fall back to
+   `diagnostics`. Give each check its own exit code so a failure points at it.
 3. **Run it:** `triage <test_name>`.
 
 ---

@@ -4046,6 +4046,17 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
     // ================================================================
 
     pub fn set_terminator(&mut self, kind: TerminatorKind) {
+        // A block ends once. Code lowered at an exit (a call to a `-> !`
+        // function) can end it first; the later terminator is dead, and
+        // writing it would silently replace the real one.
+        if self.is_terminated() {
+            kestrel_debug::ktrace!(
+                "mir-terminated",
+                "skip {:?}: block already terminated",
+                kind
+            );
+            return;
+        }
         self.drain_deferred_borrows();
         // Values this terminator forwards as block args. A NAMED binding
         // borrow among them is THREADED (references "1.75"): verify Check 4
@@ -5568,7 +5579,28 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
                 // Field addr through the base's var address (not a shallow
                 // copy) so the writeback's setter mutates the real storage.
                 let wb_mark = self.pending_writebacks.len();
-                let recv_addr = self.write_place_addr(*base)?;
+                let Some(recv_addr) = self.write_place_addr(*base) else {
+                    // No address, but the base is a place VIEW (a named
+                    // `&mutating` binding, a `mutating` param): the field
+                    // view of its borrow IS the place. Without this,
+                    // `s.xs(1) += 1` fell back to the READ accessor and
+                    // wrote into storage another copy shared, skipping the
+                    // copy-on-write fork.
+                    let place =
+                        self.lower_place(*base, place::FieldViews::Forbid, place::Access::Write)?;
+                    let place::PlaceRepr::View(v) = place.repr else {
+                        return None;
+                    };
+                    let base_arg = self.prepare_call_arg(v, ParamConvention::MutBorrow);
+                    let view = self.emit_struct_extract(base_arg.value, field_idx, field_ty);
+                    return Some((
+                        CallArg {
+                            value: view,
+                            convention: ParamConvention::MutBorrow,
+                        },
+                        field_ty,
+                    ));
+                };
                 let field_addr = self.emit_field_addr(recv_addr, base_ty, field_idx);
                 let borrow = self.mut_borrow_write_addr(field_addr, field_ty, wb_mark);
                 Some((
@@ -5859,6 +5891,36 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
             return v;
         }
         self.lower_expr(tail)
+    }
+
+    /// Lower a block that is its own drop scope (`unsafe { }`): its locals
+    /// drop at its `}`, and its value (with anything still live-tracked)
+    /// moves to the enclosing frame.
+    pub fn lower_scoped_block(&mut self, block: &HirBlock) -> ValueId {
+        self.push_scope();
+        let value = self.lower_hir_block(block);
+        if self.is_terminated() {
+            self.pop_scope();
+            return value;
+        }
+        let mut keep = vec![value];
+        keep.extend(self.tracker.values());
+        self.destroy_scope_except(&keep);
+        // A guarded destroy in the exit renames threaded values.
+        let value = self.resolve_value(value);
+        let survivors = self
+            .scope_stack
+            .pop()
+            .map(|f| f.entries)
+            .unwrap_or_default();
+        if let Some(top) = self.scope_stack.last_mut() {
+            top.entries.extend(
+                survivors
+                    .into_iter()
+                    .filter(|e| matches!(e, ScopeEntry::Owned(_))),
+            );
+        }
+        value
     }
 
     /// Is `tail` a bare local declared by a `let`/`var` in `block` itself,

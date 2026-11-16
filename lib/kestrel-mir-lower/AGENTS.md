@@ -234,3 +234,20 @@ pointer bits as values with NO crash). One fused `BeginBorrow` at entry
 converts to the let-ref VIEW representation, registered via
 `register_ref_binding` so every existing use path (receiver View, arg decay,
 aggregate packaging) applies unchanged.
+
+## Scope exits
+
+- **Normal exits and trap exits both destroy scopes.** Fallthrough, `return`,
+  `break` and `continue` go through `destroy_scope_except` /
+  `destroy_scopes_to_depth`; `emit_panic` and a call to a `-> !` function also
+  call `destroy_scopes_to_depth(0, …)` before the `Panic` terminator. Anything
+  that hooks scope exit has to decide which of the two it runs on.
+- **A value's position in a scope frame is not its declaration order.**
+  `lower_loop` pops every threaded value and re-tracks it at the end of the
+  frame, so after a loop header, values declared before the loop can sit
+  after ones declared later. Record what you need (a live set, a position) at
+  the point you need it instead of reading it back from frame order.
+- **`set_terminator` never overwrites.** A block ends once; a second
+  terminator on an ended block is skipped (`KESTREL_DEBUG=mir-terminated`
+  traces it). Lowering that may run user code at an exit should check
+  `is_terminated` before emitting more instructions.

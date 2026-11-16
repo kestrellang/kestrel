@@ -189,7 +189,7 @@ radius is what `problem.md` claims. Then (b) as the permanent regression tests.
 
 **Status:** OPEN — should land with the first commit. **Owner:** unclaimed.
 
-Per `docs/fragility-audit.md`'s own "keeping this current" rule:
+Per `docs/fragility/audit.md`'s own "keeping this current" rule:
 
 1. §A13's failure scenario does not reproduce — replace it with the
    cross-protocol witness shape (`c_assoc_witness.ks`).

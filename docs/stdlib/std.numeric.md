@@ -7764,7 +7764,7 @@ _Defined in `lang/std/numeric/int64.ks`._
 #### typealias `Output`
 
 ```kestrel
-type Output = V.Element where V: TextView
+type Output = V.Element where V: TextView, V: not Static
 ```
 
 _Defined in `lang/std/text/views.ks`._
@@ -7965,16 +7965,16 @@ _Defined in `lang/std/system/exitable.ks`._
 
 ### Implements `ViewIndex`
 
-_Conditional: `where V: TextView`._
+_Conditional: `where V: TextView, V: not Static`._
 
 ### Implements `ViewWrappable`
 
-_Conditional: `where V: TextView`._
+_Conditional: `where V: TextView, V: not Static`._
 
 #### typealias `WrappedOutput`
 
 ```kestrel
-type WrappedOutput = V.Element? where V: TextView
+type WrappedOutput = V.Element? where V: TextView, V: not Static
 ```
 
 _Defined in `lang/std/text/views.ks`._

@@ -45,7 +45,7 @@ fileprivate func bnFromU64(v: UInt64) -> Array[UInt32] {
     bnTrim(out)
 }
 
-fileprivate func bnMulSmall(n: Array[UInt32], m: UInt32) -> Array[UInt32] {
+internal func bnMulSmall(n: Array[UInt32], m: UInt32) -> Array[UInt32] {
     let mask = UInt64(truncating: 4294967295);
     let mm = UInt64(from: m);
     var out = Array[UInt32]();
@@ -310,7 +310,7 @@ fileprivate func bnToU64(n: Array[UInt32]) -> UInt64 {
 }
 
 // n + v  (v small, used for digit accumulation)
-fileprivate func bnAddSmall(n: Array[UInt32], v: UInt64) -> Array[UInt32] {
+internal func bnAddSmall(n: Array[UInt32], v: UInt64) -> Array[UInt32] {
     let mask = UInt64(truncating: 4294967295);
     var out = Array[UInt32]();
     var i: Int64 = 0;

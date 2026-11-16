@@ -471,7 +471,24 @@ pub fn declared_accessors(acc: &kestrel_syntax_tree::ast::PropertyAccessors) -> 
         mutating_ref: acc.mutating_ref_clause().is_some(),
         will_set: acc.will_set().is_some(),
         did_set: acc.did_set().is_some(),
+        repeated: acc.repeated_clause().map(|c| repeated_clause(&c)),
     }
+}
+
+/// How a repeated clause is reported: its keyword and which provider role.
+fn repeated_clause(clause: &kestrel_syntax_tree::ast::AccessorClause) -> RepeatedClause {
+    use kestrel_syntax_tree::ast::AccessorClause as C;
+    let (keyword, writes) = match clause {
+        C::GetterClause(_) => ("get", false),
+        C::ModifyingGetterClause(_) => ("modifying get", false),
+        C::RefClause(_) => ("ref", false),
+        C::ModifyingRefClause(_) => ("modifying ref", false),
+        C::SetterClause(_) => ("set", true),
+        C::MutatingRefClause(_) => ("mutating ref", true),
+        C::WillSetClause(_) => ("willSet", true),
+        C::DidSetClause(_) => ("didSet", true),
+    };
+    RepeatedClause { keyword, writes }
 }
 
 /// Spawn a `NodeKind::RefAccessor` child entity under a Field or Subscript

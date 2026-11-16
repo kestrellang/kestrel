@@ -380,7 +380,11 @@ impl LowerCtx<'_> {
                 self.unsafe_regions.push(span.clone());
                 let body = BlockSyntax::of(code_block(node), self.file_id);
                 let body = self.lower_block(&body);
-                self.alloc_expr(HirExpr::Block { body, span })
+                self.alloc_expr(HirExpr::Block {
+                    body,
+                    span,
+                    own_scope: true,
+                })
             },
             SyntaxKind::ExprClosure => self.lower_closure(node, &span),
             SyntaxKind::ExprMatch => self.lower_match(node, &span),
@@ -812,6 +816,14 @@ impl LowerCtx<'_> {
                 self.alloc_expr(HirExpr::Error { span: span.clone() })
             },
             ValueResolution::NotFound(ref seg) => {
+                if let [only] = segments
+                    && let Some(diag) = crate::ty::hidden_declaration_error(
+                        self.ctx, &only.name, self.owner, self.root, span,
+                    )
+                {
+                    self.ctx.accumulate(diag);
+                    return self.alloc_expr(HirExpr::Error { span: span.clone() });
+                }
                 let path_name = segments
                     .iter()
                     .map(|s| s.name.as_str())
@@ -2047,6 +2059,7 @@ impl LowerCtx<'_> {
                         let id = self.alloc_expr(HirExpr::Block {
                             body: lowered,
                             span: block_span,
+                            own_scope: false,
                         });
                         self.source_map.record_expr(closure, id);
                         id
@@ -2293,6 +2306,7 @@ impl LowerCtx<'_> {
             self.alloc_expr(HirExpr::Block {
                 body: block,
                 span: span.clone(),
+                own_scope: false,
             })
         }
     }

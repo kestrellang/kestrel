@@ -127,6 +127,8 @@ The authoritative catalogue is `lib/kestrel-ast-builder/src/components.rs`.
 | `kestrel-type-infer` | Constraint-based inference; `InferBody` query, `Constraint` / `InferError` enums, `TypeResolver`. |
 | `kestrel-semantics` | Higher-level semantic queries: conformance resolution and polarity, protocol refinement, builtin-protocol identification, copy semantics. Used by infer/analyze. (Witness resolution lives in `kestrel-mir-lower`/codegen.) |
 | `kestrel-copy-fold` | Single source of truth for the Copyable / Cloneable / NotCopyable decision tree (`fold_members` + `instance_semantics`). Five layer adapters (semantics over `HirTy`, the solver over `TyKind`, analyze move tracking over `ResolvedTy`, MIR `ty_query` and `mono` over `TyId`) all route through it — never re-implement the fold. |
+| `kestrel-entail` | The one where-clause entailment kernel: "does `T` satisfy `P`?" and "do these `where` clauses hold?", three-valued (holds / fails / unknown). The solver, the analyzer and mono all route through it over their own type forms. |
+| `kestrel-structural` | The `Static` and `Sized` rules, computed from a type's shape and written once for every layer (HIR, solver, analyze, mono). |
 | `kestrel-analyze` | Analyzer framework + every concrete analyzer. |
 | `kestrel-pattern-matching` | Exhaustiveness checking. |
 | `kestrel-mir` | OSSA MIR types: `MirModule`, `FunctionDef`, `OssaBody`, `ValueId`, `Instruction`, `BasicBlock`, `Terminator`. SSA, not place-based (no `Place`/`Rvalue`/`Statement`). Also owns the MIR pass pipeline, monomorphization, type layout, and symbol mangling. |

@@ -20,14 +20,8 @@ flatMap, takeWhile, count, isEmpty, Int64.maxValue
 
 ## 2. Files and modules
 
-**File names match the primary type: `UpperCamelCase.ks`.** If a file contains `RawPointer`, the file is `RawPointer.ks`. If it contains a group of related items, use an UpperCamelCase topic name: `Protocols.ks`, `Arithmetic.ks`.
-
-```
-Array.ks            // contains Array
-String.ks           // contains String
-RawPointer.ks       // contains RawPointer
-Protocols.ks        // contains Equatable, Comparable, Hash, etc.
-```
+**File names are lowercase `snake_case.ks`**, named after the primary type or
+the topic: `array.ks`, `dictionary.ks`, `slice_methods.ks`, `protocols.ks`.
 
 **Folders are lowercase and correspond to modules.** The folder structure IS the module structure.
 

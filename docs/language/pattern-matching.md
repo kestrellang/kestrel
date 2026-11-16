@@ -2,6 +2,19 @@
 
 Pattern matching provides a powerful way to destructure values and control flow based on their shape. Kestrel supports pattern matching in match expressions, if-let, while-let, guard-let, and destructuring bindings.
 
+## On this page
+
+- [Match Expressions](#match-expressions)
+- [Pattern Types](#pattern-types)
+- [If-Let Expressions](#if-let-expressions)
+- [While-Let Expressions](#while-let-expressions)
+- [Guard-Let Statements](#guard-let-statements)
+- [Destructuring Bindings](#destructuring-bindings)
+- [Exhaustiveness](#exhaustiveness)
+- [Errors](#errors)
+- [Grammar](#grammar)
+- [Future Considerations](#future-considerations)
+
 ## Match Expressions
 
 Match expressions evaluate a value (the scrutinee) against a series of patterns, executing the body of the first matching arm.

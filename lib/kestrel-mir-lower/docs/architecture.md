@@ -47,7 +47,8 @@ The crate's only HECS query. Everything else is non-memoized functions.
 | `lib.rs` | `lower_module` entry point, phase orchestration |
 | `context.rs` | `LowerCtx`, `IsProtocolMethod`, witness-key helpers |
 | `ty.rs` | `HirTy`/`ResolvedTy` → interned `TyId` |
-| `name.rs` | Qualified-name generation from the entity parent chain |
+| `existential.rs` | Existential function tables: per-requirement thunks, the drop thunk, and vtable templates that mono instantiates |
+| `ref_sources.rs` | Which call arguments a ref-carrying result may borrow from (MIR view of `ref_source_mask`) |
 | `validate.rs` | Post-lowering `MirTy::Error` ICE backstop |
 | `items/` | Declaration lowering: struct/enum/protocol/function-sig/static/witness |
 | `body/` | Body lowering: expr, stmt, control flow, patterns (via `kestrel-pattern-matching` decision trees), closures, literals |

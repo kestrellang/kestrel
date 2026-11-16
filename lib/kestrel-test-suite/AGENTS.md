@@ -23,6 +23,8 @@ let x = foo(a: 1); // ERROR: label
 
 When the exact wording is long or churns often, use a long distinctive prefix, not a single word.
 
+**Code forms:** `// ERROR(E123)` matches any error with that code, and `// ERROR(E123): message` matches the code and a message substring together. Prefer the second: the code pins which diagnostic fired, and the message pins the case. Warnings have no code form.
+
 ## Test file format
 
 - Header line 1: `// test: <kind>` — one of `diagnostics`, `mir`, or `execution` (`src/annotation.rs`).

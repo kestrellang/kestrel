@@ -159,7 +159,7 @@ fn check_callable(cx: &DeclContext<'_>) -> Vec<AnalyzeDiagnostic> {
                     }],
                     notes: vec![format!(
                         "function is public but parameter type is {}",
-                        vis_label(&hit)
+                        hit.keyword()
                     )],
                 });
                 break; // one parameter diagnostic per function is enough
@@ -184,7 +184,7 @@ fn check_callable(cx: &DeclContext<'_>) -> Vec<AnalyzeDiagnostic> {
             }],
             notes: vec![format!(
                 "function is public but return type is {}",
-                vis_label(&hit)
+                hit.keyword()
             )],
         });
     }
@@ -215,7 +215,7 @@ fn check_type_alias(cx: &DeclContext<'_>) -> Vec<AnalyzeDiagnostic> {
         }],
         notes: vec![format!(
             "type alias is public but aliased type is {}",
-            vis_label(&hit)
+            hit.keyword()
         )],
     }]
 }
@@ -240,7 +240,7 @@ fn check_field(cx: &DeclContext<'_>) -> Vec<AnalyzeDiagnostic> {
         }],
         notes: vec![format!(
             "field is public but field type is {}",
-            vis_label(&hit)
+            hit.keyword()
         )],
     }]
 }
@@ -318,14 +318,5 @@ fn first_less_visible(cx: &DeclContext<'_>, ty: &AstType) -> Option<Vis> {
             .find_map(|t| first_less_visible(cx, t)),
         AstType::Ref { inner, .. } => first_less_visible(cx, inner),
         AstType::Unit(_) | AstType::Never(_) | AstType::Inferred(_) | AstType::Builtin(..) => None,
-    }
-}
-
-fn vis_label(v: &Vis) -> &'static str {
-    match v {
-        Vis::Public => "public",
-        Vis::Internal => "internal",
-        Vis::Fileprivate => "fileprivate",
-        Vis::Private => "private",
     }
 }

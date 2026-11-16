@@ -20,6 +20,8 @@ Welcome to the Kestrel programming language documentation.
 - **[Opaque Types](opaque-types.md)** - `some Protocol` return types
 - **[Pattern Matching](pattern-matching.md)** - Destructuring and matching
 - **[References](references.md)** - Borrowed references (`&T`)
+- **[Existentials](existentials.md)** - `any Protocol` values and their boxes
+- **[Indirection](indirection.md)** - Wrappers that act like their target: member and argument peel, `DecaysFrom`
 - **[Unsafe](unsafe.md)** - `unsafe func`, `unsafe` expressions and blocks, unsafe protocols
 - **[Error Handling](error-handling.md)** - `Result`, `throws`, and `try`
 - **[Optional Chaining](optional-chaining.md)** - `a?.b`, mutation through `?.`, and the `OptionalChain` protocol
@@ -32,6 +34,6 @@ Welcome to the Kestrel programming language documentation.
 - **[String Interpolation](string-interpolation.md)** - `\(expr)` and format specifiers
 - **[Entry Points](entry-points.md)** - `@main` and program startup
 
-## Design
+## Deeper reading
 
-- **[Future](../design/future.md)** - Planned language features and design ideas
+- **[Memory model](../memory-model/overview.md)** - Copy, clone, move and drop rules in depth, and current limitations

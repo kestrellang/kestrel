@@ -300,6 +300,7 @@ impl LowerCtx<'_> {
                     tail_expr: Some(call),
                 },
                 span: span.clone(),
+                own_scope: false,
             })
         };
         self.alloc_expr(HirExpr::Sugar {

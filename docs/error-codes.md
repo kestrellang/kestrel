@@ -452,7 +452,7 @@ func outlives() -> Int64 {
 | E600 | *(reserved — not emitted)* | The check moved into the constraint solver, where an arity-mismatched `it` surfaces as inference error **E108**. The code is held so it is not reallocated. |
 | E601 | closure has {actual} parameters, but expected {expected} | The closure's parameter count doesn't match the expected function type. |
 | E602 | *(reserved — not implemented)* | Closure escape analysis; the descriptor is registered but no emit site exists yet. |
-| E603 | cannot assign to captured variable '{name}' | A **normal** closure captures read-only views, so any assignment target rooted at a capture — the bare local or a projection like `c.n = 5` — is rejected. The note points at the fix: give the closure a `mutating` expected type (e.g. `mutating () -> ()`) to write back to the original, or fold the value and return it. Lifted for `mutating` (its views are `&mutating`) and for `consuming` / `escaping` (they own their captures). |
+| E603 | cannot assign to captured variable '{name}' / cannot mutate captured variable '{name}' | A **normal** closure captures read-only views, so any write to a place rooted at a capture is rejected: an assignment (`x = v`, `c.n = 5`), a compound assignment (`x += 1`), a `mutating` method (`xs.append(1)`), a `mutating` argument, or a write inside a nested `mutating` closure. The note points at the fix: give the closure a `mutating` expected type (e.g. `mutating () -> ()`) to write back to the original, or fold the value and return it. Lifted for `mutating` (its views are `&mutating`) and for `consuming` / `escaping` (they own their captures). |
 | E604 | cannot assign to closure parameter '{name}' | Closure parameters are immutable. |
 | E605 | parameter/return type does not conform to FFISafe | `@extern` signatures may only use FFI-safe types. |
 | E606 | could not infer type for closure parameter | The closure needs type context (annotate the parameter or the binding). |
@@ -526,8 +526,8 @@ members and `lazy` properties.
 
 | Code | Message | Explanation |
 |---|---|---|
-| E619 | duplicate read provider: this member declares more than one of \`get\`, \`modifying get\`, \`ref\` and \`modifying ref\` | Reads need exactly one provider. |
-| E620 | duplicate write provider: this member declares both \`set\` and \`mutating ref\` | Writes need exactly one provider. A failable member may declare both: `mutating ref` serves `&mutating` binders, `set` serves plain `=`. |
+| E619 | duplicate read provider: this member declares more than one of \`get\`, \`modifying get\`, \`ref\` and \`modifying ref\` | Reads need exactly one provider. Also reported as "\`get\` is written more than once on this member" when one read clause is repeated. |
+| E620 | duplicate write provider: this member declares both \`set\` and \`mutating ref\` | Writes need exactly one provider. A failable member may declare both: `mutating ref` serves `&mutating` binders, `set` serves plain `=`. Also reported when a write clause or observer (`set`, `didSet`, …) is written twice. |
 | E621 | a protocol requires \`ref\` / \`mutating ref\` with bodyless clauses, and only a protocol extension gives their bodies; \`modifying\` accessors are not allowed in either | A protocol requires a place with bodyless clauses (`var value: T { ref mutating ref }`), and a protocol extension may give default bodies (`extend P { var value: T { ref { … } } }`). A body in the protocol itself, a bodyless clause in an extension, and `modifying` accessors are rejected. |
 | E622 | this member has a write provider but no read provider | A `set`/`mutating ref` without a read provider; add one. |
 | E636 | \`modifying\` accessors need an instance receiver | A static member or global has no `self` to modify; use a plain `get` / `ref`. |

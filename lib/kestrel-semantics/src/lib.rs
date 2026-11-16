@@ -984,11 +984,9 @@ pub fn indirect_box_type(
     })
 }
 
-/// `Copyable`-name fallback for stdlib-less fixtures. Returns true when
-/// `ast_ty` is a single-segment named type whose last segment matches
-/// `name`. Matches the previous HIR-tracker behavior so tests like
-/// `struct Handle: not Copyable {}` (without `import std.core`) still
-/// pick up their non-copyable semantics.
+/// The types a nominal stores inline, paired with the child that stores
+/// them: stored instance fields, and case payloads (an `indirect` case
+/// contributes its `OwnedBox`).
 pub(crate) fn collect_child_types(
     ctx: &QueryContext<'_>,
     entity: Entity,

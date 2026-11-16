@@ -37,7 +37,7 @@ Three kinds of work in a single pass:
    - `while cond { ... }` → `loop` + `if cond {} else { break }`; `while let` →
      `loop { match v { p => body, _ => break } }`
    - `try expr` → `match expr.tryExtract() { .Continue(v) => v, .Break(e) => return .fromResidual(e) }`
-   - `throw value` → `return .Err(value)`
+   - `throw value` → `Sugar { Throw, return .Err(value) }`
    - `value!` (unwrap) → `ForceUnwrap.forceUnwrap()` protocol call
    - `"hello \(name)"` → a `DefaultStringInterpolation` builder (`appendLiteral` /
      `appendInterpolation` / `build`)

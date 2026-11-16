@@ -279,3 +279,4 @@ That's the entire model. There are no lifetime parameters, no `'a`, no borrow an
 - [Structs](structs.md) — copy vs move semantics of the values references point into
 - [Extensions](extensions.md) — the `extend &T: P` conformance mechanism
 - [Closures](closures.md) — capture rules
+- [Indirection](indirection.md) — wrappers such as `Array` and `String` that lend `Slice` / `StringSlice`, and `DecaysFrom`

@@ -119,8 +119,7 @@ impl HirBody {
                 continue;
             };
             // Arm 0 is the `Some($o)` lang-case pattern by construction.
-            let Some(HirPat::Variant { args, .. }) =
-                arms.first().map(|a| &self.pats[a.pattern])
+            let Some(HirPat::Variant { args, .. }) = arms.first().map(|a| &self.pats[a.pattern])
             else {
                 continue;
             };
@@ -250,6 +249,10 @@ pub enum SugarKind {
     /// `a?.b.c` — `inner` is the outermost `Match { source: OptionalChain }`;
     /// each further bind is a nested match in the `.Some` arm.
     OptionalChain,
+    /// `throw e` — `inner` is the `Return` of `.Err(e)`. Lets later stages
+    /// tell a `throw` from a written `return`; code matching `Return`
+    /// shallowly must peel it (`HirBody::peel_throw`).
+    Throw,
 }
 
 /// A nested code block (if/loop/match arm bodies, desugared blocks).
@@ -487,10 +490,15 @@ pub enum HirExpr {
         span: Span,
     },
     /// Block expression: `{ stmts; tail_expr }`.
-    /// Used when a match arm body contains statements before its result expression.
+    /// Used when a match arm body contains statements before its result
+    /// expression, for `unsafe { }`, and by desugarings.
     Block {
         body: HirBlock,
         span: Span,
+        /// The block is a drop scope of its own: its locals drop at its `}`
+        /// (`unsafe { }`). Otherwise they live to the enclosing scope's end,
+        /// which desugarings and match arms (scoped by the arm) rely on.
+        own_scope: bool,
     },
     /// Malformed expression (error recovery)
     Error {
@@ -794,6 +802,19 @@ fn collect_pat_borrows<'a>(pats: &'a Arena<HirPat>, pat: HirPatId, out: &mut Vec
 }
 
 impl HirBody {
+    /// `id`, or the `Return` under it when `id` is a `throw`. For code that
+    /// matches `HirExpr::Return` without walking through `Sugar`.
+    pub fn peel_throw(&self, id: HirExprId) -> HirExprId {
+        match self.exprs[id] {
+            HirExpr::Sugar {
+                kind: SugarKind::Throw,
+                inner,
+                ..
+            } => inner,
+            _ => id,
+        }
+    }
+
     /// How a match with these arms holds its scrutinee: `None` when no arm
     /// borrows from it (value mode), `Some(mutating)` when one does (place
     /// mode), mutable iff any borrow is `&mutating`.

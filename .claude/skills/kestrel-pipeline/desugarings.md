@@ -13,7 +13,7 @@ All citations refer to `lib/kestrel-hir-lower/src/` unless otherwise noted.
 ProtocolCall is **desugar-only** — no syntax spells it directly. Every
 ProtocolCall in the HIR was synthesized from one of the sites below.
 
-Signature (`body.rs:172-179`):
+Signature (`body.rs`):
 
 ```rust
 ProtocolCall {
@@ -26,17 +26,17 @@ ProtocolCall {
 }
 ```
 
-Type-infer: `generate.rs:273-290` emits `Constraint::Conforms { ty: recv, protocol }`
+Type-infer: `generate.rs` emits `Constraint::Conforms { ty: recv, protocol }`
 AND `Constraint::Member { receiver, name: method, args, ... }`. Solver funnels are
-`solve_conforms` (1076) and `solve_member` (1702).
+`solve_conforms` and `solve_member`.
 
-MIR dispatch: `body_lower.rs:744-751` → `lower_protocol_call` (`body_lower.rs:2280`).
+MIR dispatch: `body/call/mod.rs` `lower_protocol_call_expr`.
 Emits witness-based method dispatch.
 
 ### Source: binary operators
 
 - Trigger: `ExprBinary` (precedence already applied by the parser).
-- Site: `desugar.rs` (`desugar_binary_hir`) — invoked by `lower_binary` in
+- Site: `desugar.rs` (`desugar_binary_hir`) — invoked from `lower_expr_node` in
   `expr.rs` for each binary node.
 - Shape:
   ```
@@ -63,15 +63,15 @@ Emits witness-based method dispatch.
       args: [HirCallArg { value: Closure { params: [], body: { tail_expr: rhs } } }],
   }
   ```
-- Gotcha: the captures list on the synthesized closure is empty at HIR time;
-  `collect_captures` is only called for user-written closures (`expr.rs`). MIR
-  closure lowering walks the body for effective captures.
+- Gotcha: HIR records no captures. Capture plans (disjoint, place-based) are
+  computed after inference in `kestrel-type-infer/src/captures.rs`, the single
+  source of truth for MIR closure lowering and the E603 analyzer.
 
-### Source: `desugar_logical_and` (multi-condition if/while/guard)
+### Source: multi-condition if/while/guard
 
 - Trigger: `if a, b, c { ... }` (comma-separated conditions combining into `a && b && c`).
-- Site: `expr.rs` calls `desugar_logical_and` (`desugar.rs`) pair-wise
-  over the condition list.
+- Site: `lower_if_conditions` (`expr.rs`) folds the list through
+  `desugar_binary_hir(BinaryOp::And, …)`, the same path as a written `&&`.
 - Shape: same as short-circuit `&&` above.
 
 ### Source: unary operators
@@ -172,7 +172,7 @@ Emits witness-based method dispatch.
 
 HIR-only (no syntax of its own).
 
-Signature (`body.rs:129-133`):
+Signature (`body.rs`):
 
 ```rust
 OverloadSet {
@@ -189,15 +189,13 @@ Sources:
   - base `MemberAccess` path — `expr.rs`.
   - multi-segment `Path` — `expr.rs`.
 
-Type-infer: `generate.rs:108-115` errors if standalone (AmbiguousMember). In a
-`HirExpr::Call` callee position, `generate.rs:120-132` dispatches via
+Type-infer: `generate.rs` errors if standalone (AmbiguousMember). In a
+`HirExpr::Call` callee position, `generate.rs` dispatches via
 `Constraint::OverloadedCall`.
 
-Solver: `solve_overloaded_call` (1379) — picks by labels + arity, then type.
+Solver: `solve_overloaded_call` — picks by labels + arity, then type.
 
-MIR: `body_lower.rs:721-733` — resolves via `typed.resolutions[expr_id]`; falls back
-to first candidate if inference didn't resolve. See MEMORY
-`static_overload_first_match_truncation.md`.
+MIR: `body/expr.rs`, the `HirExpr::OverloadSet` arm: uses the winner type-infer recorded in `typed.resolutions[expr_id]`.
 
 ---
 
@@ -205,7 +203,7 @@ to first candidate if inference didn't resolve. See MEMORY
 
 `HirExpr::Match` is produced by **nine** distinct sources. The `source: MatchSource`
 tag lets analyzers skip exhaustiveness / unreachable-arm checks on synthetic matches
-(`body.rs:76-82` — `is_desugared()`). See `match_pattern_analyzer.md` in MEMORY.
+(`body.rs` — `is_desugared()`).
 
 ```rust
 pub enum MatchSource {
@@ -259,11 +257,13 @@ pub enum MatchSource {
 
 ### MatchSource::GuardLet
 
-- Trigger: `GuardStatement`.
-- Site: `stmt.rs` calls `lower_if_conditions(..., MatchSource::GuardLet, ...)`.
-- Full shape: `if <cond> { } else { <else_body> }` wrapped in `HirStmt::Expr`.
-- Pushed into `ctx.guard_let_stmts` (`stmt.rs`) so the
-  `guard_let_divergence` analyzer can verify the else block diverges.
+- Trigger: a `GuardStatement` with at least one `let` condition.
+- Site: `lower_guard_cps` (`expr.rs`) CPS-desugars it: success = the remaining
+  statements + tail (so bindings stay in scope), fail = the else body.
+- A `guard` with no `let` lowers through `lower_guard` (`stmt.rs`) with
+  `MatchSource::Guard`: `if <cond> { } else { <else_body> }` in a `HirStmt::Expr`,
+  recorded in `hir.guard_stmts`.
+- `kestrel-analyze/src/body/guard.rs` checks that every else body diverges.
 - Diagnostics: E309.
 
 ### MatchSource::ForLoop
@@ -314,7 +314,7 @@ pub enum MatchSource {
     here, but the pattern is the same — lowered via `lower_param_pattern` at
     `pat.rs`). Also see `param_pattern` analyzer (E111) which emits a tuple-arity
     error and is specifically gated to skip `ParamDestructure`.
-- Gotcha: `generate.rs:605-612` explicitly skips the scrutinee/pattern equate for
+- Gotcha: `generate.rs` explicitly skips the scrutinee/pattern equate for
   `ParamDestructure` to avoid cascading the generic type-mismatch on top of E111.
 
 ### MatchSource::TryOp
@@ -362,13 +362,13 @@ synthesis sites worth knowing about.
 - Shape: `if <!cond> { break } else { }` — uses an explicit `ProtocolCall` on
   `LogicalNotOperatorProtocol` for the negation.
 
-### Synthetic for `lower_guard_let`
+### Synthetic for `lower_guard` (no-`let` guards)
 
-- Site: `stmt.rs`.
+- Site: `stmt.rs` (`lower_guard`).
 - Shape: `if <cond> { } else { <else_body> }`. The condition is a match-bool produced
-  by `lower_if_conditions(..., GuardLet, ...)`. The else body is the user-written
+  by `lower_if_conditions(..., MatchSource::Guard, ...)`. The else body is the user-written
   `else` block.
-- Gotcha: `generate.rs:376-380` detects this via `is_guard_let_if` and skips the
+- Gotcha: `generate.rs` detects this via `is_guard_if` and skips the
   else-body type-equate, because the else block is required to diverge.
 
 ---
@@ -380,7 +380,7 @@ User-written `match-arm block` maps 1:1. Synthesis sites:
 - Complex let-destructure wrapper: `stmt.rs`. Wraps
   `HirStmt::Let($let_tmp) + HirStmt::Expr(Match)` into a single `HirExpr::Block` so
   the caller receives one statement expression.
-- `desugar_for_loop` body wrapper: `desugar.rs`. Wraps `lower_for_body` in a
+- `desugar_for_loop` body wrapper: `desugar.rs`. Wraps the loop body in a
   `HirExpr::Block` so all statements are reachable (match arms are exprs, and the body
   of `.Some(pat) => { body }` needs to be an expr).
 - `desugar_for_loop` outer wrapper: `desugar.rs`. Wraps `let $iter = ...` +
@@ -474,7 +474,7 @@ tree (the parser applies it), so HIR just unwraps it.
 | `match x { ... }`               | `UserMatch`       | `lower_match`  |
 | `if let p = v { ... }`          | `IfLet`           | `lower_if_conditions`  |
 | `while let p = v { ... }`       | `WhileLet`        | `desugar_while_let`  |
-| `guard let p = v else { ... }`  | `GuardLet`        | `lower_guard_let`  + `lower_if_conditions` |
+| `guard let p = v else { ... }`  | `GuardLet`        | `lower_guard_cps` (`expr.rs`) |
 | `for p in iter { ... }`         | `ForLoop`         | `desugar_for_loop`  |
 | `let (a,b) = pair;` (complex)   | `LetDestructure`  | `lower_let_stmt`  |
 | `fn f((a,b): (I,I)) { ... }` / `{ ((a,b)) in ... }` | `ParamDestructure` | `lower_closure`  or `lower_param_pattern` + lib.rs |
@@ -487,6 +487,3 @@ tree (the parser applies it), so HIR just unwraps it.
 - For each surface construct, see `expressions.md` / `statements.md` for the syntax side.
 - Pattern desugarings that produce `HirPat::*` variants (shorthand, `@`) — see
   `patterns.md`.
-- Historical cascading-error fixes from pattern desugaring —
-  `cascading_infer_errors.md`.
-- Method / witness dispatch funnel (MIR side) — `dispatch_funnel_pattern.md`.

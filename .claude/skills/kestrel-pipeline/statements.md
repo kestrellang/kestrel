@@ -7,8 +7,8 @@ Top-level dispatch anchors:
 
 - HIR lowering switch: `lib/kestrel-hir-lower/src/stmt.rs` (`LowerCtx::lower_stmt` →
   `lower_stmt_node`, matching on the `SyntaxKind`)
-- Inference gen switch: `lib/kestrel-type-infer/src/generate.rs:551` (`gen_stmt`)
-- MIR lowering switch: `lib/kestrel-mir-lower/src/body_lower.rs:419` (`lower_stmt`)
+- Inference gen switch: `lib/kestrel-type-infer/src/generate.rs` (`gen_stmt`)
+- MIR lowering switch: `lib/kestrel-mir-lower/src/body/stmt.rs` (`lower_stmt`)
 
 Top-of-body lowering: `LowerBodyWithSourceMap` (`kestrel-hir-lower/src/lib.rs`) reads the
 entity's `Valued` body node — a `CodeBlock`, a function's `= expr` (`FunctionBody`), a
@@ -37,14 +37,12 @@ value) and calls `lower_block_stmts` (guard-let CPS applies at the top level).
     `lower_pat_forcing_mut(pattern, is_mut)` propagates an outer `var` into every binding.
   - A `&expr` / `&mutating expr` initializer on a simple `let` → `HirExpr::Borrow`;
     on a `var` or a destructuring pattern → E209 (lowered without the borrow).
-- Type-infer: `generate.rs:553-587`. Annotated → `lower_hir_ty(ty)` for local TyVar;
+- Type-infer: `generate.rs`. Annotated → `lower_hir_ty(ty)` for local TyVar;
   unannotated → fresh. `ctx.local_types.insert(local, local_tv)`. Bidirectional hints:
   if annotation is `Array[E]` and RHS is `HirExpr::Array`, seed
   `ctx.expected_array_elem`; same for `Dict`. Then `ctx.coerce(val_tv, local_tv, ...)`.
-- Solver: `solve_coerce` (955).
-- MIR: `body_lower.rs:419-430` — emits `StatementKind::Assign { dest: Place::local(mir_local),
-  rvalue: value_to_rvalue(init_value) }`. No init value → no statement emitted (the
-  local slot is zero-initialized by default).
+- Solver: `solve_coerce`.
+- MIR: `stmt.rs` `lower_stmt`, the `HirStmt::Let` arm: lowers the initializer and binds the local (refs via `bind_ref_local`).
 - Gotchas:
   - `let _ = expr;` is not a simple binding — `_` routes through the destructuring
     path and becomes a match with a wildcard arm.
@@ -59,9 +57,8 @@ value) and calls `lower_block_stmts` (guard-let CPS applies at the top level).
   the wrapper; `syntax::closure_body_syntax` demotes it to a statement
   (`StmtSyntax::Expr`, synthetic span) when something follows it.
 - HIR lowering: `stmt.rs` `lower_stmt_node` → `HirStmt::Expr { expr, span }` (1:1).
-- Type-infer: `generate.rs:589-591` — `gen_expr(ctx, hir, expr)`; result discarded.
-- MIR: `body_lower.rs:432-435` — `let _ = self.lower_expr(*expr);` (lowered for
-  side effects).
+- Type-infer: `generate.rs` — `gen_expr(ctx, hir, expr)`; result discarded.
+- MIR: `stmt.rs` `lower_stmt`, the `HirStmt::Expr` arm: `lower_expr`, result dropped.
 - Gotchas:
   - A final statement-like expression without `;` is the block's *value*
     (`block_syntax`), not a statement.
@@ -81,9 +78,9 @@ value) and calls `lower_block_stmts` (guard-let CPS applies at the top level).
   - No `let` → `stmt.rs` `lower_guard`: `HirExpr::If { condition, then: {}, else: Some(else) }`
     in a `HirStmt::Expr`, conditions through `lower_if_conditions(MatchSource::Guard)`;
     the statement id is pushed to `guard_stmts` for the divergence analyzer.
-- Type-infer: `generate.rs:589-591` (routes through `HirStmt::Expr`). The `HirExpr::If`
+- Type-infer: `generate.rs` (routes through `HirStmt::Expr`). The `HirExpr::If`
   arm skips the else-equate for guard Ifs, because the else block must diverge.
-- MIR: `body_lower.rs:432-435` (through `HirStmt::Expr` → `lower_expr`).
+- MIR: through `HirStmt::Expr` → the desugared `match` (`pattern.rs` `lower_match`).
 - Gotchas:
   - The else block is required to diverge (return/break/continue/throw); the guard
     divergence analyzer enforces it — HIR lowering does not.
@@ -96,9 +93,8 @@ value) and calls `lower_block_stmts` (guard-let CPS applies at the top level).
 - HIR lowering: `stmt.rs` `lower_deinit_stmt` — `lookup_local`, E137 ("undeclared
   variable") when missing, then `HirStmt::Deinit { name, local: Option<LocalId>, span }`.
   A missing name (reported by the parser) lowers to `HirName::Missing` with no E137.
-- Type-infer: `generate.rs:593-595` — no constraints. Purely a cleanup registration.
-- MIR: `body_lower.rs:436-438` — **skipped**. Deinit resolution is handled by a later
-  pass (not yet fully wired in lib).
+- Type-infer: `generate.rs` — no constraints. Purely a cleanup registration.
+- MIR: `stmt.rs` `lower_stmt`, the `HirStmt::Deinit` arm: ends the local's lifetime and runs its drop.
 - Gotchas:
   - Not a method call — `deinit x` is a statement keyword, not `x.deinit()`.
 
@@ -106,17 +102,17 @@ value) and calls `lower_block_stmts` (guard-let CPS applies at the top level).
 
 ## HirStmt variants (3)
 
-Enum: `lib/kestrel-hir/src/body.rs:234`.
+Enum: `lib/kestrel-hir/src/body.rs`.
 
 ### HirStmt::Let
 
 - Produced by: `VariableDeclaration` with a simple `BindingPattern` (`stmt.rs`). Also
   synthesized for complex-pattern let desugaring's `$let_tmp` binding
   (`stmt.rs`) and for the for-loop `$iter` temp (`desugar.rs`).
-- Type-infer: `generate.rs:553-587` (see `VariableDeclaration`). Both the annotated and
+- Type-infer: `generate.rs` (see `VariableDeclaration`). Both the annotated and
   unannotated paths live here; bidirectional hints are handled before generating the
   value expression.
-- MIR: `body_lower.rs:419-430` — `Assign` into `Place::local(map_local(local))`.
+- MIR: `stmt.rs` `lower_stmt`, the `HirStmt::Let` arm.
 - Gotchas: do not assume `HirStmt::Let` has the same scope semantics as the original
   AST — when the source had a complex pattern, there's a synthetic `$let_tmp` local
   followed by a Match that binds the real names.
@@ -126,20 +122,20 @@ Enum: `lib/kestrel-hir/src/body.rs:234`.
 - Produced by: `ExpressionStatement` (`stmt.rs`), `GuardStatement` (`stmt.rs`,
   wrapping a synthesized `HirExpr::If`), complex-pattern `let` (`stmt.rs`,
   wrapping the `HirExpr::Block(Let + Match)` and also inner wrapping of the Match
-  itself at 120-123), `desugar_while` intermediate if-break (`desugar.rs`),
+  itself), `desugar_while` intermediate if-break (`desugar.rs`),
   `desugar_while_let` intermediate if-break (`desugar.rs`), and `desugar_for_loop`
   iterator let (`desugar.rs` emits `HirStmt::Let`, not `::Expr`, but the match
-  body ends up inside a `HirStmt::Expr` at 452-455).
-- Type-infer: `generate.rs:589-591` — `gen_expr`, discard result.
-- MIR: `body_lower.rs:432-435` — `lower_expr(expr)`, result discarded.
+  body ends up inside a `HirStmt::Expr`).
+- Type-infer: `generate.rs` — `gen_expr`, discard result.
+- MIR: `stmt.rs` `lower_stmt`, the `HirStmt::Expr` arm.
 
 ### HirStmt::Deinit
 
 - Produced by: `DeinitStatement` only (`stmt.rs`). The `local: Option<LocalId>`
   is resolved at HIR-lowering time; `None` means lookup failed and a diagnostic was
   already emitted.
-- Type-infer: `generate.rs:593-595` — no constraints.
-- MIR: `body_lower.rs:436-438` — skipped (handled by a later pass when wired).
+- Type-infer: `generate.rs` — no constraints.
+- MIR: `stmt.rs` `lower_stmt`, the `HirStmt::Deinit` arm.
 - Gotchas: the HIR stores the unresolved `name` string alongside the resolved
   `local: Option<LocalId>` — both fields exist so a later pass can either act on the
   local or re-emit a better diagnostic on the original name.
@@ -151,6 +147,6 @@ Enum: `lib/kestrel-hir/src/body.rs:234`.
 - `HirExpr` details referenced here (If, Match, Block) — see `expressions.md`.
 - `HirPat` produced by let-destructuring patterns — see `patterns.md`.
 - `MatchSource` tagging for synthetic matches — see `desugarings.md`.
-- `guard_let_stmts` / `while_conditions` fields on `HirBody` — see
-  `lib/kestrel-hir/src/body.rs:42-45`. Analyzers use them to find specific
+- `guard_stmts` / `while_conditions` fields on `HirBody` — see
+  `lib/kestrel-hir/src/body.rs`. Analyzers use them to find specific
   source-original constructs after desugaring.

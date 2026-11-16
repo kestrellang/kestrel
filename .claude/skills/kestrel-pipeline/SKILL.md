@@ -1,6 +1,6 @@
 ---
 name: kestrel-pipeline
-description: Pipeline-routing reference for the lib Kestrel compiler. Use when someone asks "where is X handled?", "where does <HirExpr/HirStmt/HirPat variant> get built?", "how does <syntax node> lower?", "how does Type.method() lower?", "what constraint does try emit?", "trace this through the compiler", "what's the MIR shape of X?", or any question that would otherwise require opening 4-5 files across kestrel-hir-lower / kestrel-type-infer / kestrel-mir-lower to answer.
+description: Where each source construct is handled in the compiler, stage by stage (HIR lowering, type inference, MIR). Use for "where is X handled?", "how does X lower?" or "trace this through the compiler".
 ---
 
 # kestrel-pipeline
@@ -12,11 +12,11 @@ reads the CST's typed views directly. Entries are **enum-complete** across the C
 
 ## Which file to open
 
-- `expressions.md` — every `Expr` syntax kind and `HirExpr` (23) variant. Binary ops,
+- `expressions.md` — every `Expr` syntax kind and `HirExpr` variant. Binary ops,
   calls, member access, control flow, literals.
 - `statements.md` — every `StatementKind` (4) and `HirStmt` (3) variant. Let bindings,
   expression statements, guard-let, deinit.
-- `patterns.md` — every `Pat` syntax kind and `HirPat` (12) variant. Plus the
+- `patterns.md` — every `Pat` syntax kind and `HirPat` variant. Plus the
   `HirLiteral` sub-reference used by pattern literals.
 - `desugarings.md` — HIR-only constructs (`ProtocolCall`, `OverloadSet`, each
   non-`UserMatch` `MatchSource`, synthetic `If` / `Block` / `Tuple` / `Local` / etc.).
@@ -30,13 +30,14 @@ If you're unsure which file covers a construct, start with its enum name:
 
 ## Verify before recommending changes
 
-**Pipeline maps go stale.** Before telling the user to edit at a cited `file:line`,
-open the file and confirm the claim — function renames, match-arm reorders, and
-inlined helpers move line numbers frequently. The enum variants themselves are
+**Pipeline maps go stale.** Entries cite a file and a function, never a line
+number, because line numbers drift with every edit. Before telling the user to
+edit somewhere, open the file and confirm the claim; functions get renamed and
+inlined too. The enum variants themselves are
 stable (`kestrel.ungram` in `kestrel-syntax-tree` / `kestrel-hir/src/body.rs`), but
 dispatch sites drift.
 
-If a cited line no longer matches: grep for the variant name (e.g.,
+If a cited function no longer exists: grep for the variant name (e.g.,
 `HirExpr::Match`) or the function name (e.g., `lower_match`, `desugar_try`) to
 locate the current site, then update the skill file.
 
@@ -48,28 +49,10 @@ If a variant entry is missing or a new variant is added:
    (`lib/kestrel-hir/src/body.rs`) to confirm the scope.
 2. Trace the variant through HIR-lower (`syntax.rs` for multi-child syntax decisions,
    `expr.rs` / `stmt.rs` / `pat.rs` / `desugar.rs`), inference
-   (`generate.rs` / `solver/`), and MIR-lower (`body_lower.rs`).
-3. Add the entry with the same shape as existing ones — cite `file:line`, include a
+   (`generate.rs` / `solver/`), and MIR-lower (`lib/kestrel-mir-lower/src/body/`).
+3. Add the entry with the same shape as existing ones — cite the file and function (no line numbers), include a
    match-arm excerpt for branching variants, note gotchas. TODO markers are allowed
    when a variant can't be fully traced; never skip silently.
-
-## Related references in MEMORY
-
-These memory files add depth for the referenced topics — copy the load-bearing facts
-inline into the variant entry when relevant rather than forcing a lookup:
-
-- `match_pattern_analyzer.md` — `MatchSource` gating for exhaustiveness / unreachable
-  arm checks.
-- `dispatch_funnel_pattern.md` — method / witness dispatch funnel in MIR.
-- `cascading_infer_errors.md` — how pattern / solver poison propagates (TupleRestPat,
-  ImplicitPat, solve_equal / solve_coerce Error paths).
-- `solver_poison_overreach.md` — SolveResult::Error vs report_and_poison distinction.
-- `integer_literal_overflow_silent_zero.md` — `parse_int` u64-max round-trip.
-- `static_overload_first_match_truncation.md` — static method overload resolution.
-- `witness_instantiation_collapse.md` — `Convertible[T]` dedup bug history.
-
-Plus many more codegen / runtime memory files relevant to the MIR side — see
-`MEMORY.md` → "Codegen Bugs".
 
 ## Dispatch-switch quick anchors
 
@@ -83,14 +66,16 @@ single variant:
 - HIR lowering expr dispatch: `lib/kestrel-hir-lower/src/expr.rs` (`lower_expr_node`)
 - HIR lowering stmt dispatch: `lib/kestrel-hir-lower/src/stmt.rs` (`lower_stmt_node`)
 - HIR lowering pat dispatch: `lib/kestrel-hir-lower/src/pat.rs` (`lower_pat_node`)
-- Inference gen_expr: `lib/kestrel-type-infer/src/generate.rs:60`
-- Inference gen_stmt: `lib/kestrel-type-infer/src/generate.rs:551`
-- Inference gen_pat: `lib/kestrel-type-infer/src/generate.rs:607`
-- Constraint dispatch: `lib/kestrel-type-infer/src/solver/:583` (`try_solve`)
-- MIR lower_expr: `lib/kestrel-mir-lower/src/body_lower.rs:445`
-- MIR lower_stmt: `lib/kestrel-mir-lower/src/body_lower.rs:419`
+- Inference: `lib/kestrel-type-infer/src/generate.rs` (`gen_expr`, `gen_stmt`, `gen_pat`)
+- Constraint dispatch: `lib/kestrel-type-infer/src/solver/` (`try_solve`)
+- MIR lower_expr: `lib/kestrel-mir-lower/src/body/expr.rs` (`lower_expr_no_promote` holds the per-variant match)
+- MIR lower_stmt: `lib/kestrel-mir-lower/src/body/stmt.rs`
+- MIR patterns / match: `lib/kestrel-mir-lower/src/body/pattern.rs` (`lower_match`)
 
-Solver per-constraint fns (all in `solver/`): `solve_equal` 817, `solve_coerce` 955,
-`solve_conforms` 1076, `solve_associated` 1099, `solve_call` 1251,
-`solve_overloaded_call` 1379, `solve_member` 1702, `solve_implicit` 2182,
-`solve_implicit_pat` 2293, `solve_tuple_rest_pat` 2401, `solve_reduce` 716.
+MIR is OSSA: SSA values (`ValueId`) and blocks with params, no places or
+rvalues. The `mir` skill covers the IR, the passes and mono. `kestrel dump mir -s all f.ks` prints every pass stage.
+
+Solver per-constraint fns (all in `solver/`): `solve_equal`, `solve_coerce`,
+`solve_conforms`, `solve_associated`, `solve_call`,
+`solve_overloaded_call`, `solve_member`, `solve_implicit`,
+`solve_implicit_pat`, `solve_tuple_rest_pat`, `solve_reduce`.
