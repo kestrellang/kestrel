@@ -241,7 +241,7 @@ impl OssaBodyCtx<'_, '_> {
     /// `init(consuming value: Target)`.
     fn emit_box_init(&mut self, boxed_ty: TyId, value: ValueId) -> Option<ValueId> {
         let protocol = self.ctx.query.query(kestrel_name_res::ResolveBuiltin {
-            builtin: kestrel_hir::Builtin::ExistentialBox,
+            builtin: kestrel_hir::Builtin::Box,
             root: self.ctx.root,
         })?;
         let init = self
@@ -448,7 +448,7 @@ impl OssaBodyCtx<'_, '_> {
             .ctx
             .query
             .query(kestrel_name_res::ResolveBuiltin {
-                builtin: kestrel_hir::Builtin::ConsumingIndirectionConsumePointee,
+                builtin: kestrel_hir::Builtin::ConsumingIndirectionConsumeValue,
                 root: self.ctx.root,
             })
             .filter(|&r| self.ctx.world.parent_of(r) == Some(protocol))
@@ -622,7 +622,7 @@ impl OssaBodyCtx<'_, '_> {
             root: self.ctx.root,
         });
         let requirement = self.ctx.query.query(kestrel_name_res::ResolveBuiltin {
-            builtin: kestrel_hir::Builtin::ConsumingIndirectionConsumePointee,
+            builtin: kestrel_hir::Builtin::ConsumingIndirectionConsumeValue,
             root: self.ctx.root,
         });
         let (Some(raw), Some(protocol), Some(requirement)) = (raw, protocol, requirement) else {

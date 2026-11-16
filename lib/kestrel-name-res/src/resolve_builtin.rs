@@ -14,8 +14,8 @@ use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
 use kestrel_ast::AstType;
-use kestrel_ast_builder::TypeAnnotation;
 use kestrel_ast_builder::attrs::attrs_of;
+use kestrel_ast_builder::{NodeKind, TypeAnnotation};
 use kestrel_hecs::{Entity, QueryContext, QueryFn};
 use kestrel_hir::Builtin;
 
@@ -165,20 +165,32 @@ impl QueryFn for ResolveBuiltin {
 
 /// The nominal a type alias names (`Int64` for `type IntegerLiteralType =
 /// Int64`, `Array` for `type ArrayLiteralType[T] = std.collections.Array[T]`),
-/// resolved in the alias's own scope.
+/// each step resolved in that alias's own scope. Follows alias chains
+/// (`type AnyBox[T] = Shared[T]`, `type Shared[T] = RcBox[T]` → `RcBox`), so a
+/// binding can name a role alias instead of repeating its box.
 fn alias_target(ctx: &QueryContext<'_>, alias: Entity, root: Entity) -> Option<Entity> {
-    let TypeAnnotation(AstType::Named { segments, .. }) = ctx.get::<TypeAnnotation>(alias)? else {
-        return None;
-    };
-    let resolution = ctx.query(ResolveTypePath {
-        segments: segments.iter().map(|s| s.name.clone()).collect(),
-        context: ctx.parent_of(alias).unwrap_or(root),
-        root,
-    });
-    match resolution {
-        TypeResolution::Found(entity) => Some(entity),
-        _ => None,
+    // Bounded: a cycle is E447's to report, not a hang here.
+    const MAX_CHAIN: usize = 8;
+    let mut current = alias;
+    for _ in 0..MAX_CHAIN {
+        let TypeAnnotation(AstType::Named { segments, .. }) = ctx.get::<TypeAnnotation>(current)?
+        else {
+            return None;
+        };
+        let resolution = ctx.query(ResolveTypePath {
+            segments: segments.iter().map(|s| s.name.clone()).collect(),
+            context: ctx.parent_of(current).unwrap_or(root),
+            root,
+        });
+        let TypeResolution::Found(target) = resolution else {
+            return None;
+        };
+        if ctx.get::<NodeKind>(target) != Some(&NodeKind::TypeAlias) {
+            return Some(target);
+        }
+        current = target;
     }
+    None
 }
 
 // ===== Type sugar (`[T]`, `T?`, `[K: V]`) =====

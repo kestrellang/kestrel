@@ -3,7 +3,7 @@
 //! `any[B] P` lowers to `B[rawany P]`, so `B` must be able to hold an
 //! unsized payload: exactly one type parameter without a default (the
 //! payload; any others, like an allocator, have defaults) declared `not Sized`, a
-//! conformance to `ExistentialBox` (its `init(consuming:)` is how a concrete
+//! conformance to `Box` (its `init(consuming:)` is how a concrete
 //! value gets boxed), and every stored field holding `T` only behind a
 //! pointer (docs/plans/existentials/existentials-design.md §3). The rules
 //! live in `kestrel_semantics::ExistentialBoxDefect`; this analyzer finds the
@@ -158,7 +158,7 @@ fn diagnostic(
             "it must have exactly one type parameter without a default".to_string()
         },
         BoxDefect::ParamNotRelaxed => "its type parameter is not declared 'not Sized'".to_string(),
-        BoxDefect::NotExistentialBox => "it does not conform to 'ExistentialBox'".to_string(),
+        BoxDefect::NotBox => "it does not conform to 'Box'".to_string(),
         BoxDefect::FieldByValue { field, param } => format!(
             "field '{}' stores '{}' by value",
             util::entity_name(ctx, *field),

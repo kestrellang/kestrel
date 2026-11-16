@@ -440,10 +440,10 @@ implementation.
    `memory_model/closure_kinds/mutating/two_mutating_closures_same_place_allowed.ks`.
    Revisit only if a general exclusivity rule ever lands.
 2. **`consuming` in v1?** — **resolved: SHIPPED in v1.** All four kinds landed
-   together. The container is *not* the shared box: a `consuming` closure owns
-   a unique heap environment (`@builtin(.UniqueBox)` → `std.memory.UniqueBox`),
-   the call transfers the environment to the callee, and the caller reclaims
-   the emptied block via `release_fn` after every call — the uniform rule that
+   together. A `consuming` closure owns a single-owner heap environment
+   (`@builtin(.ConsumingClosureBox)`, `Owned` today) holding `Optional[E]`:
+   the call swaps the environment out for `.None`, and the caller reclaims
+   the emptied box via `release_fn` after every call — the uniform rule that
    makes `escaping → consuming` work with no synthesized adapter. See plan D5
    (decision 2, as amended by E2b).
 3. **Generic/protocol positions** — *still open (no blocker found).* Kinds

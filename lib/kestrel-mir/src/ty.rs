@@ -52,12 +52,11 @@ impl FnKind {
     /// type-erased share/release pair inline (4-word layout, `ApplyPartial`
     /// `retain`/`release`, the `expand.rs` erased dispatch).
     ///
-    /// BOTH owning kinds are boxed, but with different containers:
-    /// `Escaping` uses the SHARED box (`@builtin(.SharedBox)`, many handles,
-    /// many calls), `Consuming` a UNIQUE one (`@builtin(.UniqueBox)`, one
-    /// owner, one call). The shared box is unusable for `consuming` because
-    /// its release drops the WHOLE environment unconditionally, double-freeing
-    /// the slots a one-shot body already moved out (plan D5).
+    /// BOTH owning kinds are boxed, each through its own binding:
+    /// `Escaping` in `@builtin(.ClosureBox)` (a shared box: many handles,
+    /// many calls), `Consuming` in `@builtin(.ConsumingClosureBox)` (one
+    /// owner, one call), which holds `Optional[E]` so the call can take the
+    /// environment out and the release drops only what is left (plan D5).
     pub fn is_boxed(self) -> bool {
         matches!(self, FnKind::Consuming | FnKind::Escaping)
     }

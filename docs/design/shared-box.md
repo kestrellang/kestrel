@@ -1,25 +1,33 @@
 # The Shared Box
 
-**Status: implemented for the closure client (2026-08-08).** Companion to
+**Status: box bindings consolidated (0.20, 2026-11).** The protocols are
+`Box` and `SharedBox: Box` (`lang/std/memory/box.ks`); every boxing feature
+reads one tagged alias in `lang/std/memory/box_bindings.ks` (see
+[Box Bindings](#box-bindings)). `ExistentialBox` was renamed `Box`, `isUnique`
+moved onto it, and `@builtin(.SharedBox)` now tags the protocol, not `RcBox`.
+The rest of this document is the original design, updated where the
+bindings changed.
+
+**Originally implemented for the closure client (2026-08-08).** Companion to
 [closures.md](closures.md); answers its open question 5 (the shared-object
-container). Shipped: the `SharedBox` protocol (`lang/std/memory/sharedbox.ks`),
+container). Shipped: the `SharedBox` protocol (now `lang/std/memory/box.ks`),
 `RcBox`'s conformance and its `@builtin(.SharedBox)` binding
 (`lang/std/memory/rcbox.ks`), and `escaping` closure environments as the first
 client. The other clients — classes, `any` existentials, `indirect enum`
 payloads — remain future work, and the `CowBox` generalization is **deferred**
 (see [Stdlib Changes](#stdlib-changes)).
 
-**Sibling added during implementation: `UniqueBox`.** The consuming tier needs
-the opposite contract — one owner, no refcount, payload movable *out* — so it
-does not use a shared box at all. `@builtin(.UniqueBox)` →
-`std.memory.UniqueBox[T]` is a single allocation holding a liveness word plus
-the payload, with `takeValue()` (move the payload out, mark the block empty)
-and `destroy()` (drop the payload if still present, then free). It is not a
-`SharedBox` conformer and imposes none of this document's constraints; see
-[the plan's D5](../plans/closure-kinds/closure-kinds-plan.md) for why reusing
-`RcBox` with a pinned count of 1 was rejected (its release runs
-`dropInPlace` on the whole environment, double-freeing slots the one-shot body
-moved out).
+**The consuming tier boxes `Optional[E]`.** A `consuming` closure's call
+takes its environment out, but the caller still releases the closure value
+afterwards (the uniform rule that lets an `escaping` value pass as a
+`consuming` one). The box therefore holds `Optional[E]`: the call swaps it for
+`.None` through `MutableIndirection.valueMutRef()`, and the release is the
+box's ordinary drop, which drops `E` only if the closure was never called. That
+needs nothing beyond `Box` and `MutableIndirection`, so the binding points at
+`Owned` like any other feature. (It replaced a bespoke `UniqueBox` with a
+liveness word and tag-called `takeValue`/`destroy`; see
+[the plan's D5](../plans/closure-kinds/closure-kinds-plan.md) for why a box
+whose release drops the whole environment cannot serve directly.)
 
 Several language features need the same thing: a value moved to the heap,
 owned collectively by any number of handles, destroyed exactly once when the
@@ -46,17 +54,31 @@ Design rules:
 ## The Protocol
 
 ```kestrel
-/// The contract for a shared-ownership container the compiler may use for
-/// implicit boxing: escaping closure environments, class storage, `any`
-/// payloads, `indirect enum` payloads.
+/// A box: a handle onto one `Target` behind a pointer, built from a value.
+/// Every box conforms (`RcBox`, `CowBox`, `OwnedBox`); `any[B] P` needs this.
+@builtin(.Box)
+public protocol Box: Indirection {
+    /// Take ownership of `value` and move it into managed storage,
+    /// returning the first handle.
+    @builtin(.BoxInit)
+    init(consuming value: Target)
+
+    /// `true` only when this handle is provably the sole owner. Backs
+    /// copy-on-write forking. A single-owner box always answers `true`;
+    /// implementations without cheap uniqueness information (a tracing GC)
+    /// may conservatively return `false`; callers must treat `false` as
+    /// "fork before mutating".
+    var isUnique: Bool { get }
+}
+
+/// A box whose handles alias: the shared-ownership contract behind escaping
+/// closure environments, class storage and plain `any` values.
 ///
 /// Conformers are handles: small, fixed-layout values pointing at managed
 /// storage that owns one `Target`. Duplicating a handle (`clone`) shares the
-/// storage; dropping the last handle destroys the payload exactly once.
-public protocol SharedBox: Cloneable, MutableIndirection {
-    /// Take ownership of `value` and move it into managed storage,
-    /// returning the first handle.
-    init(consuming value: Target)
+/// storage; dropping the last handle destroys the value exactly once.
+@builtin(.SharedBox)
+public protocol SharedBox: Box, Cloneable, MutableIndirection {
 
     /// Mutable access to the payload through a *shared* (non-mutating)
     /// handle — the interior-mutability primitive. This is the marked
@@ -67,12 +89,6 @@ public protocol SharedBox: Cloneable, MutableIndirection {
     /// identity (`===`). Required instead of exposing an address so that a
     /// moving collector can still conform.
     func isIdentical(to other: Self) -> Bool
-
-    /// `true` only when this handle is provably the sole owner. Backs
-    /// copy-on-write forking. Implementations without cheap uniqueness
-    /// information (a tracing GC) may conservatively return `false`;
-    /// callers must treat `false` as "fork before mutating".
-    var isUnique: Bool { get }
 }
 ```
 
@@ -83,10 +99,10 @@ Most of the contract is inherited rather than invented:
 | share | `Cloneable.clone()` | the aggregate copy fold already routes struct/enum copies through it — a struct holding a handle becomes Cloneable and shares on copy for free |
 | release | the conformer's own `deinit` | ordinary drop rules; last release destroys the payload |
 | read payload | `MutableIndirection.value` (its `ref`) | also gives transparent member access (`box.field`) |
-| create | `init(consuming:)` | protocol requirement |
+| create | `Box.init(consuming:)` | protocol requirement |
 | shared mutation | `sharedMutRef()` | protocol requirement, see below |
 | identity | `isIdentical(to:)` | protocol requirement |
-| uniqueness | `isUnique` | protocol requirement, may be conservative |
+| uniqueness | `Box.isUnique` | protocol requirement, may be conservative |
 
 `sharedMutRef` is the one genuinely new operation, and it is the honest name
 for what escaping closures and classes do: mutate through a shared handle
@@ -96,62 +112,84 @@ mutates through a non-`mutating` receiver by going through `Pointer`
 hatch. The protocol standardizes that surface; implementing it is an
 `unsafe`-flavored act the stdlib performs so user code never has to.
 
-## The Lang-Item Binding
+## Box Bindings
 
 The compiler must *instantiate* a box at synthesized, unnameable payload
-types (a closure's environment struct, a class's storage struct), so the
-binding is a generic type marked as a lang item — not a conformance search:
+types (a closure's environment struct, a class's storage struct), so it reads
+a binding: a generic type alias carrying a feature tag, which denotes its
+(chained) alias target. All of them live in one file,
+`lang/std/memory/box_bindings.ks`:
 
 ```kestrel
-@builtin(.SharedBox)                                       // as shipped; drafted as @lang(sharedBox)
-public struct RcBox[T]: Cloneable where T: not Copyable { ... }   // stdlib default
-extend RcBox[T]: SharedBox { ... }                         // conformance, same file
+public type Shared[T] = RcBox[T]                   // role: shared ownership
+@builtin(.OwnedBox) public type Owned[T] = OwnedBox[T]   // role: single owner
+
+@builtin(.ClosureBox)          public type ClosureBox[T]          = Shared[T]
+@builtin(.ClassBox)            public type ClassBox[T]            = Shared[T]
+@builtin(.AnyBox)              public type AnyBox[T]              = Shared[T]
+@builtin(.IndirectBox)         public type IndirectBox[T]         = Owned[T]
+@builtin(.ConsumingClosureBox) public type ConsumingClosureBox[T] = Owned[T]
 ```
 
-Every implicit-boxing site lowers to the bound type applied to the payload
-type, then touches it only through `SharedBox` requirements. As shipped, the
-binding rides the existing `@builtin` machinery (`Builtin::SharedBox`), whose
-`name()` is the non-resolvable sentinel `"SharedBox"` — never `"RcBox"`, or the
-name-based fast path would resolve `RcBox` without the attribute and defeat
-swappability. Everything below that says `@lang(sharedBox)` means this binding.
+- **Role aliases** (`Shared`, `Owned`) name the box std uses for a kind of
+  ownership. Editing one retargets every feature that points at it.
+- **Feature aliases** name the box one compiler feature uses. Each normally
+  points at a role; pointing one at another box splits that feature off
+  (`ClassBox = GcBox[T]` for weak refs while `any` stays on `RcBox`) with no
+  compiler change.
+- `ResolveBuiltin` follows alias chains to the struct, and lowering then
+  touches it only through protocol requirements (`BoxInit`,
+  `SharedBoxSharedMutRef`, `ConsumingIndirectionConsumeValue`), never by name
+  or shape. Indirect-enum unboxing calls `takeValue()`, an extension on
+  `ConsumingIndirection` built on `consumeValue`, and a consuming closure's
+  call reaches its environment through `valueMutRef()`, an extension on
+  `MutableIndirection`; both go through the witness table.
+- Each feature tag carries the protocols its box must provide
+  (`Builtin::box_binding_bound`), checked at the alias by **E470**:
 
-**Overriding.** v1 has a single global binding, like a global allocator:
-supplying an alternate prelude/build configuration moves `@lang(sharedBox)`
-to another conforming type (`GcBox`, `ArenaBox`), and escaping closures,
-classes, existentials, and indirect enums all retarget together. Because
-lowering is protocol-driven, a later per-declaration override
-(`@box(GcBox) class Node { ... }`) is only "instantiate a different
-conformer here" — the design keeps that door open without committing to it.
+| binding | must conform to | why |
+|---|---|---|
+| `ClosureBox`, `ClassBox` | `SharedBox` | aliases share and mutate state; `===` |
+| `AnyBox` | `Box` | `init(consuming:)` and the peel |
+| `IndirectBox`, `Owned` | `Box`, `ConsumingIndirection` | matching moves the payload out |
+| `ConsumingClosureBox` | `Box`, `MutableIndirection` | the call swaps `Optional[E]` to `.None` in place |
+
+**Overriding.** Bindings are global: std decides them, users do not. Users
+pick a box per site instead: `any[B] P` today, and a per-declaration
+`@box(GcBox) class Node { ... }` is the planned escape hatch for classes.
+One switch per role keeps a closure stored in an `any`, or a class field
+holding a closure, from mixing boxes with different promises by accident.
 
 An override is a **semantic** choice, not a transparent one. The default
 `RcBox` binding promises deterministic last-release cleanup — `deinit`s run
 at a predictable point — and does not collect strong cycles. A tracing
-collector inverts both. These are properties of the *binding*, documented
-there; the protocol deliberately promises neither.
+collector inverts both. These are properties of the *box*, documented
+there; the protocols deliberately promise neither.
 
-**Naming.** The mechanism-neutral name belongs to the protocol; each
-conformer says what it actually does: `RcBox` (non-atomic refcount, default),
-future `ArcBox` (atomic), `GcBox` (traced). A user-facing alias
-`Shared[T]` — "whatever the build's box is", i.e. the current lang-item
-binding — may be added later for code that wants shared ownership without
-naming a mechanism. Code that specifically wants refcounting names `RcBox`
-and keeps it regardless of the binding.
+**Naming.** The mechanism-neutral names belong to the protocols and roles;
+each conformer says what it actually does: `RcBox` (non-atomic refcount,
+default), future `ArcBox` (atomic), `GcBox` (traced). Code that wants shared
+ownership without naming a mechanism writes `Shared[T]`; code that
+specifically wants refcounting names `RcBox` and keeps it regardless of the
+binding. The thing a box holds is its **value** (`Target` is its type) in
+names and prose.
 
 ## Clients
 
-| client | payload | handle semantics | operations used |
-|---|---|---|---|
-| `escaping` closure (**shipped**) | synthesized environment struct | reference — aliases share state | `init`, `clone`, drop, `sharedMutRef` |
-| class (future) | synthesized storage struct | reference | the above + `isIdentical` for `===` |
-| `any P` (**shipped**, 0.17) | the concrete `T` | reference — copies share the payload | `init`, `clone`, drop, `value` |
-| `indirect enum` (**shipped**, 0.19) | a recursive case's whole payload | **value** — a unique `OwnedBox` per case, not this binding; a copy clones the payload | `OwnedBox` `init`, `clone`, drop, `takeValue`; reads project the box pointer in place |
+| client | binding | payload | handle semantics | operations used |
+|---|---|---|---|---|
+| `escaping` closure (**shipped**) | `ClosureBox` → `Shared` | synthesized environment struct | reference — aliases share state | `init`, `clone`, drop, `sharedMutRef` |
+| class (future) | `ClassBox` → `Shared` | synthesized storage struct | reference | the above + `isIdentical` for `===` |
+| `any P` (**shipped**, 0.17) | `AnyBox` → `Shared` | the concrete `T` | reference — copies share the value | `init`, `clone`, drop, `value` |
+| `indirect enum` (**shipped**, 0.19) | `IndirectBox` → `Owned` | a recursive case's whole payload | **value** — one owner per case; a copy clones the payload | `init`, `clone`, drop, `takeValue`; reads project the box pointer in place |
+| `consuming` closure (**shipped**) | `ConsumingClosureBox` → `Owned` | `Optional` of the synthesized environment struct | one owner, taken once | `init`, drop, `valueMutRef` |
 
 ### Escaping closures
 
 The first client, specified in [closures.md](closures.md). An `escaping`
 literal builds its owned environment struct `E` (snapshots per the owning
 capture table), then wraps it: `Box(consuming: env)` where
-`Box = @lang(sharedBox)` at `E`. The closure value is `{ fn_ptr, handle }`;
+`Box = ClosureBox` at `E`. The closure value is `{ fn_ptr, handle }`;
 capture-free closures stay bare function pointers and never allocate.
 
 - Calling the closure projects the environment with `sharedMutRef()` — the
@@ -166,7 +204,7 @@ capture-free closures stay bare function pointers and never allocate.
 ### Classes
 
 A `class C` is sugar for a hidden storage struct plus a handle type bound to
-`Box[C.Storage]`. Field reads go through `value`, field writes and
+`ClassBox[C.Storage]`. Field reads go through `value`, field writes and
 `mutating` methods through `sharedMutRef` (classes are the other sanctioned
 reference-semantics feature), `===` is `isIdentical(to:)`. Class values are
 Cloneable handles: assignment shares, and the existing copy fold propagates
@@ -174,29 +212,29 @@ that through aggregates unchanged.
 
 ### `any P` existentials
 
-`any P` is `DefaultBox[rawany P]`, and `DefaultBox` is `RcBox`: the
+`any P` is `AnyBox[rawany P]`, and `AnyBox` is `Shared`, i.e. `RcBox`: the
 existential *is* a shared box over an unsized payload, so copies share it
 (reference semantics; `any[CowBox] P` gives value semantics). The payload's
 drop, size, alignment and clone travel in the function table carried by the
 box's pointer, so `clone`/drop/`value` on `RcBox[rawany P]` are the
-ordinary box operations. A box only needs `ExistentialBox` (this protocol's
-`init(consuming:)` + `Indirection`) to hold an existential; `SharedBox`
-refines it. See [`docs/plans/existentials/existentials-design.md`](../plans/existentials/existentials-design.md)
+ordinary box operations. A box only needs `Box` (`init(consuming:)`,
+`isUnique` + `Indirection`) to hold an existential; `SharedBox` refines it. See [`docs/plans/existentials/existentials-design.md`](../plans/existentials/existentials-design.md)
 §3 and the user guide [`docs/language/existentials.md`](../language/existentials.md).
 
 ### `indirect enum`
 
 The `indirect` payload is boxed to break layout recursion — the enum's
 payload slot holds a fixed-size handle instead of the infinite type. Enums
-are value types and must stay that way, so indirect enums lower through the
-**CoW layer**, not the raw box: copies share (`clone`), and any mutation of
-the payload runs the uniqueness check and forks when shared. A box whose
-`isUnique` conservatively returns `false` degrades to fork-always — slower,
-still correct.
+are value types and must stay that way. As shipped (0.19), each boxed case
+holds an `IndirectBox` — `Owned`, a single-owner `OwnedBox` — not the shared
+binding: a copy clones the payload, and matching a case moves it out
+(`takeValue`). The original plan, a CoW layer over the shared box, was not
+needed; `Box.isUnique` keeps that option open.
 
 ## Constraints on a Box Implementation
 
-The compiler enforces these when a type is bound as `@lang(sharedBox)`:
+The compiler relies on these for every box a binding names (E470 checks the
+protocol side; the rest is structural):
 
 1. **Fixed handle layout.** The handle's size and alignment must not depend
    on `Target`. Existentials type-erase the handle, and indirect enums rely
@@ -230,7 +268,7 @@ The compiler enforces these when a type is bound as `@lang(sharedBox)`:
 ## Stdlib Changes
 
 - **Add `protocol SharedBox`** (`std.memory`), as above. — **shipped**
-  (`lang/std/memory/sharedbox.ks`).
+  (`lang/std/memory/box.ks`, with `Box` since 0.20).
 - **Conform `RcBox`**: it already has `init(consuming:)`, `clone`,
   `isUnique`, and `MutableIndirection`; it gains `sharedMutRef()` (via
   `valuePtr()`, like `modify`) and `isIdentical(to:)` (storage pointer
@@ -246,7 +284,8 @@ The compiler enforces these when a type is bound as `@lang(sharedBox)`:
   `CowBox` continues to name `RcBox`. `RcBox`'s refcount-specific extras
   (`deepClone`, `setValue`, `refCount`) stay inherent API outside the
   protocol — a box needs none of them to conform.
-- Later, optionally: `Shared[T]` alias for the current binding. — not shipped.
+- `Shared[T]` alias for the current binding. — **shipped** (0.20, with the
+  other bindings in `box_bindings.ks`).
 
 ## Resolved Questions
 

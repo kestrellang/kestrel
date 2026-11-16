@@ -1,20 +1,22 @@
-//! The owning closure tiers: a heap-boxed environment, shared or unique.
+//! The owning closure tiers: a heap-boxed environment, shared or single-owner.
 //!
-//! - **`escaping`** — the `@builtin(.SharedBox)` binding (`RcBox` today,
-//!   swappable — docs/design/shared-box.md): many handles, many calls, the
+//! - **`escaping`** — the `@builtin(.ClosureBox)` binding (`Shared`, i.e.
+//!   `RcBox`, today — swappable in `std.memory.box_bindings`,
+//!   docs/design/shared-box.md): many handles, many calls, the
 //!   last release destroys the captures.
-//! - **`consuming`** — the `@builtin(.UniqueBox)` binding: ONE owner, ONE
-//!   call. The call takes the environment out of the box into the callee's
-//!   frame (where per-slot partial-move machinery applies) and the release
-//!   shim reclaims the block; a closure that is never called releases with
-//!   the environment still inside, so every capture drops exactly once either
-//!   way. The shared box cannot serve here: its release drops the WHOLE
-//!   payload, double-freeing slots the one-shot body moved out (plan D5).
+//! - **`consuming`** — the `@builtin(.ConsumingClosureBox)` binding
+//!   (`Owned`, i.e. `OwnedBox`, today): ONE owner, ONE call. The box holds
+//!   `Optional[E]`; the call swaps it for `.None` through
+//!   `MutableIndirection.valueMutRef()` and runs on `E` in its own frame
+//!   (where per-slot partial-move machinery applies). The release shim is the
+//!   box's ordinary drop, so a closure that is never called drops `E` there
+//!   and one that was called drops `.None`: every capture drops exactly once
+//!   either way ([`OnceSlot`]).
 //!
 //! The compiler emits NO retain/release/allocate sequence of its own: it
 //! instantiates the binding at the synthesized environment struct `E` and
-//! touches it only through the binding's requirements, so a single lang-item
-//! swap retargets every boxing site.
+//! touches it only through the binding's requirements, so editing the
+//! binding alias retargets every boxing site.
 //!
 //! Value shape (4 words, `passes/layout.rs` + both codegen `ty.rs`):
 //! `{fn_ptr, env_handle, retain_fn, release_fn}`. The two shim pointers are
@@ -35,9 +37,10 @@ use kestrel_mir::body::OssaBody;
 use kestrel_mir::callee::Callee;
 use kestrel_mir::inst::{CallArg, InstKind, Instruction};
 use kestrel_mir::item::function::{FunctionDef, FunctionKind, ParamDef};
+use kestrel_mir::item::witness::WitnessMethodKey;
 use kestrel_mir::terminator::{Terminator, TerminatorKind};
 use kestrel_mir::value::{Ownership, RootProvenance, ValueDef};
-use kestrel_mir::{FieldIdx, Immediate, MirTy, Op, ParamConvention, TyId, ValueId};
+use kestrel_mir::{FieldIdx, Immediate, MirTy, Op, ParamConvention, TyId, ValueId, VariantIdx};
 
 use super::OssaBodyCtx;
 
@@ -139,7 +142,7 @@ fn forget_handle_insts(
     cur
 }
 
-/// The resolved `@builtin(.SharedBox)` binding, specialized at one payload
+/// A resolved box binding (`ClosureBox` or `ConsumingClosureBox`), specialized at one payload
 /// type. Every member is found BY REQUIREMENT NAME on the binding entity —
 /// never by a hard-coded `RcBox` reference (plan D9).
 pub(crate) struct BoxBinding {
@@ -162,18 +165,32 @@ pub(crate) struct BoxBinding {
     /// SHARED box only: `sharedMutRef() -> &mutating Target` — borrow the
     /// payload in place.
     pub shared_mut_ref: Option<Entity>,
-    /// UNIQUE box only: `takeValue() -> T` — move the payload out, leaving the
-    /// (now empty) allocation for `destroy` to reclaim.
-    pub take_value: Option<Entity>,
-    /// UNIQUE box only: `destroy()` — drop any still-present payload and free
-    /// the allocation. The single reclamation point of a unique box.
-    pub destroy: Option<Entity>,
+    /// CONSUMING box only: the `Optional[E]` the environment is boxed as,
+    /// and how the one call reaches it in place.
+    pub once: Option<OnceSlot>,
     /// Type args for a member call on the binding: `[payload]`.
     pub type_args: Vec<TyId>,
 }
 
+/// How a `consuming` closure's box holds its environment `E`: as
+/// `Optional[E]`, so the one call can move `E` out and leave `.None` behind.
+/// The box's ordinary drop then frees the block, dropping `E` only if the
+/// closure was never called. That is the whole "taken" flag, and it needs
+/// nothing from the box beyond `Box` and `MutableIndirection`.
+#[derive(Clone)]
+pub(crate) struct OnceSlot {
+    /// `Optional[E]` — the box's payload type.
+    pub opt_ty: TyId,
+    /// `.Some` / `.None`, found by their `@builtin` case tags.
+    pub some: VariantIdx,
+    pub none: VariantIdx,
+    /// `MutableIndirection.valueMutRef()`: its protocol and witness key.
+    pub protocol: Entity,
+    pub value_mut_ref: WitnessMethodKey,
+}
+
 /// Does `c` have the box binding's required initializer shape,
-/// `init(consuming value: Target)` (`lang/std/memory/sharedbox.ks`)?
+/// `init(consuming value: Target)` (`lang/std/memory/box.ks`)?
 ///
 /// Three axes, all load-bearing: arity 1, NO label (the requirement's `value`
 /// is a single-name parameter, so call sites are positional) and `consuming`
@@ -203,8 +220,8 @@ fn exactly_one_box_member<T: Copy>(matches: &[T], requirement: &str) -> T {
         [one] => *one,
         [] => panic!(
             "ICE: box binding is missing its required member `{requirement}` — \
-             the `@builtin(.SharedBox)`/`@builtin(.UniqueBox)` type resolved but \
-             does not implement the requirement"
+             the `@builtin(.ClosureBox)` box resolved but does not implement \
+             the requirement"
         ),
         many => panic!(
             "ICE: box binding has {} members matching `{requirement}` — the \
@@ -217,11 +234,10 @@ fn exactly_one_box_member<T: Copy>(matches: &[T], requirement: &str) -> T {
 
 impl OssaBodyCtx<'_, '_> {
     /// Resolve the shared-box binding at `payload_ty`, or `None` when the
-    /// stdlib supplies no `@builtin(.SharedBox)` type (a `stdlib: false` test):
+    /// stdlib supplies no `@builtin(.ClosureBox)` binding (a `stdlib: false` test):
     /// the caller then falls back to the historical stack environment.
     pub(crate) fn resolve_box_binding(&mut self, payload_ty: TyId) -> Option<BoxBinding> {
-        let mut b =
-            self.resolve_box_common(Builtin::SharedBox, Builtin::ExistentialBoxInit, payload_ty)?;
+        let mut b = self.resolve_box_common(Builtin::ClosureBox, Builtin::BoxInit, payload_ty)?;
         let entity = match self.ctx.module.ty_arena.get(b.handle_ty) {
             MirTy::Named { entity, .. } => *entity,
             _ => return None,
@@ -232,23 +248,44 @@ impl OssaBodyCtx<'_, '_> {
         Some(b)
     }
 
-    /// Resolve the `@builtin(.UniqueBox)` binding at `payload_ty` — the
-    /// `consuming` tier's container. Same shape as [`Self::resolve_box_binding`],
-    /// different requirements: a unique box is taken from (once) or destroyed
-    /// (once), never shared.
-    pub(crate) fn resolve_unique_box_binding(&mut self, payload_ty: TyId) -> Option<BoxBinding> {
-        let mut b =
-            self.resolve_box_common(Builtin::UniqueBox, Builtin::UniqueBoxInit, payload_ty)?;
-        let entity = match self.ctx.module.ty_arena.get(b.handle_ty) {
-            MirTy::Named { entity, .. } => *entity,
-            _ => return None,
+    /// Resolve the `@builtin(.ConsumingClosureBox)` binding for environment
+    /// `env_ty` — the `consuming` tier's container. The box holds
+    /// `Optional[env_ty]` ([`OnceSlot`]); its release is the box's ordinary
+    /// drop, so nothing here is specific to one box type.
+    pub(crate) fn resolve_consuming_box_binding(&mut self, env_ty: TyId) -> Option<BoxBinding> {
+        let resolve = |this: &Self, builtin| {
+            this.ctx.query.query(kestrel_name_res::ResolveBuiltin {
+                builtin,
+                root: this.ctx.root,
+            })
         };
-        let take_value = self.find_box_member(entity, Builtin::UniqueBoxTakeValue);
-        let destroy = self.find_box_member(entity, Builtin::UniqueBoxDestroy);
-        self.ctx.register_name(take_value);
-        self.ctx.register_name(destroy);
-        b.take_value = Some(take_value);
-        b.destroy = Some(destroy);
+        let optional = resolve(self, Builtin::OptionalEnum)?;
+        self.ctx.register_name(optional);
+        let opt_ty = self.ctx.module.ty_arena.named(optional, vec![env_ty]);
+        let mut b =
+            self.resolve_box_common(Builtin::ConsumingClosureBox, Builtin::BoxInit, opt_ty)?;
+        // Past here the box resolved, so a missing piece is a broken std.
+        let some = self.ctx.builtin_variant_idx(Builtin::OptionalSomeCase);
+        let none = self.ctx.builtin_variant_idx(Builtin::OptionalNoneCase);
+        let value_mut_ref = resolve(self, Builtin::MutableIndirectionValueMutRef);
+        let (Some(some), Some(none), Some(value_mut_ref)) = (some, none, value_mut_ref) else {
+            panic!(
+                "ICE: `@builtin(.ConsumingClosureBox)` resolved but std lacks the \
+                 `Optional` case tags or `MutableIndirection.valueMutRef()`"
+            );
+        };
+        let protocol = self
+            .ctx
+            .is_protocol_method(value_mut_ref)
+            .expect("ICE: `valueMutRef` is not a `MutableIndirection` member");
+        self.ctx.register_name(protocol);
+        b.once = Some(OnceSlot {
+            opt_ty,
+            some,
+            none,
+            protocol,
+            value_mut_ref: self.ctx.witness_method_key(value_mut_ref),
+        });
         Some(b)
     }
 
@@ -284,8 +321,7 @@ impl OssaBodyCtx<'_, '_> {
             raw_ty,
             init,
             shared_mut_ref: None,
-            take_value: None,
-            destroy: None,
+            once: None,
             type_args,
         })
     }
@@ -356,8 +392,8 @@ impl OssaBodyCtx<'_, '_> {
     }
 
     /// The binding's member for the `@builtin`-tagged `tag`: the tagged
-    /// entity itself when it sits on the binding (or an extension of it —
-    /// `UniqueBox.takeValue`), else the ONE binding member carrying the tagged
+    /// entity itself when it sits on the binding (or an extension of it),
+    /// else the ONE binding member carrying the tagged
     /// PROTOCOL requirement's witness key (`SharedBox.sharedMutRef`, whose
     /// implementation lives on whichever type is the swappable binding).
     ///
@@ -366,7 +402,7 @@ impl OssaBodyCtx<'_, '_> {
     /// peeled to a raw pointer), so a missing tag or a missing / duplicated
     /// member is a broken stdlib, never the legitimate "no box available"
     /// case. See [`exactly_one_box_member`].
-    fn find_box_member(&mut self, entity: Entity, tag: Builtin) -> Entity {
+    pub(crate) fn find_box_member(&mut self, entity: Entity, tag: Builtin) -> Entity {
         let what = tag.name();
         let Some(requirement) = self.ctx.query.query(kestrel_name_res::ResolveBuiltin {
             builtin: tag,
@@ -382,53 +418,6 @@ impl OssaBodyCtx<'_, '_> {
             return requirement;
         }
         exactly_one_box_member(&matches, what)
-    }
-
-    /// Find the ONE member of `entity` (or its extensions) whose shape
-    /// matches `pred`. Only for boxes with no `@builtin` tags yet (the
-    /// indirect-enum `OwnedBox`); a tagged box uses [`Self::find_box_member`].
-    /// Missing or duplicated matches are a broken stdlib (ICE).
-    pub(crate) fn find_box_member_by_shape(
-        &mut self,
-        entity: Entity,
-        kind: kestrel_ast_builder::NodeKind,
-        requirement: &str,
-        pred: impl Fn(&Callable, &str) -> bool,
-    ) -> Entity {
-        let mut parents = vec![entity];
-        parents.extend(
-            self.ctx
-                .query
-                .query(kestrel_name_res::extensions::ExtensionsFor {
-                    target: entity,
-                    root: self.ctx.root,
-                }),
-        );
-        // Collect ALL matches rather than taking the first: "first hit wins"
-        // is what made the selection depend on declaration order (F4).
-        let mut matches = Vec::new();
-        for parent in parents {
-            for &child in self.ctx.query.children_of(parent).iter() {
-                if self.ctx.query.get::<kestrel_ast_builder::NodeKind>(child) != Some(&kind) {
-                    continue;
-                }
-                let name = self
-                    .ctx
-                    .query
-                    .get::<kestrel_ast_builder::Name>(child)
-                    .map(|n| n.0.clone())
-                    .unwrap_or_default();
-                if self
-                    .ctx
-                    .query
-                    .get::<Callable>(child)
-                    .is_some_and(|c| pred(c, &name))
-                {
-                    matches.push(child);
-                }
-            }
-        }
-        exactly_one_box_member(&matches, requirement)
     }
 
     /// Move `env` (an @owned environment struct) into managed storage and
@@ -583,44 +572,71 @@ impl OssaBodyCtx<'_, '_> {
         payload_ptr
     }
 
-    /// Move the payload OUT of a unique box, returning the @owned value. The
-    /// allocation stays alive and marked empty; the closure value's release
-    /// shim (`destroy`) reclaims it afterwards, so every unique box is freed
-    /// exactly once whether or not it was ever called.
+    /// Wrap a fresh `consuming` environment for its box: `.Some(env)`.
+    pub(crate) fn emit_once_payload(&mut self, binding: &BoxBinding, env: ValueId) -> ValueId {
+        let once = binding
+            .once
+            .as_ref()
+            .expect("ICE: consuming box without its slot");
+        self.emit_enum_variant(once.opt_ty, once.some, vec![env])
+    }
+
+    /// Move the environment OUT of a `consuming` closure's box, returning the
+    /// @owned `E`. The box keeps `.None` in its place and stays alive: the
+    /// closure value's release (the box's ordinary drop) frees it afterwards,
+    /// dropping nothing, so every box is freed exactly once whether or not the
+    /// closure was ever called.
     ///
     /// This is the `consuming` tier's prologue: the environment lands in the
     /// body's own frame, where the ORDINARY partial-move machinery gives each
     /// capture slot its own drop state (plan D5, "per-slot drop flags in the
     /// body frame").
-    pub(crate) fn emit_unique_take(
+    pub(crate) fn emit_consuming_take(
         &mut self,
         binding: &BoxBinding,
         raw: ValueId,
-        payload_ty: TyId,
+        env_ty: TyId,
     ) -> ValueId {
+        let once = binding
+            .once
+            .clone()
+            .expect("ICE: consuming box without its slot");
+        // `valueMutRef()` is `mutating`: the conjured handle needs an address.
         let handle = self.emit_handle_from_raw(binding, raw);
-        let borrow = self.emit_begin_borrow(handle);
-        let callee = Callee::direct_with_args(
-            binding
-                .take_value
-                .expect("ICE: unique-box binding without `takeValue`"),
-            binding.type_args.clone(),
-            Some(binding.handle_ty),
-        );
-        let payload = self.emit_call_returning(
+        let ptr_ty = self.ctx.module.ty_arena.pointer(binding.handle_ty);
+        let one = self.emit_literal(Immediate::i64(1));
+        let handle_addr = self.emit_op1(Op::StackAlloc(binding.handle_ty), one, ptr_ty);
+        self.emit_store_init(handle_addr, handle);
+        let callee = Callee::Witness {
+            protocol: once.protocol,
+            method: once.value_mut_ref,
+            self_type: binding.handle_ty,
+            method_type_args: vec![],
+        };
+        let slot_ref = self.emit_call_returning(
             callee,
             vec![CallArg {
-                value: borrow,
-                convention: ParamConvention::Borrow,
+                value: handle_addr,
+                convention: ParamConvention::MutBorrow,
             }],
-            payload_ty,
+            once.opt_ty,
         );
-        self.emit_end_borrow(borrow);
+        let opt_ptr_ty = self.ctx.module.ty_arena.pointer(once.opt_ty);
+        let slot = self.emit_op1(Op::RefToPtr, slot_ref, opt_ptr_ty);
+        // Same reason as `emit_box_payload_ptr`: only the raw pointer is used
+        // from here on, so the tracked ref ends now.
+        self.end_ref_if_single_use(slot_ref);
+        // Swap the payload for `.None`, then unwrap the `.Some` we took.
+        let taken = self.emit_take(slot, once.opt_ty);
+        let none = self.emit_enum_variant(once.opt_ty, once.none, Vec::new());
+        self.emit_store_init(slot, none);
+        let env = self.emit_destructure_enum(taken, once.some, &[env_ty])[0];
         // Give the conjured handle back to the word it came from — the closure
-        // VALUE still owns the (now empty) allocation.
+        // VALUE still owns the (now `.None`) box.
+        let handle = self.emit_take(handle_addr, binding.handle_ty);
         let forgotten = self.emit_forget_handle(binding, handle);
         self.emit_destroy_value(forgotten);
-        payload
+        env
     }
 }
 
@@ -653,16 +669,12 @@ pub(crate) fn synthesize_env_shims(
     )
 }
 
-/// The `consuming` tier's shim pair: a NO-OP retain (a unique one-shot owner
-/// is `not Copyable`, so no share path may ever be reachable — the word exists
+/// The `consuming` tier's shim pair: a NO-OP retain (a one-shot owner is
+/// `not Copyable`, so no share path may ever be reachable — the word exists
 /// only to keep the 4-word owning layout single-sourced through
-/// `func_thick_words`) and a real release that calls the unique box's
-/// `destroy()`.
-///
-/// `destroy()` is the box's single reclamation point: it drops the payload
-/// when the closure was never called and skips it when the call already took
-/// the environment out, then frees the block either way.
-pub(crate) fn synthesize_unique_env_shims(
+/// `func_thick_words`) and the box's ordinary release, which drops whatever
+/// the `Optional[E]` still holds (`.None` once the closure has been called).
+pub(crate) fn synthesize_consuming_env_shims(
     ctx: &mut crate::LowerCtx<'_>,
     binding: &BoxBinding,
     base_name: &str,
@@ -670,86 +682,15 @@ pub(crate) fn synthesize_unique_env_shims(
     type_args: Vec<TyId>,
 ) -> (Callee, Callee) {
     let (retain, _) = nop_shims(ctx);
-    let release = build_unique_release_shim(ctx, binding, base_name, &type_params);
+    let release = build_shim(
+        ctx,
+        binding,
+        binding.handle_ty,
+        base_name,
+        &type_params,
+        false,
+    );
     (retain, Callee::direct_with_args(release, type_args, None))
-}
-
-fn build_unique_release_shim(
-    ctx: &mut crate::LowerCtx<'_>,
-    binding: &BoxBinding,
-    base_name: &str,
-    type_params: &[kestrel_mir::TypeParamDef],
-) -> Entity {
-    let entity = ctx.next_synthetic_entity();
-    let name = format!("{base_name}.release");
-    ctx.module.register_name(entity, &name);
-
-    let unit_ty = ctx.module.ty_arena.unit();
-    let mut body = OssaBody::new();
-
-    let raw_param = body.alloc_value(
-        ValueDef::owned(binding.raw_ty).with_root(kestrel_mir::value::RootProvenance::Param(0)),
-    );
-    body.param_count = 1;
-    let entry = body.alloc_block();
-    body.entry = entry;
-
-    let mut insts: Vec<Instruction> = Vec::new();
-    let owned = |body: &mut OssaBody, ty: TyId| body.alloc_value(ValueDef::owned(ty));
-
-    // Reconstitute the handle from the word, then `destroy()` it.
-    let box_val = wrap_raw_insts(&mut body, &mut insts, &binding.wrappers, raw_param);
-    let borrow = body.alloc_value(ValueDef::guaranteed(binding.handle_ty, box_val));
-    insts.push(Instruction::new(InstKind::BeginBorrow {
-        result: borrow,
-        operand: box_val,
-    }));
-    insts.push(Instruction::new(InstKind::Call {
-        result: None,
-        callee: Callee::direct_with_args(
-            binding
-                .destroy
-                .expect("ICE: unique-box binding without `destroy`"),
-            binding.type_args.clone(),
-            Some(binding.handle_ty),
-        ),
-        args: vec![CallArg {
-            value: borrow,
-            convention: ParamConvention::Borrow,
-        }],
-    }));
-    insts.push(Instruction::new(InstKind::EndBorrow { operand: borrow }));
-    // The handle itself owns nothing once `destroy()` has run — forget it back
-    // down to the POD word rather than destroying a dangling box value.
-    let word = forget_handle_insts(
-        &mut body,
-        &mut insts,
-        &binding.wrappers,
-        binding.raw_ty,
-        box_val,
-    );
-    insts.push(Instruction::new(InstKind::DestroyValue { operand: word }));
-
-    let unit_val = owned(&mut body, unit_ty);
-    insts.push(Instruction::new(InstKind::Literal {
-        result: unit_val,
-        value: Immediate::unit(),
-    }));
-    body.block_mut(entry).insts = insts;
-    body.block_mut(entry).terminator = Terminator::new(TerminatorKind::Return(unit_val));
-
-    let mut func = FunctionDef::new(entity, &name, unit_ty);
-    func.type_params = type_params.to_vec();
-    func.kind = FunctionKind::Free;
-    func.params.push(ParamDef::new(
-        "handle",
-        raw_param,
-        binding.raw_ty,
-        ParamConvention::Consuming,
-    ));
-    func.body = Some(body);
-    ctx.module.add_function(func);
-    entity
 }
 
 fn build_shim(

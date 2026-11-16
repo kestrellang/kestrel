@@ -756,7 +756,7 @@ fn describe_existential(ctx: &InferCtx<'_>, kind: &TyKind) -> Option<String> {
         return None;
     };
     let bounds = describe_existential_bounds(ctx, bounds, bindings);
-    if ctx.resolver.builtin(kestrel_hir::Builtin::DefaultBoxType) == Some(*entity) {
+    if ctx.resolver.builtin(kestrel_hir::Builtin::AnyBox) == Some(*entity) {
         return Some(format!("any {bounds}"));
     }
     let name = ctx

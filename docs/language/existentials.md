@@ -48,7 +48,7 @@ An existential always lives in a box, and the box is part of the type:
   Use `any[CowBox] P` for value semantics; it needs `P: Cloneable`, because a write forks by cloning the payload.
 - **`any[OwnedBox] P` is the single-owner box.** It is the box to use for move-only payloads you want to give up later, and the only stdlib box that allows `consuming` requirements and `consuming as?`.
 - **Boxes are not interconverted.** `any P` and `any[OwnedBox] P` are different types (E147). To move a payload into another box, get it out first with `as?`.
-- **Your own box.** Any type with one `not Sized` type parameter that conforms to `ExistentialBox` and stores its payload behind a `Pointer` can be used as `any[B] P` (E402 explains what's missing otherwise).
+- **Your own box.** Any type with one `not Sized` type parameter that conforms to `Box` and stores its payload behind a `Pointer` can be used as `any[B] P` (E402 explains what's missing otherwise).
 
 ## Composition and associated types
 
@@ -160,4 +160,4 @@ They work in `match`, `if let`, `guard let` and `while let`. See [pattern matchi
 
 ## How it works
 
-`any P` is sugar for `DefaultBox[rawany P]` and `any[B] P` for `B[rawany P]`, where `rawany P` is an unsized type with no spelling of its own. Pointers to it are two words: the payload's address and its function table. A table holds the payload's drop, size, alignment and clone, a pointer to each parent protocol's table, and one entry per dispatchable requirement. Tables are built once per box, payload type and protocol, so `as?` and `is` compare table addresses. The design is in [`docs/plans/existentials/`](../plans/existentials/existentials-design.md).
+`any P` is sugar for `AnyBox[rawany P]` (std binds `AnyBox` to `Shared`, which is `RcBox`; see `std.memory.box_bindings`) and `any[B] P` for `B[rawany P]`, where `rawany P` is an unsized type with no spelling of its own. Pointers to it are two words: the payload's address and its function table. A table holds the payload's drop, size, alignment and clone, a pointer to each parent protocol's table, and one entry per dispatchable requirement. Tables are built once per box, payload type and protocol, so `as?` and `is` compare table addresses. The design is in [`docs/plans/existentials/`](../plans/existentials/existentials-design.md).

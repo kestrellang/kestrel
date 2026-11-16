@@ -4,6 +4,7 @@
 //! Target kinds control which entity types the analyzer runs on.
 
 pub mod attribute_semantics;
+pub mod box_binding;
 pub mod builtin_marker_protocol;
 pub mod cloneable_field;
 pub mod closure_field;

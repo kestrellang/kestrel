@@ -958,9 +958,9 @@ fn nominal_copy_semantics_impl(
     CopySemanticsInfo::copyable()
 }
 
-/// The physical storage of a boxed `indirect enum` case: `OwnedBox[P]`, where
+/// The physical storage of a boxed `indirect enum` case: `IndirectBox[P]` (`OwnedBox[P]` today), where
 /// `P` is the lone payload type or the tuple of all of them. `None` when the
-/// stdlib binds no `OwnedBox` (an error reported by the indirect-enum
+/// stdlib binds no `IndirectBox` (an error reported by the indirect-enum
 /// analyzer). MIR `enum_lower` builds the same shape as a `TyId`.
 pub fn indirect_box_type(
     ctx: &QueryContext<'_>,
@@ -968,7 +968,7 @@ pub fn indirect_box_type(
     root: Entity,
 ) -> Option<HirTy> {
     let owned_box = ctx.query(ResolveBuiltin {
-        builtin: Builtin::OwnedBox,
+        builtin: Builtin::IndirectBox,
         root,
     })?;
     // Never shown: this type is synthesized for classification only.

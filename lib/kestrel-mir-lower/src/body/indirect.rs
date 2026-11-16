@@ -8,17 +8,21 @@
 //! Body lowering keeps speaking the DECLARED (logical) payload, and the three
 //! enum choke points translate at the boundary:
 //! - `emit_enum_variant` packs the logical fields and boxes them
-//!   (`OwnedBox(consuming:)`) — [`OssaBodyCtx::emit_indirect_box`];
+//!   (`Box.init(consuming:)`) — [`OssaBodyCtx::emit_indirect_box`];
 //! - `emit_destructure_enum` moves the box out and takes the payload back
-//!   (`takeValue()`, which frees the block) — [`OssaBodyCtx::emit_indirect_unbox`];
+//!   (`ConsumingIndirection.takeValue()`, which frees the block) —
+//!   [`OssaBodyCtx::emit_indirect_unbox`];
 //! - `emit_enum_payload` views the payload IN PLACE through the box's
 //!   pointer, a scope-tracked address borrow like an `is T` payload view —
 //!   [`OssaBodyCtx::emit_indirect_view`].
 //!
-//! The box is found through `@builtin(.OwnedBox)` and its members by shape,
-//! never by a hard-coded path, like the closure-box bindings.
+//! The box is found through `@builtin(.IndirectBox)` and its init through the
+//! tagged `Box.init(consuming:)` requirement, never by a hard-coded path or
+//! shape, like the closure-box bindings, and the payload comes back out
+//! through the `ConsumingIndirection.takeValue()` extension
+//! (`.ConsumingIndirectionTakeValue`), so any box meeting the binding's
+//! E470 bound works.
 
-use kestrel_ast_builder::NodeKind;
 use kestrel_hecs::Entity;
 use kestrel_mir::callee::Callee;
 use kestrel_mir::inst::{CallArg, InstKind};
@@ -26,7 +30,6 @@ use kestrel_mir::value::Ownership;
 use kestrel_mir::{FieldIdx, Immediate, MirTy, Op, ParamConvention, TyId, ValueId, VariantIdx};
 
 use super::OssaBodyCtx;
-use super::closure_box::is_box_init_shape;
 
 /// A boxed case of an `indirect enum`, substituted at one enum instance.
 pub(crate) struct IndirectCase {
@@ -88,12 +91,9 @@ impl OssaBodyCtx<'_, '_> {
                 .expect("ICE: boxed enum case with no payload value")
         };
         let owned_box = self.owned_box_entity(case.box_ty);
-        let init = self.find_box_member_by_shape(
-            owned_box,
-            NodeKind::Initializer,
-            "init(consuming value: T)",
-            |c, _| is_box_init_shape(c),
-        );
+        // The binding's witness of the tagged `Box.init(consuming:)`
+        // requirement, like the closure boxes: never a shape match.
+        let init = self.find_box_member(owned_box, kestrel_hir::Builtin::BoxInit);
         self.ctx.register_name(init);
         // `emit_init_literal_call` shape: a stack slot for `self`, the init
         // writes it, `Take` moves the finished box out.
@@ -121,21 +121,30 @@ impl OssaBodyCtx<'_, '_> {
         case: &IndirectCase,
         boxed: ValueId,
     ) -> Vec<ValueId> {
+        // `ConsumingIndirection.takeValue()` is a protocol-extension method,
+        // dispatched on the binding's box like a user-written `b.takeValue()`:
+        // the enum touches its box only through the protocols E470 checks.
         let take_value = self
             .ctx
             .query
             .query(kestrel_name_res::ResolveBuiltin {
-                builtin: kestrel_hir::Builtin::OwnedBoxTakeValue,
+                builtin: kestrel_hir::Builtin::ConsumingIndirectionTakeValue,
                 root: self.ctx.root,
             })
-            .expect("ICE: `@builtin(.OwnedBoxTakeValue)` missing — boxed enum cases need std");
-        self.ctx.register_name(take_value);
+            .expect("ICE: `@builtin(.ConsumingIndirectionTakeValue)` missing — boxed enum cases need std");
+        let protocol = self
+            .ctx
+            .is_protocol_method(take_value)
+            .expect("ICE: `takeValue` is not a `ConsumingIndirection` member");
+        self.ctx.register_name(protocol);
+        let method = self.ctx.witness_method_key(take_value);
         let payload = self.emit_call_returning(
-            Callee::direct_with_args(
-                take_value,
-                self.box_type_args(case.box_ty),
-                Some(case.box_ty),
-            ),
+            Callee::Witness {
+                protocol,
+                method,
+                self_type: case.box_ty,
+                method_type_args: vec![],
+            },
             vec![CallArg {
                 value: boxed,
                 convention: ParamConvention::Consuming,

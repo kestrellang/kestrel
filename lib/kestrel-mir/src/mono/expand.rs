@@ -701,7 +701,7 @@ fn expand_function(
     // from this map — the `retain.is_none()` filter below is what excludes it.
     // Its captures live in a heap environment the box owns; they are released
     // by the erased `release` shim (the shared box's last release, or the
-    // unique box's `destroy()`), so walking them here as well would
+    // consuming box's drop), so walking them here as well would
     // double-free.
     let mut closure_captures: HashMap<ValueId, Vec<ValueId>> = HashMap::new();
     for block in &body.blocks {

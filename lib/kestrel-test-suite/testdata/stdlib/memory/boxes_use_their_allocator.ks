@@ -1,15 +1,15 @@
 // test: execution
 // stdlib: true
 // expect-exit: 0
-// expect-stdout: owned 42 2\nrc 7 1 2\ncow 1 2 2\nunique 9 0\nsizes 8 16 8 16\nindirect 6\nclosure 3\nbalanced true\n
+// expect-stdout: owned 42 2\nrc 7 1 2\ncow 1 2 2\nsizes 8 16 8 16\nindirect 6\nclosure 3\nbalanced true\n
 
-// OwnedBox, RcBox, CowBox and UniqueBox store their allocator: every block
+// OwnedBox, RcBox and CowBox store their allocator: every block
 // they (and their clones and forks) allocate comes from it and goes back to
 // it. A stateless allocator adds no bytes, so the default boxes stay one
 // word and still back indirect enums and escaping closures.
 module Test
 
-import std.memory.(Allocator, Layout, Pointer, RawPointer, SystemAllocator, OwnedBox, RcBox, CowBox, UniqueBox)
+import std.memory.(Allocator, Layout, Pointer, RawPointer, SystemAllocator, OwnedBox, RcBox, CowBox)
 
 // Counts live allocations through a shared counter.
 struct Counting: Allocator {
@@ -66,12 +66,6 @@ func useAll(alloc: Counting) {
     var c2 = c.clone();
     c2.value = "2";
     print("cow \(c.value) \(c2.value) \(live(alloc) - 4)\n");
-
-    let u = UniqueBox[Int64, Counting](9, allocator: alloc);
-    let before = live(alloc);
-    let nine = u.takeValue();
-    u.destroy();
-    print("unique \(nine) \(before - live(alloc) - 1)\n");
 }
 
 @main

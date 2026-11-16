@@ -2,13 +2,13 @@
 // stdlib: true
 //
 // E402: `B` in `any[B] P` must have one `not Sized` type parameter, conform
-// to `ExistentialBox`, and hold `T` only behind a pointer (design §3).
+// to `Box`, and hold `T` only behind a pointer (design §3).
 
 module Test
 
 import std.numeric.(Int64)
 import std.core.(Indirection)
-import std.memory.(ExistentialBox, Pointer)
+import std.memory.(Box, Pointer)
 
 protocol Shape {
     func area() -> Int64
@@ -24,7 +24,7 @@ extend Square: Shape {
     public func area() -> Int64 { self.side * self.side }
 }
 
-// Not an ExistentialBox.
+// Not a Box.
 struct NotABox[T] where T: not Sized {
     var p: Pointer[T];
 }
@@ -37,10 +37,11 @@ extend ByValueBox[T]: Indirection {
     type Target = T
     public var value: T { ref { self.items } }
 }
-extend ByValueBox[T]: ExistentialBox {
+extend ByValueBox[T]: Box {
     public init(consuming value: T) where T: Sized { self.items = value; }
+    public var isUnique: Bool { true }
 }
 
 func a(x: any[Array] Shape) {} // ERROR: 'Array' cannot box an existential: its type parameter is not declared 'not Sized'
-func b(x: any[NotABox] Shape) {} // ERROR: 'NotABox' cannot box an existential: it does not conform to 'ExistentialBox'
+func b(x: any[NotABox] Shape) {} // ERROR: 'NotABox' cannot box an existential: it does not conform to 'Box'
 func c(x: any[ByValueBox] Shape) {} // ERROR: 'ByValueBox' cannot box an existential: field 'items' stores 'T' by value

@@ -484,8 +484,8 @@ pub enum BoxDefect {
     ParamCount,
     /// The one type parameter is not declared `not Sized`.
     ParamNotRelaxed,
-    /// No conformance to `ExistentialBox`.
-    NotExistentialBox,
+    /// No conformance to `Box`.
+    NotBox,
     /// A stored field holds the payload by value, so the box can't be
     /// widened to carry an unsized payload.
     FieldByValue { field: Entity, param: Entity },
@@ -524,7 +524,7 @@ impl QueryFn for ExistentialBoxDefect {
         }
         let conforms = ctx
             .query(ResolveBuiltin {
-                builtin: Builtin::ExistentialBox,
+                builtin: Builtin::Box,
                 root: self.root,
             })
             .is_some_and(|protocol| {
@@ -535,7 +535,7 @@ impl QueryFn for ExistentialBoxDefect {
                 })
             });
         if !conforms {
-            return Some(BoxDefect::NotExistentialBox);
+            return Some(BoxDefect::NotBox);
         }
         // Every stored field must hold the payload only behind a pointer.
         // Unlike E403 there is no tail exemption: a box is a fixed-size

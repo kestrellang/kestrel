@@ -169,7 +169,7 @@ pub enum AstType {
         negative: Vec<AstType>,
         span: Span,
     },
-    /// Boxed existential, e.g. `any P`, `any[UniqueBox] P and Q`,
+    /// Boxed existential, e.g. `any P`, `any[OwnedBox] P and Q`,
     /// `any Iterator[Item = Int64]`. Sugar for `Box[<raw existential>]`:
     /// `box_ty` is the unapplied box (`None` = the builtin default box), and
     /// HIR lowering does the desugaring.
