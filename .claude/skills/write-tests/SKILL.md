@@ -22,7 +22,11 @@ module <Name>
 ...
 ```
 
-- `// test:` — either `diagnostics` or `execution`. Required.
+- `// test:` — `diagnostics`, `execution` or `mir`. Required. An unknown
+  kind silently runs as `diagnostics`. `mir` compiles the file and compares
+  the lowered MIR against a snapshot (`mir-filter` / `mir-snapshot` headers,
+  `lib/kestrel-test-suite/src/mir_snapshot.rs`); use it only when the shape
+  of the MIR is the thing under test.
 - `// stdlib:` — `false` for unit-like diagnostic tests that don't need stdlib
   (faster, fewer moving parts); `true` when the test uses stdlib types
   (`Int64`, `String`, `Array`, `Char`, etc.). Required.
@@ -198,7 +202,9 @@ No `mod.rs` update is needed — the harness discovers files by walking
 ## What not to do
 
 - Don't write Rust test code under `tests/` — the harness runs `.ks` files. New
-  Rust tests are almost never the right answer for feature coverage.
+  Rust tests are almost never the right answer for feature coverage. The
+  exception is a pure syntax check (tree shape, recovery) in
+  `lib/kestrel-parser/tests/`.
 - Don't test the same diagnostic message twice across files. One canonical
   reproduction is enough; additional cases should cover *different* trigger
   paths.

@@ -28,3 +28,22 @@ Recursive descent from tokens to a lossless rowan CST. Read
   code.
 - New syntax also needs a contextual-keyword check or a token (see
   kestrel-lexer's AGENTS.md) and the `feature` skill's checklist.
+
+## Adding a keyword
+
+A reserved keyword needs every one of these, or it half-works:
+
+1. `Token` variant (kestrel-lexer) and a `kinds.txt` line, appended
+   (kestrel-syntax-tree; see its AGENTS.md for the regeneration bootstrap).
+2. `is_label_keyword` (`grammar/mod.rs`), so it can still be an argument or
+   parameter label like every other keyword.
+3. `kind_spelling` (`syntax_error.rs`), or messages print `'token'`.
+4. `at_stmt_boundary` (`grammar/blocks.rs`) if it starts a statement, so
+   block recovery stops in front of it.
+5. Its dispatch:
+   - a **statement** (`let`, `guard`, `deinit x;`) is a `block_items` arm in
+     `grammar/blocks.rs`;
+   - a **statement-like expression** (`if`, `loop`, `match`: no `;` needed) is
+     `at_stmt_like` / `stmt_like` in `grammar/exprs.rs` plus `is_stmt_like` in
+     `blocks.rs`. These lists are for expressions only.
+6. The grammar file's EBNF header and `kestrel.ungram`.

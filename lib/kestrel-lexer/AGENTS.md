@@ -10,7 +10,11 @@ Source text to tokens. See `docs/architecture.md`.
   that crate's AGENTS.md). Never insert mid-file.
 - **Prefer a contextual keyword to a reserved one.** `ref` and `escaping` lex
   as `Identifier`, and the parser checks them with `nth_is_contextual`, so
-  existing code that uses the word as a name keeps working.
+  existing code that uses the word as a name keeps working. Reserving a word
+  is the user's call: put it in the design as an open question, and once it is
+  decided, follow the design.
+- **A reserved keyword touches more than this crate.** The full list is in
+  kestrel-parser's AGENTS.md ("Adding a keyword").
 - **Strings are lexed once.** The modal driver splits interpolated strings into
   `StringStart ... StringEnd` with ordinary tokens in each hole, and collapses a
   hole-free string back into one `String` token. Nothing downstream re-lexes

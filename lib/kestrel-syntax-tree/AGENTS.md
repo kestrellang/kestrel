@@ -33,6 +33,12 @@ and corrupts cached trees. Then regenerate (above). A node kind with a shape
 also needs a rule in `kestrel.ungram`, or an entry in sourcegen's `UNRULED`
 list with the reason it has none.
 
+**A new token needs a bootstrap.** `kinds.rs` holds the generated
+`From<Token> for SyntaxKind` match, so adding the lexer's `Token` variant
+breaks the crate's build before sourcegen can run. Hand-add the variant and
+its `From<Token>` arm to `src/generated/kinds.rs` first, then run the
+regeneration command, which rewrites the file properly.
+
 `syntax_kind_table_round_trips` asserts the generated `ALL` is ordered
 (`ALL[n] as u16 == n`), complete, and that an out-of-range raw value still
 reads back as `Error`.

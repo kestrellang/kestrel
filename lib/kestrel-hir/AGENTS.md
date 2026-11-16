@@ -60,3 +60,16 @@ adding a field:
 
 Enum fields on existing variants are cheap. New side-tables on `HirBody`
 are not — they expand the hash surface.
+
+## Adding a variant
+
+A new `HirStmt` or `HirExpr` variant breaks every exhaustive match, which is
+the point: the compiler lists the sites. The ones it can't list are walks that
+end in `_ => {}`. They skip the new variant silently, so a check never sees
+code inside it. After adding a variant, grep for walks over `hir.stmts[` and
+`hir.exprs[` with a catch-all and give each one an arm (or a comment saying why
+it doesn't need one). Prefer exhaustive matches in new walks.
+
+`throw` is `Sugar { kind: Throw, inner: Return }`. A shallow match on
+`HirExpr::Return` must see through it with `HirBody::peel_throw`; walks that
+recurse through `Sugar` need nothing.

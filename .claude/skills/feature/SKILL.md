@@ -69,8 +69,14 @@ more than one reasonable answer.
 >
 > **No one to answer?** (an unattended run, a subagent) Don't approve your own
 > gates. Write the open questions and your recommended answers into the design
-> doc, stop there, and report. Gates exist because the user owns the language's
-> shape.
+> doc's "Open questions" section (mark it unresolved), stop there, and report.
+> Gates exist because the user owns the language's shape. The same applies to
+> the AGENTS.md "ask first" rule: list the patterns you'd add in your report
+> instead of adding them.
+>
+> **Small feature?** Gates 2 and 3 can be one review: write the design and the
+> plan, then ask once. Do this when the semantics are settled and the plan is
+> mostly mechanical.
 
 ## Phase 2 — Design document
 
@@ -93,6 +99,9 @@ One paragraph: what it does, why it's needed.
 - Copy vs move, access modes, visibility implications
 
 ## Pipeline impact
+Name the file and function for each change, from reading the code, not from
+memory. An unchecked row is a guess; a plan built on it repeats the guess.
+
 | Stage | Change |
 |-------|--------|
 | Lexer | New tokens? |
@@ -135,6 +144,9 @@ don't apply (most features don't touch every stage).
 ## Phases
 
 ### Phase 0 — Tests (fail first)
+Once Gate 2 settles the semantics, these tests can be written right away, as
+CLAUDE.md asks ("if something doesn't work yet, add a test"). Put them in their
+own commit so a change of plan at Gate 3 can drop them.
 - [ ] Diagnostic `.ks` files under `testdata/diagnostics/<feature>/` or the
       most specific category (e.g. `expressions/<feature>/`)
 - [ ] Execution `.ks` files with `// expect-exit: 0`
@@ -154,6 +166,12 @@ Files: `lib/kestrel-parser/src/grammar/` (`exprs.rs`, `blocks.rs`, `items.rs`,
 - [ ] Parse rule for the new shape.
 - [ ] Wire into the existing declaration / expression / statement dispatcher
       so the parser actually reaches it.
+- [ ] **A new keyword** has a checklist in kestrel-parser's AGENTS.md
+      ("Adding a keyword"): label keywords, `kind_spelling`,
+      `at_stmt_boundary`, dispatch, EBNF.
+- [ ] **A new statement** (not an expression: `let`, `guard`, `deinit x;`) is
+      a `block_items` arm in `grammar/blocks.rs`. The two lists below are for
+      expressions only.
 - [ ] **Statement-like expressions.** If the new expression can stand alone as
       a statement without a trailing semicolon (like `if`, `while`, `loop`,
       `for`, `match`), add its keyword to `at_stmt_like` / `stmt_like` in
@@ -189,6 +207,9 @@ Files: `lib/kestrel-name-res/src/...`
 - [ ] Update auto-import / std-import rules only if explicitly part of the design.
 
 ### Phase 6 — HIR lowering
+A new `HirStmt`/`HirExpr` variant: also give an arm to every walk that ends in
+`_ => {}` (see kestrel-hir's AGENTS.md). The compiler won't list those.
+
 Files: `lib/kestrel-hir-lower/src/{syntax,expr,stmt,pat,ty,desugar}.rs`
 - [ ] `HirExpr` / `HirStmt` / `HirPat` variant — or desugar to existing ones
       (prefer desugar when the semantics overlap with an existing construct).
@@ -219,7 +240,8 @@ Files: `lib/kestrel-analyze/src/decl/<feature>.rs` or `.../body/<feature>.rs`
       well-formed. Type checking, pattern validation, and any other semantic
       correctness checks are analyzer passes. Keeping the split clean makes
       validation logic independently testable and keeps the lowerer focused
-      on tree construction.
+      on tree construction. (E010–E012 are emitted in HIR lowering; they
+      predate the rule and are not a precedent.)
 
 ### Phase 9 — MIR lowering / codegen
 Files: `lib/kestrel-mir-lower/src/...`, `lib/kestrel-codegen-cranelift/src/...`
@@ -280,7 +302,7 @@ After tests are green:
 
 - **`change`** — behavioral tweak to an existing feature (one pipeline stage,
   maybe two). Skip brainstorm and design; go straight to the change.
-- **`debug-kestrel` / `debug-test`** — diagnosing a failure, not adding a
+- **`debug`** — diagnosing a failure, not adding a
   feature.
 - **`write-tests`** — writing `.ks` testdata (this skill tells you *what* to
   test; that skill tells you *how* to encode it).
