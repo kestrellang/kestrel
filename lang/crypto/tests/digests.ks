@@ -453,9 +453,9 @@ func main() {
     check("SHA512 len 200 split", incremental[SHA512](200).hexString, "986058e9895e2c2ab8f9e8cbdf801db12a44842a56a91d5a4e87b1fc98b293722c4664142e42c3c551ff898646268cd92b84ed230b8c94bed7798d4f27cd7465");
     check("SHA512 len 1000", SHA512.hash(pattern(1000)).hexString, "5096498d96f50f9a137c4db5b8b0cd38383ad55350fb5a98805fedc31fa1262f1f0cf4d6f12d7ecd8dedd933a4c9126344fe22e937a8ad35fdeae1e876ae698b");
     check("SHA512 len 1000 split", incremental[SHA512](1000).hexString, "5096498d96f50f9a137c4db5b8b0cd38383ad55350fb5a98805fedc31fa1262f1f0cf4d6f12d7ecd8dedd933a4c9126344fe22e937a8ad35fdeae1e876ae698b");
-    check("HMAC-SHA1", HMAC[SHA1].authenticate("The quick brown fox jumps over the lazy dog".asByteSlice(), using: SymmetricKey(bytes: "key".toBytes())).hexString, "de7c9b85b8b78aa6bc8a7a36f70a90701c9db4d9");
-    check("HMAC-SHA384", HMAC[SHA384].authenticate("The quick brown fox jumps over the lazy dog".asByteSlice(), using: SymmetricKey(bytes: "key".toBytes())).hexString, "d7f4727e2c0b39ae0f1e40cc96f60242d5b7801841cea6fc592c5d3e1ae50700582a96cf35e1e554995fe4e03381c237");
-    check("HMAC-SHA3_256", HMAC[SHA3_256].authenticate("The quick brown fox jumps over the lazy dog".asByteSlice(), using: SymmetricKey(bytes: "key".toBytes())).hexString, "8c6e0683409427f8931711b10ca92a506eb1fafa48fadd66d76126f47ac2c333");
+    check("HMAC-SHA1", HMAC[SHA1].authenticate("The quick brown fox jumps over the lazy dog".bytes, using: SymmetricKey(bytes: "key".toBytes())).hexString, "de7c9b85b8b78aa6bc8a7a36f70a90701c9db4d9");
+    check("HMAC-SHA384", HMAC[SHA384].authenticate("The quick brown fox jumps over the lazy dog".bytes, using: SymmetricKey(bytes: "key".toBytes())).hexString, "d7f4727e2c0b39ae0f1e40cc96f60242d5b7801841cea6fc592c5d3e1ae50700582a96cf35e1e554995fe4e03381c237");
+    check("HMAC-SHA3_256", HMAC[SHA3_256].authenticate("The quick brown fox jumps over the lazy dog".bytes, using: SymmetricKey(bytes: "key".toBytes())).hexString, "8c6e0683409427f8931711b10ca92a506eb1fafa48fadd66d76126f47ac2c333");
     check("BLAKE3 len 0", BLAKE3.hash(pattern(0)).hexString, "af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262");
     check("BLAKE3 len 1", BLAKE3.hash(pattern(1)).hexString, "2d3adedff11b61f14c886e35afa036736dcd87a74d27b5c1510225d0f592e213");
     check("BLAKE3 len 2", BLAKE3.hash(pattern(2)).hexString, "7b7015bb92cf0b318037702a6cdd81dee41224f734684c2c122cd6359cb1ee63");
@@ -675,7 +675,7 @@ func main() {
     check("SHAKE256 split", incSHAKE256.finalize(outputLength: 64).expect("s").hexString, "20a1c001eb6aee7535706c02dbe70f2a39d87d3fda665f89706bea621102565795a44c9347d59b0cb70ea20fae3a4b31f2894a9f4a5aeca9df6c6b3bb4537c5d");
     check("SHAKE256 finalize twice", incSHAKE256.finalize(outputLength: 64).expect("s").hexString, "20a1c001eb6aee7535706c02dbe70f2a39d87d3fda665f89706bea621102565795a44c9347d59b0cb70ea20fae3a4b31f2894a9f4a5aeca9df6c6b3bb4537c5d");
     check("SHAKE256 out 0 -> null", "\(SHAKE256.hash(pattern(3), outputLength: 0).isSome)", "false");
-    check("BLAKE3 abc", BLAKE3.hash("abc".asByteSlice()).hexString, "6437b3ac38465133ffb63b75273a8db548c558465d79db03fd359c6cd5bd9d85");
+    check("BLAKE3 abc", BLAKE3.hash("abc".bytes).hexString, "6437b3ac38465133ffb63b75273a8db548c558465d79db03fd359c6cd5bd9d85");
     check("SHA1 digestSize", "\(SHA1.digestSize)", "20");
     check("SHA3_256 blockSize", "\(SHA3_256.blockSize)", "136");
 }

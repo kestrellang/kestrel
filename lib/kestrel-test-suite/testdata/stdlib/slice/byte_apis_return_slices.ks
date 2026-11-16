@@ -14,22 +14,22 @@ func sum(xs: Slice[Int64]) -> Int64 {
 }
 
 // The public byte and sub-slice APIs hand out safe `Slice` views, not
-// `UnsafeSlice`: `Str.asByteSlice()`, `Hasher.write`, `Slice`'s
+// `UnsafeSlice`: `String.bytes` (through `Indirection`), `Hasher.write`, `Slice`'s
 // prefix/suffix/drop, and `ArrayBuilder.append(contentsOf:)`.
 @main
 func main() -> lang.i64 {
-    // asByteSlice() binds and passes as a `Slice[UInt8]`.
-    let bytes = "hey".asByteSlice();
+    // `bytes` binds as a `BytesView` and passes as a `Slice[UInt8]`.
+    let bytes = "hey".bytes;
     if bytes.count != 3 { return 1 }
     if bytes(0) != 104 { return 2 }
-    if countOf("abcd".asByteSlice()) != 4 { return 3 }
+    if countOf("abcd".bytes) != 4 { return 3 }
 
     // Hasher.write takes a Slice; split writes equal one write.
     var a = DefaultHasher();
-    a.write("hello world".asByteSlice());
+    a.write("hello world".bytes);
     var b = DefaultHasher();
-    b.write("hello".asByteSlice());
-    b.write(" world".asByteSlice());
+    b.write("hello".bytes);
+    b.write(" world".bytes);
     if a.finish() != b.finish() { return 4 }
 
     // ArrayBuilder.append(contentsOf:) takes a `&Slice`; an array literal peels to one.

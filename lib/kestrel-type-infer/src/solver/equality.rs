@@ -1006,12 +1006,16 @@ fn try_view_arg_peel(
     // pinned to the param's type, which would rule the peel out:
     // - one whose own constraint is still pending (`probe(xs.asUnsafeSlice())`)
     //   while `view_peel_gate` is up;
+    // - a field read whose member resolution is still pending, at any gate:
+    //   its receiver is typed without it, so the param can't type it
+    //   (`hash(s.bytes)` with `s` an unannotated string literal);
     // - a literal the target can't take (`total([1, 2])` with a `&Slice`
     //   param) while `synth_gate` is up, so it defaults to `Array` and peels.
     let wait = match ctx.slot(wrapper) {
         TySlot::Resolved(_) => false,
         TySlot::Unresolved { literal: None } => {
             (ctx.view_peel_gate && !ctx.postponed_literal_args.contains(&expr))
+                || awaits_field_read(ctx, expr)
                 || awaits_ref_decay(ctx, wrapper)
                 // A call's result typed by a literal default
                 // (`Float64(parsing: pieces(2))`) waits through the
@@ -1163,6 +1167,15 @@ fn try_decays_from(
         },
     );
     Some(SolveResult::Solved)
+}
+
+/// Is `expr` a field read (`s.bytes`) whose `Member` constraint is still
+/// pending? A field's receiver must be known on its own
+/// (`require_known_receiver`), so its type never comes from where it's used.
+fn awaits_field_read(ctx: &InferCtx<'_>, expr: kestrel_hir::body::HirExprId) -> bool {
+    ctx.constraints
+        .iter()
+        .any(|c| matches!(c, Constraint::Member { expr: e, is_call: false, .. } if *e == expr))
 }
 
 /// Is `tv` a binding still owed its type by a pending ref decay

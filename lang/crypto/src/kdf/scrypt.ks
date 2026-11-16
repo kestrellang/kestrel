@@ -14,7 +14,7 @@ import crypto.key.(SymmetricKey)
 /// # Examples
 ///
 /// ```
-/// let key = try Scrypt.deriveKey(password.asByteSlice(), salt: salt, logN: 17, blockSize: 8, parallelism: 1, length: 32);
+/// let key = try Scrypt.deriveKey(password.bytes, salt: salt, logN: 17, blockSize: 8, parallelism: 1, length: 32);
 /// ```
 public struct Scrypt {
     /// Throws `.InvalidParameter` unless `logN` is 1–30, `blockSize` and

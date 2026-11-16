@@ -13,7 +13,7 @@ crypto = { path = "../../lang/crypto" }
 
 - **The data being processed is positional; everything else is labeled.** `SHA256.hash(data)`, `PBKDF2[SHA256].deriveKey(password, salt: …)`, `ChaCha20Poly1305.seal(message, using: key)`.
 - **Keys are passed as `using:`** in operations (`seal`, `open`, `authenticate`); initializers that hold a key take `key:`.
-- **Byte inputs are `some Slice[UInt8]`**, so `Array[UInt8]` and `ArraySlice[UInt8]` both work. For a `String`, pass `s.asByteSlice()` (no copy). Values a type stores (`SymmetricKey(bytes:)`, `Salt(bytes:)`, …) take an `Array[UInt8]`.
+- **Byte inputs are `some Slice[UInt8]`**, so `Array[UInt8]` and `ArraySlice[UInt8]` both work. For a `String`, pass `s.bytes` (no copy). Values a type stores (`SymmetricKey(bytes:)`, `Salt(bytes:)`, …) take an `Array[UInt8]`.
 
 ## Modules
 
@@ -87,7 +87,7 @@ if tag == expected { /* verified, constant-time */ }
 
 ```kestrel
 let key = try PBKDF2[SHA256].deriveKey(
-    password.asByteSlice(),
+    password.bytes,
     salt: salt,
     iterations: 100000,
     length: 32

@@ -286,7 +286,8 @@ public struct String[A = GlobalAllocator]: Iterable, Equatable, Equal[String[A]]
 
     /// `s.bytes` — view over the raw UTF-8 bytes. O(1) byte indexing,
     /// byte-level iteration. Index via the view's subscripts:
-    /// `s.bytes(i)`, `s.bytes(checked: i)`, `s.bytes(0..<n)`.
+    /// `s.bytes(i)`, `s.bytes(checked: i)`, `s.bytes(0..<n)`. Passes as a
+    /// `&Slice[UInt8]` without a copy: `SHA256.hash(s.bytes)`.
     public var bytes: BytesView { BytesView(slice: self.asSlice()) }
 
     /// `s.chars` — view over the Unicode code points. O(n) indexing,

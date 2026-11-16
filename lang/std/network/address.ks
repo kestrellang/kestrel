@@ -104,7 +104,7 @@ public struct Ipv4Address: Equatable, Hashable, Formattable {
 
     /// Parses four decimal octets, `a.b.c.d`, with no leading zeros.
     public static func parse(text: String) -> Optional[Ipv4Address] {
-        let b = text.asByteSlice();
+        let b = text._byteSlice();
         var bits: UInt32 = 0;
         var parts = 0;
         var i = 0;
@@ -199,7 +199,7 @@ public struct Ipv6Address: Equatable, Hashable, Formattable {
     /// of zeros, an optional trailing dotted IPv4 (`::ffff:1.2.3.4`) and an
     /// optional numeric zone (`%3`).
     public static func parse(text: String) -> Optional[Ipv6Address] {
-        let b = text.asByteSlice();
+        let b = text._byteSlice();
         // The zone, after `%`.
         var end = b.count;
         var scope: UInt32 = 0;
@@ -358,7 +358,7 @@ public struct SocketAddress: Equatable, Hashable, Formattable {
 
     /// Parses `1.2.3.4:80` or `[::1]:80`.
     public static func parse(text: String) -> Optional[SocketAddress] {
-        let b = text.asByteSlice();
+        let b = text._byteSlice();
         // The port follows the last colon.
         var colonAt = b.count - 1;
         while colonAt >= 0 and b(colonAt) != colon() {
@@ -522,7 +522,7 @@ func containsDot(b: Slice[UInt8], start: Int64, end: Int64) -> Bool {
 
 /// `value` in lowercase hex without leading zeros.
 func hexText(value: UInt16) -> String {
-    let digits = "0123456789abcdef".asByteSlice();
+    let digits = "0123456789abcdef"._byteSlice();
     var out = Array[UInt8]();
     var shift: Int64 = 12;
     var started = false;

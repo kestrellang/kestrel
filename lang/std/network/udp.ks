@@ -16,7 +16,7 @@ import std.time.(Duration)
 ///
 /// ```
 /// var socket = try UdpSocket.bind(to: SocketAddress.parse("127.0.0.1:0").unwrap());
-/// try socket.send("ping".asByteSlice(), to: server);
+/// try socket.send("ping".bytes, to: server);
 /// var buf = Array[UInt8](repeating: 0, count: 1500);
 /// let (n, from) = try socket.receiveFrom(into: buf.asMutableSlice());
 /// ```

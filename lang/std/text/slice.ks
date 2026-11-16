@@ -259,7 +259,7 @@ extend StringSlice: Comparable {
 
 extend StringSlice: Hashable {
     public func hash[H](mutating into hasher: H) where H: Hasher {
-        hasher.write(self.asByteSlice());
+        hasher.write(self._byteSlice());
         // Length terminator, as in `String.hash`.
         hasher.write(uint64: UInt64(truncating: self._len))
     }

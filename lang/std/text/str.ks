@@ -23,7 +23,8 @@ extend StringSlice {
 
     // -- Views ---------------------------------------------------------------
 
-    /// View over the raw UTF-8 bytes.
+    /// View over the raw UTF-8 bytes. Passes as a `&Slice[UInt8]`
+    /// without a copy.
     ///
     /// # Examples
     ///
@@ -103,26 +104,15 @@ extend StringSlice {
         if n == 0 {
             return buffer
         }
-        // asByteSlice() borrows the live string buffer;
+        // `bytes` borrows the live string buffer;
         // append(contentsOf:) copies out of it in a single pass.
-        buffer.append(contentsOf: self.asByteSlice());
+        buffer.append(contentsOf: self._byteSlice());
         buffer
     }
 
-    /// Returns a borrowed `Slice[UInt8]` view over this string's raw
-    /// UTF-8 bytes — no copy, no allocation. The view borrows the live
-    /// string buffer, so it can't outlive the string. O(1).
-    ///
-    /// Use this to hand the bytes to a sink (a socket, a hasher, an
-    /// FFI call) without materializing an `Array[UInt8]` via `toBytes()`.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// let bytes = "Hi".asByteSlice();
-    /// bytes.count;  // 2
-    /// ```
-    public func asByteSlice() -> &Slice[UInt8] {
+    // The raw UTF-8 bytes as a borrowed `Slice[UInt8]`: no copy. The public
+    // spelling is `bytes`, which peels to this through `Indirection`.
+    func _byteSlice() -> &Slice[UInt8] {
         unsafe Slice.lend(start: self._rawPtr(), count: self._len)
     }
 
@@ -800,8 +790,8 @@ extend StringSlice {
     /// "Content-Type".equalsCaseInsensitiveAscii("Host");          // false
     /// ```
     public func equalsCaseInsensitiveAscii(other: &StringSlice) -> Bool {
-        let a = self.asByteSlice();
-        let b = other.asByteSlice();
+        let a = self._byteSlice();
+        let b = other._byteSlice();
         if a.count != b.count {
             return false
         }

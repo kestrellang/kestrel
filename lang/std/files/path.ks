@@ -37,7 +37,7 @@ public struct Path: Equatable, Hashable, Cloneable, Formattable, ExpressibleBySt
     /// @name From Text
     /// The path `text`, as written.
     public init(text: String) {
-        self.data = text.asByteSlice().toOwned()
+        self.data = text.toBytes()
     }
 
     /// @name From Bytes
@@ -49,7 +49,7 @@ public struct Path: Equatable, Hashable, Cloneable, Formattable, ExpressibleBySt
     /// @name String Literal
     /// A path literal, as in `File.open("data.txt")`.
     public init(stringLiteral ptr: lang.ptr[lang.i8], length: lang.i64) {
-        self.data = String(stringLiteral: ptr, length).asByteSlice().toOwned()
+        self.data = String(stringLiteral: ptr, length).toBytes()
     }
 
     /// The path as text. Bytes that aren't UTF-8 become U+FFFD, so use
@@ -155,7 +155,7 @@ public struct Path: Equatable, Hashable, Cloneable, Formattable, ExpressibleBySt
         result.append(contentsOf: self.data(0..<stop));
         if not ext.isEmpty {
             result.append(46);
-            result.append(contentsOf: ext.asByteSlice())
+            result.append(contentsOf: ext._byteSlice())
         }
         Path(bytes: result)
     }
