@@ -132,6 +132,13 @@ provenance. Capture-free function pointers remain freely ownable.
 - Nested closures capture transitively. A frame-view inner closure remains
   rooted in the frame active when it is created and may be called there; it
   cannot escape merely because the outer closure owns its own environment.
+- A nested `mutating` closure writes through the outer closure's captures.
+  Inside a normal closure those are read-only views, so such a write is E603
+  on the outer closure, exactly as if the outer body wrote it directly.
+- The right-hand side of `and` / `or` lowers to a `mutating () -> Bool`
+  thunk (`And.logicalAnd` / `Or.logicalOr` take `mutating` thunks). It runs at
+  most once, immediately, and is never stored, so `x != 1 and seen.insert(x)`
+  or an assigning `if` arm on the right side writes back to the caller.
 
 ### The freeze rule (view kinds only)
 

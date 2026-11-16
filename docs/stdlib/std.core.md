@@ -113,7 +113,7 @@ _Defined in `lang/std/core/logical.ks`._
 #### function `logicalAnd`
 
 ```kestrel
-func logicalAnd(() -> Other) -> Output
+func logicalAnd(mutating mutating () -> Other) -> Output
 ```
 
 Returns `self and other()`. The closure runs only if needed.
@@ -2383,7 +2383,7 @@ _Defined in `lang/std/core/logical.ks`._
 #### function `logicalOr`
 
 ```kestrel
-func logicalOr(() -> Other) -> Output
+func logicalOr(mutating mutating () -> Other) -> Output
 ```
 
 Returns `self or other()`. The closure runs only if needed.
