@@ -194,7 +194,7 @@ fn var_decl(p: &mut Parser<'_>) {
         ty(p);
     }
     // A missing initializer is already reported (E803); when a statement
-    // keyword follows (`let x = defer { }`), the absent `;` is part of that
+    // keyword follows (`let x = deinit y;`), the absent `;` is part of that
     // one mistake, not a second.
     let missing_init = p.eat(K::Equals) && exprs::expr(p).is_none();
     if !(missing_init && at_stmt_boundary(p)) {
