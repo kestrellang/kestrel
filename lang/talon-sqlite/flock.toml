@@ -7,6 +7,7 @@ license = "MIT"
 repository = "https://github.com/kestrellang/kestrel"
 
 [dependencies]
+uuid = { path = "../uuid" }
 
 [build]
 link = ["sqlite3"]
