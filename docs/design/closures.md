@@ -139,6 +139,9 @@ provenance. Capture-free function pointers remain freely ownable.
   thunk (`And.logicalAnd` / `Or.logicalOr` take `mutating` thunks). It runs at
   most once, immediately, and is never stored, so `x != 1 and seen.insert(x)`
   or an assigning `if` arm on the right side writes back to the caller.
+  Because it is a closure, a `try`, `throw`, `return`, `break` or `continue`
+  on the right side would leave the thunk rather than the caller's function
+  or loop; E012 rejects them (the same holds for `??`'s default).
 
 ### The freeze rule (view kinds only)
 

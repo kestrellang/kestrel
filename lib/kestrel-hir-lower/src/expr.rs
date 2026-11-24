@@ -243,9 +243,9 @@ impl LowerCtx<'_> {
                 }
                 let (lhs, mut rhs) = self.operands(node, &span);
                 // A rejected right side lowers as recovery poison, so the
-                // misplaced `try` reports once and nothing cascades from it.
-                if matches!(op, kestrel_ast::BinaryOp::And | kestrel_ast::BinaryOp::Or)
-                    && self.reject_try_in_short_circuit_rhs(&rhs, &op)
+                // misplaced jump reports once and nothing cascades from it.
+                if lookup_short_circuit_op(&op).is_some()
+                    && self.reject_jumps_in_short_circuit_rhs(&rhs, &op)
                 {
                     rhs = ExprSrc::Error(rhs.node().map_or(span.clone(), |n| self.span(n)));
                 }
@@ -407,11 +407,15 @@ impl LowerCtx<'_> {
 
     /// The two operands of a binary-shaped node, each an error at `span`
     /// when absent.
-    /// E012: `try` in the right operand of `and` / `or`. That operand runs
-    /// inside the short-circuit closure, so its early return would leave the
-    /// closure, not the function. A closure written inside the operand is
-    /// its own scope and may use `try` freely. True when it reported.
-    fn reject_try_in_short_circuit_rhs(
+    /// E012: control flow in the right operand of a short-circuit operator
+    /// (`and` / `or` / `??`) that would leave the operand. That operand runs
+    /// inside the short-circuit closure, so `try`, `throw` and `return` would
+    /// exit the closure, not the function, and `break` / `continue` would find
+    /// no loop (the closure boundary hides the caller's). A `break` aimed at a
+    /// loop written inside the operand stays inside it and is fine, as is
+    /// anything inside a closure written in the operand (its own scope).
+    /// True when it reported.
+    fn reject_jumps_in_short_circuit_rhs(
         &mut self,
         rhs: &ExprSrc,
         op: &kestrel_ast::BinaryOp,
@@ -420,33 +424,80 @@ impl LowerCtx<'_> {
             return false;
         };
         let mut rejected = false;
-        let mut stack = vec![rhs.clone()];
-        while let Some(node) = stack.pop() {
-            match node.kind() {
+        // Each node carries the labels of the loops it sits in *within* the
+        // operand, innermost last.
+        let mut stack: Vec<(SyntaxNode, Vec<Option<String>>)> = vec![(rhs.clone(), Vec::new())];
+        while let Some((node, loops)) = stack.pop() {
+            let keyword = match node.kind() {
                 SyntaxKind::ExprClosure => continue,
-                SyntaxKind::ExprTry => {
-                    rejected = true;
-                    let span = self.span(&node);
-                    self.ctx.accumulate(
-                        Diagnostic::error()
-                            .with_code("E012")
-                            .with_message(format!(
-                                "`try` can't appear on the right side of `{}`",
-                                op.symbol()
-                            ))
-                            .with_labels(vec![Label::primary(span.file_id, span.range())
-                                .with_message("this runs only if the left side doesn't decide the result")])
-                            .with_notes(vec![
-                                "bind the value first (`let x = try f();`) or move the `try` to the left side"
-                                    .to_string(),
-                            ]),
-                    );
+                SyntaxKind::ExprTry => Some("try"),
+                SyntaxKind::ExprThrow => Some("throw"),
+                SyntaxKind::ExprReturn => Some("return"),
+                SyntaxKind::ExprBreak | SyntaxKind::ExprContinue => {
+                    let label = jump_label(&node);
+                    let local = loops
+                        .iter()
+                        .rev()
+                        .any(|l| label_selects_loop(label.as_deref(), l.as_deref()));
+                    (!local).then(|| {
+                        if node.kind() == SyntaxKind::ExprBreak {
+                            "break"
+                        } else {
+                            "continue"
+                        }
+                    })
                 },
-                _ => {},
+                _ => None,
+            };
+            if let Some(keyword) = keyword {
+                rejected = true;
+                self.report_short_circuit_jump(&node, keyword, op);
             }
-            stack.extend(node.children());
+            // A loop's body is inside the loop; its header (condition,
+            // iterable) is not.
+            let is_loop = matches!(
+                node.kind(),
+                SyntaxKind::ExprWhile | SyntaxKind::ExprFor | SyntaxKind::ExprLoop
+            );
+            for child in node.children() {
+                let mut child_loops = loops.clone();
+                if is_loop && child.kind() == SyntaxKind::CodeBlock {
+                    child_loops.push(loop_label(&node));
+                }
+                stack.push((child, child_loops));
+            }
         }
         rejected
+    }
+
+    /// The E012 diagnostic for `keyword` in the right operand of `op`.
+    fn report_short_circuit_jump(
+        &self,
+        node: &SyntaxNode,
+        keyword: &str,
+        op: &kestrel_ast::BinaryOp,
+    ) {
+        let note = match keyword {
+            "try" => "bind the value first (`let x = try f();`) or move the `try` to the left side",
+            _ => {
+                "the right side runs inside a closure, so this would leave that closure instead; \
+                  write the branch as an `if`, `guard` or `match`"
+            },
+        };
+        let span = self.span(node);
+        self.ctx.accumulate(
+            Diagnostic::error()
+                .with_code("E012")
+                .with_message(format!(
+                    "`{keyword}` can't appear on the right side of `{}`",
+                    op.symbol()
+                ))
+                .with_labels(vec![
+                    Label::primary(span.file_id, span.range())
+                        .with_message("this runs only if the left side doesn't decide the result"),
+                ])
+                .with_notes(vec![note.to_string()]),
+        );
     }
 
     pub(crate) fn operands(&self, node: &SyntaxNode, span: &Span) -> (ExprSrc, ExprSrc) {
