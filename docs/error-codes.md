@@ -48,7 +48,7 @@ the type checker, and the code is assigned in one place,
 | E009 | cannot return before all fields are initialized | An `init` has an early `return` while some fields are still unassigned. |
 | E010 | '{keyword}' outside of loop | `break`/`continue` used where no loop encloses it. |
 | E011 | undeclared label '{label}' | `break`/`continue` names a loop label that no enclosing loop declares. |
-| E012 | `try` can't appear on the right side of `{op}` | The right side of `and`/`or` runs only when the left side doesn't decide the result, so an early return from `try` there is rejected. Bind the value first or move the `try` to the left side. |
+| E012 | `{keyword}` can't appear on the right side of `{op}` | The right side of `and`/`or`/`??` runs inside the short-circuit closure, so `try`, `throw` and `return` there would leave that closure instead of the function, and `break`/`continue` would leave it instead of the loop. A jump aimed at a loop written inside the right side, or anything inside a closure written there, is fine. Bind the value first, move the `try` to the left side, or write the branch as an `if`/`guard`/`match`. |
 
 ## E100–E141 — Type checking, names, parameters & literals
 
